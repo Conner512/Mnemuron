@@ -1,0 +1,31 @@
+{
+  "name": "mnemuron",
+  "version": "0.1.14+codex.20260904233116",
+  "description": "Start, preview, and continue tasks across ChatGPT devices with provenance-aware memory.",
+  "author": {
+    "name": "Mnemuron"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Mnemuron",
+    "shortDescription": "Start and continue tasks across agents",
+    "longDescription": "Mnemuron captures task activity with device and agent provenance, explicitly bootstraps new Projects and Canonical Tasks, previews resumable state, and only returns a Resume Packet after explicit confirmation.",
+    "developerName": "Mnemuron",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Show my recent Mnemuron task status",
+      "Start a new project with its first task",
+      "Start a new task in an existing Mnemuron project",
+      "Preview shared memory for a project",
+      "Preview a task I can continue",
+      "Save an important task memory"
+    ],
+    "brandColor": "#6D5EF7"
+  },
+  "mcpServers": "./.mcp.json"
+}

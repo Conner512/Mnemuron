@@ -1,0 +1,41 @@
+{
+  "task_id": "task-mnemuron-hermes-adapter-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron Hermes Adapter v0.1",
+  "aliases": [
+    "Hermes",
+    "Hermes adapter",
+    "Hermes 接入"
+  ],
+  "goal": "Example task: validate the Hermes adapter with your own isolated service and agent identity.",
+  "status": "active",
+  "progress": [],
+  "decisions": [
+    "Hermes uses the independent identity hermes-example on device hermes-host.",
+    "Hermes events use workstream-hermes and never overwrite canonical task state.",
+    "Telegram /mnemuron continue only creates a Resume Preview; exact confirmation is required in a later message.",
+    "Confirmed Resume Packets are matched to hashed platform/session scope and injected once into the next ordinary Hermes turn.",
+    "Session-end details remain in raw_hook_payload while the content field is omitted, preventing a redundant low-quality Checkpoint after the assistant event.",
+    "Expired Preview conflicts return an explicit user-facing explanation instead of falling through to Hermes Unknown command; new Previews display Task status and a 30-minute expiry."
+  ],
+  "blockers": [
+    "Example seed only; deployment-specific acceptance evidence has not been recorded."
+  ],
+  "next_steps": [
+    "Configure isolated service and client identities for this example.",
+    "Run the documented acceptance checks and record actual results before marking the task complete."
+  ],
+  "resources": [
+    "adapters/hermes/README.md",
+    "adapters/hermes/plugin.yaml"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-hermes",
+      "name": "Hermes example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

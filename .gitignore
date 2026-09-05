@@ -1,0 +1,49 @@
+# Local release archives, private acceptance evidence, and scratch work.
+# adapters/openclaw/dist/ contains implementation code and must stay tracked.
+/dist/
+/evidence/
+/tmp/
+/private/
+/backups/
+.dev/
+.mnemuron/
+
+# Local dependencies and caches.
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+coverage/
+.nyc_output/
+
+# Runtime configuration and credentials; keep documented examples.
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+
+# Runtime databases and logs.
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+*.log
+
+# macOS metadata and editor temporary files.
+.DS_Store
+._*
+*.swp
+*.swo
+*~

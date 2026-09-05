@@ -1,0 +1,70 @@
+{
+  "task_id": "task-mnemuron-production-readiness-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron Production Readiness v0.1",
+  "aliases": [
+    "Production Readiness",
+    "生产化验收",
+    "生产就绪"
+  ],
+  "goal": "Example task: record correctness, capacity, recovery, and security evidence before considering production readiness.",
+  "status": "active",
+  "progress": [],
+  "decisions": [
+    "production_ready remains false until correctness, event integrity, conflict, capacity, recovery, security, observability, and stability gates all pass with recorded evidence.",
+    "Failed attempts remain append-only audit evidence and are not erased by a later successful retry.",
+    "Device, Agent, Agent instance, Session, Task, Workstream, Resume, Preview, Receipt, and turn provenance must remain independently attributable.",
+    "No full-capture claim is allowed while unexplained Raw unavailability is nonzero; policy-expired Raw records must be reported separately.",
+    "Production changes require a recoverable backup, scoped deployment, and post-change verification proportional to risk.",
+    "Raw availability is accounted only when every Event is partitioned into Raw available or policy expired and unexplained_raw_unavailable is zero; any unexplained or inconsistent partition is degraded.",
+    "A fresh Receipt cycle is accepted by its exact Resume, Receipt, Session, Workstream, and turn evidence; historical unreported confirmations and failed attempts remain separately visible append-only debt and are never erased or relabeled by a later success.",
+    "An idempotent restart retry passes only when the original failed attempt remains immutable, the retry receives a fresh attempt ID, both attempts use the intended real conversation Session, the retry reaches a matching terminal ACK, and no unrelated or third attempt claims the Resume."
+  ],
+  "blockers": [
+    "Example seed only; deployment-specific acceptance evidence has not been recorded."
+  ],
+  "next_steps": [
+    "Configure isolated service and client identities for this example.",
+    "Run the documented acceptance checks and record actual results before marking the task complete."
+  ],
+  "resources": [
+    "docs/production-readiness-v0.1.md",
+    "docs/production-readiness-evidence-matrix-v0.1.md",
+    "docs/core-spec-v0.1.md",
+    "docs/chatgpt-mcp-delivery-receipt-v0.1.4.md",
+    "docs/dynamic-task-scope-v0.1.md",
+    "docs/deployment-record-ct131.md",
+    "docs/combination-resolver-v0.1.md",
+    "docs/openclaw-deployment-ct128.md",
+    "docs/capacity-backpressure-test-plan-v0.1.md"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-platform",
+      "name": "Central server",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-macmini",
+      "name": "Mac mini ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-macbook",
+      "name": "MacBook ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-openclaw",
+      "name": "OpenClaw example client",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-hermes",
+      "name": "Hermes example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

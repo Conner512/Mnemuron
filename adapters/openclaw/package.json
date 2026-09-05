@@ -1,0 +1,29 @@
+{
+  "name": "@mnemuron/openclaw",
+  "version": "0.1.16",
+  "description": "Mnemuron capture, memory, and handoff adapter for OpenClaw.",
+  "type": "module",
+  "license": "UNLICENSED",
+  "private": true,
+  "files": [
+    "dist/",
+    "skills/",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.7.1-2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.7.1-2",
+      "minGatewayVersion": ">=2026.7.1-2"
+    }
+  },
+  "scripts": {
+    "test": "node --test ./test/*.test.mjs"
+  }
+}

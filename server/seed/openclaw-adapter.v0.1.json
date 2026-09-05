@@ -1,0 +1,40 @@
+{
+  "task_id": "task-mnemuron-openclaw-adapter-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron OpenClaw Adapter v0.1",
+  "aliases": [
+    "OpenClaw",
+    "OpenClaw adapter",
+    "OpenClaw 接入"
+  ],
+  "goal": "Example task: validate the OpenClaw adapter with your own isolated service and agent identity.",
+  "status": "active",
+  "progress": [],
+  "decisions": [
+    "OpenClaw uses an independent API credential and the identity openclaw-example on device openclaw-host.",
+    "OpenClaw events use workstream-openclaw and never overwrite canonical task state.",
+    "Telegram /mnemuron continue only creates a Resume Preview; confirmation requires the exact resume ID and version in a later message.",
+    "A confirmed Resume Packet is injected once into the next OpenClaw turn and acknowledged only after successful agent completion.",
+    "Command Sessions and full Telegram Agent Sessions are matched through a channel-scoped chat identity so Packets cannot cross chats."
+  ],
+  "blockers": [
+    "Example seed only; deployment-specific acceptance evidence has not been recorded."
+  ],
+  "next_steps": [
+    "Configure isolated service and client identities for this example.",
+    "Run the documented acceptance checks and record actual results before marking the task complete."
+  ],
+  "resources": [
+    "adapters/openclaw/README.md",
+    "adapters/openclaw/openclaw.plugin.json"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-openclaw",
+      "name": "OpenClaw example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

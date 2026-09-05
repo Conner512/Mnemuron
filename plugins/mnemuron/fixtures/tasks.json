@@ -1,0 +1,40 @@
+[
+  {
+    "task_id": "task-mnemuron-plugin-spike",
+    "project_id": "project-mnemuron",
+    "project_name": "Mnemuron",
+    "title": "Example: Mnemuron ChatGPT Plugin Spike",
+    "aliases": [
+      "Mnemuron plugin",
+      "plugin spike",
+      "接入验证",
+      "插件原型"
+    ],
+    "goal": "Example task: validate capture, preview, explicit confirmation, and continuation between independently configured ChatGPT clients.",
+    "status": "active",
+    "progress": [],
+    "decisions": [
+      "Resume Preview must be shown before a Resume Packet is returned.",
+      "Per-turn Hook events are primary; transcript files are not parsed as a stable interface.",
+      "Each device and agent instance must use distinct provenance identifiers."
+    ],
+    "blockers": [
+      "Example seed only; deployment-specific acceptance evidence has not been recorded."
+    ],
+    "next_steps": [
+      "Configure isolated service and client identities for this example.",
+      "Run the documented acceptance checks and record actual results before marking the task complete."
+    ],
+    "resources": [
+      "docs/core-spec-v0.1.md"
+    ],
+    "workstreams": [
+      {
+        "workstream_id": "workstream-chatgpt-local-spike",
+        "name": "ChatGPT Desktop local spike",
+        "status": "active"
+      }
+    ],
+    "conflicts": []
+  }
+]

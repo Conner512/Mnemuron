@@ -1,0 +1,33 @@
+{
+  "mcpServers": {
+    "mnemuron": {
+      "command": "./scripts/launch-mcp",
+      "cwd": ".",
+      "env_vars": [
+        "MNEMURON_NODE_PATH",
+        "MNEMURON_MODE",
+        "MNEMURON_SPIKE_DATA_DIR",
+        "MNEMURON_SERVER_URL",
+        "MNEMURON_API_KEY",
+        "MNEMURON_API_KEY_FILE",
+        "MNEMURON_TLS_CA_FILE",
+        "MNEMURON_ALLOW_INSECURE_HTTP",
+        "MNEMURON_REQUEST_TIMEOUT_MS",
+        "MNEMURON_DEVICE_ID",
+        "MNEMURON_AGENT_ID",
+        "MNEMURON_AGENT_INSTANCE_ID",
+        "MNEMURON_RAW_RETENTION_DAYS",
+        "MNEMURON_DEFAULT_PROJECT_ID",
+        "MNEMURON_DEFAULT_TASK_ID",
+        "MNEMURON_DEFAULT_WORKSTREAM_ID",
+        "CODEX_THREAD_ID",
+        "CODEX_SESSION_ID",
+        "CODEX_MCP_NODE_PATH",
+        "HOME",
+        "PATH"
+      ],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 30
+    }
+  }
+}

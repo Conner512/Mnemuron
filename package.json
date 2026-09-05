@@ -1,0 +1,15 @@
+{
+  "name": "mnemuron",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-timeout=15000 server/test/*.test.mjs plugins/mnemuron/test/*.test.mjs adapters/openclaw/test/*.test.mjs && npm run test:hermes",
+    "test:hermes": "python3 -m unittest discover -s adapters/hermes/test -p 'test_*.py'",
+    "test:capacity-local": "node server/bin/mnemuron-capacity-harness.mjs",
+    "test:failure-local": "node server/bin/mnemuron-failure-recovery-harness.mjs --quick"
+  }
+}

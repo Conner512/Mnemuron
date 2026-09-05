@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "task-mnemuron-plugin-spike",
+    "project_id": "project-mnemuron",
+    "project_name": "Mnemuron",
+    "title": "Example: Mnemuron ChatGPT Plugin Spike",
+    "aliases": [
+      "Mnemuron plugin",
+      "plugin spike",
+      "接入验证",
+      "插件原型"
+    ],
+    "goal": "Example task: validate capture, preview, explicit confirmation, and continuation between independently configured ChatGPT clients.",
+    "status": "active",
+    "progress": [],
+    "decisions": [
+      "Resume Preview must be shown before a Resume Packet is returned.",
+      "Each device and agent instance uses a distinct API Key and server-verified provenance.",
+      "The client keeps an event outbox when the center is temporarily unreachable.",
+      "Formal clients use https://mnemuron.example.com; insecure HTTP is not enabled."
+    ],
+    "blockers": [
+      "Example seed only; deployment-specific acceptance evidence has not been recorded."
+    ],
+    "next_steps": [
+      "Configure isolated service and client identities for this example.",
+      "Run the documented acceptance checks and record actual results before marking the task complete."
+    ],
+    "resources": [
+      "docs/core-spec-v0.1.md",
+      "docs/pve-lxc-deployment-v0.1.md"
+    ],
+    "workstreams": [
+      {
+        "workstream_id": "workstream-macmini",
+        "name": "Mac mini ChatGPT",
+        "status": "active"
+      },
+      {
+        "workstream_id": "workstream-macbook",
+        "name": "MacBook ChatGPT",
+        "status": "active"
+      }
+    ],
+    "conflicts": []
+  }
+]
