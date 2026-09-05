@@ -307,6 +307,11 @@ test("legacy memory rows migrate additively without being rewritten or removed",
       source: "explicit",
       source_event_ids: [],
       source_checkpoint_id: null,
+      verification: {
+        submission_identity: "authenticated",
+        content_evidence: "caller_submitted",
+        independently_fact_checked: false,
+      },
       generation: {
         method: null,
         confidence: null,

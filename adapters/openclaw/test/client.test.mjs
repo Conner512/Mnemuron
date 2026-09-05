@@ -826,11 +826,11 @@ test("OpenClaw outbox quarantines a permanent 413 and continues later events", a
     const config = adapterConfig(root, "http://127.0.0.1:1", "mnm_test-quarantine");
     const client = new MnemuronClient(config);
     client.queueEnvelope({
-      event: { event_id: "event-413-a" },
+      event: { event_id: "event-413-a", session_id: "lane-bad" },
       raw_retention_days: 1,
     });
     client.queueEnvelope({
-      event: { event_id: "event-valid-z" },
+      event: { event_id: "event-valid-z", session_id: "lane-good" },
       raw_retention_days: 1,
     });
     const delivered = [];
@@ -842,13 +842,14 @@ test("OpenClaw outbox quarantines a permanent 413 and continues later events", a
         throw error;
       }
       delivered.push(envelope.event.event_id);
-      return { status: "accepted" };
+      return { status: "accepted", received: 1, inserted: 1, duplicate: 0 };
     };
 
     assert.deepEqual(await client.flushOutbox(), {
       queued_before: 2,
       flushed: 1,
       quarantined: 1,
+      blocked: 0,
     });
     assert.deepEqual(delivered, ["event-valid-z"]);
     assert.equal(client.outboxFiles().length, 0);
@@ -871,7 +872,7 @@ test("OpenClaw outbox quarantines a permanent 413 and continues later events", a
     assert.equal(status.adapter.sync_status, "degraded");
     assert.deepEqual(
       JSON.parse(readFileSync(path.join(config.outboxQuarantineDir, "event-413-a.json"), "utf8")),
-      { event: { event_id: "event-413-a" }, raw_retention_days: 1 },
+      { event: { event_id: "event-413-a", session_id: "lane-bad" }, raw_retention_days: 1 },
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

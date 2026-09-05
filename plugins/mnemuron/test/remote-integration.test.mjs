@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { createMnemuronApp } from "../../../server/lib/app.mjs";
 import { resolveTaskScope, taskScopeCounts } from "../scripts/storage.mjs";
+import {flushOutbox} from '../scripts/remote-client.mjs';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(TEST_DIR, "..");
@@ -88,7 +89,7 @@ function runHook(payload, env) {
   });
 }
 
-test("Mac mini hook events can be previewed and confirmed by MacBook MCP", async () => {
+test("E-06 offline Mac mini events derive indexed memory and resume through MacBook MCP with exact Stop ACK", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "mnemuron-remote-plugin-"));
   const app = createMnemuronApp({ databasePath: path.join(root, "server.sqlite3") });
   let client;
@@ -116,6 +117,7 @@ test("Mac mini hook events can be previewed and confirmed by MacBook MCP", async
       MNEMURON_DEFAULT_PROJECT_ID: fixtureTask.project_id,
       MNEMURON_DEFAULT_TASK_ID: fixtureTask.task_id,
     };
+    const miniEnv={...common,MNEMURON_API_KEY:mini.api_key,MNEMURON_SPIKE_DATA_DIR:path.join(root,'mini'),MNEMURON_DEVICE_ID:'macmini-example',MNEMURON_AGENT_ID:'chatgpt',MNEMURON_AGENT_INSTANCE_ID:'chatgpt-macmini-example',MNEMURON_DEFAULT_WORKSTREAM_ID:'workstream-macmini'};
     const hook = await runHook({
         hook_event_name: "Stop",
         session_id: "session-macmini",
@@ -123,7 +125,7 @@ test("Mac mini hook events can be previewed and confirmed by MacBook MCP", async
         project_id: fixtureTask.project_id,
         task_id: fixtureTask.task_id,
         workstream_id: "workstream-macmini",
-        last_assistant_message: "Central transport is complete; deploy it to the PVE LXC next.",
+        last_assistant_message: "已完成：Central transport is complete; deploy it to the PVE LXC next.",
       }, {
         ...common,
         MNEMURON_API_KEY: mini.api_key,
@@ -132,9 +134,19 @@ test("Mac mini hook events can be previewed and confirmed by MacBook MCP", async
         MNEMURON_AGENT_ID: "chatgpt",
         MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macmini-example",
         MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macmini",
+        MNEMURON_SERVER_URL: 'http://127.0.0.1:1',
+        MNEMURON_REQUEST_TIMEOUT_MS: '250',
     });
     assert.equal(hook.status, 0, hook.stderr);
     assert.deepEqual(JSON.parse(hook.stdout), {});
+    assert.match(hook.stderr,/queued for retry/);
+    assert.equal(app.store.db.prepare('SELECT count(*) n FROM events').get().n,0);
+    assert.equal((await flushOutbox(miniEnv)).flushed,1);
+    const derived=app.store.queryMemories(app.store.authenticate(book.api_key),{query:'Central transport is complete',task_id:fixtureTask.task_id});
+    assert.equal(derived.result_count,1);
+    assert.equal(derived.results[0].source,'checkpoint_derived');
+    assert.equal(derived.results[0].provenance.agent_instance_id,'chatgpt-macmini-example');
+    assert.equal(app.store.memorySearch.validate(),true);
 
     const bookEnv = {
       ...common,
@@ -265,7 +277,7 @@ test("Mac mini hook events can be previewed and confirmed by MacBook MCP", async
       },
     });
     assert.equal(unboundRemember.result.isError, true);
-    assert.match(unboundRemember.result.structuredContent.error, /task_id is required/);
+    assert.match(unboundRemember.result.structuredContent.error, /INVALID_MEMORY_SCOPE/);
 
     const reconciliationStatusCall = await client.request("tools/call", {
       name: "mnemuron_reconciliation_status",

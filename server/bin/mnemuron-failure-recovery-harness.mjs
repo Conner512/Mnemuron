@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { drainIsolatedOutbox } from '../lib/harness-sync.mjs';
 import { once } from "node:events";
 import {
   chmodSync,
@@ -476,7 +477,7 @@ async function runRestartMatrix({
     server = await startReadyServer({ databasePath, port });
     const recoveryMs = performance.now() - restartStarted;
     const drainStarted = performance.now();
-    const drained = await client.flushOutbox();
+    const drained = await drainIsolatedOutbox(client);
     const drainMs = performance.now() - drainStarted;
     const postEvent = eventFor(runId, caseLabel, options.restartQueuePerCycle + 1);
     eventIds.add(postEvent.event_id);
@@ -554,7 +555,7 @@ async function runAdapterRestart({ baseUrl, databasePath, root, keyFile, identit
   const before = outboxSnapshot(beforeRestart);
   const afterRestart = new MnemuronClient(config);
   const drainStarted = performance.now();
-  const drain = await afterRestart.flushOutbox();
+  const drain = await drainIsolatedOutbox(afterRestart);
   const drainMs = performance.now() - drainStarted;
   const reconciliation = reconcile(databasePath, eventIds);
   const passed = before.count === count
@@ -640,7 +641,7 @@ async function runPartitions({
       stateName,
     }));
     const drainStarted = performance.now();
-    const drain = await restored.flushOutbox();
+    const drain = await drainIsolatedOutbox(restored);
     const drainMs = performance.now() - drainStarted;
     const reconciliation = reconcile(databasePath, eventIds);
     timeline.push({

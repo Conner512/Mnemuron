@@ -641,12 +641,15 @@ test("queues a remote event locally when the server is unavailable", () => {
     });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stderr, /queued for retry/i);
-    const queued = readdirSync(path.join(dataDir, "outbox"));
+    const queued = readdirSync(path.join(dataDir, "outbox")).filter(name => name.endsWith('.json'));
     assert.equal(queued.length, 1);
     const envelope = JSON.parse(
       readFileSync(path.join(dataDir, "outbox", queued[0]), "utf8"),
     );
     assert.equal(envelope.event.content, "preserve this while offline");
+    const retry = JSON.parse(readFileSync(path.join(dataDir, 'outbox', queued[0] + '.state'), 'utf8'));
+    assert.equal(retry.state, 'retry_wait');
+    assert.equal(retry.attempt_count, 1);
   } finally {
     rmSync(dataDir, { recursive: true, force: true });
   }

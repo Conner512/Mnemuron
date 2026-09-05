@@ -8,6 +8,14 @@
 .dev/
 .mnemuron/
 
+# Keep local execution records private; publish reviewed generic specifications.
+/docs/core-optimization-v0.2/*
+!/docs/core-optimization-v0.2/CORE_OPTIMIZATION_PLAN.md
+!/docs/core-optimization-v0.2/ACCEPTANCE_TESTS.md
+!/docs/core-optimization-v0.2/retrieval-decision.md
+!/docs/core-optimization-v0.2/release-notes.md
+/scripts/verify-core-optimization-artifacts.mjs
+
 # Local dependencies and caches.
 node_modules/
 __pycache__/

@@ -15,9 +15,11 @@ Mnemuron 是面向单个用户的跨设备、跨 Agent 任务连续性系统。�
 
 核心规格见 [Core Specification](docs/core-spec-v0.1.md)，部署入口见 [PVE LXC Deployment](docs/pve-lxc-deployment-v0.1.md)。功能规格包括 [Task Scope](docs/dynamic-task-scope-v0.1.md)、[Task Bootstrap](docs/task-bootstrap-binding-v0.1.md)、[Project Bootstrap](docs/project-bootstrap-initial-task-v0.1.md)、[Branch-aware Resume](docs/branch-aware-resume-selection-v0.1.md) 和 [Memory Lifecycle](docs/structured-memory-retrieval-lifecycle-v0.1.md)。发布前按 [Production Readiness](docs/production-readiness-v0.1.md) 与[验收矩阵](docs/production-readiness-evidence-matrix-v0.1.md)收集当前环境的证据。
 
+本次 [Core Optimization v0.2](docs/core-optimization-v0.2/release-notes.md) 已完成四批核心改进：范围与幂等、全文检索与详情、可靠同步与维护、迁移及兼容回归。结论限于源码和本地/隔离测试，不表示已部署或生产就绪。
+
 ## 验证
 
-需要 Node.js 24 或更高版本：
+需要 Node.js 24 或更高版本、Python 3，以及包含基线历史的 Git 检出目录（迁移回归会读取原版本源码）：
 
 ```bash
 npm test

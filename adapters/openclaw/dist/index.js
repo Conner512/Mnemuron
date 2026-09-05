@@ -178,7 +178,7 @@ function helpText() {
     "/mnemuron branches <任务>",
     "/mnemuron confirm <resume_id> <version>",
     "/mnemuron cancel <resume_id> <version>",
-    "/mnemuron remember <内容>",
+    "/mnemuron remember [--operation-id <id>] <内容>",
     "/mnemuron reconcile <task_id>",
     "/mnemuron reconcile-confirm <proposal_id> <proposal_version> <base_version>",
     "/mnemuron reconcile-reject <proposal_id> <proposal_version> <base_version>",
@@ -427,7 +427,7 @@ export default definePluginEntry({
     api.registerTool((toolContext) => ({
       name: "mnemuron_remember",
       label: "Remember in Mnemuron",
-      description: "Explicitly save a fact, decision, constraint, or next step to shared Mnemuron memory.",
+      description: "Explicitly save a fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain save; separate saves use separate keys.",
       parameters: objectSchema({
         content: { type: "string", minLength: 1 },
         scope: { type: "string", enum: ["user", "project", "task", "workstream", "session"] },
@@ -440,15 +440,17 @@ export default definePluginEntry({
           enum: ["goal", "fact", "constraint", "decision", "completed", "blocker", "remaining", "next_step"],
         },
         topic: { type: "string", minLength: 1, maxLength: 120 },
+        operation_id: { type: "string", minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$" },
       }, ["content", "scope"]),
       async execute(_toolCallId, params, signal) {
         const currentClient = client();
         const activeScope = taskScopes().resolve(toolContext || {});
-        return toolResult(await client().request("POST", "/v1/memories", {
+        const explicitTarget = [params.project_id, params.task_id, params.workstream_id].some(value => value !== undefined && value !== null);
+        return toolResult(await currentClient.remember({
           ...params,
-          project_id: params.project_id || activeScope?.project_id || currentClient.config.projectId,
-          task_id: params.task_id || activeScope?.task_id || currentClient.config.taskId,
-          workstream_id: params.workstream_id || activeScope?.workstream_id || currentClient.config.workstreamId,
+          project_id: params.project_id ?? (explicitTarget ? null : activeScope?.project_id || currentClient.config.projectId),
+          task_id: params.task_id ?? (explicitTarget ? null : activeScope?.task_id || currentClient.config.taskId),
+          workstream_id: params.workstream_id ?? (explicitTarget ? null : activeScope?.workstream_id || currentClient.config.workstreamId),
           source: "explicit-openclaw",
         }, signal));
       },
@@ -666,17 +668,29 @@ export default definePluginEntry({
         }
         if (action === "remember") {
           if (!rest) return { text: "请提供要保存的内容：/mnemuron remember <内容>" };
+          const keyed = rest.match(/^--operation-id\s+(\S+)\s+([\s\S]+)$/u);
+          if (rest.startsWith("--operation-id") && !keyed) return { text: "用法：/mnemuron remember --operation-id <id> <原内容>" };
           const activeScope = taskScopes().resolve(context);
-          const saved = await currentClient.request("POST", "/v1/memories", {
-            content: rest,
+          const body = {
+            content: keyed ? keyed[2] : rest,
+            ...(keyed ? { operation_id: keyed[1] } : {}),
             scope: "task",
             project_id: activeScope?.project_id || currentClient.config.projectId,
             task_id: activeScope?.task_id || currentClient.config.taskId,
             workstream_id: activeScope?.workstream_id || currentClient.config.workstreamId,
             session_id: context.sessionId || null,
             source: "explicit-openclaw-command",
-          });
-          return { text: `已保存到 Mnemuron：${saved.memory?.memory_id}` };
+          };
+          try {
+            const saved = await currentClient.remember(body);
+            return { text: `已保存到 Mnemuron：${saved.memory?.memory_id}` };
+          } catch (error) {
+            if (!error.operation_id) throw error;
+            const outcome = error.statusCode && error.statusCode < 500
+              ? `保存请求被拒绝 (${error.responseData?.error_code || error.statusCode})`
+              : "保存结果尚未确认";
+            return { text: `${outcome}；如需重试，请在同一任务和会话使用 /mnemuron remember --operation-id ${error.operation_id} <原内容>。` };
+          }
         }
         if (action === "reconcile") {
           if (!rest) return { text: "请提供 Task ID：/mnemuron reconcile <task_id>" };

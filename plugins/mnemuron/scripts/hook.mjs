@@ -337,7 +337,8 @@ async function main() {
       process.stderr.write(`Mnemuron delivery-receipt synchronization unavailable: ${error.message}\n`);
     }
     try {
-      await flushInjectionEventOutbox(runtimeEnv);
+      const sync=await flushInjectionEventOutbox(runtimeEnv);
+      injectionTransportReady=sync.blocked===0 && sync.quarantined===0;
     } catch (error) {
       injectionTransportReady = false;
       process.stderr.write(`Mnemuron injection-event synchronization unavailable: ${error.message}\n`);
@@ -435,11 +436,11 @@ async function main() {
           : resolveTaskScope(dataDir, payload.session_id, runtimeEnv);
   const record = normalizeHookEvent(payload, runtimeEnv, new Date(), taskScope);
   if (runtimeMode(runtimeEnv) === "remote") {
+    enqueueOutbox(dataDir, eventEnvelope(record, runtimeEnv));
     try {
-      await flushOutbox(runtimeEnv);
-      await submitEvent(record, runtimeEnv);
+      const sync=await flushOutbox(runtimeEnv);
+      if(sync.blocked || sync.quarantined)process.stderr.write('Mnemuron event queued for retry or isolated; inspect sync_state.\n');
     } catch (error) {
-      enqueueOutbox(dataDir, eventEnvelope(record, runtimeEnv));
       process.stderr.write(`Mnemuron event queued for retry: ${error.message}\n`);
     }
   } else {

@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { RESPONSE_LIMIT, decodeResponse, protocolError, queueItems, queueSummary, flushQueue, validateAcceptance, immutableEnvelope } from './sync-protocol.mjs';
 
 const IDENTIFIER_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 const HOOK_EVENT_TYPES = {
@@ -1068,8 +1069,9 @@ export function buildHookEvent(name, event = {}, context = {}, inputConfig = {},
 }
 
 export class MnemuronClient {
-  constructor(inputConfig) {
+  constructor(inputConfig, retryOptions = {}) {
     this.config = inputConfig.serverUrl instanceof URL ? inputConfig : resolveAdapterConfig(inputConfig);
+    this.retryOptions = retryOptions;
   }
 
   readApiKey() {
@@ -1088,8 +1090,10 @@ export class MnemuronClient {
     const combinedSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
     try {
       const target = new URL(endpoint, this.config.serverUrl);
+      if (target.origin !== this.config.serverUrl.origin) throw protocolError('REDIRECT_BLOCKED');
       const response = await fetch(target, {
         method,
+        redirect: 'manual',
         signal: combinedSignal,
         headers: {
           authorization: `Bearer ${this.readApiKey()}`,
@@ -1098,21 +1102,31 @@ export class MnemuronClient {
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
-      let data;
-      try {
-        data = await response.json();
-      } catch {
-        throw new Error(`Mnemuron returned invalid JSON (${response.status}).`);
+      let size=0;const chunks=[];
+      for await (const chunk of response.body || []) {
+        size+=chunk.length;
+        if(size>RESPONSE_LIMIT){controller.abort();throw protocolError('RESPONSE_TOO_LARGE',response.status);}
+        chunks.push(chunk);
       }
-      if (!response.ok) {
-        const error = new Error(data.error || `Mnemuron request failed (${response.status}).`);
-        error.statusCode = response.status;
-        error.responseData = data;
-        throw error;
-      }
-      return data;
+      return decodeResponse(response.status,Buffer.concat(chunks).toString('utf8'),response.headers.get('retry-after'));
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  async remember(body, signal = undefined) {
+    const operationId = body.operation_id === undefined ? randomUUID() : body.operation_id;
+    if (typeof operationId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(operationId)) {
+      throw new Error("operation_id must be a non-empty ASCII identifier of at most 128 characters.");
+    }
+    const payload = { ...body, operation_id: operationId };
+    try {
+      return await this.request("POST", "/v1/memories", payload, signal);
+    } catch (error) {
+      throw Object.assign(new Error(
+        `Memory save not confirmed; retry the same payload with operation_id=${operationId}. ${error.message}`,
+        { cause: error },
+      ), { operation_id: operationId, statusCode: error.statusCode, responseData: error.responseData });
     }
   }
 
@@ -1131,13 +1145,9 @@ export class MnemuronClient {
 
   queueEnvelope(envelope) {
     this.ensureOutbox();
+    assertIdentifier(envelope.event.event_id, 'event_id');
     const target = path.join(this.config.outboxDir, `${envelope.event.event_id}.json`);
-    if (existsSync(target)) return target;
-    const temporary = `${target}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(envelope)}\n`, { mode: 0o600, flag: "wx" });
-    renameSync(temporary, target);
-    chmodSync(target, 0o600);
-    return target;
+    return immutableEnvelope(target, envelope);
   }
 
   ensureOutboxQuarantine() {
@@ -1178,9 +1188,9 @@ export class MnemuronClient {
       schema_version: "mnemuron-outbox-terminal-v0.1",
       event_id: eventId,
       terminal_status: "quarantined",
-      reason: "permanent_http_413",
-      http_status: 413,
-      error: error.message,
+      reason: `permanent_http_${error.statusCode}`,
+      http_status: error.statusCode,
+      error: error.errorCode || `HTTP_${error.statusCode}`,
       quarantined_at: new Date().toISOString(),
       original_file: originalName,
       original_bytes: original.length,
@@ -1200,22 +1210,7 @@ export class MnemuronClient {
   }
 
   async flushOutbox(signal = undefined) {
-    const files = this.outboxFiles();
-    let flushed = 0;
-    let quarantined = 0;
-    for (const file of files) {
-      const envelope = JSON.parse(readFileSync(file, "utf8"));
-      try {
-        await this.request("POST", "/v1/events", envelope, signal);
-        unlinkSync(file);
-        flushed += 1;
-      } catch (error) {
-        if (error.statusCode !== 413) throw error;
-        this.quarantineOutboxItem(file, error);
-        quarantined += 1;
-      }
-    }
-    return { queued_before: files.length, flushed, quarantined };
+    return flushQueue(queueItems(this.config.outboxDir,'event'),{...this.retryOptions,root:path.dirname(this.config.outboxDir),credential:this.config.serverUrl.href+'|'+this.readApiKey(),predecessors:queueItems(this.config.injectionEventOutboxDir,'injection'),send:item=>this.request('POST','/v1/events',item.payload,signal),quarantine:(item,error)=>this.quarantineOutboxItem(item.filePath,error)});
   }
 
   ensureInjectionEventOutbox() {
@@ -1236,42 +1231,23 @@ export class MnemuronClient {
     assertIdentifier(payload?.event_id, "event_id");
     this.ensureInjectionEventOutbox();
     const target = path.join(this.config.injectionEventOutboxDir, `${payload.event_id}.json`);
-    if (existsSync(target)) return target;
-    const temporary = `${target}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify({ resume_id: resumeId, payload })}\n`, {
-      mode: 0o600,
-      flag: "wx",
-    });
-    renameSync(temporary, target);
-    chmodSync(target, 0o600);
-    return target;
+    return immutableEnvelope(target, {resume_id: resumeId, payload});
   }
 
   async flushInjectionEventOutbox(signal = undefined) {
-    const files = this.injectionEventOutboxFiles();
-    let flushed = 0;
-    for (const file of files) {
-      const item = JSON.parse(readFileSync(file, "utf8"));
-      await this.request(
-        "POST",
-        `/v1/resume/${encodeURIComponent(item.resume_id)}/injection-events`,
-        item.payload,
-        signal,
-      );
-      unlinkSync(file);
-      flushed += 1;
-    }
-    return { queued_before: files.length, flushed };
+    return flushQueue(queueItems(this.config.injectionEventOutboxDir,'injection'),{...this.retryOptions,root:path.dirname(this.config.outboxDir),credential:this.config.serverUrl.href+'|'+this.readApiKey(),predecessors:queueItems(this.config.outboxDir,'event'),send:item=>this.request('POST',`/v1/resume/${encodeURIComponent(item.resume_id)}/injection-events`,item.payload,signal)});
   }
 
   async submitInjectionRecord(record, phase, signal = undefined) {
     const payload = injectionEventPayload(record, phase);
-    return this.request(
+    const result = await this.request(
       "POST",
       `/v1/resume/${encodeURIComponent(record.resume_id)}/injection-events`,
       payload,
       signal,
     );
+    validateAcceptance('injection', {resume_id:record.resume_id, payload}, result);
+    return result;
   }
 
   queueInjectionRecord(record, phase) {
@@ -1283,10 +1259,11 @@ export class MnemuronClient {
 
   async submitEvent(event, signal = undefined) {
     const envelope = { event, raw_retention_days: this.config.rawRetentionDays };
+    this.queueEnvelope(envelope);
     try {
-      await this.flushOutbox(signal);
-      const result = await this.request("POST", "/v1/events", envelope, signal);
-      return { delivery: "synchronized", result };
+      const result=await this.flushOutbox(signal);
+      const quarantined=existsSync(path.join(this.config.outboxQuarantineDir,`${event.event_id}.json`));
+      return {delivery:quarantined?'quarantined':existsSync(path.join(this.config.outboxDir,`${event.event_id}.json`))?'queued':'synchronized',result:result.last_response,flush:result};
     } catch (error) {
       this.queueEnvelope(envelope);
       return { delivery: "queued", error: error.message };
@@ -1294,18 +1271,7 @@ export class MnemuronClient {
   }
 
   async status(signal = undefined) {
-    let lastFlush;
-    try {
-      lastFlush = await this.flushOutbox(signal);
-    } catch (error) {
-      lastFlush = { error: error.message };
-    }
-    let lastInjectionEventFlush;
-    try {
-      lastInjectionEventFlush = await this.flushInjectionEventOutbox(signal);
-    } catch (error) {
-      lastInjectionEventFlush = { error: error.message };
-    }
+    const lastFlush={status:'not_run_read_only'},lastInjectionEventFlush=lastFlush;
     const queuedEvents = this.outboxFiles().length;
     const quarantinedEvents = this.quarantinedOutboxItems().length;
     const queuedInjectionEvents = this.injectionEventOutboxFiles().length;
@@ -1325,6 +1291,7 @@ export class MnemuronClient {
           : quarantinedEvents ? "degraded" : "synchronized",
         injection_event_sync_status: queuedInjectionEvents ? "pending" : "synchronized",
         last_flush: lastFlush,
+        sync_state:queueSummary([...queueItems(this.config.outboxDir,'event'),...queueItems(this.config.injectionEventOutboxDir,'injection')],Date.now(),path.dirname(this.config.outboxDir)),
         last_injection_event_flush: lastInjectionEventFlush,
         local_identity: {
           device_id: this.config.deviceId,

@@ -20,6 +20,7 @@ import { performance } from "node:perf_hooks";
 import { backup, DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { createMnemuronApp } from "../lib/app.mjs";
+import { drainIsolatedOutbox } from '../lib/harness-sync.mjs';
 import {
   MnemuronClient,
   resolveAdapterConfig,
@@ -609,7 +610,7 @@ async function runQueueCases({ app, root, baseUrl, apiKey, runId, options, ident
 
   const liveClient = new MnemuronClient(liveConfig);
   const drainStarted = performance.now();
-  const drained = await liveClient.flushOutbox();
+  const drained = await drainIsolatedOutbox(liveClient);
   const drainMs = performance.now() - drainStarted;
   const queueReconcile = reconcileIds(app.store.db, queuedIds);
   const queue02Passed = drained.queued_before === options.queueCount
@@ -632,21 +633,26 @@ async function runQueueCases({ app, root, baseUrl, apiKey, runId, options, ident
   }
   const interruptingClient = new MnemuronClient(liveConfig);
   const originalRequest = interruptingClient.request.bind(interruptingClient);
+  let interruptInjected = false;
   let requestCount = 0;
   interruptingClient.request = async (...args) => {
-    if (requestCount >= options.queueInterruptAfter) throw new Error("harness_interrupt");
+    if (requestCount >= options.queueInterruptAfter) {
+      interruptInjected = true;
+      throw Object.assign(new Error("harness_interrupt"), {errorCode:'HARNESS_INTERRUPT'});
+    }
     requestCount += 1;
     return originalRequest(...args);
   };
   let interruptError = null;
   try {
-    await interruptingClient.flushOutbox();
+    const interrupted=await interruptingClient.flushOutbox();
+    if(interrupted.blocked && interruptInjected)interruptError='harness_interrupt';
   } catch (error) {
     interruptError = error.message;
   }
   const remainingAfterInterrupt = interruptingClient.outboxFiles().length;
   const restartedClient = new MnemuronClient(liveConfig);
-  const restartDrain = await restartedClient.flushOutbox();
+  const restartDrain = await drainIsolatedOutbox(restartedClient);
   const interruptedReconcile = reconcileIds(app.store.db, interruptedIds);
   const queue03Passed = interruptError === "harness_interrupt"
     && remainingAfterInterrupt === options.queueInterruptCount - options.queueInterruptAfter
@@ -670,7 +676,7 @@ async function runQueueCases({ app, root, baseUrl, apiKey, runId, options, ident
   const validIdentity = {
     eventId: `${runId}-queue04-zzzzzz`,
     runId,
-    sessionId: `capacity-v02-${runId}-queue04`,
+    sessionId: `capacity-v02-${runId}-queue04-independent`,
   };
   const oversize = makeSizedEnvelope(OVER_LIMIT_BODY_BYTES, oversizeIdentity);
   const valid = makeSizedEnvelope(2 * 1024, validIdentity);

@@ -121,11 +121,15 @@ class ResumeStoreTests(unittest.TestCase):
             client = MnemuronClient(config)
             client.queue_injection_event(finished["record"], finished["phase"])
             calls = []
-            client.request = lambda method, endpoint, body=None: calls.append(
-                (method, endpoint, body)
-            ) or {"ok": True}
+            def accept(method, endpoint, body):
+                calls.append((method, endpoint, body))
+                return {"inserted": 1, "duplicate": 0, "event_id": body["event_id"], "delivery": {
+                    "resume_id": finished["record"]["resume_id"], "preview_version": body["preview_version"],
+                    "attempts": [{**{key: body[key] for key in ("attempt_id", "session_id", "turn_id", "workstream_id")},
+                                  "acknowledged_at": body["occurred_at"], "ack_complete": True, "event_ids": [body["event_id"]]}]}}
+            client.request = accept
             result = client.flush_injection_event_outbox()
-            self.assertEqual(result, {"queued_before": 1, "flushed": 1})
+            self.assertEqual(result, {"queued_before": 1, "flushed": 1, "blocked": 0, "quarantined": 0})
             self.assertIn("/injection-events", calls[0][1])
             self.assertEqual(calls[0][2]["phase"], "acknowledged")
 

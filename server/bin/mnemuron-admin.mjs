@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { backup } from "node:sqlite";
 import { MnemuronStore, SCOPE_DEFAULTS } from "../lib/store.mjs";
@@ -16,6 +16,7 @@ function usage() {
   mnemuron-admin task-bootstrap-scopes --instance ID [--apply]
   mnemuron-admin project-bootstrap-scopes --instance ID [--apply]
   mnemuron-admin prune
+  mnemuron-admin memory-index --database EXISTING_FILE [--rebuild]
   mnemuron-admin backup --file FILE
 
 Environment:
@@ -50,9 +51,11 @@ if (!command || args.help) {
   process.exit(command ? 0 : 2);
 }
 
-const databasePath = path.resolve(
-  process.env.MNEMURON_DATABASE_PATH || "/var/lib/mnemuron/mnemuron.sqlite3",
-);
+if(command==='memory-index' && (typeof args.database!=='string' || !path.isAbsolute(args.database) || !statSync(args.database).isFile())) {
+  throw new Error('memory-index requires an explicit absolute --database path to an existing SQLite file.');
+}
+const databasePath = path.resolve(command==='memory-index'?args.database:
+  process.env.MNEMURON_DATABASE_PATH || "/var/lib/mnemuron/mnemuron.sqlite3");
 const store = new MnemuronStore(databasePath, {
   defaultRetentionDays: process.env.MNEMURON_RAW_RETENTION_DAYS || "30",
 });
@@ -106,6 +109,12 @@ try {
       });
     } else if (command === "prune") {
       result = store.pruneExpired(auth);
+    } else if(command==='memory-index') {
+      store.requireScope(auth,'admin:tasks');
+      if(args.rebuild===true)store.memorySearch.rebuild();
+      const valid=store.memorySearch.validate();
+      result={...store.memorySearch.status(),valid,business_records_rewritten:false,startup_verification_may_rebuild:true};
+      if(!valid)process.exitCode=1;
     } else if (command === "backup") {
       if (!args.file) throw new Error("--file is required.");
       const target = path.resolve(args.file);

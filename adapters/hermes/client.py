@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
+from .sync_protocol import request_json, queue_items, queue_summary, flush_queue, validate_acceptance, immutable_envelope
 
 
 LOGGER = logging.getLogger(__name__)
@@ -662,15 +663,27 @@ class MnemuronClient:
         if payload is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(target, data=payload, headers=headers, method=method)
+        base = urllib.parse.urlsplit(self.config.server_url)
+        resolved = urllib.parse.urlsplit(target)
+        if (base.scheme, base.netloc) != (resolved.scheme, resolved.netloc):
+            raise ValueError('Cross-origin request blocked')
+        return request_json(request, self.config.request_timeout_seconds)
+
+    def remember(self, body: Mapping[str, Any]) -> dict[str, Any]:
+        operation_id = body.get("operation_id", str(uuid.uuid4()))
+        if not isinstance(operation_id, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}", operation_id):
+            raise ValueError("operation_id must be a non-empty ASCII identifier of at most 128 characters.")
+        payload = {**body, "operation_id": operation_id}
         try:
-            with urllib.request.urlopen(request, timeout=self.config.request_timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            try:
-                detail = json.loads(error.read().decode("utf-8")).get("error")
-            except Exception:
-                detail = None
-            raise RuntimeError(detail or f"Mnemuron request failed ({error.code})") from error
+            return self.request("POST", "/v1/memories", payload)
+        except Exception as error:
+            failure = RuntimeError(
+                f"Memory save not confirmed; retry the same payload with operation_id={operation_id}. {error}"
+            )
+            failure.operation_id = operation_id
+            failure.status_code = getattr(error, "status_code", None)
+            failure.error_code = getattr(error, "error_code", None)
+            raise failure from error
 
     def _outbox_files(self) -> list[Path]:
         self.config.outbox_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -680,19 +693,12 @@ class MnemuronClient:
     def _queue(self, envelope: Mapping[str, Any]) -> None:
         event_id = _identifier(envelope["event"]["event_id"], "event_id")
         target = self.config.outbox_dir / f"{event_id}.json"
-        if not target.exists():
-            _atomic_json_write(target, envelope)
+        immutable_envelope(target, envelope)
 
     def flush_outbox(self) -> dict[str, int]:
         with self._lock:
-            files = self._outbox_files()
-            flushed = 0
-            for target in files:
-                envelope = json.loads(target.read_text(encoding="utf-8"))
-                self.request("POST", "/v1/events", envelope)
-                target.unlink()
-                flushed += 1
-            return {"queued_before": len(files), "flushed": flushed}
+            return flush_queue(queue_items(self.config.outbox_dir, 'event'), root=self.config.outbox_dir.parent,
+                credential=self.config.server_url+'|'+self._api_key(), predecessors=queue_items(self.config.injection_event_outbox_dir,'injection'), send=lambda item:self.request('POST','/v1/events',item['payload']))
 
     def _injection_event_files(self) -> list[Path]:
         directory = self.config.injection_event_outbox_dir
@@ -704,54 +710,40 @@ class MnemuronClient:
         payload = injection_event_payload(record, phase)
         self._injection_event_files()
         target = self.config.injection_event_outbox_dir / f"{payload['event_id']}.json"
-        if not target.exists():
-            _atomic_json_write(target, {
-                "resume_id": _identifier(record.get("resume_id"), "resume_id"),
-                "payload": payload,
-            })
+        immutable_envelope(target, {
+            "resume_id": _identifier(record.get("resume_id"), "resume_id"),
+            "payload": payload,
+        })
 
     def flush_injection_event_outbox(self) -> dict[str, int]:
         with self._lock:
-            files = self._injection_event_files()
-            flushed = 0
-            for target in files:
-                item = json.loads(target.read_text(encoding="utf-8"))
-                resume_id = _identifier(item.get("resume_id"), "resume_id")
-                self.request(
-                    "POST", f"/v1/resume/{urllib.parse.quote(resume_id, safe='')}/injection-events",
-                    item.get("payload"),
-                )
-                target.unlink()
-                flushed += 1
-            return {"queued_before": len(files), "flushed": flushed}
+            return flush_queue(queue_items(self.config.injection_event_outbox_dir, 'injection'), root=self.config.outbox_dir.parent,
+                credential=self.config.server_url+'|'+self._api_key(), predecessors=queue_items(self.config.outbox_dir,'event'), send=lambda item:self.request('POST',f"/v1/resume/{urllib.parse.quote(item['resume_id'],safe='')}/injection-events",item['payload']))
 
     def submit_injection_record(self, record: Mapping[str, Any], phase: str) -> dict[str, Any]:
         resume_id = _identifier(record.get("resume_id"), "resume_id")
-        return self.request(
+        payload = injection_event_payload(record, phase)
+        result = self.request(
             "POST", f"/v1/resume/{urllib.parse.quote(resume_id, safe='')}/injection-events",
-            injection_event_payload(record, phase),
+            payload,
         )
+        validate_acceptance('injection', {'resume_id':resume_id, 'payload':payload}, result)
+        return result
 
     def submit_event(self, event: Mapping[str, Any]) -> dict[str, Any]:
         envelope = {"event": event, "raw_retention_days": self.config.raw_retention_days}
         with self._lock:
+            self._queue(envelope)
             try:
-                self.flush_outbox()
-                result = self.request("POST", "/v1/events", envelope)
-                return {"delivery": "synchronized", "result": result}
+                result = self.flush_outbox()
+                queued = (self.config.outbox_dir / f"{event['event_id']}.json").exists()
+                return {"delivery": "queued" if queued else "synchronized", "result": result}
             except Exception as error:
                 self._queue(envelope)
                 return {"delivery": "queued", "error": str(error)}
 
     def status(self) -> dict[str, Any]:
-        try:
-            flush = self.flush_outbox()
-        except Exception as error:
-            flush = {"error": str(error)}
-        try:
-            injection_flush = self.flush_injection_event_outbox()
-        except Exception as error:
-            injection_flush = {"error": str(error)}
+        flush = injection_flush = {"status": "not_run_read_only"}
         queued = len(self._outbox_files())
         queued_injection_events = len(self._injection_event_files())
         remote = self.request("GET", "/v1/status")
@@ -767,6 +759,7 @@ class MnemuronClient:
             "sync_status": "pending" if queued or queued_injection_events else "synchronized",
             "injection_event_sync_status": "pending" if queued_injection_events else "synchronized",
             "last_flush": flush,
+            "sync_state": queue_summary(queue_items(self.config.outbox_dir, 'event') + queue_items(self.config.injection_event_outbox_dir, 'injection'), self.config.outbox_dir.parent),
             "last_injection_event_flush": injection_flush,
             "local_identity": {
                 "device_id": self.config.device_id,

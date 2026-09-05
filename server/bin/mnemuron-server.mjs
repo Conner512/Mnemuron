@@ -35,16 +35,23 @@ process.stdout.write(JSON.stringify({
   max_body_bytes: maxBodyBytes,
 }) + "\n");
 
-const pruneTimer = setInterval(() => {
+let pruneContinuation=null;
+function runPruneBatch() {
+  pruneContinuation=null;
   try {
     const result = app.store.pruneExpired();
     if (result.expired_events) {
       process.stdout.write(JSON.stringify({ level: "info", action: "retention.prune", ...result }) + "\n");
     }
+    if(result.more_pending) {
+      pruneContinuation=setTimeout(runPruneBatch,1000);
+      pruneContinuation.unref();
+    }
   } catch (error) {
     process.stderr.write(JSON.stringify({ level: "error", action: "retention.prune", error: error.message }) + "\n");
   }
-}, 60 * 60_000);
+}
+const pruneTimer = setInterval(() => {if(!pruneContinuation)runPruneBatch();}, 60 * 60_000);
 pruneTimer.unref();
 
 let stopping = false;
@@ -52,6 +59,7 @@ async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
   clearInterval(pruneTimer);
+  if(pruneContinuation)clearTimeout(pruneContinuation);
   process.stdout.write(JSON.stringify({ level: "info", message: "Mnemuron server stopping", signal }) + "\n");
   await app.close();
 }

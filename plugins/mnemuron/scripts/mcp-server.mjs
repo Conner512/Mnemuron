@@ -51,7 +51,11 @@ async function handle(request) {
       );
       return toolResult(data);
     } catch (error) {
-      return toolResult({ error: error.message }, true);
+      return toolResult({
+        error: error.message,
+        ...(error.operation_id ? { operation_id: error.operation_id } : {}),
+        ...(error.responseData?.error_code ? { error_code: error.responseData.error_code } : {}),
+      }, true);
     }
   }
   throw Object.assign(new Error(`Method not found: ${request.method}`), { code: -32601 });

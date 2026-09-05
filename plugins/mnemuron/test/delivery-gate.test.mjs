@@ -44,13 +44,19 @@ function close(server) {
   });
 }
 
+const receiptPayloads = new Map();
 function readRequestJson(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     request.on("data", (chunk) => chunks.push(chunk));
     request.on("end", () => {
       try {
-        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {});
+        const payload=chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+        if(payload.receipt_id) {
+          const history=receiptPayloads.get(payload.receipt_id)||{};
+          history[payload.phase]=payload;history.latest=payload;receiptPayloads.set(payload.receipt_id,history);
+        }
+        resolve(payload);
       } catch (error) {
         reject(error);
       }
@@ -155,15 +161,20 @@ function centralDeliveryResponse(receiptId, {
   duplicate = 0,
   centralReceiptId = receiptId,
 } = {}) {
+  const history=receiptPayloads.get(receiptId)||{},p=history.latest||{};
   return {
     inserted,
     duplicate,
+    receipt_event_id:p.receipt_event_id,
     delivery: {
       resume_id: "resume-delivery-gate",
       preview_version: 1,
       status,
       ack_complete: ackComplete,
       latest_receipt: { receipt_id: centralReceiptId },
+      receipts:[{receipt_id:centralReceiptId,session_id:p.session_id,turn_id:p.turn_id,workstream_id:p.workstream_id,
+        receipt_event_ids:['delivered','acknowledged','failed'].flatMap(phase=>history[phase]?[history[phase].receipt_event_id]:[]),
+        delivered_at:history.delivered?.occurred_at,acknowledged_at:history.acknowledged?.occurred_at,failed_at:history.failed?.occurred_at,ack_complete:ackComplete}],
     },
   };
 }
@@ -185,7 +196,7 @@ test("Resume Task Scope activates only after central server accepts the exact De
     if (request.method === "POST" && request.url === "/v1/events") {
       submittedEvents.push((await readRequestJson(request)).event);
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;
@@ -409,7 +420,8 @@ test("status includes Delivery Receipt outbox in adapter synchronization state",
     assert.equal(status.adapter.queued_delivery_receipts, 1);
     assert.equal(status.adapter.delivery_receipt_sync_status, "pending");
     assert.equal(status.adapter.sync_status, "pending");
-    assert.match(status.adapter.last_delivery_receipt_flush.error, /receipt unavailable/);
+    assert.equal(status.adapter.last_delivery_receipt_flush.status, 'not_run_read_only');
+    assert.equal(status.adapter.sync_state.queued, 1);
   } finally {
     if (server.listening) await close(server);
     rmSync(dataDir, { recursive: true, force: true });
@@ -739,7 +751,7 @@ test("SessionStart recovery defers while a live take owns the Session delivery l
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;
@@ -812,7 +824,7 @@ test("compact SessionStart preserves an in-flight delivery for the matching Stop
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;
@@ -947,7 +959,7 @@ test("a Stop ACK intent survives cross-process lock contention and is recovered 
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;
@@ -1087,7 +1099,7 @@ test("recovery that linearizes before a late Stop cannot ACK the replacement rec
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;
@@ -1176,12 +1188,12 @@ test("a finished Stop ACK intent survives a crash before submission and replays 
       if (body.phase === "delivered") deliveredPosts += 1;
       if (body.phase === "acknowledged") acknowledgedPosts += 1;
       response.statusCode = 200;
-      response.end(JSON.stringify(centralDeliveryResponse(expectedReceiptId)));
+      response.end(JSON.stringify(centralDeliveryResponse(expectedReceiptId,{status:body.phase==='acknowledged'?'acknowledged':'in_flight',ackComplete:body.phase==='acknowledged'})));
       return;
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
       return;
     }
     response.statusCode = 404;

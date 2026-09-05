@@ -1,14 +1,13 @@
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import https from "node:https";
+import path from 'node:path';
+import { RESPONSE_LIMIT, decodeResponse, protocolError, flushQueue, queueItems, queueSummary, validateAcceptance } from './sync-protocol.mjs';
 import {
-  listOutbox,
-  listDeliveryReceiptOutbox,
-  listInjectionEventOutbox,
   loadRuntimeEnv,
   markMcpDeliveryAcknowledgementReported,
   quarantineOutboxItem,
-  removeOutboxItem,
   resolveApiKey,
   resolveDataDir,
 } from "./storage.mjs";
@@ -47,9 +46,13 @@ function remoteSettings(env = process.env) {
 export function remoteRequest(env, method, endpoint, body = undefined) {
   const settings = remoteSettings(env);
   const target = new URL(endpoint, settings.baseUrl);
+  if (target.origin !== settings.baseUrl.origin) throw protocolError('REDIRECT_BLOCKED');
   const payload = body === undefined ? null : Buffer.from(JSON.stringify(body));
   const transport = target.protocol === "https:" ? https : http;
   return new Promise((resolve, reject) => {
+    let settled=false;
+    const done=(error,data)=>{if(settled)return;settled=true;clearTimeout(deadline);error?reject(error):resolve(data);};
+    const deadline=setTimeout(()=>request.destroy(protocolError('TOTAL_TIMEOUT')),settings.timeoutMs);
     const request = transport.request(target, {
       method,
       timeout: settings.timeoutMs,
@@ -64,27 +67,17 @@ export function remoteRequest(env, method, endpoint, body = undefined) {
       },
     }, (response) => {
       const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
+      let bytes=0;
+      response.on("data", (chunk) => {bytes+=chunk.length;if(bytes>RESPONSE_LIMIT){request.destroy(protocolError('RESPONSE_TOO_LARGE',response.statusCode));return;} chunks.push(chunk);});
+      response.on('error',error=>done(error));
       response.on("end", () => {
-        let data;
         try {
-          data = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
-        } catch {
-          reject(new Error(`Mnemuron server returned invalid JSON (${response.statusCode}).`));
-          return;
-        }
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          const error = new Error(data.error || `Mnemuron server request failed (${response.statusCode}).`);
-          error.statusCode = response.statusCode;
-          error.responseData = data;
-          reject(error);
-          return;
-        }
-        resolve(data);
+          done(null,decodeResponse(response.statusCode,Buffer.concat(chunks).toString('utf8'),response.headers['retry-after']));
+        } catch(error) {done(error);}
       });
     });
-    request.on("timeout", () => request.destroy(new Error("Mnemuron server request timed out.")));
-    request.on("error", reject);
+    request.on("timeout", () => request.destroy(protocolError('TOTAL_TIMEOUT')));
+    request.on("error", error=>done(error));
     if (payload) request.write(payload);
     request.end();
   });
@@ -98,74 +91,72 @@ export function eventEnvelope(event, env = process.env) {
   };
 }
 
+export async function rememberRemote(env, body) {
+  const operationId = body.operation_id === undefined ? randomUUID() : body.operation_id;
+  if (typeof operationId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(operationId)) {
+    throw new Error("operation_id must be a non-empty ASCII identifier of at most 128 characters.");
+  }
+  const payload = { ...body, operation_id: operationId };
+  try {
+    return await remoteRequest(env, "POST", "/v1/memories", payload);
+  } catch (error) {
+    throw Object.assign(new Error(
+      `Memory save not confirmed; retry the same payload with operation_id=${operationId}. ${error.message}`,
+      { cause: error },
+    ), { operation_id: operationId, statusCode: error.statusCode, responseData: error.responseData });
+  }
+}
+
 export function submitEvent(event, env = process.env) {
   return remoteRequest(env, "POST", "/v1/events", eventEnvelope(event, env));
 }
 
-export function submitInjectionEvent(resumeId, payload, env = process.env) {
-  return remoteRequest(
+export async function submitInjectionEvent(resumeId, payload, env = process.env) {
+  const result=await remoteRequest(
     env,
     "POST",
     `/v1/resume/${encodeURIComponent(resumeId)}/injection-events`,
     payload,
   );
+  validateAcceptance('injection',{resume_id:resumeId,payload},result);
+  return result;
 }
 
-export function submitDeliveryReceipt(resumeId, payload, env = process.env) {
-  return remoteRequest(
+export async function submitDeliveryReceipt(resumeId, payload, env = process.env) {
+  const result=await remoteRequest(
     env,
     "POST",
     `/v1/resume/${encodeURIComponent(resumeId)}/delivery-receipts`,
     payload,
   );
+  if(payload.phase!=='delivered')validateAcceptance('receipt',{resume_id:resumeId,payload},result);
+  return result;
 }
 
 export async function flushDeliveryReceiptOutbox(env = process.env) {
-  const runtimeEnv = loadRuntimeEnv(env);
-  const queued = listDeliveryReceiptOutbox(resolveDataDir(runtimeEnv));
-  let flushed = 0;
-  for (const item of queued) {
-    await submitDeliveryReceipt(item.resume_id, item.payload, runtimeEnv);
-    if (item.payload.phase === "acknowledged") {
-      markMcpDeliveryAcknowledgementReported(
-        resolveDataDir(runtimeEnv),
-        item.payload.receipt_event_id,
-      );
-    }
-    removeOutboxItem(item.filePath);
-    flushed += 1;
-  }
-  return { queued_before: queued.length, flushed };
+  return flushKind('receipt',env);
 }
 
 export async function flushInjectionEventOutbox(env = process.env) {
-  const runtimeEnv = loadRuntimeEnv(env);
-  const queued = listInjectionEventOutbox(resolveDataDir(runtimeEnv));
-  let flushed = 0;
-  for (const item of queued) {
-    await submitInjectionEvent(item.resume_id, item.payload, runtimeEnv);
-    removeOutboxItem(item.filePath);
-    flushed += 1;
-  }
-  return { queued_before: queued.length, flushed };
+  return flushKind('injection',env);
 }
 
 export async function flushOutbox(env = process.env) {
-  const runtimeEnv = loadRuntimeEnv(env);
-  const dataDir = resolveDataDir(runtimeEnv);
-  const queued = listOutbox(dataDir);
-  let flushed = 0;
-  let quarantined = 0;
-  for (const item of queued) {
-    try {
-      await remoteRequest(runtimeEnv, "POST", "/v1/events", item.payload);
-      removeOutboxItem(item.filePath);
-      flushed += 1;
-    } catch (error) {
-      if (error.statusCode !== 413) throw error;
-      quarantineOutboxItem(dataDir, item.filePath, error);
-      quarantined += 1;
-    }
-  }
-  return { queued_before: queued.length, flushed, quarantined };
+  return flushKind('event',env);
+}
+
+const queueDirectories={event:'outbox',injection:'injection-event-outbox',receipt:'delivery-receipt-outbox'};
+export function localSyncSummary(env=process.env) {
+  const root=resolveDataDir(loadRuntimeEnv(env));
+  return queueSummary(Object.entries(queueDirectories).flatMap(([kind,dir])=>queueItems(path.join(root,dir),kind)),Date.now(),root);
+}
+async function flushKind(kind,env) {
+  const runtimeEnv=loadRuntimeEnv(env),root=resolveDataDir(runtimeEnv);
+  return flushQueue(queueItems(path.join(root,queueDirectories[kind]),kind),{
+    root,credential:runtimeEnv.MNEMURON_SERVER_URL+'|'+resolveApiKey(runtimeEnv),
+    predecessors:Object.entries(queueDirectories).filter(([other])=>other!==kind).flatMap(([other,dir])=>queueItems(path.join(root,dir),other)),
+    send:item=>kind==='event'?remoteRequest(runtimeEnv,'POST','/v1/events',item.payload):kind==='injection'?submitInjectionEvent(item.resume_id,item.payload,runtimeEnv):submitDeliveryReceipt(item.resume_id,item.payload,runtimeEnv),
+    quarantine:kind==='event'?(item,error)=>quarantineOutboxItem(root,item.filePath,error):null,
+    accepted:item=>{if(kind==='receipt'&&item.payload.phase==='acknowledged')markMcpDeliveryAcknowledgementReported(root,item.payload.receipt_event_id);},
+  });
 }

@@ -32,7 +32,7 @@ test("ChatGPT outbox quarantines a permanent 413 and continues later events", as
       }
       received.push(envelope.event.event_id);
       response.statusCode = 202;
-      response.end(JSON.stringify({ status: "accepted" }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
     });
   });
   try {
@@ -50,11 +50,11 @@ test("ChatGPT outbox quarantines a permanent 413 and continues later events", as
       MNEMURON_REQUEST_TIMEOUT_MS: "1000",
     };
     enqueueOutbox(dataDir, {
-      event: { event_id: "event-413-a" },
+      event: { event_id: "event-413-a", session_id: "lane-bad" },
       raw_retention_days: 1,
     });
     enqueueOutbox(dataDir, {
-      event: { event_id: "event-valid-z" },
+      event: { event_id: "event-valid-z", session_id: "lane-good" },
       raw_retention_days: 1,
     });
 
@@ -62,6 +62,7 @@ test("ChatGPT outbox quarantines a permanent 413 and continues later events", as
       queued_before: 2,
       flushed: 1,
       quarantined: 1,
+      blocked: 0,
     });
     assert.deepEqual(received, ["event-valid-z"]);
     assert.equal(listOutbox(dataDir).length, 0);
@@ -74,7 +75,7 @@ test("ChatGPT outbox quarantines a permanent 413 and continues later events", as
     assert.equal(statSync(path.join(quarantineDir, "event-413-a.json")).mode & 0o777, 0o600);
     assert.deepEqual(
       JSON.parse(readFileSync(path.join(quarantineDir, "event-413-a.json"), "utf8")),
-      { event: { event_id: "event-413-a" }, raw_retention_days: 1 },
+      { event: { event_id: "event-413-a", session_id: "lane-bad" }, raw_retention_days: 1 },
     );
   } finally {
     if (server.listening) await new Promise((resolve) => server.close(resolve));

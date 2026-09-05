@@ -17,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildResumeInjectionText } from "./resume-injection.mjs";
+import { queueItems, immutableEnvelope } from './sync-protocol.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 export const PLUGIN_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -1168,15 +1169,7 @@ export function enqueueInjectionEvent(dataDir, resumeId, payload) {
 }
 
 export function listInjectionEventOutbox(dataDir) {
-  const directory = injectionEventOutboxDir(dataDir);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((name) => /^[a-zA-Z0-9_-]+\.json$/.test(name))
-    .map((name) => {
-      const filePath = path.join(directory, name);
-      return { filePath, ...JSON.parse(readFileSync(filePath, "utf8")) };
-    })
-    .sort((left, right) => left.payload.occurred_at.localeCompare(right.payload.occurred_at));
+  return queueItems(injectionEventOutboxDir(dataDir),'injection');
 }
 
 export function enqueueDeliveryReceipt(dataDir, resumeId, payload) {
@@ -1191,15 +1184,7 @@ export function enqueueDeliveryReceipt(dataDir, resumeId, payload) {
 }
 
 export function listDeliveryReceiptOutbox(dataDir) {
-  const directory = deliveryReceiptOutboxDir(dataDir);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((name) => /^[a-zA-Z0-9_-]+\.json$/.test(name))
-    .map((name) => {
-      const filePath = path.join(directory, name);
-      return { filePath, ...JSON.parse(readFileSync(filePath, "utf8")) };
-    })
-    .sort((left, right) => left.payload.occurred_at.localeCompare(right.payload.occurred_at));
+  return queueItems(deliveryReceiptOutboxDir(dataDir),'receipt');
 }
 
 function activateMatchingTaskScope(
@@ -1393,26 +1378,15 @@ function outboxQuarantineDir(dataDir) {
 
 export function enqueueOutbox(dataDir, payload) {
   const directory = outboxDir(ensureDataDir(dataDir));
-  mkdirSync(directory, { recursive: true });
+  mkdirSync(directory, { recursive: true, mode:0o700 });
   const eventId = payload?.event?.event_id;
   assertSafeId(eventId);
   const target = path.join(directory, `${eventId}.json`);
-  const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify(payload)}\n`, "utf8");
-  renameSync(temporary, target);
-  return target;
+  return immutableEnvelope(target, payload);
 }
 
 export function listOutbox(dataDir) {
-  const directory = outboxDir(dataDir);
-  if (!existsSync(directory)) return [];
-  return readdirSync(directory)
-    .filter((name) => /^[a-zA-Z0-9_-]+\.json$/.test(name))
-    .sort()
-    .map((name) => {
-      const filePath = path.join(directory, name);
-      return { filePath, payload: JSON.parse(readFileSync(filePath, "utf8")) };
-    });
+  return queueItems(outboxDir(dataDir),'event');
 }
 
 export function listOutboxQuarantine(dataDir) {
@@ -1447,9 +1421,9 @@ export function quarantineOutboxItem(dataDir, filePath, error) {
     schema_version: "mnemuron-outbox-terminal-v0.1",
     event_id: eventId,
     terminal_status: "quarantined",
-    reason: "permanent_http_413",
-    http_status: 413,
-    error: error.message,
+    reason: `permanent_http_${error.statusCode}`,
+    http_status: error.statusCode,
+    error: error.errorCode || `HTTP_${error.statusCode}`,
     quarantined_at: new Date().toISOString(),
     original_file: originalName,
     original_bytes: original.length,

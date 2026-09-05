@@ -53,7 +53,7 @@ CONFIRM_SCHEMA = {
 }
 REMEMBER_SCHEMA = {
     "name": "mnemuron_remember",
-    "description": "Explicitly save a fact, decision, constraint, or next step to shared Mnemuron memory.",
+    "description": "Explicitly save a fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain save; separate saves use separate keys.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -63,6 +63,7 @@ REMEMBER_SCHEMA = {
             "task_id": {"type": "string"},
             "workstream_id": {"type": "string"},
             "session_id": {"type": "string"},
+            "operation_id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$"},
         },
         "required": ["content", "scope"],
         "additionalProperties": False,
@@ -304,15 +305,16 @@ class PluginRuntime:
         config = self.config()
         tokens = self._scope_tokens(session_id=kwargs.get("session_id"))
         active_scope = self.task_scopes().resolve(tokens) or {}
+        explicit_target = any(args.get(field) is not None for field in ["project_id", "task_id", "workstream_id"])
         body = {
             **args,
-            "project_id": args.get("project_id") or active_scope.get("project_id") or config.project_id,
-            "task_id": args.get("task_id") or active_scope.get("task_id") or config.task_id,
-            "workstream_id": args.get("workstream_id") or active_scope.get("workstream_id") or config.workstream_id,
+            "project_id": args.get("project_id") if explicit_target else active_scope.get("project_id") or config.project_id,
+            "task_id": args.get("task_id") if explicit_target else active_scope.get("task_id") or config.task_id,
+            "workstream_id": args.get("workstream_id") if explicit_target else active_scope.get("workstream_id") or config.workstream_id,
             "session_id": args.get("session_id") or kwargs.get("session_id"),
             "source": "explicit-hermes",
         }
-        return json.dumps(self.client().request("POST", "/v1/memories", body), ensure_ascii=False, indent=2)
+        return json.dumps(self.client().remember(body), ensure_ascii=False, indent=2)
 
     def command(self, raw_args: str) -> str:
         action, rest = parse_command(raw_args)
@@ -323,7 +325,7 @@ class PluginRuntime:
                 "/mnemuron continue <任务>",
                 "/mnemuron confirm <resume_id> <version>",
                 "/mnemuron cancel <resume_id> <version>",
-                "/mnemuron remember <内容>",
+                "/mnemuron remember [--operation-id <id>] <内容>",
             ])
         if action == "status":
             return format_status(client.status())
@@ -334,10 +336,18 @@ class PluginRuntime:
         if action == "remember":
             if not rest:
                 return "请提供要保存的内容：/mnemuron remember <内容>"
+            operation = {}
+            if rest.startswith("--operation-id"):
+                parts = rest.split(maxsplit=2)
+                if len(parts) != 3 or parts[0] != "--operation-id":
+                    return "用法：/mnemuron remember --operation-id <id> <原内容>"
+                operation["operation_id"] = parts[1]
+                rest = parts[2]
             config = self.config()
             active_scope = self.task_scopes().resolve(list(GATEWAY_SCOPE.get({}).get("tokens") or [])) or {}
-            saved = client.request("POST", "/v1/memories", {
+            saved = client.remember({
                 "content": rest,
+                **operation,
                 "scope": "task",
                 "project_id": active_scope.get("project_id") or config.project_id,
                 "task_id": active_scope.get("task_id") or config.task_id,
@@ -380,6 +390,16 @@ class PluginRuntime:
         try:
             return self.command(raw_args)
         except Exception as error:
+            if getattr(error, "operation_id", None):
+                status = getattr(error, "status_code", None)
+                outcome = (
+                    f"保存请求被拒绝 ({getattr(error, 'error_code', None) or status})"
+                    if status and status < 500 else "保存结果尚未确认"
+                )
+                return (
+                    f"{outcome}；如需重试，请在同一任务和会话使用 "
+                    f"/mnemuron remember --operation-id {error.operation_id} <原内容>。"
+                )
             message = str(error).replace("\n", " ").strip()
             LOGGER.warning("Mnemuron command failed: %s", message[:300])
             lowered = message.lower()

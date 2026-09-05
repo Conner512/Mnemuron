@@ -174,7 +174,9 @@ export function createMnemuronApp({
       if (request.method === "POST" && pathname === "/v1/memories") {
         const body = await readJson(request, maxBodyBytes);
         responseStatus = 201;
-        return sendJson(response, 201, store.saveMemory(auth, body));
+        return sendJson(response, 201, store.saveMemory(auth, body, {
+          idempotencyKey: request.headers["idempotency-key"],
+        }));
       }
       if (request.method === "POST" && pathname === "/v1/memories/query") {
         const body = await readJson(request, maxBodyBytes);
@@ -194,6 +196,17 @@ export function createMnemuronApp({
         return sendJson(response, 200, store.retractMemory(auth, retractMemory[0], body));
       }
       const deleteMemory = routeMatch(pathname, /^\/v1\/memories\/([^/]+)$/);
+      if (request.method === "GET" && deleteMemory) {
+        responseStatus = 200;
+        const options = {};
+        if (url.searchParams.has('include_history')) {
+          const value = url.searchParams.get('include_history');
+          if (!['true','false'].includes(value)) throw new ValidationError('include_history must be true or false.');
+          options.include_history = value === 'true';
+        }
+        for (const field of ['content_offset','content_limit']) if (url.searchParams.has(field)) options[field] = Number(url.searchParams.get(field));
+        return sendJson(response, 200, store.memoryDetail(auth, deleteMemory[0], options));
+      }
       if (request.method === "DELETE" && deleteMemory) {
         responseStatus = 200;
         return sendJson(response, 200, store.retractMemory(auth, deleteMemory[0], {
@@ -356,6 +369,8 @@ export function createMnemuronApp({
       if (!response.headersSent) {
         sendJson(response, responseStatus, {
           error: responseStatus >= 500 ? "Internal server error." : error.message,
+          error_code: responseStatus >= 500 && error.errorCode !== 'SEARCH_UNAVAILABLE' ? "INTERNAL_ERROR" : error.errorCode
+            || (responseStatus === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_FAILED"),
         });
       }
     } finally {

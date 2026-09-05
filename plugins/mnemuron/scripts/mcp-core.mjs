@@ -34,7 +34,9 @@ import {
   flushDeliveryReceiptOutbox,
   flushInjectionEventOutbox,
   flushOutbox,
+  rememberRemote,
   remoteRequest,
+  localSyncSummary,
   submitDeliveryReceipt,
 } from "./remote-client.mjs";
 
@@ -289,7 +291,7 @@ export const TOOLS = [
   },
   {
     name: "mnemuron_remember",
-    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step.",
+    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain remote save; separate saves use separate keys.",
     inputSchema: {
       type: "object",
       properties: {
@@ -307,6 +309,7 @@ export const TOOLS = [
           enum: ["goal", "fact", "constraint", "decision", "completed", "blocker", "remaining", "next_step"],
         },
         topic: { type: "string", minLength: 1, maxLength: 120 },
+        operation_id: { type: "string", minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$" },
       },
       required: ["content", "scope"],
       additionalProperties: false,
@@ -482,7 +485,10 @@ function identity(env) {
   };
 }
 
-function memoryScope(args, activeScope = {}) {
+function memoryScope(args, activeScope = {}, validateRequired = true) {
+  if (!validateRequired && [args.project_id, args.task_id, args.workstream_id].some(value => value !== undefined && value !== null)) {
+    activeScope = {};
+  }
   const resolved = {
     project_id: args.project_id ?? activeScope.project_id ?? null,
     task_id: args.task_id ?? activeScope.task_id ?? null,
@@ -495,7 +501,7 @@ function memoryScope(args, activeScope = {}) {
     workstream: "workstream_id",
     session: "session_id",
   }[args.scope];
-  if (requiredField && !resolved[requiredField]) {
+  if (validateRequired && requiredField && !resolved[requiredField]) {
     throw new Error(
       `${requiredField} is required for ${args.scope}-scoped memory when no confirmed Task Scope is active.`,
     );
@@ -1346,6 +1352,9 @@ export async function callTool(name, args = {}, env = process.env) {
   }
 
   if (name === "mnemuron_remember") {
+    if (args.operation_id !== undefined) {
+      throw new Error("operation_id requires remote mode; local-spike does not provide atomic retry deduplication.");
+    }
     if (typeof args.content !== "string" || !args.content.trim()) {
       throw new Error("content is required.");
     }
@@ -1376,31 +1385,8 @@ export async function callTool(name, args = {}, env = process.env) {
 async function callRemoteTool(name, args, runtimeEnv) {
   if (name === "mnemuron_status") {
     const dataDir = resolveDataDir(runtimeEnv);
-    for (const acknowledgement of pendingMcpDeliveryAcknowledgements(dataDir)) {
-      enqueueDeliveryReceipt(
-        dataDir,
-        acknowledgement.resume_id,
-        acknowledgement.payload,
-      );
-    }
-    let sync;
-    try {
-      sync = await flushOutbox(runtimeEnv);
-    } catch (error) {
-      sync = { error: error.message };
-    }
-    let injectionEventSync;
-    try {
-      injectionEventSync = await flushInjectionEventOutbox(runtimeEnv);
-    } catch (error) {
-      injectionEventSync = { error: error.message };
-    }
-    let deliveryReceiptSync;
-    try {
-      deliveryReceiptSync = await flushDeliveryReceiptOutbox(runtimeEnv);
-    } catch (error) {
-      deliveryReceiptSync = { error: error.message };
-    }
+    const sync = {status:'not_run_read_only'}, injectionEventSync = sync, deliveryReceiptSync = sync;
+    const syncState = localSyncSummary(runtimeEnv);
     const queued = listOutbox(dataDir).length;
     const quarantined = listOutboxQuarantine(dataDir).length;
     const queuedInjectionEvents = listInjectionEventOutbox(dataDir).length;
@@ -1432,6 +1418,7 @@ async function callRemoteTool(name, args, runtimeEnv) {
           delivery_receipt_sync_status: queuedDeliveryReceipts ? "pending" : "unavailable",
           error: error.message,
           last_flush: sync,
+          sync_state: syncState,
           last_injection_event_flush: injectionEventSync,
           last_delivery_receipt_flush: deliveryReceiptSync,
           task_scope_bindings: taskScopes,
@@ -1470,6 +1457,7 @@ async function callRemoteTool(name, args, runtimeEnv) {
             ? "unavailable"
             : "synchronized",
         last_flush: sync,
+        sync_state: syncState,
         last_injection_event_flush: injectionEventSync,
         last_delivery_receipt_flush: deliveryReceiptSync,
         task_scope_bindings: taskScopes,
@@ -1685,12 +1673,13 @@ async function callRemoteTool(name, args, runtimeEnv) {
     const activeScope = resolveTaskScope(
       resolveDataDir(runtimeEnv), runtimeEnv.CODEX_THREAD_ID, runtimeEnv,
     ) || {};
-    const resolvedScope = memoryScope(args, activeScope);
-    return remoteRequest(runtimeEnv, "POST", "/v1/memories", {
+    const resolvedScope = memoryScope(args, activeScope, false);
+    return rememberRemote(runtimeEnv, {
       content: args.content,
       scope: args.scope,
       ...(args.memory_type === undefined ? {} : { memory_type: args.memory_type }),
       ...(args.topic === undefined ? {} : { topic: args.topic }),
+      ...(args.operation_id === undefined ? {} : { operation_id: args.operation_id }),
       ...resolvedScope,
     });
   }

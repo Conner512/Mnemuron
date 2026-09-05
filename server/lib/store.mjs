@@ -6,6 +6,12 @@ import {
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "./errors.mjs";
+export { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "./errors.mjs";
+import { MEMORY_TYPES as STRUCTURED_MEMORY_TYPES, memoryPayload, memoryContent, memoryType as validateMemoryType, memoryTopic, memoryIntent, memoryOperationId } from "./memory-validation.mjs";
+import { resolveMemoryScope } from "./memory-scope.mjs";
+import { MemorySearch, lexicalScore } from "./memory-retrieval.mjs";
+import { memorySummary, boundMemoryResponse, unicodeSlice, MEMORY_RESPONSE_BYTES } from "./memory-projection.mjs";
 import {
   RESOLVER_VERSION,
   normalizeResolverText,
@@ -62,6 +68,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function rawExpired(event) {
+  return Boolean(event.expired_at || (event.expires_at && Date.parse(event.expires_at) <= Date.now()));
+}
+
 function normalize(value) {
   return String(value ?? "")
     .toLowerCase()
@@ -90,16 +100,6 @@ const STRUCTURED_MEMORY_RETRIEVAL_SCHEMA_VERSION = "structured-memory-retrieval-
 const STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION = "structured-memory-lifecycle-v0.1";
 const STRUCTURED_MEMORY_RETRIEVAL_CANDIDATE_LIMIT = 500;
 const STRUCTURED_MEMORY_RETRIEVAL_RESULT_LIMIT = 20;
-const STRUCTURED_MEMORY_TYPES = new Set([
-  "goal",
-  "fact",
-  "constraint",
-  "decision",
-  "completed",
-  "blocker",
-  "remaining",
-  "next_step",
-]);
 const STRUCTURED_MEMORY_STATUSES = new Set(["active", "superseded", "retracted"]);
 
 function textContent(value) {
@@ -313,7 +313,7 @@ function classifyCheckpointStatements(events) {
   const nextPattern = /(?:下一步|接下来|待完成|仍需|还需要|需要继续|TODO|next\s+steps?|remaining|remains?\s+to)/iu;
 
   for (const event of events) {
-    const content = event.expired_at ? null : fromJson(event.content, null);
+    const content = rawExpired(event) ? null : fromJson(event.content, null);
     for (const line of statements(content)) {
       if (completedPattern.test(line)) completed.push(derivedItem(line, event.event_id, "completed"));
       if (decisionPattern.test(line)) decisions.push(derivedItem(line, event.event_id, "decision"));
@@ -373,7 +373,7 @@ function structuredMemoryStatements(events) {
   const extracted = [];
   for (const event of events) {
     if (!["user_message", "assistant_message"].includes(event.event_type)) continue;
-    if (event.expired_at) continue;
+    if (rawExpired(event)) continue;
     const decoded = event.decoded_content === undefined
       ? fromJson(event.content, null)
       : event.decoded_content;
@@ -427,34 +427,6 @@ function structuredMemoryFingerprint({
     topic_key: topicKey || null,
     content: normalize(content),
   })).digest("hex");
-}
-
-function memorySearchUnits(value) {
-  const normalized = normalize(value);
-  const units = new Set(normalized.split(/\s+/u).filter((part) => part.length >= 2));
-  for (const run of normalized.match(/[\p{Script=Han}]{2,}/gu) || []) {
-    const characters = [...run];
-    for (const character of characters) units.add(character);
-    for (let index = 0; index < characters.length - 1; index += 1) {
-      units.add(`${characters[index]}${characters[index + 1]}`);
-    }
-  }
-  return { normalized, units };
-}
-
-function memoryLexicalScore(query, memory) {
-  const queryParts = memorySearchUnits(query);
-  const contentParts = memorySearchUnits(`${memory.topic || ""} ${memory.content}`);
-  if (!queryParts.normalized || !contentParts.normalized) return 0;
-  if (queryParts.normalized === contentParts.normalized) return 1;
-  if (contentParts.normalized.includes(queryParts.normalized)) return 0.92;
-  if (queryParts.normalized.includes(contentParts.normalized)) return 0.82;
-  if (!queryParts.units.size) return 0;
-  let matched = 0;
-  for (const unit of queryParts.units) {
-    if (contentParts.units.has(unit)) matched += 1;
-  }
-  return matched / queryParts.units.size;
 }
 
 function memoryScopeScore(memory) {
@@ -715,54 +687,17 @@ function retentionExpiry(capturedAt, days) {
   return new Date(Date.parse(capturedAt) + days * 86_400_000).toISOString();
 }
 
-export class ValidationError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ValidationError";
-    this.statusCode = 400;
-  }
-}
-
-export class AuthenticationError extends Error {
-  constructor(message = "Invalid or revoked API credential.") {
-    super(message);
-    this.name = "AuthenticationError";
-    this.statusCode = 401;
-  }
-}
-
-export class AuthorizationError extends Error {
-  constructor(scope) {
-    super(`Credential lacks required scope: ${scope}.`);
-    this.name = "AuthorizationError";
-    this.statusCode = 403;
-  }
-}
-
-export class NotFoundError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "NotFoundError";
-    this.statusCode = 404;
-  }
-}
-
-export class ConflictError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "ConflictError";
-    this.statusCode = 409;
-  }
-}
-
 export class MnemuronStore {
   constructor(databasePath, options = {}) {
     this.databasePath = path.resolve(databasePath);
     this.defaultRetentionDays = parseRetention(options.defaultRetentionDays ?? 30);
+    this.authTouchIntervalMs = options.authTouchIntervalMs ?? 60_000;
+    if (!Number.isInteger(this.authTouchIntervalMs) || this.authTouchIntervalMs < 0 || this.authTouchIntervalMs > 300_000) throw new ValidationError('Invalid credential touch interval.');
     mkdirSync(path.dirname(this.databasePath), { recursive: true });
     this.db = new DatabaseSync(this.databasePath);
     this.db.exec("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;");
     this.migrate();
+    this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false});
     this.db.prepare(`
       INSERT OR IGNORE INTO settings (key, value_json, updated_at)
       VALUES ('raw_retention_days', ?, ?)
@@ -900,6 +835,22 @@ export class MnemuronStore {
       );
       CREATE INDEX IF NOT EXISTS memories_task_idx
         ON memories(user_id, task_id, created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS memory_create_operations (
+        user_id TEXT NOT NULL,
+        agent_instance_id TEXT NOT NULL,
+        operation_type TEXT NOT NULL CHECK(operation_type = 'memory.create'),
+        operation_id TEXT NOT NULL,
+        request_hash TEXT NOT NULL,
+        memory_id TEXT NOT NULL,
+        credential_id TEXT NOT NULL,
+        submitted_identity_json TEXT NOT NULL,
+        effective_scope_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY(user_id, agent_instance_id, operation_type, operation_id),
+        FOREIGN KEY(memory_id) REFERENCES memories(memory_id),
+        FOREIGN KEY(credential_id) REFERENCES credentials(credential_id)
+      );
 
       CREATE TABLE IF NOT EXISTS checkpoints (
         checkpoint_id TEXT PRIMARY KEY,
@@ -1313,8 +1264,8 @@ export class MnemuronStore {
     if (requiredScope && !auth.scopes.includes(requiredScope)) {
       throw new AuthorizationError(requiredScope);
     }
-    this.db.prepare("UPDATE credentials SET last_used_at = ? WHERE credential_id = ?")
-      .run(nowIso(), row.credential_id);
+    this.db.prepare("UPDATE credentials SET last_used_at = ? WHERE credential_id = ? AND (last_used_at IS NULL OR last_used_at <= ?)")
+      .run(nowIso(), row.credential_id, new Date(Date.now() - this.authTouchIntervalMs).toISOString());
     return auth;
   }
 
@@ -1335,6 +1286,7 @@ export class MnemuronStore {
 
   rotateAgentKey(auth, agentInstanceId) {
     this.requireScope(auth, "admin:devices");
+    return this.memoryTransaction(() => {
     const current = this.db.prepare(`
       SELECT * FROM credentials
       WHERE user_id = ? AND agent_instance_id = ? AND revoked_at IS NULL
@@ -1357,6 +1309,7 @@ export class MnemuronStore {
     });
     this.audit({ auth, action: "credential.rotate", targetType: "agent_instance", targetId: agentInstanceId });
     return result;
+    });
   }
 
   revokeAgent(auth, agentInstanceId) {
@@ -2817,6 +2770,11 @@ export class MnemuronStore {
       source: row.source,
       source_event_ids: fromJson(row.source_event_ids_json, []),
       source_checkpoint_id: row.source_checkpoint_id || null,
+      verification: {
+        submission_identity: "authenticated",
+        content_evidence: fromJson(row.source_event_ids_json, []).length ? "source_linked" : "caller_submitted",
+        independently_fact_checked: false,
+      },
       generation: {
         method: row.generation_method || null,
         confidence: row.confidence === null || row.confidence === undefined
@@ -3531,7 +3489,7 @@ export class MnemuronStore {
     const lowerRowId = previous?.trigger_rowid || 0;
     const events = this.db.prepare(`
       SELECT rowid AS event_rowid, event_id, event_type, hook_event_name,
-             captured_at, received_at, expired_at, content, cwd, tool_name,
+             captured_at, received_at, expires_at, expired_at, content, cwd, tool_name,
              device_id, agent_id, agent_instance_id
       FROM events
       WHERE user_id = ? AND task_id = ? AND workstream_id = ? AND session_id = ?
@@ -3547,7 +3505,7 @@ export class MnemuronStore {
       CHECKPOINT_EVENT_LIMIT,
     ).reverse();
     const meaningfulEvents = events.filter((event) =>
-      (event.content && !event.expired_at) || event.cwd || event.tool_name ||
+      (event.content && !rawExpired(event)) || event.cwd || event.tool_name ||
       !["session_end", "session_start"].includes(event.event_type),
     );
     if (!meaningfulEvents.length) {
@@ -3581,7 +3539,7 @@ export class MnemuronStore {
 
     const contentEvents = events.map((event) => ({
       ...event,
-      decoded_content: event.expired_at ? null : fromJson(event.content, null),
+      decoded_content: rawExpired(event) ? null : fromJson(event.content, null),
     }));
     const lastUser = [...contentEvents].reverse().find((event) =>
       event.event_type === "user_message" && textContent(event.decoded_content));
@@ -3623,7 +3581,7 @@ export class MnemuronStore {
     const warnings = [];
     if (!activeRequest) warnings.push("No user message was available in this checkpoint window.");
     if (!latestOutcome) warnings.push("No assistant outcome was available in this checkpoint window.");
-    if (events.some((event) => event.expired_at)) {
+    if (events.some((event) => rawExpired(event))) {
       warnings.push("At least one source event had expired raw content before derivation.");
     }
     if (events.length === CHECKPOINT_EVENT_LIMIT) {
@@ -3652,10 +3610,10 @@ export class MnemuronStore {
         event_id: event.event_id,
         event_type: event.event_type,
         captured_at: event.captured_at,
-        summary: event.expired_at
+        summary: rawExpired(event)
           ? null
           : compactText(event.decoded_content || event.tool_name || event.hook_event_name, 240) || null,
-        source_status: event.expired_at ? "raw_expired" : "available",
+        source_status: rawExpired(event) ? "raw_expired" : "available",
         provenance: {
           device_id: event.device_id,
           agent_id: event.agent_id,
@@ -3751,14 +3709,14 @@ export class MnemuronStore {
     const placeholders = sourceEventIds.map(() => "?").join(", ");
     return this.db.prepare(`
       SELECT rowid AS event_rowid, event_id, event_type, hook_event_name,
-             captured_at, received_at, expired_at, content, cwd, tool_name,
+             captured_at, received_at, expires_at, expired_at, content, cwd, tool_name,
              device_id, agent_id, agent_instance_id
       FROM events
       WHERE user_id = ? AND event_id IN (${placeholders})
       ORDER BY rowid ASC
     `).all(userId, ...sourceEventIds).map((event) => ({
       ...event,
-      decoded_content: event.expired_at ? null : fromJson(event.content, null),
+      decoded_content: rawExpired(event) ? null : fromJson(event.content, null),
     }));
   }
 
@@ -3932,100 +3890,80 @@ export class MnemuronStore {
     return {
       status: "accepted",
       received: events.length,
+      accepted_event_ids: events.map(event=>event.event_id),
       inserted,
       duplicate: events.length - inserted,
       checkpoints,
     };
   }
 
-  saveMemory(auth, payload) {
+  memoryTransaction(callback) {
+    const nested = this.db.isTransaction;
+    const savepoint = "memory_" + randomUUID().replaceAll("-", "");
+    this.db.exec(nested ? "SAVEPOINT " + savepoint : "BEGIN IMMEDIATE");
+    try {
+      const result = callback();
+      this.db.exec(nested ? "RELEASE " + savepoint : "COMMIT");
+      return result;
+    } catch (error) {
+      if (nested) this.db.exec("ROLLBACK TO " + savepoint + "; RELEASE " + savepoint);
+      else this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  saveMemory(auth, payload, { idempotencyKey } = {}) {
     this.requireScope(auth, "memory:write");
-    if (typeof payload.content !== "string" || !payload.content.trim()) {
-      throw new ValidationError("content is required.");
-    }
-    const allowedScopes = new Set(["user", "project", "task", "workstream", "session"]);
-    if (!allowedScopes.has(payload.scope)) {
-      throw new ValidationError("scope must be user, project, task, workstream, or session.");
-    }
-    const memoryType = payload.memory_type || "fact";
-    if (!STRUCTURED_MEMORY_TYPES.has(memoryType)) {
-      throw new ValidationError("memory_type is invalid.");
-    }
-    const topic = payload.topic === undefined || payload.topic === null
-      ? null
-      : compactText(payload.topic, 120);
-    if (payload.topic !== undefined && payload.topic !== null
-        && (typeof payload.topic !== "string" || !topic)) {
-      throw new ValidationError("topic must be a non-empty string of at most 120 characters.");
-    }
-    const memoryId = randomUUID();
-    const createdAt = nowIso();
-    this.db.prepare(`
-      INSERT INTO memories (
-        memory_id, user_id, credential_id, device_id, agent_id, agent_instance_id,
-        content, scope, project_id, task_id, workstream_id, session_id, source,
-        memory_type, status, source_event_ids_json, source_checkpoint_id,
-        generation_method, confidence, confidence_label, warnings_json,
-        content_fingerprint, topic, topic_key, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '[]', NULL,
-                'explicit-user-save-v0.1', 1.0, 'high', '[]', NULL, ?, ?, ?, ?)
-    `).run(
-      memoryId,
-      auth.user_id,
-      auth.credential_id,
-      auth.device_id,
-      auth.agent_id,
-      auth.agent_instance_id,
-      payload.content.trim(),
-      payload.scope,
-      payload.project_id || null,
-      payload.task_id || null,
-      payload.workstream_id || null,
-      payload.session_id || null,
-      payload.source || "explicit",
-      memoryType,
-      topic,
-      topic ? normalize(topic) : null,
-      createdAt,
-      createdAt,
-    );
-    this.audit({ auth, action: "memory.create", targetType: "memory", targetId: memoryId });
-    return {
-      status: "saved",
-      memory: {
-        memory_id: memoryId,
-        content: payload.content.trim(),
-        scope: payload.scope,
-        project_id: payload.project_id || null,
-        task_id: payload.task_id || null,
-        workstream_id: payload.workstream_id || null,
-        session_id: payload.session_id || null,
-        memory_type: memoryType,
-        status: "active",
-        topic,
-        topic_key: topic ? normalize(topic) : null,
-        source_event_ids: [],
-        source_checkpoint_id: null,
-        generation: {
-          method: "explicit-user-save-v0.1",
-          confidence: 1,
-          confidence_label: "high",
-          warnings: [],
-        },
-        created_at: createdAt,
-        updated_at: createdAt,
-        lifecycle: {
-          schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
-          supersedes_memory_id: null,
-          superseded_by_memory_id: null,
-          reason: null,
-          retracted_at: null,
-          actor: {},
-        },
-        provenance: this.publicIdentity(auth),
-        source: payload.source || "explicit",
-      },
-    };
+    const intent = memoryIntent(payload, auth);
+    const operationId = memoryOperationId(payload, idempotencyKey);
+    const requestHash = createHash("sha256").update(asJson({ version: 1, ...intent })).digest("hex");
+    return this.memoryTransaction(() => {
+      const existing = operationId ? this.db.prepare(
+        "SELECT * FROM memory_create_operations WHERE user_id = ? AND agent_instance_id = ? AND operation_type = 'memory.create' AND operation_id = ?",
+      ).get(auth.user_id, auth.agent_instance_id, operationId) : null;
+      if (existing && existing.request_hash !== requestHash) {
+        throw new ConflictError("operation_id was already used for a different Memory intent.", "IDEMPOTENCY_CONFLICT");
+      }
+      if (existing) {
+        const row = this.db.prepare("SELECT * FROM memories WHERE user_id = ? AND memory_id = ?")
+          .get(auth.user_id, existing.memory_id);
+        if (!row) throw new ConflictError("Original Memory is unavailable.", "IDEMPOTENCY_RESULT_UNAVAILABLE");
+        return { status: "saved", memory: this.memoryFromRow(row), idempotent: true,
+          operation: { operation_id: operationId, replayed: true, original_memory_id: row.memory_id } };
+      }
+      // Resolve only a new intent. Replaying a completed operation must not retarget it.
+      const scope = resolveMemoryScope(this.db, auth.user_id, intent, { write: true });
+      const memoryId = randomUUID();
+      const createdAt = nowIso();
+      this.db.prepare(
+        "INSERT INTO memories (memory_id, user_id, credential_id, device_id, agent_id, agent_instance_id, " +
+        "content, scope, project_id, task_id, workstream_id, session_id, source, memory_type, status, " +
+        "source_event_ids_json, source_checkpoint_id, generation_method, confidence, confidence_label, " +
+        "warnings_json, content_fingerprint, topic, topic_key, created_at, updated_at) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '[]', NULL, " +
+        "'explicit-user-save-v0.1', 1.0, 'high', '[]', NULL, ?, ?, ?, ?)",
+      ).run(
+        memoryId, auth.user_id, auth.credential_id, auth.device_id, auth.agent_id, auth.agent_instance_id,
+        intent.content, intent.scope, scope.project_id, scope.task_id, scope.workstream_id, scope.session_id,
+        intent.source, intent.memory_type, intent.topic, intent.topic ? normalize(intent.topic) : null,
+        createdAt, createdAt,
+      );
+      this.audit({ auth, action: "memory.create", targetType: "memory", targetId: memoryId });
+      if (operationId) this.db.prepare(
+        "INSERT INTO memory_create_operations (user_id, agent_instance_id, operation_type, operation_id, " +
+        "request_hash, memory_id, credential_id, submitted_identity_json, effective_scope_json, created_at) " +
+        "VALUES (?, ?, 'memory.create', ?, ?, ?, ?, ?, ?, ?)",
+      ).run(
+        auth.user_id, auth.agent_instance_id, operationId, requestHash, memoryId, auth.credential_id,
+        asJson(this.publicIdentity(auth)), asJson(scope), createdAt,
+      );
+      return {
+        status: "saved",
+        memory: this.memoryFromRow(this.db.prepare("SELECT * FROM memories WHERE memory_id = ?").get(memoryId)),
+        idempotent: false,
+        ...(operationId ? { operation: { operation_id: operationId, replayed: false, original_memory_id: memoryId } } : {}),
+      };
+    });
   }
 
   queryMemories(auth, payload) {
@@ -4064,43 +4002,15 @@ export class MnemuronStore {
     }
     const limit = Math.min(payload.limit || 10, STRUCTURED_MEMORY_RETRIEVAL_RESULT_LIMIT);
     const includeShared = payload.include_shared !== false;
-    const statusPlaceholders = statuses.map(() => "?").join(", ");
-    const typePlaceholders = memoryTypes.map(() => "?").join(", ");
-    const rows = this.db.prepare(`
-      SELECT *
-      FROM memories
-      WHERE user_id = ?
-        AND status IN (${statusPlaceholders})
-        AND memory_type IN (${typePlaceholders})
-      ORDER BY COALESCE(updated_at, created_at) DESC
-      LIMIT ?
-    `).all(
-      auth.user_id,
-      ...statuses,
-      ...memoryTypes,
-      STRUCTURED_MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
-    );
-    const workstreamSet = workstreamIds ? new Set(workstreamIds) : null;
+    const effectiveScope = resolveMemoryScope(this.db, auth.user_id, payload, { workstreamIds });
+    const selection = this.memorySearch.candidates(auth.user_id, payload.query, effectiveScope,
+      {workstreamIds, includeShared, statuses, memoryTypes});
+    const rows = selection.rows;
     const currentTime = Date.now();
     const candidates = rows
       .map((row) => this.memoryFromRow(row))
-      .filter((memory) => {
-        if (payload.project_id
-            && memory.scope !== "user"
-            && memory.project_id !== payload.project_id) return false;
-        if (payload.task_id
-            && !["user", "project"].includes(memory.scope)
-            && memory.task_id !== payload.task_id) return false;
-        if (payload.session_id
-            && memory.scope === "session"
-            && memory.session_id !== payload.session_id) return false;
-        if (workstreamSet && memory.workstream_id !== null
-            && !workstreamSet.has(memory.workstream_id)) return false;
-        if (!includeShared && workstreamSet && memory.workstream_id === null) return false;
-        return true;
-      })
       .map((memory) => {
-        const lexical = memoryLexicalScore(payload.query, memory);
+        const lexical = lexicalScore(payload.query, memory);
         if (lexical <= 0) return null;
         const confidence = Number.isFinite(memory.generation.confidence)
           ? memory.generation.confidence
@@ -4121,7 +4031,7 @@ export class MnemuronStore {
             confidence_score: Number(confidence.toFixed(6)),
             scope_score: Number(scope.toFixed(6)),
             recency_score: Number(recency.toFixed(6)),
-            method: "deterministic-lexical-scope-confidence-recency-v0.1",
+            method: "literal-fts-scope-confidence-recency-v0.2",
           },
         };
       })
@@ -4153,7 +4063,8 @@ export class MnemuronStore {
         workstream_ids: [...workstreams].sort(),
         variants: group.map((memory) => ({
           memory_id: memory.memory_id,
-          content: compactText(memory.content, 600),
+          ...memorySummary({content:memory.content}, 600),
+          status: memory.status,
           workstream_id: memory.workstream_id,
           source_event_ids: memory.source_event_ids,
           source_checkpoint_id: memory.source_checkpoint_id,
@@ -4169,6 +4080,7 @@ export class MnemuronStore {
     const result = {
       schema_version: STRUCTURED_MEMORY_RETRIEVAL_SCHEMA_VERSION,
       read_only: true,
+      effective_scope: effectiveScope,
       query: payload.query.trim(),
       filters: {
         project_id: payload.project_id || null,
@@ -4179,10 +4091,14 @@ export class MnemuronStore {
         statuses,
         include_shared: includeShared,
       },
-      results: candidates.slice(0, limit).map((memory) => ({
-        ...memory,
-        content: compactText(memory.content, 1_000),
-      })),
+      results: candidates.slice(0, limit).map(memory => memorySummary(memory)),
+      retrieval: {
+        engine: 'sqlite_fts5', index_version: 'memory-search-v1', coverage: 'authorized_scope',
+        execution_complete: true, degraded: false, candidate_limit: 500,
+        candidate_truncated: selection.truncated, result_truncated: candidates.length > limit,
+        conflict_truncated: selection.truncated || potentialConflicts.length > 20,
+        conflict_coverage: 'ranked_candidates_only', total_matching_count: null,
+      },
       result_count: Math.min(candidates.length, limit),
       matched_candidate_count: candidates.length,
       candidate_limit: STRUCTURED_MEMORY_RETRIEVAL_CANDIDATE_LIMIT,
@@ -4206,9 +4122,7 @@ export class MnemuronStore {
         memory_lifecycle_changed: false,
       },
     };
-    if (serializedBytes(result) > READ_PREVIEW_RESPONSE_BUDGET_BYTES) {
-      throw new Error("Memory query exceeded its response budget.");
-    }
+    boundMemoryResponse(result);
     this.audit({
       auth,
       action: "memory.query",
@@ -4222,16 +4136,42 @@ export class MnemuronStore {
     return result;
   }
 
+  memoryDetail(auth, memoryId, payload = {}) {
+    this.requireScope(auth, 'memory:read');
+    assertIdentifier(memoryId, 'memory_id');
+    const includeHistory = payload.include_history === true;
+    if (payload.include_history !== undefined && typeof payload.include_history !== 'boolean') throw new ValidationError('include_history must be boolean.');
+    const offset = payload.content_offset ?? 0, limit = payload.content_limit ?? 8192;
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 8192) throw new ValidationError('Invalid content_offset/content_limit.');
+    const row = this.db.prepare(`SELECT * FROM memories WHERE user_id=? AND memory_id=? ${includeHistory ? '' : "AND status='active'"}`).get(auth.user_id,memoryId);
+    if (!row) throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    const memory = this.memoryFromRow(row), length = Array.from(memory.content).length;
+    if (offset > length) throw new ValidationError('content_offset exceeds content length.');
+    const sourceIds=memory.source_event_ids.slice(0,100);
+    const sources=sourceIds.map(event_id => {
+      const event=this.db.prepare('SELECT expires_at,expired_at,raw_payload_json IS NOT NULL AS available FROM events WHERE user_id=? AND event_id=?').get(auth.user_id,event_id);
+      return {event_id, raw_availability:!event ? 'unavailable' : rawExpired(event) ? 'expired' : event.available ? 'available':'unavailable'};
+    });
+    memory.content=unicodeSlice(memory.content,offset,limit);
+    memory.source_event_ids=sourceIds;
+    const end=offset+Array.from(memory.content).length;
+    const result={read_only:true,memory,sources,source_ids_truncated:row.source_event_ids_json ? JSON.parse(row.source_event_ids_json).length>100 : false,
+      content_offset:offset,content_length:length,content_length_unit:'unicode_code_points',next_offset:end<length?end:null,content_complete:end===length,budget_bytes:MEMORY_RESPONSE_BYTES};
+    // Legacy metadata may predate current input limits; retain IDs, omit oversized optional metadata.
+    if (serializedBytes(result)>MEMORY_RESPONSE_BYTES) {
+      result.metadata_truncated=true;
+      for (const key of ['generation','topic','topic_key','source','retraction']) delete memory[key];
+    }
+    if (serializedBytes(result)>MEMORY_RESPONSE_BYTES) throw Object.assign(new Error('Legacy metadata exceeds detail budget.'),{statusCode:422,errorCode:'DETAIL_METADATA_TOO_LARGE'});
+    this.audit({auth,action:'memory.read',targetType:'memory',targetId:memoryId});
+    return result;
+  }
+
   supersedeMemory(auth, memoryId, payload) {
     this.requireScope(auth, "memory:write");
     assertIdentifier(memoryId, "memory_id");
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)
-        || typeof payload.content !== "string" || !payload.content.trim()) {
-      throw new ValidationError("content is required.");
-    }
-    if (payload.content.length > 4_096) {
-      throw new ValidationError("content must be at most 4096 characters.");
-    }
+    memoryPayload(payload, auth);
+    memoryContent(payload.content);
     const reason = payload.reason === undefined
       ? "Explicit user correction."
       : compactText(payload.reason, 1_000);
@@ -4242,18 +4182,9 @@ export class MnemuronStore {
     const targetRow = this.db.prepare(
       "SELECT * FROM memories WHERE user_id = ? AND memory_id = ?",
     ).get(auth.user_id, memoryId);
-    if (!targetRow) throw new NotFoundError("Memory not found.");
-    const memoryType = payload.memory_type || targetRow.memory_type || "fact";
-    if (!STRUCTURED_MEMORY_TYPES.has(memoryType)) {
-      throw new ValidationError("memory_type is invalid.");
-    }
-    const topic = payload.topic === undefined
-      ? targetRow.topic || null
-      : payload.topic === null ? null : compactText(payload.topic, 120);
-    if (payload.topic !== undefined && payload.topic !== null
-        && (typeof payload.topic !== "string" || !topic)) {
-      throw new ValidationError("topic must be null or a non-empty string.");
-    }
+    if (!targetRow) throw new NotFoundError("Memory not found.", "MEMORY_NOT_FOUND");
+    const memoryType = validateMemoryType(payload.memory_type ?? targetRow.memory_type ?? "fact");
+    const topic = memoryTopic(payload.topic === undefined ? targetRow.topic : payload.topic);
     if (targetRow.status === "superseded" && targetRow.superseded_by_memory_id) {
       const existingRow = this.db.prepare(
         "SELECT * FROM memories WHERE user_id = ? AND memory_id = ?",
@@ -4348,6 +4279,7 @@ export class MnemuronStore {
   retractMemory(auth, memoryId, payload = {}) {
     this.requireScope(auth, "memory:write");
     assertIdentifier(memoryId, "memory_id");
+    memoryPayload(payload, auth);
     const reason = payload.reason === undefined
       ? "Explicit user retraction."
       : compactText(payload.reason, 1_000);
@@ -4358,7 +4290,7 @@ export class MnemuronStore {
     const row = this.db.prepare(
       "SELECT * FROM memories WHERE user_id = ? AND memory_id = ?",
     ).get(auth.user_id, memoryId);
-    if (!row) throw new NotFoundError("Memory not found.");
+    if (!row) throw new NotFoundError("Memory not found.", "MEMORY_NOT_FOUND");
     if (row.status === "retracted") {
       return {
         schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
@@ -4457,7 +4389,6 @@ export class MnemuronStore {
 
   previewProjectContext(auth, payload) {
     this.requireScope(auth, "resume:read");
-    this.pruneExpired();
     const request = resolverRequest(payload, { requireQuery: true });
     const resolution = this.resolveProject(auth, request);
     if (resolution.status !== "resolved") return resolution;
@@ -4505,7 +4436,7 @@ export class MnemuronStore {
       .map((memory) => this.memoryFromRow(memory));
     const events = this.db.prepare(`
       SELECT event_id, task_id, workstream_id, session_id, event_type,
-             captured_at, expired_at, content, device_id, agent_id, agent_instance_id
+             captured_at, expires_at, expired_at, content, device_id, agent_id, agent_instance_id
       FROM events
       WHERE user_id = ? AND project_id = ?
       ORDER BY captured_at DESC LIMIT ?
@@ -4543,7 +4474,7 @@ export class MnemuronStore {
         content_truncated: textContent(memory.content).length > 600,
       })),
       recent_activity: events.map((event) => {
-        const content = event.expired_at ? null : fromJson(event.content, null);
+        const content = rawExpired(event) ? null : fromJson(event.content, null);
         const text = content === null ? null : textContent(content);
         return {
           event_id: event.event_id,
@@ -4554,7 +4485,7 @@ export class MnemuronStore {
           captured_at: event.captured_at,
           content: text === null ? null : compactText(text, 400),
           content_truncated: typeof text === "string" && text.length > 400,
-          source_status: event.expired_at ? "raw_expired" : "available",
+          source_status: rawExpired(event) ? "raw_expired" : "available",
           provenance: {
             device_id: event.device_id,
             agent_id: event.agent_id,
@@ -4597,7 +4528,6 @@ export class MnemuronStore {
 
   previewTaskBranches(auth, payload) {
     this.requireScope(auth, "resume:read");
-    this.pruneExpired();
     const request = resolverRequest(payload, { requireQuery: true });
     const resolution = this.resolveTask(auth, request);
     if (resolution.status !== "resolved") return resolution;
@@ -4830,7 +4760,6 @@ export class MnemuronStore {
 
   createPreview(auth, payload) {
     this.requireScope(auth, "resume:read");
-    this.pruneExpired();
     const requestedWorkstreamIds = requestedSourceWorkstreamIds(payload);
     const request = resolverRequest(payload, { requireQuery: true });
     const resolution = this.resolveTask(auth, request);
@@ -4876,14 +4805,14 @@ export class MnemuronStore {
       : null;
     const eventSql = requestedWorkstreamIds
       ? `
-        SELECT event_id, event_type, captured_at, expired_at, content,
+        SELECT event_id, event_type, captured_at, expires_at, expired_at, content,
                device_id, agent_id, agent_instance_id, workstream_id
         FROM events
         WHERE user_id = ? AND task_id = ? AND workstream_id IN (${workstreamPlaceholders})
         ORDER BY captured_at DESC LIMIT 20
       `
       : `
-      SELECT event_id, event_type, captured_at, expired_at, content,
+      SELECT event_id, event_type, captured_at, expires_at, expired_at, content,
              device_id, agent_id, agent_instance_id, workstream_id
       FROM events
       WHERE user_id = ? AND task_id = ?
@@ -5001,8 +4930,8 @@ export class MnemuronStore {
         event_id: event.event_id,
         event_type: event.event_type,
         captured_at: event.captured_at,
-        content: event.expired_at ? null : fromJson(event.content, null),
-        source_status: event.expired_at ? "raw_expired" : "available",
+        content: rawExpired(event) ? null : fromJson(event.content, null),
+        source_status: rawExpired(event) ? "raw_expired" : "available",
         workstream_id: event.workstream_id,
         provenance: {
           device_id: event.device_id,
@@ -5673,16 +5602,16 @@ export class MnemuronStore {
     const rawAvailabilityRow = this.db.prepare(`
       SELECT
         COUNT(*) AS total_events,
-        COALESCE(SUM(CASE WHEN raw_payload_json IS NOT NULL THEN 1 ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN raw_payload_json IS NOT NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at > ?) THEN 1 ELSE 0 END), 0)
           AS raw_events_available,
-        COALESCE(SUM(CASE WHEN expired_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+        COALESCE(SUM(CASE WHEN expired_at IS NOT NULL OR expires_at <= ? THEN 1 ELSE 0 END), 0)
           AS expired_events,
         COALESCE(SUM(CASE
-          WHEN raw_payload_json IS NULL AND expired_at IS NULL THEN 1 ELSE 0
+          WHEN raw_payload_json IS NULL AND expired_at IS NULL AND (expires_at IS NULL OR expires_at > ?) THEN 1 ELSE 0
         END), 0) AS unexplained_raw_unavailable
       FROM events
       WHERE user_id = ?
-    `).get(auth.user_id);
+    `).get(statusNow, statusNow, statusNow, auth.user_id);
     const rawAvailability = {
       schema_version: "mnemuron-raw-availability-status-v0.1",
       total_events: rawAvailabilityRow.total_events,
@@ -5782,6 +5711,9 @@ export class MnemuronStore {
         source_conflicts_auto_merged: false,
       },
       raw_availability: rawAvailability,
+      memory_search: this.memorySearch.status(),
+      maintenance: fromJson(this.db.prepare("SELECT value_json FROM settings WHERE key='last_retention_maintenance'").get()?.value_json, {status:'not_run'}),
+      adapter_report: {status:'not_reported',pending:null,retry_wait:null,blocked:null,quarantined:null},
       structured_memory: memorySummary,
       canonical_reconciliation: {
         schema_version: RECONCILIATION_SCHEMA_VERSION,
@@ -5878,18 +5810,27 @@ export class MnemuronStore {
     };
   }
 
-  pruneExpired(auth = null) {
+  pruneExpired(auth = null, {batchSize = 1000} = {}) {
     if (auth) this.requireScope(auth, "admin:retention");
+    if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000) throw new ValidationError('Maintenance batch must be 1..1000.');
     const timestamp = nowIso();
-    const result = this.db.prepare(`
-      UPDATE events
-      SET content = NULL, raw_payload_json = NULL, expired_at = ?
-      WHERE expires_at IS NOT NULL AND expires_at <= ? AND expired_at IS NULL
-    `).run(timestamp, timestamp);
-    if (auth || result.changes) {
-      this.audit({ auth, action: "retention.prune", targetType: "event", metadata: { expired_events: result.changes } });
+    const started=Date.now();
+    const record=value=>this.db.prepare("INSERT INTO settings(key,value_json,updated_at) VALUES('last_retention_maintenance',?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").run(asJson(value),nowIso());
+    try {
+      return this.memoryTransaction(()=>{
+        const result=this.db.prepare(`UPDATE events SET content=NULL,raw_payload_json=NULL,expired_at=? WHERE event_id IN (
+          SELECT event_id FROM events WHERE expires_at<=? AND expired_at IS NULL ${auth ? 'AND user_id=?' : ''} ORDER BY expires_at,event_id LIMIT ?)`)
+          .run(timestamp,timestamp,...(auth ? [auth.user_id] : []),batchSize);
+        const remaining=this.db.prepare(`SELECT count(*) n FROM events WHERE expires_at<=? AND expired_at IS NULL ${auth ? 'AND user_id=?' : ''}`).get(timestamp,...(auth ? [auth.user_id] : [])).n;
+        const outcome={status:remaining ? 'more_pending':'completed',expired_events:Number(result.changes),remaining_events:remaining,completed_at:timestamp,duration_ms:Date.now()-started};
+        if (auth || result.changes) this.audit({auth,action:'retention.prune',targetType:'event',metadata:{expired_events:Number(result.changes)}});
+        record(outcome);
+        return outcome;
+      });
+    } catch(error) {
+      record({status:'failed',error_code:'MAINTENANCE_FAILED',completed_at:timestamp,duration_ms:Date.now()-started});
+      throw error;
     }
-    return { status: "completed", expired_events: result.changes, completed_at: timestamp };
   }
 
   getRetention() {
