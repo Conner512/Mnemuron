@@ -4,7 +4,7 @@
 
 ## 文档边界
 
-本指南描述单用户中心服务的通用部署步骤。实际地址、容器编号、设备身份、凭证与验收记录由部署者私下维护，本文不声明任何部署已经通过验收。
+本指南以 Linux/LXC 为例描述单用户中心服务的部署步骤。核心 API 不要求使用 Proxmox 或指定设备；本地体验请从[快速开始](getting-started.md)进入。实际地址、容器编号、设备身份、凭证与验收记录由部署者自行维护，本文不声明任何部署已经通过验收。
 
 每个 Agent 实例使用独立 API Key，经同一 HTTPS 地址访问中心 API。首次上线应验证事件写入、Preview/Confirm/下一轮投递/终态 ACK、凭证隔离、服务重启持久性与备份恢复。
 
@@ -13,11 +13,11 @@
 - Debian/Ubuntu LXC。
 - Node.js 24 或更高版本。服务只使用 Node 内置模块，包括 `node:sqlite`，没有 npm 生产依赖。
 - 持久目录 `/var/lib/mnemuron`。
-- 默认监听 `127.0.0.1:47831`，由内网 TLS 反向代理提供给 SD-WAN 客户端。
-- LXC 至少预留 1 vCPU、512 MiB 内存；原始记录容量根据实际捕获量另行测算。
+- 默认监听 `127.0.0.1:47831`，由受控 TLS 反向代理提供给远端客户端。
+- CPU、内存和磁盘容量应根据捕获量、保留期、索引规模与并发负载测算；本指南不提供未经测量的生产容量保证。
 - `MNEMURON_MAX_BODY_BYTES` 控制单次 JSON 请求体上限，允许范围为 64 KiB 到 64 MiB；代码默认 2 MiB；需要更大完整 Hook 记录时，应根据容量测试结果显式调整。超过上限时服务会完整消费请求并返回明确的 413，避免反向代理将上游提前断开误报为 502。
 
-不要将 SQLite 数据库放在 SMB、NFS 或其他多主网络共享目录。两台 Mac 只访问 API，由 LXC 内的 SQLite/WAL 负责并发写入。
+不要将 SQLite 数据库放在 SMB、NFS 或其他多主网络共享目录。各客户端只访问 API，由服务端的 SQLite/WAL 负责并发写入。
 
 ## 文件布局
 
@@ -47,7 +47,7 @@ MNEMURON_DATABASE_PATH=/var/lib/mnemuron/mnemuron.sqlite3 \
 ```
 
 7. 把 Admin Key 保存到仅管理员可读的凭证文件，不写入仓库、shell 历史、聊天记录或服务日志。
-8. 使用 Admin Key 注册两台 ChatGPT 实例并分别保存返回的 Key：
+8. 为每个 Agent 实例注册独立身份并分别保存返回的 Key，以下以两个 ChatGPT 客户端为例：
 
 ```bash
 MNEMURON_DATABASE_PATH=/var/lib/mnemuron/mnemuron.sqlite3 \
@@ -88,7 +88,7 @@ MNEMURON_ADMIN_API_KEY="从受保护文件读取" \
 
 ## 两台示例客户端的远端配置
 
-每台 Mac 使用自己的 `~/.mnemuron/config.json` 和独立 Key 文件。Key 文件权限必须为 `0600`。
+每个 ChatGPT 客户端使用自己的 `~/.mnemuron/config.json` 和独立 Key 文件。Key 文件权限必须为 `0600`。其他宿主按各自适配器的配置格式接入。
 
 Device A：
 
@@ -104,7 +104,7 @@ Device A：
   "raw_retention_days": 30,
   "default_project_id": "project-mnemuron",
   "default_task_id": "task-mnemuron-plugin-spike",
-  "default_workstream_id": "workstream-device-a"
+  "default_workstream_id": "workstream-clienta"
 }
 ```
 
@@ -122,7 +122,7 @@ Device B：
   "raw_retention_days": 30,
   "default_project_id": "project-mnemuron",
   "default_task_id": "task-mnemuron-plugin-spike",
-  "default_workstream_id": "workstream-device-b"
+  "default_workstream_id": "workstream-clientb"
 }
 ```
 

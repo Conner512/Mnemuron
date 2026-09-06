@@ -1,6 +1,8 @@
-# Mnemuron Hermes Adapter v0.1
+# Hermes adapter
 
-Native Hermes user plugin. It uses only documented Hermes plugin APIs and Python's standard library; Hermes core files and its virtual environment are not modified.
+[Project overview](../../README.md) · [Local API walkthrough](../../docs/getting-started.md) · [Deployment guide](../../docs/hermes-deployment.md)
+
+Native Hermes user plugin using Python's standard library. It does not require changes to Hermes core files or its virtual environment. Verify plugin API compatibility, hook permissions, and gateway/session routing in your Hermes version; source availability alone does not certify a host deployment.
 
 ## Identity
 
@@ -8,8 +10,8 @@ Native Hermes user plugin. It uses only documented Hermes plugin APIs and Python
 device_id: hermes-host
 agent_id: hermes
 agent_instance_id: hermes-local
-project_id: project-mnemuron
-task_id: task-mnemuron-hermes-adapter-v01
+project_id: project-example
+task_id: task-example
 workstream_id: workstream-hermes
 ```
 

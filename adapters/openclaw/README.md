@@ -1,4 +1,6 @@
-# Mnemuron OpenClaw Adapter v0.1
+# OpenClaw adapter
+
+[Project overview](../../README.md) · [Local API walkthrough](../../docs/getting-started.md) · [Deployment guide](../../docs/openclaw-deployment.md)
 
 Native OpenClaw plugin. It provides:
 
@@ -9,7 +11,7 @@ Native OpenClaw plugin. It provides:
 - One-time next-turn Resume Packet injection after explicit confirmation, with centrally recorded `injected` and terminal `acknowledged` / `failed` events.
 - A separate private injection-event outbox so terminal ACK evidence survives a temporary Mnemuron server outage.
 
-The API key remains in a separate `0600` file. Plugin config stores only its path. Conversation hooks require `plugins.entries.mnemuron.hooks.allowConversationAccess=true`.
+The API key remains in a separate `0600` file. Plugin config stores only its path. Conversation hooks require `plugins.entries.mnemuron.hooks.allowConversationAccess=true`. Verify plugin API compatibility, hook permissions, and session routing in your OpenClaw version; source availability alone does not certify a host deployment.
 
 Example client identity:
 
