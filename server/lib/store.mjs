@@ -10,7 +10,7 @@ import { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, 
 export { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "./errors.mjs";
 import { MEMORY_TYPES as STRUCTURED_MEMORY_TYPES, memoryPayload, memoryContent, memoryType as validateMemoryType, memoryTopic, memoryIntent, memoryOperationId } from "./memory-validation.mjs";
 import { resolveMemoryScope } from "./memory-scope.mjs";
-import { MemorySearch, lexicalScore } from "./memory-retrieval.mjs";
+import { INDEX_VERSION, MemorySearch, lexicalScore } from "./memory-retrieval.mjs";
 import { memorySummary, boundMemoryResponse, unicodeSlice, MEMORY_RESPONSE_BYTES } from "./memory-projection.mjs";
 import {
   RESOLVER_VERSION,
@@ -4093,7 +4093,7 @@ export class MnemuronStore {
       },
       results: candidates.slice(0, limit).map(memory => memorySummary(memory)),
       retrieval: {
-        engine: 'sqlite_fts5', index_version: 'memory-search-v1', coverage: 'authorized_scope',
+        engine: 'sqlite_fts5', index_version: INDEX_VERSION, coverage: 'authorized_scope',
         execution_complete: true, degraded: false, candidate_limit: 500,
         candidate_truncated: selection.truncated, result_truncated: candidates.length > limit,
         conflict_truncated: selection.truncated || potentialConflicts.length > 20,

@@ -48,9 +48,9 @@ test("project memory preview is source-rich and creates no Resume or Task Scope 
     const admin = app.store.bootstrapAdmin();
     const agent = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
       label: "Project context test",
-      device_id: "macbook-project-context",
+      device_id: "clienta-project-context",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-project-context",
+      agent_instance_id: "chatgpt-clienta-project-context",
     }, 201);
     await api(baseUrl, admin.api_key, "POST", "/v1/projects", {
       project_id: "project-mnemuron",
@@ -64,8 +64,8 @@ test("project memory preview is source-rich and creates no Resume or Task Scope 
     active.goal = `Complete a bounded Project view. ${"goal ".repeat(40_000)}`;
     active.progress = [`Source detail remains in Mnemuron. ${"progress ".repeat(30_000)}`];
     active.workstreams.push({
-      workstream_id: "workstream-macbook",
-      name: "MacBook branch",
+      workstream_id: "workstream-clienta",
+      name: "Client A branch",
       status: "active",
     });
     active.conflicts = [{
@@ -73,12 +73,12 @@ test("project memory preview is source-rich and creates no Resume or Task Scope 
       left: {
         value: "Continue on the source Agent.",
         workstream_id: active.workstreams[0].workstream_id,
-        provenance: { agent_instance_id: "chatgpt-macmini-project-context" },
+        provenance: { agent_instance_id: "chatgpt-clientb-project-context" },
       },
       right: {
         value: "Continue on the destination Agent.",
-        workstream_id: "workstream-macbook",
-        provenance: { agent_instance_id: "chatgpt-macbook-project-context" },
+        workstream_id: "workstream-clienta",
+        provenance: { agent_instance_id: "chatgpt-clienta-project-context" },
       },
     }];
     const completed = task("task-context-completed", "Project Context Completed", "completed");
@@ -115,10 +115,10 @@ test("project memory preview is source-rich and creates no Resume or Task Scope 
     assert.equal(preview.tasks.length, 2);
     assert.equal(preview.source_summary.active_task_count, 1);
     assert.equal(preview.structured_memories.length, 1);
-    assert.equal(preview.structured_memories[0].provenance.device_id, "macbook-project-context");
+    assert.equal(preview.structured_memories[0].provenance.device_id, "clienta-project-context");
     assert.equal(preview.recent_activity[0].event_id, eventId);
     assert.equal(preview.recent_activity[0].provenance.agent_instance_id,
-      "chatgpt-macbook-project-context");
+      "chatgpt-clienta-project-context");
     assert.equal(preview.tasks.find((item) => item.task_id === active.task_id)
       .latest_checkpoints.length, 1);
     assert.equal(preview.safety.resume_created, false);
@@ -145,14 +145,14 @@ test("project memory preview is source-rich and creates no Resume or Task Scope 
     assert.equal(branches.task.task_id, active.task_id);
     assert.deepEqual(new Set(branches.branches.map((branch) => branch.workstream_id)), new Set([
       active.workstreams[0].workstream_id,
-      "workstream-macbook",
+      "workstream-clienta",
     ]));
     assert.equal(branches.branches.find((branch) =>
       branch.workstream_id === active.workstreams[0].workstream_id)
-      .latest_checkpoint.provenance.agent_instance_id, "chatgpt-macbook-project-context");
+      .latest_checkpoint.provenance.agent_instance_id, "chatgpt-clienta-project-context");
     assert.equal(branches.conflicts.length, 1);
     assert.equal(branches.conflicts[0].left.workstream_id, active.workstreams[0].workstream_id);
-    assert.equal(branches.conflicts[0].right.workstream_id, "workstream-macbook");
+    assert.equal(branches.conflicts[0].right.workstream_id, "workstream-clienta");
     assert.equal(branches.conflict_summary.source_preserved, true);
     assert.equal(branches.conflict_summary.automatic_merge_performed, false);
     assert.equal(branches.safety.resume_created, false);

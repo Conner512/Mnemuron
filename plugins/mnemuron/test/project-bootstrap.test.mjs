@@ -90,10 +90,10 @@ test("ChatGPT Project Bootstrap creates and binds only after Preview, Confirm, a
     const admin = app.store.bootstrapAdmin();
     const adminAuth = app.store.authenticate(admin.api_key);
     const book = app.store.registerAgent(adminAuth, {
-      label: "ChatGPT MacBook Project Bootstrap",
-      device_id: "macbook-project-bootstrap-test",
+      label: "ChatGPT Client A Project Bootstrap",
+      device_id: "clienta-project-bootstrap-test",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-project-bootstrap-test",
+      agent_instance_id: "chatgpt-clienta-project-bootstrap-test",
       scopes: [
         "capture:write",
         "memory:read",
@@ -110,11 +110,11 @@ test("ChatGPT Project Bootstrap creates and binds only after Preview, Confirm, a
       MNEMURON_API_KEY: book.api_key,
       MNEMURON_CONFIG_PATH: path.join(root, "missing-config.json"),
       MNEMURON_SPIKE_DATA_DIR: dataDir,
-      MNEMURON_DEVICE_ID: "macbook-project-bootstrap-test",
+      MNEMURON_DEVICE_ID: "clienta-project-bootstrap-test",
       MNEMURON_AGENT_ID: "chatgpt",
-      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macbook-project-bootstrap-test",
+      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-clienta-project-bootstrap-test",
       MNEMURON_RAW_RETENTION_DAYS: "30",
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook-project-bootstrap",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta-project-bootstrap",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };

@@ -28,16 +28,16 @@ const task = {
   project_name: "Mnemuron",
   title: "Mnemuron cross device test",
   aliases: ["跨设备测试", "cross device"],
-  goal: "Continue a Mac mini task on MacBook through the central service.",
+  goal: "Continue a Client B task on Client A through the central service.",
   status: "active",
-  progress: ["Both ChatGPT plugins are installed."],
+  progress: ["Synthetic fixture: both clients are configured."],
   decisions: ["Resume Preview is required before confirmation."],
   blockers: [],
-  next_steps: ["Capture on Mac mini and resume on MacBook."],
+  next_steps: ["Capture on Client B and resume on Client A."],
   resources: ["docs/core-spec-v0.1.md"],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: [],
 };
@@ -53,10 +53,10 @@ test("request body limit accepts the blocked event size and returns a real 413 r
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const agent = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook ChatGPT body limit test",
-      device_id: "macbook-body-limit-test",
+      label: "Client A ChatGPT body limit test",
+      device_id: "clienta-body-limit-test",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-body-limit-test",
+      agent_instance_id: "chatgpt-clienta-body-limit-test",
     }, 201);
     const event = {
       event_id: randomUUID(),
@@ -91,16 +91,16 @@ test("central API preserves server provenance, confirmation gate, revocation, re
     const admin = app.store.bootstrapAdmin();
 
     const mini = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "Mac mini ChatGPT",
-      device_id: "macmini-example",
+      label: "Client B ChatGPT",
+      device_id: "clientb-example",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macmini-example",
+      agent_instance_id: "chatgpt-clientb-example",
     }, 201);
     const book = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook ChatGPT",
-      device_id: "macbook-example",
+      label: "Client A ChatGPT",
+      device_id: "clienta-example",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-example",
+      agent_instance_id: "chatgpt-clienta-example",
     }, 201);
     const miniKey = mini.data.api_key;
     const bookKey = book.data.api_key;
@@ -119,9 +119,9 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       captured_at: new Date().toISOString(),
       project_id: task.project_id,
       task_id: task.task_id,
-      workstream_id: "workstream-macmini",
+      workstream_id: "workstream-clientb",
       session_id: "session-mini",
-      content: "Mac mini completed the central API implementation and is ready for handoff.",
+      content: "Client B completed the central API implementation and is ready for handoff.",
       provenance: {
         device_id: "forged-device",
         agent_instance_id: "forged-agent",
@@ -147,8 +147,8 @@ test("central API preserves server provenance, confirmation gate, revocation, re
     assert.equal(preview.resume_packet, undefined);
     assert.equal(Date.parse(preview.expires_at) - Date.parse(preview.created_at), 30 * 60_000);
     assert.equal(preview.recent_activity.length, 1);
-    assert.equal(preview.recent_activity[0].provenance.device_id, "macmini-example");
-    assert.equal(preview.recent_activity[0].provenance.agent_instance_id, "chatgpt-macmini-example");
+    assert.equal(preview.recent_activity[0].provenance.device_id, "clientb-example");
+    assert.equal(preview.recent_activity[0].provenance.agent_instance_id, "chatgpt-clientb-example");
 
     const wrongVersion = await api(
       baseUrl,
@@ -169,7 +169,7 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       200,
     );
     assert.equal(confirmed.data.status, "confirmed");
-    assert.equal(confirmed.data.resume_packet.context.recent_activity[0].provenance.device_id, "macmini-example");
+    assert.equal(confirmed.data.resume_packet.context.recent_activity[0].provenance.device_id, "clientb-example");
 
     const injectionAttemptId = randomUUID();
     const injectedEvent = {
@@ -179,7 +179,7 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       phase: "injected",
       session_id: "session-book-resume",
       turn_id: "turn-book-resume",
-      workstream_id: "workstream-macbook",
+      workstream_id: "workstream-clienta",
       injection_method: "codex-hook-additional-context",
       occurred_at: new Date().toISOString(),
     };
@@ -241,8 +241,8 @@ test("central API preserves server provenance, confirmation gate, revocation, re
     );
     assert.equal(acknowledged.data.delivery.status, "acknowledged");
     assert.equal(acknowledged.data.delivery.ack_complete, true);
-    assert.equal(acknowledged.data.delivery.latest_attempt.provenance.device_id, "macbook-example");
-    assert.equal(acknowledged.data.delivery.latest_attempt.provenance.agent_instance_id, "chatgpt-macbook-example");
+    assert.equal(acknowledged.data.delivery.latest_attempt.provenance.device_id, "clienta-example");
+    assert.equal(acknowledged.data.delivery.latest_attempt.provenance.agent_instance_id, "chatgpt-clienta-example");
 
     const deliveryStatus = await api(
       baseUrl,
@@ -275,7 +275,7 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       phase: "delivered",
       session_id: "session-book-mcp-receipt",
       turn_id: null,
-      workstream_id: "workstream-macbook",
+      workstream_id: "workstream-clienta",
       delivery_method: "codex-mcp-tool-result",
       occurred_at: new Date().toISOString(),
     };
@@ -355,7 +355,7 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       200,
     );
     assert.equal(receiptStatus.data.protocol, "chatgpt-mcp-delivery-receipt-v0.1.4");
-    assert.equal(receiptStatus.data.latest_receipt.provenance.device_id, "macbook-example");
+    assert.equal(receiptStatus.data.latest_receipt.provenance.device_id, "clienta-example");
     const statusWithReceipt = await api(baseUrl, bookKey, "GET", "/v1/status", undefined, 200);
     assert.equal(statusWithReceipt.data.resume_delivery_receipts.acknowledged, 1);
     assert.equal(statusWithReceipt.data.resume_delivery_receipts.unreported, 0);
@@ -400,7 +400,7 @@ test("central API preserves server provenance, confirmation gate, revocation, re
       baseUrl,
       admin.api_key,
       "POST",
-      "/v1/agent-instances/chatgpt-macbook-example/revoke",
+      "/v1/agent-instances/chatgpt-clienta-example/revoke",
       {},
       200,
     );

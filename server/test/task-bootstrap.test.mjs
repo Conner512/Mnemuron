@@ -41,8 +41,8 @@ const bootstrapRequest = {
   title: "Task Bootstrap & Binding v0.1",
   goal: "Create and bind a missing Canonical Task only after explicit confirmation.",
   aliases: ["Task Bootstrap", "Bootstrap Binding"],
-  workstream_id: "workstream-macbook",
-  workstream_name: "MacBook",
+  workstream_id: "workstream-clienta",
+  workstream_name: "Client A",
   session_id: "session-task-bootstrap-owner",
 };
 
@@ -79,15 +79,15 @@ async function setup() {
   const admin = app.store.bootstrapAdmin();
   const owner = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
     label: "Task bootstrap owner",
-    device_id: "macbook-task-bootstrap-owner",
+    device_id: "clienta-task-bootstrap-owner",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macbook-task-bootstrap-owner",
+    agent_instance_id: "chatgpt-clienta-task-bootstrap-owner",
   }, 201);
   const peer = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
     label: "Task bootstrap peer",
-    device_id: "macmini-task-bootstrap-peer",
+    device_id: "clientb-task-bootstrap-peer",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macmini-task-bootstrap-peer",
+    agent_instance_id: "chatgpt-clientb-task-bootstrap-peer",
   }, 201);
   const previewOnly = await api(
     baseUrl,
@@ -395,8 +395,8 @@ test("confirmed Bootstrap atomically creates Canonical v1 and returns an idempot
       name: bootstrapRequest.workstream_name,
       status: "active",
       agent_id: "chatgpt",
-      device_id: "macbook-task-bootstrap-owner",
-      agent_instance_id: "chatgpt-macbook-task-bootstrap-owner",
+      device_id: "clienta-task-bootstrap-owner",
+      agent_instance_id: "chatgpt-clienta-task-bootstrap-owner",
     }]);
 
     const revision = context.app.store.db.prepare(`

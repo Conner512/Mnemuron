@@ -637,7 +637,7 @@ async function main() {
       target: backupTarget,
       bytes: backupResult.bytes,
       sha256: backupResult.sha256,
-      ct131_free_percent: Number((postBackupResource.filesystem.free_ratio * 100).toFixed(4)),
+      server_free_percent: Number((postBackupResource.filesystem.free_ratio * 100).toFixed(4)),
     })}\n`);
 
     const expiresAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
@@ -793,7 +793,7 @@ async function main() {
       key_material_recorded: false,
       raw_payload_recorded: false,
       deliberate_faults: ["systemctl-restart", "systemctl-restart", "systemctl-restart", "sigkill", "sigkill"],
-      ct128_or_ct129_action_performed: false,
+      other_adapters_action_performed: false,
       network_dns_caddy_firewall_change_performed: false,
       production_ready_promoted: false,
     });

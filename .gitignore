@@ -15,6 +15,15 @@
 !/docs/core-optimization-v0.2/retrieval-decision.md
 !/docs/core-optimization-v0.2/release-notes.md
 /scripts/verify-core-optimization-artifacts.mjs
+/docs/core-review-v0.3/*
+!/docs/core-review-v0.3/README.md
+
+# Archives may contain private source snapshots or execution records.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bundle
 
 # Local dependencies and caches.
 node_modules/

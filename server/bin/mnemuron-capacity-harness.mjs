@@ -71,10 +71,10 @@ export const QUICK_DEFAULTS = {
   sampleIntervalMs: 250,
 };
 
-const EXECUTION_LAYERS = new Set(["local-isolated", "ct131-isolated"]);
+const EXECUTION_LAYERS = new Set(["local-isolated", "server-isolated"]);
 
 function executionIdentity(executionLayer) {
-  if (executionLayer === "ct131-isolated") {
+  if (executionLayer === "server-isolated") {
     return {
       label: "Mnemuron server isolated capacity harness",
       device_id: "capacity-server-v02",
@@ -763,7 +763,7 @@ function finalReportMarkdown(summary) {
     `- Missing Events: ${summary.load_reconciliation.missing_count}`,
     `- Integrity: ${summary.final_integrity_check}`,
     "",
-    summary.mode === "ct131-isolated"
+    summary.mode === "server-isolated"
       ? "This result is server disposable loopback evidence only. It does not represent private-TLS acceptance."
       : "This result is local isolated evidence only. It does not represent deployed-server or private-TLS acceptance.",
     "",
@@ -774,7 +774,7 @@ function finalReportMarkdown(summary) {
 export async function runLocalHarness(input = {}) {
   const options = { ...DEFAULTS, ...input };
   if (!EXECUTION_LAYERS.has(options.executionLayer)) {
-    throw new Error("executionLayer must be local-isolated or ct131-isolated.");
+    throw new Error("executionLayer must be local-isolated or server-isolated.");
   }
   const startedAt = new Date().toISOString();
   const runId = options.runId || `local-${timestampId()}-${randomUUID().slice(0, 8)}`;
@@ -1135,13 +1135,13 @@ export async function runLocalHarness(input = {}) {
       run_id: runId,
       generated_at: finishedAt,
       topology: {
-        server: options.executionLayer === "ct131-isolated"
+        server: options.executionLayer === "server-isolated"
           ? "in-process current createMnemuronApp on the server"
           : "in-process current createMnemuronApp",
         listener: "127.0.0.1 random port",
         database: "temporary SQLite removed after run",
         tls: false,
-        ct131: options.executionLayer === "ct131-isolated",
+        server_isolated: options.executionLayer === "server-isolated",
       },
       identity: {
         device_id: identity.device_id,

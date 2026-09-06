@@ -40,6 +40,34 @@ class SyncReliabilityTests(unittest.TestCase):
         immutable_envelope(file, {'event':{'event_id':id,'session_id':lane,'captured_at':at,'content':'SENSITIVE-BODY'}})
         return file
 
+    def test_strict_event_acceptance_shared_vectors(self):
+        contract=json.loads((Path(__file__).resolve().parents[3]/'server/test/helpers/event-acceptance-vectors.json').read_text())
+        item={'payload':{'event':{'event_id':contract['event_id']}}}
+        for vector in contract['vectors']:
+            with self.subTest(case=vector['name']):
+                if vector['valid']: validate_acceptance('event',item,vector['response'])
+                else:
+                    with self.assertRaises(RuntimeError) as caught: validate_acceptance('event',item,vector['response'])
+                    self.assertEqual(caught.exception.error_code,'RECEIPT_MISMATCH')
+
+    def test_incomplete_event_acceptance_retains_bytes_and_blocks_restart(self):
+        contract=json.loads((Path(__file__).resolve().parents[3]/'server/test/helpers/event-acceptance-vectors.json').read_text())
+        for vector in contract['vectors']:
+            with self.subTest(case=vector['name']):
+                root=self.root/vector['name']; file=root/'outbox/event.json'
+                immutable_envelope(file,{'event':{'event_id':contract['event_id'],'session_id':'isolated-lane','content':'SYNTHETIC-PRIVATE'}})
+                raw=file.read_bytes()
+                run=lambda send:flush_queue(queue_items(root/'outbox','event'),root=root,credential='synthetic',send=send)
+                result=run(lambda _:copy.deepcopy(vector['response']))
+                if vector['valid']:
+                    self.assertEqual(result['flushed'],1);self.assertFalse(file.exists())
+                else:
+                    self.assertEqual(result['flushed'],0);self.assertEqual(file.read_bytes(),raw)
+                    self.assertEqual(queue_summary(queue_items(root/'outbox','event'))['counts']['blocked_reconciliation'],1)
+                    self.assertFalse((root/'sync-last-success.state').exists())
+                    self.assertEqual(run(lambda _:self.fail('must not resend after restart'))['flushed'],0)
+                    self.assertEqual(file.read_bytes(),raw)
+
     def test_shared_vectors_and_persisted_retry_after(self):
         vectors=json.loads((Path(__file__).resolve().parents[3]/'server/test/helpers/sync-contract-vectors.json').read_text())
         for case in vectors['vectors']:

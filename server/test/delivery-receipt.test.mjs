@@ -30,10 +30,10 @@ test("a retry delivered in the same event millisecond supersedes the failed rece
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const agent = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook delivery retry test",
-      device_id: "macbook-delivery-retry",
+      label: "Client A delivery retry test",
+      device_id: "clienta-delivery-retry",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-delivery-retry",
+      agent_instance_id: "chatgpt-clienta-delivery-retry",
     }, 201);
     const taskId = "task-delivery-retry-same-millisecond";
     await api(baseUrl, admin.api_key, "POST", "/v1/tasks", {
@@ -50,8 +50,8 @@ test("a retry delivered in the same event millisecond supersedes the failed rece
       next_steps: [],
       resources: [],
       workstreams: [{
-        workstream_id: "workstream-macbook",
-        name: "MacBook",
+        workstream_id: "workstream-clienta",
+        name: "Client A",
         status: "active",
       }],
       conflicts: [],
@@ -72,7 +72,7 @@ test("a retry delivered in the same event millisecond supersedes the failed rece
     const common = {
       preview_version: preview.preview_version,
       session_id: "session-delivery-retry",
-      workstream_id: "workstream-macbook",
+      workstream_id: "workstream-clienta",
       delivery_method: "codex-mcp-tool-result",
       occurred_at: occurredAt,
     };

@@ -11,20 +11,9 @@
   "goal": "Example task: validate persistent task binding after an explicitly confirmed Resume while preserving the destination workstream.",
   "status": "active",
   "progress": [],
-  "decisions": [
-    "The confirmed Resume Packet supplies project_id and task_id; the destination Adapter supplies workstream_id.",
-    "A Resume Packet is injected once, but its activated Task Scope persists for later turns in the same conversation.",
-    "The confirmation turn remains on the previous scope; activation starts only at the next ordinary user turn.",
-    "A newer confirmed Resume supersedes the prior active binding only within the matching conversation scope.",
-    "Local binding records use 0700 directories, 0600 files, and include Resume provenance in captured raw events."
-  ],
-  "blockers": [
-    "Example seed only; deployment-specific acceptance evidence has not been recorded."
-  ],
-  "next_steps": [
-    "Configure isolated service and client identities for this example.",
-    "Run the documented acceptance checks and record actual results before marking the task complete."
-  ],
+  "decisions": [],
+  "blockers": [],
+  "next_steps": [],
   "resources": [
     "docs/dynamic-task-scope-v0.1.md",
     "docs/chatgpt-mcp-delivery-receipt-v0.1.4.md",
@@ -34,13 +23,13 @@
   ],
   "workstreams": [
     {
-      "workstream_id": "workstream-macmini",
-      "name": "Mac mini ChatGPT",
+      "workstream_id": "workstream-clientb",
+      "name": "Client B ChatGPT",
       "status": "active"
     },
     {
-      "workstream_id": "workstream-macbook",
-      "name": "MacBook ChatGPT",
+      "workstream_id": "workstream-clienta",
+      "name": "Client A ChatGPT",
       "status": "active"
     },
     {

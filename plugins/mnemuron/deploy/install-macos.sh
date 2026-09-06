@@ -2,7 +2,7 @@
 
 set -eu
 
-expected_version="0.1.14+codex.20260904233116"
+expected_version="0.1.14"
 bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 plugin_source="${bundle_dir}/plugin"
 manifest_file="${plugin_source}/.codex-plugin/plugin.json"

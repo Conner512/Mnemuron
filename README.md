@@ -15,7 +15,9 @@ Mnemuron 是面向单个用户的跨设备、跨 Agent 任务连续性系统。�
 
 核心规格见 [Core Specification](docs/core-spec-v0.1.md)，部署入口见 [PVE LXC Deployment](docs/pve-lxc-deployment-v0.1.md)。功能规格包括 [Task Scope](docs/dynamic-task-scope-v0.1.md)、[Task Bootstrap](docs/task-bootstrap-binding-v0.1.md)、[Project Bootstrap](docs/project-bootstrap-initial-task-v0.1.md)、[Branch-aware Resume](docs/branch-aware-resume-selection-v0.1.md) 和 [Memory Lifecycle](docs/structured-memory-retrieval-lifecycle-v0.1.md)。发布前按 [Production Readiness](docs/production-readiness-v0.1.md) 与[验收矩阵](docs/production-readiness-evidence-matrix-v0.1.md)收集当前环境的证据。
 
-本次 [Core Optimization v0.2](docs/core-optimization-v0.2/release-notes.md) 已完成四批核心改进：范围与幂等、全文检索与详情、可靠同步与维护、迁移及兼容回归。结论限于源码和本地/隔离测试，不表示已部署或生产就绪。
+[Core Optimization v0.2](docs/core-optimization-v0.2/release-notes.md) 包含四批核心改进：范围与幂等、全文检索与详情、可靠同步与维护、迁移及兼容回归。实现与合成测试不表示已部署或生产就绪。
+
+[Core Review v0.3](docs/core-review-v0.3/README.md) 在此基础上修复中英文连写漏召回、补充搜索组件健康检查，并严格核验单事件接收 ID；OAuth 相关功能暂不实施。
 
 ## 验证
 
@@ -24,3 +26,5 @@ Mnemuron 是面向单个用户的跨设备、跨 Agent 任务连续性系统。�
 ```bash
 npm test
 ```
+
+发布前执行[公开内容检查](docs/publication-policy.md)，确保合成测试与私人运行记录保持分离。

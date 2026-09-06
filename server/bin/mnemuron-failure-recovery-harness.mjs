@@ -37,7 +37,7 @@ const SERVER_ENTRY = path.resolve(SOURCE_DIR, "mnemuron-server.mjs");
 const APP_FILE = path.resolve(SOURCE_DIR, "../lib/app.mjs");
 const STORE_FILE = path.resolve(SOURCE_DIR, "../lib/store.mjs");
 const CLIENT_FILE = path.resolve(SOURCE_DIR, "../../adapters/openclaw/dist/client.js");
-const EXECUTION_LAYERS = new Set(["local-isolated", "ct131-isolated"]);
+const EXECUTION_LAYERS = new Set(["local-isolated", "server-isolated"]);
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const READY_TIMEOUT_MS = 60_000;
 const DRAIN_TIMEOUT_MS = 5 * 60_000;
@@ -133,7 +133,7 @@ function fileSystemSnapshot(root, label) {
 }
 
 function testIdentity(executionLayer, runId, suffix = "primary") {
-  const location = executionLayer === "ct131-isolated" ? "ct131" : "local";
+  const location = executionLayer === "server-isolated" ? "server" : "local";
   return {
     label: `Mnemuron ${location} failure recovery ${suffix}`,
     device_id: `failure-${location}-v01`,
@@ -1074,7 +1074,7 @@ function reportMarkdown(summary) {
 export async function runFailureRecoveryHarness(input = {}) {
   const options = { ...DEFAULTS, ...input };
   if (!EXECUTION_LAYERS.has(options.executionLayer)) {
-    throw new Error("executionLayer must be local-isolated or ct131-isolated.");
+    throw new Error("executionLayer must be local-isolated or server-isolated.");
   }
   if (![options.restartQueuePerCycle, options.adapterQueueCount, options.partitionQueueCount]
     .every((value) => Number.isInteger(value) && value > 0)) {
@@ -1207,7 +1207,7 @@ export async function runFailureRecoveryHarness(input = {}) {
       production_service_restarted: false,
       temporary_production_key_created: false,
       network_configuration_changed: false,
-      ct129_touched: false,
+      other_agents_touched: false,
       external_memory_service_changed: false,
       production_ready_changed: false,
       parameters: {
@@ -1285,13 +1285,13 @@ export async function runFailureRecoveryHarness(input = {}) {
         production_service_restarted: false,
         temporary_production_key_created: false,
         network_configuration_changed: false,
-        ct129_touched: false,
+        other_agents_touched: false,
         external_memory_service_changed: false,
       },
       open_production_gates: [
         "private_tls_duplicate_receipt_and_session_ownership",
         "wall_clock_network_partitions",
-        "production_ct131_restart_matrix",
+        "production_server_restart_matrix",
         "real_adapter_restart_recovery",
         "scheduled_backup_rpo_and_restore_rto",
       ],

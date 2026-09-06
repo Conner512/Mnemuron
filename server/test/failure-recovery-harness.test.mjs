@@ -33,7 +33,7 @@ test("failure recovery harness passes only disposable local isolation", async ()
     assert.equal(summary.production_database_written, false);
     assert.equal(summary.production_service_restarted, false);
     assert.equal(summary.temporary_production_key_created, false);
-    assert.equal(summary.ct129_touched, false);
+    assert.equal(summary.other_agents_touched, false);
     assert.equal(summary.production_ready_changed, false);
     assert.deepEqual(summary.cases.map((item) => item.id), [
       "FR-00", "FR-01", "FR-02", "FR-03", "FR-04", "FR-05",

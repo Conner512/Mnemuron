@@ -21,14 +21,14 @@ const fixtureTask = {
   aliases: ["Mnemuron plugin", "插件原型"],
   goal: "Prove cross-device capture and resume through one central service.",
   status: "active",
-  progress: ["Mac mini and MacBook local plugin tests passed."],
+  progress: ["Synthetic fixture: source and destination clients are configured."],
   decisions: ["Use preview before confirmation."],
   blockers: [],
-  next_steps: ["Deploy the verified server to PVE LXC."],
+  next_steps: ["Continue the synthetic task on the destination client."],
   resources: ["docs/core-spec-v0.1.md"],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: [],
 };
@@ -89,7 +89,7 @@ function runHook(payload, env) {
   });
 }
 
-test("E-06 offline Mac mini events derive indexed memory and resume through MacBook MCP with exact Stop ACK", async () => {
+test("E-06 offline Client B events derive indexed memory and resume through Client A MCP with exact Stop ACK", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "mnemuron-remote-plugin-"));
   const app = createMnemuronApp({ databasePath: path.join(root, "server.sqlite3") });
   let client;
@@ -98,14 +98,14 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     const serverUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const mini = app.store.registerAgent(app.store.authenticate(admin.api_key), {
-      device_id: "macmini-example",
+      device_id: "clientb-example",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macmini-example",
+      agent_instance_id: "chatgpt-clientb-example",
     });
     const book = app.store.registerAgent(app.store.authenticate(admin.api_key), {
-      device_id: "macbook-example",
+      device_id: "clienta-example",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-example",
+      agent_instance_id: "chatgpt-clienta-example",
     });
     app.store.upsertTask(app.store.authenticate(admin.api_key), fixtureTask);
 
@@ -117,23 +117,23 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
       MNEMURON_DEFAULT_PROJECT_ID: fixtureTask.project_id,
       MNEMURON_DEFAULT_TASK_ID: fixtureTask.task_id,
     };
-    const miniEnv={...common,MNEMURON_API_KEY:mini.api_key,MNEMURON_SPIKE_DATA_DIR:path.join(root,'mini'),MNEMURON_DEVICE_ID:'macmini-example',MNEMURON_AGENT_ID:'chatgpt',MNEMURON_AGENT_INSTANCE_ID:'chatgpt-macmini-example',MNEMURON_DEFAULT_WORKSTREAM_ID:'workstream-macmini'};
+    const miniEnv={...common,MNEMURON_API_KEY:mini.api_key,MNEMURON_SPIKE_DATA_DIR:path.join(root,'mini'),MNEMURON_DEVICE_ID:'clientb-example',MNEMURON_AGENT_ID:'chatgpt',MNEMURON_AGENT_INSTANCE_ID:'chatgpt-clientb-example',MNEMURON_DEFAULT_WORKSTREAM_ID:'workstream-clientb'};
     const hook = await runHook({
         hook_event_name: "Stop",
-        session_id: "session-macmini",
+        session_id: "session-clientb",
         turn_id: "turn-1",
         project_id: fixtureTask.project_id,
         task_id: fixtureTask.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         last_assistant_message: "已完成：Central transport is complete; deploy it to the PVE LXC next.",
       }, {
         ...common,
         MNEMURON_API_KEY: mini.api_key,
         MNEMURON_SPIKE_DATA_DIR: path.join(root, "mini"),
-        MNEMURON_DEVICE_ID: "macmini-example",
+        MNEMURON_DEVICE_ID: "clientb-example",
         MNEMURON_AGENT_ID: "chatgpt",
-        MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macmini-example",
-        MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macmini",
+        MNEMURON_AGENT_INSTANCE_ID: "chatgpt-clientb-example",
+        MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clientb",
         MNEMURON_SERVER_URL: 'http://127.0.0.1:1',
         MNEMURON_REQUEST_TIMEOUT_MS: '250',
     });
@@ -145,18 +145,18 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     const derived=app.store.queryMemories(app.store.authenticate(book.api_key),{query:'Central transport is complete',task_id:fixtureTask.task_id});
     assert.equal(derived.result_count,1);
     assert.equal(derived.results[0].source,'checkpoint_derived');
-    assert.equal(derived.results[0].provenance.agent_instance_id,'chatgpt-macmini-example');
+    assert.equal(derived.results[0].provenance.agent_instance_id,'chatgpt-clientb-example');
     assert.equal(app.store.memorySearch.validate(),true);
 
     const bookEnv = {
       ...common,
       MNEMURON_API_KEY: book.api_key,
       MNEMURON_SPIKE_DATA_DIR: path.join(root, "book"),
-      MNEMURON_DEVICE_ID: "macbook-example",
+      MNEMURON_DEVICE_ID: "clienta-example",
       MNEMURON_AGENT_ID: "chatgpt",
-      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macbook-example",
+      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-clienta-example",
       MNEMURON_DEFAULT_TASK_ID: "task-chatgpt-adapter-default",
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -174,8 +174,8 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     const statusCall = await client.request("tools/call", { name: "mnemuron_status", arguments: {} });
     const status = statusCall.result.structuredContent;
     assert.equal(status.mode, "remote-v0.1");
-    assert.equal(status.identity.device_id, "macbook-example");
-    assert.equal(status.adapter.plugin_version, "0.1.14+codex.20260904233116");
+    assert.equal(status.identity.device_id, "clienta-example");
+    assert.equal(status.adapter.plugin_version, "0.1.14");
     assert.equal(
       status.adapter.resume_injection_mode,
       "chatgpt-mcp-delivery-receipt-v0.1.4",
@@ -198,7 +198,7 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.equal(projectContext.tasks.length, 1);
     assert.equal(projectContext.tasks[0].latest_checkpoints.length, 1);
     assert.equal(projectContext.tasks[0].latest_checkpoints[0].provenance.device_id,
-      "macmini-example");
+      "clientb-example");
     assert.equal(projectContext.safety.resume_created, false);
     assert.equal(projectContext.safety.task_scope_changed, false);
     assert.equal(projectContext.safety.context_injected, false);
@@ -261,8 +261,8 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.equal(branches.status, "task_branches_preview");
     assert.equal(branches.task.task_id, fixtureTask.task_id);
     assert.deepEqual(new Set(branches.branches.map((branch) => branch.workstream_id)), new Set([
-      "workstream-macmini",
-      "workstream-macbook",
+      "workstream-clientb",
+      "workstream-clienta",
     ]));
     assert.equal(branches.safety.resume_created, false);
     assert.equal(branches.safety.task_scope_changed, false);
@@ -320,7 +320,7 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
       name: "mnemuron_preview_resume",
       arguments: {
         query: "继续 Mnemuron plugin",
-        source_workstream_ids: ["workstream-macmini"],
+        source_workstream_ids: ["workstream-clientb"],
       },
     });
     const preview = previewCall.result.structuredContent;
@@ -330,10 +330,10 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.ok(preview.decisions.includes(
       "Canonical reconciliation confirmation remains separate from Resume confirmation.",
     ));
-    assert.equal(preview.recent_activity[0].provenance.device_id, "macmini-example");
+    assert.equal(preview.recent_activity[0].provenance.device_id, "clientb-example");
     assert.equal(preview.branch_selection.mode, "single");
-    assert.deepEqual(preview.branch_selection.selected_workstream_ids, ["workstream-macmini"]);
-    assert.deepEqual(preview.workstreams.map((item) => item.workstream_id), ["workstream-macmini"]);
+    assert.deepEqual(preview.branch_selection.selected_workstream_ids, ["workstream-clientb"]);
+    assert.deepEqual(preview.workstreams.map((item) => item.workstream_id), ["workstream-clientb"]);
     assert.equal(preview.resume_packet, undefined);
 
     const confirmationPrompt = await runHook({
@@ -371,7 +371,7 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.deepEqual(JSON.parse(confirmationTurnStop.stdout), {});
     const confirmationEvent = app.store.db.prepare(
       "SELECT task_id FROM events WHERE agent_instance_id = ? AND turn_id = ? ORDER BY captured_at DESC LIMIT 1",
-    ).get("chatgpt-macbook-example", "turn-confirm");
+    ).get("chatgpt-clienta-example", "turn-confirm");
     assert.equal(confirmationEvent.task_id, null);
 
     const resumedPrompt = await runHook({
@@ -392,7 +392,7 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
       FROM events
       WHERE agent_instance_id = ? AND turn_id = ? AND event_type = 'user_message'
       ORDER BY captured_at DESC LIMIT 1
-    `).get("chatgpt-macbook-example", "turn-resumed");
+    `).get("chatgpt-clienta-example", "turn-resumed");
     assert.equal(preDeliveryPromptEvent.task_id, null);
     assert.equal(preDeliveryPromptEvent.workstream_id, null);
     const deliveryCall = await client.request("tools/call", {
@@ -405,7 +405,7 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.match(delivered.resume_context, new RegExp(preview.resume_id));
     assert.match(delivered.resume_context, /Central transport is complete/);
     assert.match(delivered.resume_context, /resume-branch-selection-v0\.1/);
-    assert.match(delivered.resume_context, /workstream-macmini/);
+    assert.match(delivered.resume_context, /workstream-clientb/);
     assert.equal(delivered.task_scope.task_id, fixtureTask.task_id);
     assert.equal(
       resolveTaskScope(path.join(root, "book"), sessionId, bookEnv).resume_id,
@@ -451,9 +451,9 @@ test("E-06 offline Mac mini events derive indexed memory and resume through MacB
     assert.equal(acknowledged.latest_receipt.turn_id, "turn-resumed");
     const resumedEvent = app.store.db.prepare(
       "SELECT task_id, workstream_id, raw_payload_json FROM events WHERE agent_instance_id = ? AND turn_id = ? ORDER BY captured_at DESC LIMIT 1",
-    ).get("chatgpt-macbook-example", "turn-resumed");
+    ).get("chatgpt-clienta-example", "turn-resumed");
     assert.equal(resumedEvent.task_id, fixtureTask.task_id);
-    assert.equal(resumedEvent.workstream_id, "workstream-macbook");
+    assert.equal(resumedEvent.workstream_id, "workstream-clienta");
     assert.equal(
       JSON.parse(resumedEvent.raw_payload_json).mnemuron_task_scope.source,
       "confirmed-resume",

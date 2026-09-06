@@ -40,7 +40,7 @@ import {
   submitDeliveryReceipt,
 } from "./remote-client.mjs";
 
-export const PLUGIN_VERSION = "0.1.14+codex.20260904233116";
+export const PLUGIN_VERSION = "0.1.14";
 const RESUME_INJECTION_MODE = "chatgpt-mcp-delivery-receipt-v0.1.4";
 
 export const TOOLS = [

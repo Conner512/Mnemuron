@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { chmodSync, statSync } from "node:fs";
+import { chmodSync, existsSync, realpathSync, statSync } from "node:fs";
+import path from "node:path";
 import { backup, DatabaseSync } from "node:sqlite";
 import { MnemuronStore } from "../lib/store.mjs";
 
-const [sourcePath, copyPath] = process.argv.slice(2);
-if (!sourcePath || !copyPath) {
-  throw new Error("usage: node ct131-task-branches-copy-smoke.mjs <source.sqlite3> <copy.sqlite3>");
+const [sourcePath, copyPath, userId, projectId, taskId] = process.argv.slice(2);
+if (!sourcePath || !copyPath || !userId || !projectId || !taskId) {
+  throw new Error("usage: node database-copy-task-branches-smoke.mjs <source.sqlite3> <new-copy.sqlite3> <user-id> <project-id> <task-id>");
 }
+assert.ok(!existsSync(copyPath), "copy destination must not already exist");
+assert.notEqual(path.resolve(copyPath), realpathSync(sourcePath), "copy destination must differ from source");
 
 const source = new DatabaseSync(sourcePath, { readOnly: true });
 await backup(source, copyPath);
@@ -15,8 +18,6 @@ chmodSync(copyPath, 0o600);
 
 const store = new MnemuronStore(copyPath);
 try {
-  const userId = store.db.prepare("SELECT user_id FROM tasks ORDER BY updated_at DESC LIMIT 1").get()?.user_id;
-  assert.ok(userId, "copy contains no Task user");
   const auth = {
     user_id: userId,
     credential_id: "isolated-copy-smoke",
@@ -31,9 +32,9 @@ try {
     proposals: store.db.prepare("SELECT COUNT(*) count FROM task_reconciliation_proposals").get().count,
   });
   const before = counters();
-  const project = store.previewProjectContext(auth, { query: "Mnemuron" });
+  const project = store.previewProjectContext(auth, { query: projectId });
   const branches = store.previewTaskBranches(auth, {
-    query: "task-mnemuron-production-readiness-v01",
+    query: taskId,
   });
   const after = counters();
   const projectBytes = Buffer.byteLength(JSON.stringify(project));

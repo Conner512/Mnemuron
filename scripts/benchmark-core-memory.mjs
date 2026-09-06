@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {mkdtempSync,realpathSync,rmSync,writeFileSync,statSync,mkdirSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,11 +8,16 @@ import {createMnemuronApp} from '../server/lib/app.mjs';
 import {MnemuronStore} from '../server/lib/store.mjs';
 import assert from 'node:assert/strict';
 
-const terms=['语音','许可','音','C9800-CL','17.9.8','17.98','FDO1234ABCD','FDO1234ABCE','192.0.2.10','192.0.2.11','ＦＵＬＬＷＩＤＴＨ９９','MiXeD-Case77','😀','🛠','" OR NOT : ( ) % _','路由恢复','备份校验','端口隔离','凭证轮换','网络抖动','蓝牙连接','QoS-DSCP46','2001:db8::100','v0.2.17','FOC987ZYX01','FOC987ZYX02','Eth-Trunk99','6e8e2838-8cf8-4066-af31-5b103123650e','syslog/notice','restore_checkpoint_v02'];
+const runLabel=process.argv[2];
+if(runLabel!==undefined && !/^[a-z0-9-]+$/.test(runLabel))throw Error('A safe benchmark run label is required');
+
+const terms=['语音','许可','音','C9800-CL','17.9.8','17.98','FDO1234ABCD','FDO1234ABCE','192.0.2.10','192.0.2.11','ＦＵＬＬＷＩＤＴＨ９９','MiXeD-Case77','😀','🛠','" OR NOT : ( ) % _','路由恢复','备份校验','端口隔离','凭证轮换','网络抖动','蓝牙连接','QoS-DSCP46','2001:db8::100','v0.2.17','FOC987ZYX01','FOC987ZYX02','Eth-Trunk99','11111111-1111-4111-8111-000000000007','syslog/notice','restore_checkpoint_v02'];
 assert.equal(terms.length,30);
 const percentile=(values,q)=>[...values].sort((a,b)=>a-b)[Math.ceil(values.length*q)-1]??0;
 const stats=values=>({count:values.length,p50_ms:percentile(values,.5),p95_ms:percentile(values,.95),max_ms:Math.max(0,...values)});
 const report={schema_version:'core-memory-benchmark-v1',started_at:new Date().toISOString(),synthetic:true,production_touched:false,node:process.version,sqlite:null,hardware:{platform:os.platform(),release:os.release(),arch:os.arch(),cpu:os.cpus()[0].model,cpus:os.cpus().length,memory_bytes:os.totalmem()},thresholds:{warm_p95_ms:{10000:250,100000:750},concurrent_max_ms:5000},runs:[]};
+report.actual_head=execFileSync('git',['rev-parse','HEAD'],{cwd:path.resolve(import.meta.dirname,'..'),encoding:'utf8'}).trim();
+report.run_label=runLabel ?? null;
 for(const size of [10000,100000]) {
   const root=realpathSync(mkdtempSync(path.join(os.tmpdir(),'mnemuron-core-bench-'))),database=path.join(root,'benchmark.sqlite3');
   assert.equal(path.dirname(root),realpathSync(os.tmpdir()));
@@ -75,5 +81,5 @@ for(const size of [10000,100000]) {
   }finally{if(app)await app.close();if(store)store.close();rmSync(root,{recursive:true,force:true});}
 }
 report.completed_at=new Date().toISOString();report.passed=report.runs.every(r=>r.passed);
-const destination=path.resolve('evidence/core-optimization-v0.2/benchmark-'+process.version+'.json');mkdirSync(path.dirname(destination),{recursive:true,mode:0o700});writeFileSync(destination,JSON.stringify(report,null,2)+'\n',{mode:0o600});console.log(destination);
+const destination=path.resolve('evidence/core-optimization-v0.2/benchmark-'+process.version+(runLabel?'-'+runLabel:'')+'.json');mkdirSync(path.dirname(destination),{recursive:true,mode:0o700});writeFileSync(destination,JSON.stringify(report,null,2)+'\n',{mode:0o600});console.log(destination);
 if(!report.passed)process.exitCode=1;

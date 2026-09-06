@@ -96,6 +96,20 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
 
+      if (request.method === "GET" && pathname === "/readyz/search") {
+        store.requireScope(auth, "memory:read");
+        const search = store.memorySearch.status();
+        const ready = search.state === "ready";
+        responseStatus = ready ? 200 : 503;
+        return sendJson(response, responseStatus, {
+          status: ready ? "ready" : "unavailable",
+          component: "memory_search",
+          ready,
+          index_version: search.index_version,
+          enabled: search.enabled,
+          ...(ready ? {} : { error_code: "SEARCH_UNAVAILABLE" }),
+        });
+      }
       if (request.method === "GET" && pathname === "/v1/status") {
         responseStatus = 200;
         return sendJson(response, 200, store.status(auth));

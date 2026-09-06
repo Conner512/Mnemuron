@@ -36,19 +36,19 @@ function bindingPacket() {
       canonical_version: 1,
     },
     workstream: {
-      workstream_id: "workstream-macbook",
-      name: "MacBook",
+      workstream_id: "workstream-clienta",
+      name: "Client A",
       status: "active",
       agent_id: "chatgpt",
-      device_id: "macbook-example",
-      agent_instance_id: "chatgpt-macbook-example",
+      device_id: "clienta-example",
+      agent_instance_id: "chatgpt-clienta-example",
     },
     target_session_id: "session-bootstrap-owner",
     binding_authorized_at: "2026-09-04T08:00:00.000Z",
     provenance: {
-      device_id: "macbook-example",
+      device_id: "clienta-example",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-example",
+      agent_instance_id: "chatgpt-clienta-example",
       identity_status: "server_verified",
     },
   };
@@ -216,10 +216,10 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
       path_hints: [],
     });
     const book = app.store.registerAgent(adminAuth, {
-      label: "ChatGPT MacBook bootstrap integration",
-      device_id: "macbook-bootstrap-test",
+      label: "ChatGPT Client A bootstrap integration",
+      device_id: "clienta-bootstrap-test",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-bootstrap-test",
+      agent_instance_id: "chatgpt-clienta-bootstrap-test",
     });
     const dataDir = path.join(root, "book");
     const sessionId = "session-bootstrap-integration";
@@ -230,11 +230,11 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
       MNEMURON_API_KEY: book.api_key,
       MNEMURON_CONFIG_PATH: path.join(root, "missing-config.json"),
       MNEMURON_SPIKE_DATA_DIR: dataDir,
-      MNEMURON_DEVICE_ID: "macbook-bootstrap-test",
+      MNEMURON_DEVICE_ID: "clienta-bootstrap-test",
       MNEMURON_AGENT_ID: "chatgpt",
-      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macbook-bootstrap-test",
+      MNEMURON_AGENT_INSTANCE_ID: "chatgpt-clienta-bootstrap-test",
       MNEMURON_RAW_RETENTION_DAYS: "30",
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook-bootstrap",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta-bootstrap",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -263,7 +263,7 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
         title: "Cross-device Bootstrap Acceptance",
         goal: "Create one new Canonical Task and bind this exact ChatGPT session.",
         aliases: ["Bootstrap Acceptance"],
-        workstream_name: "MacBook Bootstrap",
+        workstream_name: "Client A Bootstrap",
         session_id: sessionId,
       },
     });
@@ -339,7 +339,7 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
       WHERE agent_instance_id = ? AND turn_id IN (?, ?)
       ORDER BY captured_at
     `).all(
-      "chatgpt-macbook-bootstrap-test",
+      "chatgpt-clienta-bootstrap-test",
       "turn-before-bootstrap",
       "turn-confirm-bootstrap",
     );
@@ -375,9 +375,9 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
       FROM events
       WHERE agent_instance_id = ? AND turn_id = ? AND event_type = 'user_message'
       ORDER BY captured_at DESC LIMIT 1
-    `).get("chatgpt-macbook-bootstrap-test", "turn-bootstrap-first");
+    `).get("chatgpt-clienta-bootstrap-test", "turn-bootstrap-first");
     assert.equal(firstBoundEvent.task_id, preview.task.task_id);
-    assert.equal(firstBoundEvent.workstream_id, "workstream-macbook-bootstrap");
+    assert.equal(firstBoundEvent.workstream_id, "workstream-clienta-bootstrap");
     const scopeEvidence = JSON.parse(firstBoundEvent.raw_payload_json).mnemuron_task_scope;
     assert.equal(scopeEvidence.source, "confirmed-task-bootstrap");
     assert.equal(scopeEvidence.binding_kind, "task_bootstrap");
@@ -411,7 +411,7 @@ test("remote Task Bootstrap Preview and Confirm bind only the next ordinary Hook
       FROM events
       WHERE agent_instance_id = ? AND turn_id IN (?, ?)
     `).all(
-      "chatgpt-macbook-bootstrap-test",
+      "chatgpt-clienta-bootstrap-test",
       "turn-before-bootstrap",
       "turn-confirm-bootstrap",
     );

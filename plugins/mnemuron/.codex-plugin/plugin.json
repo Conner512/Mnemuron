@@ -1,6 +1,6 @@
 {
   "name": "mnemuron",
-  "version": "0.1.14+codex.20260904233116",
+  "version": "0.1.14",
   "description": "Start, preview, and continue tasks across ChatGPT devices with provenance-aware memory.",
   "author": {
     "name": "Mnemuron"

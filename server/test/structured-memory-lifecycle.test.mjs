@@ -34,8 +34,8 @@ const task = {
   next_steps: [],
   resources: [],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: ["A recorded Canonical conflict remains visible."],
 };
@@ -48,16 +48,16 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const mini = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "Mac mini",
-      device_id: "macmini-memory-lifecycle",
+      label: "Client B",
+      device_id: "clientb-memory-lifecycle",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macmini-memory-lifecycle",
+      agent_instance_id: "chatgpt-clientb-memory-lifecycle",
     }, 201);
     const book = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook",
-      device_id: "macbook-memory-lifecycle",
+      label: "Client A",
+      device_id: "clienta-memory-lifecycle",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-memory-lifecycle",
+      agent_instance_id: "chatgpt-clienta-memory-lifecycle",
     }, 201);
     await api(baseUrl, admin.api_key, "POST", "/v1/tasks", task);
 
@@ -69,7 +69,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         captured_at: "2026-09-04T05:00:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-memory-mini",
         content: "决定[存储后端]：使用 SQLite。\n约束：确认前不得注入。",
       },
@@ -80,7 +80,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         captured_at: "2026-09-04T05:01:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-memory-mini",
         content: "收到。",
       },
@@ -92,7 +92,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         captured_at: "2026-09-04T05:02:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macbook",
+        workstream_id: "workstream-clienta",
         session_id: "session-memory-book",
         content: "决定[存储后端]：使用 PostgreSQL。\n事实：另一条无主题事实。",
       },
@@ -103,7 +103,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         captured_at: "2026-09-04T05:03:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macbook",
+        workstream_id: "workstream-clienta",
         session_id: "session-memory-book",
         content: "收到。",
       },
@@ -119,7 +119,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
       query: "存储后端",
       project_id: task.project_id,
       task_id: task.task_id,
-      source_workstream_ids: ["workstream-macmini", "workstream-macbook"],
+      source_workstream_ids: ["workstream-clientb", "workstream-clienta"],
       memory_types: ["decision"],
       limit: 10,
     });
@@ -131,7 +131,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
     assert.equal(result.conflict_presentation.potential_conflicts.length, 1);
     assert.deepEqual(
       result.conflict_presentation.potential_conflicts[0].workstream_ids,
-      ["workstream-macbook", "workstream-macmini"],
+      ["workstream-clienta", "workstream-clientb"],
     );
     assert.equal(
       result.conflict_presentation.potential_conflicts[0].automatic_resolution_performed,
@@ -159,15 +159,15 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
     const miniOnly = await api(baseUrl, mini.api_key, "POST", "/v1/memories/query", {
       query: "存储后端",
       task_id: task.task_id,
-      source_workstream_ids: ["workstream-macmini"],
+      source_workstream_ids: ["workstream-clientb"],
       include_shared: false,
     });
     assert.equal(miniOnly.result_count, 1);
-    assert.equal(miniOnly.results[0].workstream_id, "workstream-macmini");
+    assert.equal(miniOnly.results[0].workstream_id, "workstream-clientb");
     assert.equal(miniOnly.conflict_presentation.potential_conflicts.length, 0);
 
     const miniMemory = result.results.find((memory) =>
-      memory.workstream_id === "workstream-macmini");
+      memory.workstream_id === "workstream-clientb");
     const superseded = await api(
       baseUrl,
       book.api_key,
@@ -191,10 +191,10 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
     assert.equal(superseded.replacement_memory.source, "explicit_correction");
     assert.equal(superseded.replacement_memory.topic, "存储后端");
     assert.equal(superseded.replacement_memory.task_id, task.task_id);
-    assert.equal(superseded.replacement_memory.workstream_id, "workstream-macmini");
+    assert.equal(superseded.replacement_memory.workstream_id, "workstream-clientb");
     assert.equal(
       superseded.replacement_memory.lifecycle.actor.agent_instance_id,
-      "chatgpt-macbook-memory-lifecycle",
+      "chatgpt-clienta-memory-lifecycle",
     );
 
     const retried = await api(

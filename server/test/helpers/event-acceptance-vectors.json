@@ -1,0 +1,24 @@
+{
+  "event_id": "event-review-a",
+  "vectors": [
+    {"name":"inserted","valid":true,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"duplicate","valid":true,"response":{"status":"accepted","received":1,"inserted":0,"duplicate":1,"accepted_event_ids":["event-review-a"]}},
+    {"name":"json_integer_notation","valid":true,"response":{"status":"accepted","received":1.0,"inserted":1.0,"duplicate":0.0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"missing_ids","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0}},
+    {"name":"null_ids","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":null}},
+    {"name":"empty_ids","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":[]}},
+    {"name":"wrong_id","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":["event-other"]}},
+    {"name":"extra_id","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":["event-review-a","event-other"]}},
+    {"name":"array_like","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":{"0":"event-review-a","length":1}}},
+    {"name":"numeric_id","valid":false,"response":{"status":"accepted","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":[1]}},
+    {"name":"boolean_received","valid":false,"response":{"status":"accepted","received":true,"inserted":1,"duplicate":0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"boolean_inserted","valid":false,"response":{"status":"accepted","received":1,"inserted":true,"duplicate":false,"accepted_event_ids":["event-review-a"]}},
+    {"name":"fractional_counts","valid":false,"response":{"status":"accepted","received":1,"inserted":0.5,"duplicate":0.5,"accepted_event_ids":["event-review-a"]}},
+    {"name":"negative_counts","valid":false,"response":{"status":"accepted","received":1,"inserted":2,"duplicate":-1,"accepted_event_ids":["event-review-a"]}},
+    {"name":"string_counts","valid":false,"response":{"status":"accepted","received":1,"inserted":"1","duplicate":0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"missing_counts","valid":false,"response":{"status":"accepted","received":1,"accepted_event_ids":["event-review-a"]}},
+    {"name":"wrong_received","valid":false,"response":{"status":"accepted","received":2,"inserted":1,"duplicate":0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"wrong_status","valid":false,"response":{"status":"pending","received":1,"inserted":1,"duplicate":0,"accepted_event_ids":["event-review-a"]}},
+    {"name":"null_response","valid":false,"response":null}
+  ]
+}

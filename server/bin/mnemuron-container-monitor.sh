@@ -3,7 +3,7 @@
 set -eu
 
 if [ "$#" -ne 4 ]; then
-  echo "usage: mnemuron-ct131-monitor.sh RUN_ID EVIDENCE_DIR BASELINE_PID BASELINE_RESTARTS" >&2
+  echo "usage: mnemuron-container-monitor.sh RUN_ID EVIDENCE_DIR BASELINE_PID BASELINE_RESTARTS" >&2
   exit 64
 fi
 
@@ -16,8 +16,8 @@ swap_stop_delta_bytes=33554432
 
 umask 077
 mkdir -p "$evidence_dir"
-resource_file="$evidence_dir/ct131-host-resources.csv"
-stop_file="$evidence_dir/ct131-stop-reason.txt"
+resource_file="$evidence_dir/container-host-resources.csv"
+stop_file="$evidence_dir/container-stop-reason.txt"
 printf '%s\n' 'captured_at,harness_pid,harness_rss_bytes,production_pid,production_memory_bytes,combined_rss_bytes,production_restarts,production_active,swap_used_bytes,swap_delta_bytes,swap_growth_samples,filesystem_free_percent' > "$resource_file"
 
 started=0

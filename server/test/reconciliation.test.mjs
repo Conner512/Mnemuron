@@ -41,8 +41,8 @@ const baseTask = {
   next_steps: ["Implement the reconciliation engine."],
   resources: ["docs/canonical-task-reconciliation-v0.1.md"],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: [],
 };
@@ -54,16 +54,16 @@ async function setup() {
   const baseUrl = `http://127.0.0.1:${address.port}`;
   const admin = app.store.bootstrapAdmin();
   const mini = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-    label: "Mac mini reconciliation",
-    device_id: "macmini-reconciliation",
+    label: "Client B reconciliation",
+    device_id: "clientb-reconciliation",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macmini-reconciliation",
+    agent_instance_id: "chatgpt-clientb-reconciliation",
   }, 201);
   const book = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-    label: "MacBook reconciliation",
-    device_id: "macbook-reconciliation",
+    label: "Client A reconciliation",
+    device_id: "clienta-reconciliation",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macbook-reconciliation",
+    agent_instance_id: "chatgpt-clienta-reconciliation",
   }, 201);
   await api(baseUrl, admin.api_key, "POST", "/v1/tasks", baseTask);
   return { root, app, baseUrl, admin, mini, book };
@@ -99,7 +99,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           captured_at: "2026-09-03T01:00:00.000Z",
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-reconcile-safe",
           content: "执行安全的 Canonical 进度回写测试。",
         },
@@ -110,7 +110,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           captured_at: "2026-09-03T01:01:00.000Z",
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-reconcile-safe",
           content: "已完成 Canonical Task Reconciliation 安全追加验证。",
         },
@@ -125,10 +125,10 @@ test("safe derived progress auto-applies once with immutable provenance", async 
     assert.equal(proposal.operations[0].field, "progress");
     assert.equal(proposal.operations[0].automatic_eligible, true);
     assert.deepEqual(proposal.source_event_ids, [assistantEventId, userEventId].sort());
-    assert.equal(proposal.source_workstreams[0].workstream_id, "workstream-macmini");
+    assert.equal(proposal.source_workstreams[0].workstream_id, "workstream-clientb");
     assert.equal(
       proposal.source_workstreams[0].provenance.agent_instance_id,
-      "chatgpt-macmini-reconciliation",
+      "chatgpt-clientb-reconciliation",
     );
     assert.ok(!proposal.operations.some((operation) =>
       operation.after === "Immutable Checkpoints are available."));
@@ -146,7 +146,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           captured_at: "2026-09-03T01:00:00.000Z",
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-reconcile-safe",
           content: "执行安全的 Canonical 进度回写测试。",
         },
@@ -157,7 +157,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           captured_at: "2026-09-03T01:01:00.000Z",
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-reconcile-safe",
           content: "已完成 Canonical Task Reconciliation 安全追加验证。",
         },
@@ -204,7 +204,7 @@ test("checkpoint telemetry stays immutable without becoming a canonical resource
         captured_at: "2026-09-03T01:10:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-reconcile-telemetry-only",
         cwd: "/workspace/telemetry-only",
         tool_name: "apply_patch",
@@ -295,7 +295,7 @@ test("material operations require exact confirmation and remain separate from Re
           {
             op: "replace_workstream_status",
             field: "workstreams",
-            workstream_id: "workstream-macmini",
+            workstream_id: "workstream-clientb",
             value: "completed",
           },
           {
@@ -304,7 +304,7 @@ test("material operations require exact confirmation and remain separate from Re
             value: {
               conflict_id: "conflict-review-sample",
               status: "preserved",
-              claims: ["Mac mini complete", "MacBook still active"],
+              claims: ["Client B complete", "Client A still active"],
             },
           },
         ],
@@ -385,7 +385,7 @@ test("material operations require exact confirmation and remain separate from Re
     assert.equal(applied.task.blockers.length, 0);
     assert.deepEqual(applied.task.next_steps, ["Run isolated Canonical reconciliation acceptance."]);
     assert.equal(
-      applied.task.workstreams.find((item) => item.workstream_id === "workstream-macmini").status,
+      applied.task.workstreams.find((item) => item.workstream_id === "workstream-clientb").status,
       "completed",
     );
     assert.equal(applied.task.conflicts[0].conflict_id, "conflict-review-sample");
@@ -446,7 +446,7 @@ test("material operations require exact confirmation and remain separate from Re
           captured_at: "2026-09-03T01:30:00.000Z",
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-reconciliation-rejection-liveness",
           content: "已完成待确认 Proposal 拒绝活性验证。",
         },
@@ -508,9 +508,9 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
         captured_at: "2026-09-03T02:00:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-reconcile-low-mini",
-        content: "已完成 Mac mini 的低置信度来源验证。",
+        content: "已完成 Client B 的低置信度来源验证。",
       },
     }, 202);
     assert.equal(first.checkpoints[0].checkpoint.generation.confidence_label, "low");
@@ -525,9 +525,9 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
         captured_at: "2026-09-03T02:01:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macbook",
+        workstream_id: "workstream-clienta",
         session_id: "session-reconcile-low-book",
-        content: "已完成 MacBook 的独立低置信度来源验证。",
+        content: "已完成 Client A 的独立低置信度来源验证。",
       },
     }, 202);
     const frozen = second.checkpoints[0].reconciliation;
@@ -588,7 +588,7 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
     assert.equal(regenerated.proposal.operations.length, 1);
     assert.equal(
       regenerated.proposal.operations[0].sources[0].workstream_id,
-      "workstream-macbook",
+      "workstream-clienta",
     );
     const appliedBook = await api(
       context.baseUrl,
@@ -603,8 +603,8 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
     );
     assert.equal(appliedBook.task.canonical_version, 3);
     assert.deepEqual(appliedBook.deferred_checkpoint_ids, []);
-    assert.ok(appliedBook.task.progress.includes("已完成 Mac mini 的低置信度来源验证。"));
-    assert.ok(appliedBook.task.progress.includes("已完成 MacBook 的独立低置信度来源验证。"));
+    assert.ok(appliedBook.task.progress.includes("已完成 Client B 的低置信度来源验证。"));
+    assert.ok(appliedBook.task.progress.includes("已完成 Client A 的独立低置信度来源验证。"));
 
     const conflicted = await api(
       context.baseUrl,
@@ -713,9 +713,9 @@ test("curated checkpoint proposal preserves evidence without importing derived n
         captured_at: "2026-09-03T03:00:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-curated-source-mini",
-        content: "已完成 Mac mini 的低置信度来源验证。",
+        content: "已完成 Client B 的低置信度来源验证。",
       },
     }, 202);
     assert.equal(first.checkpoints[0].reconciliation.status, "awaiting_confirmation");
@@ -728,9 +728,9 @@ test("curated checkpoint proposal preserves evidence without importing derived n
         captured_at: "2026-09-03T03:01:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macbook",
+        workstream_id: "workstream-clienta",
         session_id: "session-curated-source-book",
-        content: "已完成 MacBook 的独立低置信度来源验证。",
+        content: "已完成 Client A 的独立低置信度来源验证。",
       },
     }, 202);
     const pendingProposal = first.checkpoints[0].reconciliation.proposal;
@@ -787,7 +787,7 @@ test("curated checkpoint proposal preserves evidence without importing derived n
     assert.deepEqual(curated.proposal.source_checkpoint_ids, [evidenceCheckpoint.checkpoint_id]);
     assert.deepEqual(curated.proposal.source_event_ids, evidenceCheckpoint.source_event_ids);
     assert.equal(curated.proposal.source_workstreams.length, 1);
-    assert.equal(curated.proposal.source_workstreams[0].workstream_id, "workstream-macbook");
+    assert.equal(curated.proposal.source_workstreams[0].workstream_id, "workstream-clienta");
     assert.equal(curated.proposal.operations.length, 1);
     assert.equal(curated.proposal.operations[0].field, "progress");
     assert.equal(curated.proposal.operations[0].sources[0].source_type, "user_requested");
@@ -918,7 +918,7 @@ test("reconciliation failure never rolls back accepted Events or Checkpoints", a
         captured_at: "2026-09-03T03:00:00.000Z",
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-reconciliation-fault",
         content: "已完成故障边界验证。",
       },

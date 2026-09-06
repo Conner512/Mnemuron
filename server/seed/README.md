@@ -1,8 +1,9 @@
 # Example task seeds
 
 These files are generic examples, not a copy of a live user's tasks or proof of
-deployment acceptance. Progress is deliberately empty and each task remains
-active until its operator records real results.
+deployment acceptance. Progress, decisions, blockers, next steps and conflicts
+are deliberately empty. Each task remains active until its operator records
+real results. Client A and Client B are synthetic labels, not device identities.
 
 Before importing them, choose your own project, task and workstream identifiers,
 update the project path hints, and review the target database and credentials.

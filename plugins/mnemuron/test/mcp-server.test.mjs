@@ -82,7 +82,7 @@ test("MCP server enforces preview before confirmation", async () => {
       clientInfo: { name: "test", version: "1.0.0" },
     });
     assert.equal(initialized.result.serverInfo.name, "mnemuron-spike");
-    assert.equal(initialized.result.serverInfo.version, "0.1.14+codex.20260904233116");
+    assert.equal(initialized.result.serverInfo.version, "0.1.14");
 
     const listed = await client.request("tools/list");
     assert.deepEqual(
@@ -279,7 +279,7 @@ test("MCP server enforces preview before confirmation", async () => {
       name: "mnemuron_status",
       arguments: {},
     });
-    assert.equal(statusCall.result.structuredContent.plugin_version, "0.1.14+codex.20260904233116");
+    assert.equal(statusCall.result.structuredContent.plugin_version, "0.1.14");
     assert.equal(
       statusCall.result.structuredContent.resume_injection_mode,
       "chatgpt-mcp-delivery-receipt-v0.1.4",

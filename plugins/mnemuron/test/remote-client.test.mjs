@@ -32,7 +32,7 @@ test("ChatGPT outbox quarantines a permanent 413 and continues later events", as
       }
       received.push(envelope.event.event_id);
       response.statusCode = 202;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [envelope.event.event_id] }));
     });
   });
   try {

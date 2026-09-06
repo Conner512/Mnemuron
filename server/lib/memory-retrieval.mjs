@@ -1,15 +1,16 @@
 import { ValidationError } from './errors.mjs';
 import { memoryScopeSql } from './memory-scope.mjs';
 
-export const INDEX_VERSION = 'memory-search-v1';
+export const INDEX_VERSION = 'memory-search-v2';
 export const normalizeSearch = value => String(value ?? '').normalize('NFKC').toLowerCase();
 export function searchTokens(value) {
   const text = normalizeSearch(value), tokens = new Set();
-  for (const word of text.match(/[\p{L}\p{N}]+(?:[._:/-][\p{L}\p{N}]+)*/gu) || []) {
-    if (/\p{Script=Han}/u.test(word)) {
-      const chars = Array.from(word);
+  // Han boundaries must not split adjacent engineering identifiers into characters.
+  for (const segment of text.split(/(\p{Script=Han}+)/u)) {
+    if (/^\p{Script=Han}/u.test(segment)) {
+      const chars = Array.from(segment);
       chars.forEach((char, i) => { tokens.add(char); if (chars[i+1]) tokens.add(char + chars[i+1]); });
-    } else tokens.add(word);
+    } else for (const word of segment.match(/[\p{L}\p{N}]+(?:[._:/-][\p{L}\p{N}]+)*/gu) || []) tokens.add(word);
   }
   for (const symbol of text.match(/\p{S}/gu) || []) tokens.add(symbol);
   return [...tokens];
@@ -100,7 +101,7 @@ export class MemorySearch {
     try {
       const row=this.db.prepare('SELECT * FROM memory_search_state WHERE id=1').get();
       const tables=this.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name IN ('memory_search_fts','memory_search_docs','memory_search_insert','memory_search_update','memory_search_delete','memory_search_doc_insert','memory_search_doc_update','memory_search_doc_delete')").get();
-      return {index_version:INDEX_VERSION,state:this.enabled && this.state==='ready' && row?.state==='ready' && tables.n===8 ? 'ready':'unavailable',enabled:this.enabled};
+      return {index_version:INDEX_VERSION,state:this.enabled && this.state==='ready' && row?.state==='ready' && row.version===INDEX_VERSION && tables.n===8 ? 'ready':'unavailable',enabled:this.enabled};
     } catch { return {index_version:INDEX_VERSION,state:'unavailable',enabled:this.enabled}; }
   }
   candidates(userId, query, scope, options) {

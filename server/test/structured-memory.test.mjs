@@ -35,8 +35,8 @@ const task = {
   next_steps: [],
   resources: [],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: [],
 };
@@ -49,16 +49,16 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const mini = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "Mac mini ChatGPT",
-      device_id: "macmini-structured-memory",
+      label: "Client B ChatGPT",
+      device_id: "clientb-structured-memory",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macmini-structured-memory",
+      agent_instance_id: "chatgpt-clientb-structured-memory",
     }, 201);
     const book = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook ChatGPT",
-      device_id: "macbook-structured-memory",
+      label: "Client A ChatGPT",
+      device_id: "clienta-structured-memory",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-structured-memory",
+      agent_instance_id: "chatgpt-clienta-structured-memory",
     }, 201);
     await api(baseUrl, admin.api_key, "POST", "/v1/tasks", task);
 
@@ -71,7 +71,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
         captured_at: "2026-09-04T01:00:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-structured-memory-mini",
         content: "约束：确认前不得注入。\n决定：使用严格标签生成长期记忆。",
       },
@@ -82,7 +82,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
         captured_at: "2026-09-04T01:01:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-structured-memory-mini",
         content: "已完成：自动结构化记忆已生成。\n阻塞：无\n下一步：验证跨分支保留。",
       },
@@ -105,7 +105,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
       SELECT * FROM memories
       WHERE task_id = ? AND workstream_id = ?
       ORDER BY memory_type, content
-    `).all(task.task_id, "workstream-macmini");
+    `).all(task.task_id, "workstream-clientb");
     assert.equal(rows.length, 4);
     assert.deepEqual(rows.map((row) => row.memory_type), [
       "completed",
@@ -148,7 +148,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           captured_at: "2026-09-04T01:10:00.000Z",
           project_id: task.project_id,
           task_id: task.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-unlabeled-mini",
           content: "我们聊一下记忆生成，但这不是需要保存的正式事实。",
         },
@@ -159,7 +159,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           captured_at: "2026-09-04T01:11:00.000Z",
           project_id: task.project_id,
           task_id: task.task_id,
-          workstream_id: "workstream-macmini",
+          workstream_id: "workstream-clientb",
           session_id: "session-unlabeled-mini",
           content: "普通对话已完成，但没有结构化标签。",
         },
@@ -178,7 +178,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           captured_at: "2026-09-04T02:00:00.000Z",
           project_id: task.project_id,
           task_id: task.task_id,
-          workstream_id: "workstream-macbook",
+          workstream_id: "workstream-clienta",
           session_id: "session-structured-memory-book",
           content: "决定：使用严格标签生成长期记忆。",
         },
@@ -189,7 +189,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           captured_at: "2026-09-04T02:01:00.000Z",
           project_id: task.project_id,
           task_id: task.task_id,
-          workstream_id: "workstream-macbook",
+          workstream_id: "workstream-clienta",
           session_id: "session-structured-memory-book",
           content: "收到。",
         },
@@ -206,12 +206,12 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
 
     const preview = await api(baseUrl, book.api_key, "POST", "/v1/resume/preview", {
       query: task.task_id,
-      source_workstream_ids: ["workstream-macmini"],
+      source_workstream_ids: ["workstream-clientb"],
     }, 201);
     assert.equal(preview.branch_selection.mode, "single");
     assert.ok(preview.structured_memories.length >= 4);
     assert.ok(preview.structured_memories.every((memory) =>
-      memory.workstream_id === "workstream-macmini"));
+      memory.workstream_id === "workstream-clientb"));
     const previewDecision = preview.structured_memories.find((memory) =>
       memory.memory_type === "decision");
     assert.equal(previewDecision.status, "active");

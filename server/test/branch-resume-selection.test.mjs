@@ -46,24 +46,24 @@ async function fixture() {
     next_steps: ["Select one source branch."],
     resources: [],
     workstreams: [
-      { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-      { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+      { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+      { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
     ],
     conflicts: [{
       conflict_id: "conflict-branch-test",
       subject: "next_step",
       status: "unresolved",
       claims: [
-        { value: "mini", workstream_id: "workstream-macmini" },
-        { value: "book", workstream_id: "workstream-macbook" },
+        { value: "mini", workstream_id: "workstream-clientb" },
+        { value: "book", workstream_id: "workstream-clienta" },
       ],
     }],
   };
   await api(baseUrl, admin.api_key, "POST", "/v1/tasks", task);
 
   for (const [workstreamId, sessionId, content] of [
-    ["workstream-macmini", "session-mini", "Mac mini branch result."],
-    ["workstream-macbook", "session-book", "MacBook branch result."],
+    ["workstream-clientb", "session-mini", "Client B branch result."],
+    ["workstream-clienta", "session-book", "Client A branch result."],
   ]) {
     await api(baseUrl, agent.api_key, "POST", "/v1/events", {
       event: {
@@ -93,18 +93,18 @@ async function fixture() {
     project_id: task.project_id,
   }, 201);
   await api(baseUrl, agent.api_key, "POST", "/v1/memories", {
-    content: "Mac mini branch memory.",
+    content: "Client B branch memory.",
     scope: "workstream",
     project_id: task.project_id,
     task_id: task.task_id,
-    workstream_id: "workstream-macmini",
+    workstream_id: "workstream-clientb",
   }, 201);
   await api(baseUrl, agent.api_key, "POST", "/v1/memories", {
-    content: "MacBook branch memory.",
+    content: "Client A branch memory.",
     scope: "workstream",
     project_id: task.project_id,
     task_id: task.task_id,
-    workstream_id: "workstream-macbook",
+    workstream_id: "workstream-clienta",
   }, 201);
   return { root, app, baseUrl, key: agent.api_key, task };
 }
@@ -119,19 +119,19 @@ test("Resume Preview freezes one exact source Workstream through confirmation", 
   try {
     const preview = await api(context.baseUrl, context.key, "POST", "/v1/resume/preview", {
       query: context.task.task_id,
-      source_workstream_ids: ["workstream-macmini"],
+      source_workstream_ids: ["workstream-clientb"],
     }, 201);
     assert.equal(preview.branch_selection.schema_version, "resume-branch-selection-v0.1");
     assert.equal(preview.branch_selection.explicit, true);
     assert.equal(preview.branch_selection.mode, "single");
-    assert.deepEqual(preview.branch_selection.selected_workstream_ids, ["workstream-macmini"]);
-    assert.deepEqual(preview.workstreams.map((item) => item.workstream_id), ["workstream-macmini"]);
-    assert.deepEqual(preview.latest_checkpoints.map((item) => item.workstream_id), ["workstream-macmini"]);
+    assert.deepEqual(preview.branch_selection.selected_workstream_ids, ["workstream-clientb"]);
+    assert.deepEqual(preview.workstreams.map((item) => item.workstream_id), ["workstream-clientb"]);
+    assert.deepEqual(preview.latest_checkpoints.map((item) => item.workstream_id), ["workstream-clientb"]);
     assert.ok(preview.recent_activity.length > 0);
-    assert.ok(preview.recent_activity.every((item) => item.workstream_id === "workstream-macmini"));
+    assert.ok(preview.recent_activity.every((item) => item.workstream_id === "workstream-clientb"));
     assert.ok(preview.structured_memories.some((item) => item.content === "Shared project constraint."));
-    assert.ok(preview.structured_memories.some((item) => item.content === "Mac mini branch memory."));
-    assert.ok(!preview.structured_memories.some((item) => item.content === "MacBook branch memory."));
+    assert.ok(preview.structured_memories.some((item) => item.content === "Client B branch memory."));
+    assert.ok(!preview.structured_memories.some((item) => item.content === "Client A branch memory."));
     assert.equal(preview.conflicts.length, 1);
     assert.equal(preview.conflict_summary.automatic_merge_performed, false);
 
@@ -144,12 +144,12 @@ test("Resume Preview freezes one exact source Workstream through confirmation", 
     );
     assert.deepEqual(
       confirmed.resume_packet.selected_workstreams.map((item) => item.workstream_id),
-      ["workstream-macmini"],
+      ["workstream-clientb"],
     );
     assert.deepEqual(confirmed.resume_packet.branch_selection, preview.branch_selection);
     assert.deepEqual(
       confirmed.resume_packet.context.latest_checkpoints.map((item) => item.workstream_id),
-      ["workstream-macmini"],
+      ["workstream-clientb"],
     );
   } finally {
     await cleanup(context);
@@ -162,15 +162,15 @@ test("multiple branches form an explicit combined view without automatic merge",
     const preview = await api(context.baseUrl, context.key, "POST", "/v1/resume/preview", {
       query: context.task.task_id,
       source_workstream_ids: [
-        "workstream-macbook",
-        "workstream-macmini",
-        "workstream-macbook",
+        "workstream-clienta",
+        "workstream-clientb",
+        "workstream-clienta",
       ],
     }, 201);
     assert.equal(preview.branch_selection.mode, "combined_view");
     assert.deepEqual(preview.branch_selection.selected_workstream_ids, [
-      "workstream-macbook",
-      "workstream-macmini",
+      "workstream-clienta",
+      "workstream-clientb",
     ]);
     assert.equal(preview.branch_selection.automatic_merge_performed, false);
     assert.equal(preview.latest_checkpoints.length, 2);

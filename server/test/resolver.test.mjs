@@ -58,8 +58,8 @@ const sourceConflict = {
   claims: [
     {
       value: "ready",
-      workstream_id: "workstream-macmini",
-      source: { device_id: "macmini-example", agent_instance_id: "chatgpt-macmini-example" },
+      workstream_id: "workstream-clientb",
+      source: { device_id: "clientb-example", agent_instance_id: "chatgpt-clientb-example" },
     },
     {
       value: "not_ready",
@@ -96,7 +96,7 @@ const tasks = [
     goal: "Complete production gates, delivery receipts, security, capacity, and stability acceptance.",
     workstreams: [
       { workstream_id: "workstream-platform", name: "central server Platform", status: "active" },
-      { workstream_id: "workstream-macmini", name: "Mac mini ChatGPT", status: "active" },
+      { workstream_id: "workstream-clientb", name: "Client B ChatGPT", status: "active" },
     ],
     conflicts: [sourceConflict],
   }),
@@ -112,7 +112,7 @@ const tasks = [
     taskId: "task-mnemuron-openclaw-adapter-v01",
     title: "Mnemuron OpenClaw Adapter v0.1",
     aliases: ["OpenClaw", "OpenClaw adapter", "OpenClaw 接入"],
-    goal: "Capture Telegram OpenClaw work on CT128 and create automatic checkpoints.",
+    goal: "Capture Telegram OpenClaw work on node-a and create automatic checkpoints.",
     status: "completed",
     workstreams: [{ workstream_id: "workstream-openclaw", name: "OpenClaw example client", status: "completed" }],
   }),
@@ -120,7 +120,7 @@ const tasks = [
     taskId: "task-mnemuron-hermes-adapter-v01",
     title: "Mnemuron Hermes Adapter v0.1",
     aliases: ["Hermes", "Hermes adapter", "Hermes 接入"],
-    goal: "Capture Telegram Hermes work on CT129 and create automatic checkpoints.",
+    goal: "Capture Telegram Hermes work on node-b and create automatic checkpoints.",
     status: "completed",
     workstreams: [{ workstream_id: "workstream-hermes", name: "Hermes example client", status: "completed" }],
   }),
@@ -157,9 +157,9 @@ async function fixture() {
   const admin = app.store.bootstrapAdmin();
   const agent = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
     label: "Resolver acceptance Agent",
-    device_id: "macbook-resolver-test",
+    device_id: "clienta-resolver-test",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macbook-resolver-test",
+    agent_instance_id: "chatgpt-clienta-resolver-test",
   }, 201);
   for (const project of projects) await api(baseUrl, admin.api_key, "POST", "/v1/projects", project);
   for (const item of tasks) await api(baseUrl, admin.api_key, "POST", "/v1/tasks", item);

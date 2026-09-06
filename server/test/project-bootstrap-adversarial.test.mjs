@@ -52,9 +52,9 @@ async function setup() {
   const admin = app.store.bootstrapAdmin();
   const owner = app.store.issueCredential({
     label: "Project Bootstrap reviewer",
-    deviceId: "macbook-project-bootstrap-review",
+    deviceId: "clienta-project-bootstrap-review",
     agentId: "chatgpt",
-    agentInstanceId: "chatgpt-macbook-project-bootstrap-review",
+    agentInstanceId: "chatgpt-clienta-project-bootstrap-review",
     scopes: PROJECT_BOOTSTRAP_SCOPES,
   });
   return { root, databasePath, app, baseUrl, admin, owner };

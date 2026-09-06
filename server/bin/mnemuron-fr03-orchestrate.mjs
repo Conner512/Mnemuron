@@ -496,9 +496,9 @@ async function main() {
       temporary_credential_scope: ["capture:write"],
       key_material_recorded: false,
       raw_payload_recorded: false,
-      ct131_service_restart_performed: false,
+      server_service_restart_performed: false,
       network_dns_caddy_firewall_change_performed: false,
-      ct128_or_ct129_action_performed: false,
+      other_adapters_action_performed: false,
       production_ready_promoted: false,
     });
     writeResourceCsv(path.join(evidenceDir, "pve-resources.csv"), resourceSamples);

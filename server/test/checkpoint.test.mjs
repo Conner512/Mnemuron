@@ -34,8 +34,8 @@ const task = {
   next_steps: ["Validate the checkpoint in Resume Preview."],
   resources: ["docs/checkpoint-v0.1.md"],
   workstreams: [
-    { workstream_id: "workstream-macmini", name: "Mac mini", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook", status: "active" },
+    { workstream_id: "workstream-clientb", name: "Client B", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A", status: "active" },
   ],
   conflicts: [],
 };
@@ -48,16 +48,16 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
     const baseUrl = `http://127.0.0.1:${address.port}`;
     const admin = app.store.bootstrapAdmin();
     const mini = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "Mac mini ChatGPT",
-      device_id: "macmini-checkpoint",
+      label: "Client B ChatGPT",
+      device_id: "clientb-checkpoint",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macmini-checkpoint",
+      agent_instance_id: "chatgpt-clientb-checkpoint",
     }, 201);
     const book = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook ChatGPT",
-      device_id: "macbook-checkpoint",
+      label: "Client A ChatGPT",
+      device_id: "clienta-checkpoint",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-checkpoint",
+      agent_instance_id: "chatgpt-clienta-checkpoint",
     }, 201);
     await api(baseUrl, admin.api_key, "POST", "/v1/tasks", task);
 
@@ -71,7 +71,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         captured_at: "2026-08-24T01:00:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-checkpoint-mini",
         content: "请实现自动 Checkpoint v0.1。",
       },
@@ -82,9 +82,9 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         captured_at: "2026-08-24T01:01:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-checkpoint-mini",
-        content: "已完成不可变 Checkpoint 表。确认采用规则提炼且不覆盖任务状态。无阻塞。下一步在 MacBook 验证 Preview。",
+        content: "已完成不可变 Checkpoint 表。确认采用规则提炼且不覆盖任务状态。无阻塞。下一步在 Client A 验证 Preview。",
         provenance: { device_id: "forged", agent_instance_id: "forged" },
       },
     ];
@@ -98,7 +98,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
     assert.equal(checkpoint.generation.automatic, true);
     assert.equal(checkpoint.generation.canonical_task_state_overwritten, false);
     assert.deepEqual(checkpoint.source_event_ids, [userEventId, assistantEventId]);
-    assert.equal(checkpoint.provenance.device_id, "macmini-checkpoint");
+    assert.equal(checkpoint.provenance.device_id, "clientb-checkpoint");
     assert.equal(checkpoint.active_request.source_event_id, userEventId);
     assert.equal(checkpoint.latest_outcome.source_event_id, assistantEventId);
     assert.ok(checkpoint.completed_items.some(({ text }) => text.includes("已完成不可变")));
@@ -119,7 +119,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         captured_at: "2026-08-24T01:02:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macmini",
+        workstream_id: "workstream-clientb",
         session_id: "session-checkpoint-mini",
       },
     }, 202);
@@ -130,7 +130,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
       baseUrl,
       book.api_key,
       "GET",
-      `/v1/tasks/${task.task_id}/checkpoints?workstream_id=workstream-macmini`,
+      `/v1/tasks/${task.task_id}/checkpoints?workstream_id=workstream-clientb`,
     );
     assert.equal(listed.checkpoints.length, 1);
 
@@ -172,9 +172,9 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         captured_at: "2026-08-24T02:00:00.000Z",
         project_id: task.project_id,
         task_id: task.task_id,
-        workstream_id: "workstream-macbook",
+        workstream_id: "workstream-clienta",
         session_id: "session-checkpoint-book",
-        content: "在 MacBook 上继续检查。",
+        content: "在 Client A 上继续检查。",
       },
     }, 202);
     const manual = await api(
@@ -182,7 +182,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
       book.api_key,
       "POST",
       "/v1/sessions/session-checkpoint-book/checkpoint",
-      { task_id: task.task_id, workstream_id: "workstream-macbook" },
+      { task_id: task.task_id, workstream_id: "workstream-clienta" },
       201,
     );
     assert.equal(manual.status, "created");

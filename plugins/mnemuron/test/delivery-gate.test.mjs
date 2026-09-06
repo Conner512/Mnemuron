@@ -73,10 +73,10 @@ function remoteEnv(dataDir, serverUrl) {
     MNEMURON_SERVER_URL: serverUrl,
     MNEMURON_ALLOW_INSECURE_HTTP: "true",
     MNEMURON_API_KEY: "test-api-key",
-    MNEMURON_DEVICE_ID: "macbook-test",
+    MNEMURON_DEVICE_ID: "clienta-test",
     MNEMURON_AGENT_ID: "chatgpt",
-    MNEMURON_AGENT_INSTANCE_ID: "chatgpt-macbook-test",
-    MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+    MNEMURON_AGENT_INSTANCE_ID: "chatgpt-clienta-test",
+    MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
     CODEX_THREAD_ID: "",
     CODEX_SESSION_ID: "",
   };
@@ -194,9 +194,10 @@ test("Resume Task Scope activates only after central server accepts the exact De
       return;
     }
     if (request.method === "POST" && request.url === "/v1/events") {
-      submittedEvents.push((await readRequestJson(request)).event);
+      const { event } = await readRequestJson(request);
+      submittedEvents.push(event);
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [event.event_id] }));
       return;
     }
     response.statusCode = 404;
@@ -213,7 +214,7 @@ test("Resume Task Scope activates only after central server accepts the exact De
       preview_version: 1,
       project: { project_id: "project-mnemuron" },
       task: { task_id: "task-previous-active" },
-      workstream: { workstream_id: "workstream-macbook" },
+      workstream: { workstream_id: "workstream-clienta" },
     };
     stageTaskScopeForSession(dataDir, previousBootstrap, sessionId, env);
     activateTaskBootstrapScope(dataDir, sessionId, env);
@@ -222,7 +223,7 @@ test("Resume Task Scope activates only after central server accepts the exact De
       preview_version: 1,
       project: { project_id: "project-mnemuron" },
       task: { task_id: "task-bootstrap-delivery-gate" },
-      workstream: { workstream_id: "workstream-macbook" },
+      workstream: { workstream_id: "workstream-clienta" },
     }, sessionId, env);
     const scope = stageTaskScopeForSession(dataDir, resumePacket, sessionId, env);
     const pendingDelivery = queueResumeInjection(
@@ -370,7 +371,7 @@ test("Resume Task Scope activates only after central server accepts the exact De
     assert.ok(committedEvents.length >= 2);
     assert.ok(committedEvents.every((event) => (
       event.task_id === resumePacket.task.task_id
-      && event.workstream_id === "workstream-macbook"
+      && event.workstream_id === "workstream-clienta"
     )));
   } finally {
     if (server.listening) await close(server);
@@ -409,7 +410,7 @@ test("status includes Delivery Receipt outbox in adapter synchronization state",
       phase: "acknowledged",
       session_id: "session-status-test",
       turn_id: "turn-status-test",
-      workstream_id: "workstream-macbook",
+      workstream_id: "workstream-clienta",
       delivery_method: "codex-mcp-tool-result",
       occurred_at: "2026-09-04T08:00:00.000Z",
     });
@@ -751,7 +752,7 @@ test("SessionStart recovery defers while a live take owns the Session delivery l
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [(await readRequestJson(request)).event.event_id] }));
       return;
     }
     response.statusCode = 404;
@@ -824,7 +825,7 @@ test("compact SessionStart preserves an in-flight delivery for the matching Stop
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [(await readRequestJson(request)).event.event_id] }));
       return;
     }
     response.statusCode = 404;
@@ -959,7 +960,7 @@ test("a Stop ACK intent survives cross-process lock contention and is recovered 
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [(await readRequestJson(request)).event.event_id] }));
       return;
     }
     response.statusCode = 404;
@@ -1099,7 +1100,7 @@ test("recovery that linearizes before a late Stop cannot ACK the replacement rec
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [(await readRequestJson(request)).event.event_id] }));
       return;
     }
     response.statusCode = 404;
@@ -1193,7 +1194,7 @@ test("a finished Stop ACK intent survives a crash before submission and replays 
     }
     if (request.method === "POST" && request.url === "/v1/events") {
       response.statusCode = 200;
-      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0 }));
+      response.end(JSON.stringify({ status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [(await readRequestJson(request)).event.event_id] }));
       return;
     }
     response.statusCode = 404;

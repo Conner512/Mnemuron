@@ -1,18 +1,17 @@
 # Mnemuron 核心功能优化方案 v0.2
 
-> 执行对象：在 `Conner512/Mnemuron` 仓库工作的 Codex。
+> 执行对象：Mnemuron 核心源码与测试。
 > 范围：现有核心功能的正确性、可靠性、检索质量、兼容性与可维护性。
 > 明确延期：ChatGPT 网页端连接及其相关新功能。
-> 方案日期：2026-09-05。方案版本不等于仓库软件版本。
-> 已核对的远端基线：`4289bfe883d514d0534e9dad000efe70040363f8`。执行时必须重新记录实际 HEAD。
+> 方案版本不等于仓库软件版本。执行时须记录实际 HEAD 与测试基线。
 
 ## 0. 文档效力与使用方式
 
-本文件是**待实施的工程规范**，不是完成报告。编写时对照了上一版审查清单、当前提交的关键源码和测试；本次未修改仓库、未运行项目测试、未验证生产部署。
+本文件保留核心优化的工程规范，不是执行记录或生产部署验收报告。实际实现进展见发布说明，具体运行结果应另行验证。
 
-把本执行包放到仓库的 `docs/core-optimization-v0.2/`，先阅读本文件、`ACCEPTANCE_TESTS.md` 和 `CODEX_START_HERE.md`，再从 CORE-OPT-00 开始。已有仓库 `AGENTS.md`、安全边界和更近版本的已验收契约优先；本方案不得用来覆盖用户未提交的改动。
+先阅读本文件和 `ACCEPTANCE_TESTS.md`，再从 CORE-OPT-00 开始核对。已有仓库 `AGENTS.md`、安全边界和更近版本的契约优先；本方案不得用来覆盖用户未提交的改动。
 
-本包还包含 `EXECUTION_STATUS.json`，所有任务初始为 `not_started`。只有实际执行且有证据时才能更改为通过。文中提出的新增路径、API 字段和辅助函数均是设计建议，不表示仓库已经存在。
+执行状态应存入私有 `EXECUTION_STATUS.json`，任务初始为 `not_started`。只有实际执行且有证据时才能更改为通过。文中的路径、API 字段和辅助函数需与当前源码核对。
 
 **执行原则：先证明问题，再做最小修复；先修正确性，再优化性能；最后才做结构整理。**
 
@@ -597,13 +596,11 @@ F-01～F-03。重构提交前后相同输入具有等价业务输出和数据库
 
 ## 14. 来源与参考依据
 
-[R1] 本仓库基线与总说明：
-`https://github.com/Conner512/Mnemuron/tree/4289bfe883d514d0534e9dad000efe70040363f8`
+[R1] 本仓库总说明：`README.md`。执行前另行记录实际 Git 基线，不将私人执行记录写入通用规格。
 
 [R2] 核心实现：`server/lib/store.mjs`，重点为 `queryMemories`、`saveMemory`、`supersedeMemory`、`retractMemory`、`authenticate`、`rotateAgentKey`、迁移和各类写入路径。
-`https://github.com/Conner512/Mnemuron/blob/4289bfe883d514d0534e9dad000efe70040363f8/server/lib/store.mjs`
 
-[R3] HTTP 接口：`server/lib/app.mjs`；本地调用：`plugins/mnemuron/scripts/mcp-core.mjs`、`remote-client.mjs`、`storage.mjs`。路径均以 R1 的固定提交为准。
+[R3] HTTP 接口：`server/lib/app.mjs`；本地调用：`plugins/mnemuron/scripts/mcp-core.mjs`、`remote-client.mjs`、`storage.mjs`。路径与行为需对照当前源码核验。
 
 [R4] 已有验收样例：`server/test/structured-memory-lifecycle.test.mjs`；根 `package.json` 中 Node/Hermes、capacity、failure 脚本。
 

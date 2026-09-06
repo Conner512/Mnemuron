@@ -41,8 +41,9 @@ export function validateAcceptance(kind, item, result) {
   const payload=item.payload;
   if(kind==='event') {
     const id=payload?.event?.event_id;
-    if(result?.status==='accepted' && result.received===1 && result.inserted+result.duplicate===1
-      && (!result.accepted_event_ids || (result.accepted_event_ids.length===1 && result.accepted_event_ids[0]===id))) return;
+    if(typeof id==='string' && id.length>0 && result?.status==='accepted' && result.received===1
+      && [result.inserted,result.duplicate].every(n=>Number.isInteger(n) && n>=0 && n<=1) && result.inserted+result.duplicate===1
+      && Array.isArray(result.accepted_event_ids) && result.accepted_event_ids.length===1 && result.accepted_event_ids[0]===id) return;
   } else {
     const receipt=kind==='receipt', delivery=result?.delivery;
     const eventKey=receipt?'receipt_event_id':'event_id', attemptKey=receipt?'receipt_id':'attempt_id';

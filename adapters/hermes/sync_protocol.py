@@ -199,8 +199,12 @@ def queue_items(directory, kind):
 def validate_acceptance(kind, item, result):
     payload = item["payload"]
     if kind == "event":
-        if result.get("status") == "accepted" and result.get("received") == 1 and result.get("inserted", -2) + result.get("duplicate", -2) == 1:
-            if "accepted_event_ids" not in result or result["accepted_event_ids"] == [payload["event"]["event_id"]]: return
+        event_id = payload.get("event", {}).get("event_id")
+        if isinstance(result, dict) and isinstance(event_id, str) and event_id and result.get("status") == "accepted":
+            counts = (result.get("inserted"), result.get("duplicate"))
+            if (type(result.get("received")) in (int, float) and result["received"] == 1
+                and all(type(n) in (int, float) and n in (0, 1) for n in counts) and sum(counts) == 1
+                and isinstance(result.get("accepted_event_ids"), list) and result["accepted_event_ids"] == [event_id]): return
     else:
         delivery = result.get("delivery", {})
         attempt = next((x for x in delivery.get("attempts", []) if x.get("attempt_id") == payload.get("attempt_id")), {})

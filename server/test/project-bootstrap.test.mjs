@@ -36,8 +36,8 @@ const bootstrapRequest = {
   task_title: "Build the first usable workspace",
   task_goal: "Create the Project and its first Canonical Task only after explicit confirmation.",
   task_aliases: ["Initial workspace"],
-  workstream_id: "workstream-macbook",
-  workstream_name: "MacBook ChatGPT",
+  workstream_id: "workstream-clienta",
+  workstream_name: "Client A ChatGPT",
   session_id: "session-project-bootstrap-owner",
 };
 
@@ -49,16 +49,16 @@ async function setup() {
   const admin = app.store.bootstrapAdmin();
   const owner = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
     label: "Project bootstrap owner",
-    device_id: "macbook-project-bootstrap-owner",
+    device_id: "clienta-project-bootstrap-owner",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macbook-project-bootstrap-owner",
+    agent_instance_id: "chatgpt-clienta-project-bootstrap-owner",
     scopes: ["memory:read", "project:bootstrap:preview", "project:bootstrap:confirm"],
   }, 201);
   const peer = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
     label: "Project bootstrap peer",
-    device_id: "macmini-project-bootstrap-peer",
+    device_id: "clientb-project-bootstrap-peer",
     agent_id: "chatgpt",
-    agent_instance_id: "chatgpt-macmini-project-bootstrap-peer",
+    agent_instance_id: "chatgpt-clientb-project-bootstrap-peer",
     scopes: ["memory:read", "project:bootstrap:preview", "project:bootstrap:confirm"],
   }, 201);
   return { root, app, baseUrl, admin, owner, peer };
@@ -120,10 +120,10 @@ test("Project Bootstrap Preview freezes Project and initial Task without busines
     assert.deepEqual(preview.task.aliases, bootstrapRequest.task_aliases);
     assert.equal(preview.workstream.workstream_id, bootstrapRequest.workstream_id);
     assert.equal(preview.workstream.agent_id, "chatgpt");
-    assert.equal(preview.workstream.device_id, "macbook-project-bootstrap-owner");
+    assert.equal(preview.workstream.device_id, "clienta-project-bootstrap-owner");
     assert.equal(
       preview.workstream.agent_instance_id,
-      "chatgpt-macbook-project-bootstrap-owner",
+      "chatgpt-clienta-project-bootstrap-owner",
     );
     assert.equal(preview.target_session_id, bootstrapRequest.session_id);
     assert.equal(preview.binding_packet, undefined);
@@ -359,8 +359,8 @@ test("identical Project Bootstrap Preview is idempotent and a competing pending 
         ...bootstrapRequest,
         task_title: "Competing first Task",
         task_goal: "Do not silently create a second Project from another pending proposal.",
-        workstream_id: "workstream-macmini",
-        workstream_name: "Mac mini ChatGPT",
+        workstream_id: "workstream-clientb",
+        workstream_name: "Client B ChatGPT",
         session_id: "session-project-bootstrap-peer",
       },
       201,

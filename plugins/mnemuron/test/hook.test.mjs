@@ -180,7 +180,7 @@ test("PostToolUse compatibility mode stages, injects, and acknowledges a Resume 
     injection_authorized_at: new Date().toISOString(),
   };
   const common = {
-    MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macmini",
+    MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clientb",
     CODEX_THREAD_ID: "",
     CODEX_SESSION_ID: "",
   };
@@ -301,7 +301,7 @@ test("refuses to bind a confirmed resume when confirmation sessions conflict", (
       selected_workstreams: [{ workstream_id: "workstream-chatgpt" }],
     }, {
       MNEMURON_CONFIG_PATH: path.join(dataDir, "missing-config.json"),
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macmini",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clientb",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     });
@@ -341,7 +341,7 @@ test("injects a confirmed Resume Packet once and acknowledges it on Stop", () =>
     };
     const env = {
       MNEMURON_CONFIG_PATH: path.join(dataDir, "missing-config.json"),
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -427,7 +427,7 @@ test("does not inject or activate a pending Resume when central attestation is u
     };
     const env = {
       MNEMURON_CONFIG_PATH: path.join(dataDir, "missing-config.json"),
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -445,7 +445,7 @@ test("does not inject or activate a pending Resume when central attestation is u
       MNEMURON_ALLOW_INSECURE_HTTP: "true",
       MNEMURON_API_KEY: "mnm_test-only-unreachable-key",
       MNEMURON_REQUEST_TIMEOUT_MS: "500",
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
     });
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), {});
@@ -486,7 +486,7 @@ test("recovers an unacknowledged attempt after restart with a fresh attempt id",
     };
     const env = {
       MNEMURON_CONFIG_PATH: path.join(dataDir, "missing-config.json"),
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macbook",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clienta",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -546,7 +546,7 @@ test("does not recover another session's in-flight attempt on SessionStart", () 
     };
     const env = {
       MNEMURON_CONFIG_PATH: path.join(dataDir, "missing-config.json"),
-      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-macmini",
+      MNEMURON_DEFAULT_WORKSTREAM_ID: "workstream-clientb",
       CODEX_THREAD_ID: "",
       CODEX_SESSION_ID: "",
     };
@@ -587,9 +587,9 @@ test("loads device identity and retention from a local config file", () => {
       configPath,
       JSON.stringify({
         data_dir: captureDir,
-        device_id: "macmini-test",
+        device_id: "clientb-test",
         agent_id: "chatgpt",
-        agent_instance_id: "chatgpt-macmini-test",
+        agent_instance_id: "chatgpt-clientb-test",
         raw_retention_days: 7,
       }),
     );
@@ -614,7 +614,7 @@ test("loads device identity and retention from a local config file", () => {
     const event = JSON.parse(
       readFileSync(path.join(captureDir, "events.jsonl"), "utf8").trim(),
     );
-    assert.equal(event.provenance.device_id, "macmini-test");
+    assert.equal(event.provenance.device_id, "clientb-test");
     assert.equal(event.provenance.identity_status, "configured");
     assert.equal(
       Date.parse(event.expires_at) - Date.parse(event.captured_at),

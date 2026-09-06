@@ -87,7 +87,7 @@ const task = {
   resources: ["adapters/openclaw/README.md"],
   workstreams: [
     { workstream_id: "workstream-openclaw", name: "OpenClaw example client", status: "active" },
-    { workstream_id: "workstream-macbook", name: "MacBook ChatGPT", status: "active" },
+    { workstream_id: "workstream-clienta", name: "Client A ChatGPT", status: "active" },
   ],
   conflicts: [],
 };
@@ -125,11 +125,11 @@ test("OpenClaw hooks preserve full source context, verify identity, and create a
       agent_id: "openclaw",
       agent_instance_id: "openclaw-local",
     }, 201);
-    const macbook = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
-      label: "MacBook ChatGPT",
-      device_id: "macbook-openclaw-test",
+    const clienta = await api(baseUrl, admin.api_key, "POST", "/v1/agent-instances/register", {
+      label: "Client A ChatGPT",
+      device_id: "clienta-openclaw-test",
       agent_id: "chatgpt",
-      agent_instance_id: "chatgpt-macbook-openclaw-test",
+      agent_instance_id: "chatgpt-clienta-openclaw-test",
     }, 201);
     await api(baseUrl, admin.api_key, "POST", "/v1/tasks", task);
 
@@ -161,7 +161,7 @@ test("OpenClaw hooks preserve full source context, verify identity, and create a
         { role: "user", content: "继续 Mnemuron OpenClaw 适配任务。" },
         {
           role: "assistant",
-          content: "已完成 OpenClaw 原生 Hook 适配。确认采用独立设备与 Agent 身份。无阻塞。下一步从 MacBook 预览恢复。",
+          content: "已完成 OpenClaw 原生 Hook 适配。确认采用独立设备与 Agent 身份。无阻塞。下一步从 Client A 预览恢复。",
         },
       ],
     }, context, config);
@@ -182,9 +182,9 @@ test("OpenClaw hooks preserve full source context, verify identity, and create a
     const raw = JSON.parse(stored.raw_payload_json);
     assert.equal(raw.context.messageProvider, "telegram");
     assert.equal(raw.event.messages[1].role, "assistant");
-    assert.match(raw.event.messages[1].content, /下一步从 MacBook/);
+    assert.match(raw.event.messages[1].content, /下一步从 Client A/);
 
-    const preview = await api(baseUrl, macbook.api_key, "POST", "/v1/resume/preview", {
+    const preview = await api(baseUrl, clienta.api_key, "POST", "/v1/resume/preview", {
       query: "OpenClaw",
     }, 201);
     assert.equal(preview.status, "pending_confirmation");
@@ -192,7 +192,7 @@ test("OpenClaw hooks preserve full source context, verify identity, and create a
     assert.match(preview.latest_checkpoints[0].latest_outcome.text, /原生 Hook 适配/);
     const confirmed = await api(
       baseUrl,
-      macbook.api_key,
+      clienta.api_key,
       "POST",
       `/v1/resume/${preview.resume_id}/confirm`,
       { preview_version: preview.preview_version, confirmed: true },
@@ -204,7 +204,7 @@ test("OpenClaw hooks preserve full source context, verify identity, and create a
     );
     const repeatedConfirmation = await api(
       baseUrl,
-      macbook.api_key,
+      clienta.api_key,
       "POST",
       `/v1/resume/${preview.resume_id}/confirm`,
       { preview_version: preview.preview_version, confirmed: true },
@@ -240,7 +240,7 @@ test("Resume Packet injection stays below the OpenClaw limit while preserving re
       explicit: true,
       mode: "single",
       selected_workstream_ids: ["workstream-openclaw"],
-      available_workstream_ids: ["workstream-openclaw", "workstream-macbook"],
+      available_workstream_ids: ["workstream-openclaw", "workstream-clienta"],
       source_preserved: true,
       automatic_merge_performed: false,
     },
@@ -842,7 +842,7 @@ test("OpenClaw outbox quarantines a permanent 413 and continues later events", a
         throw error;
       }
       delivered.push(envelope.event.event_id);
-      return { status: "accepted", received: 1, inserted: 1, duplicate: 0 };
+      return { status: "accepted", received: 1, inserted: 1, duplicate: 0, accepted_event_ids: [envelope.event.event_id] };
     };
 
     assert.deepEqual(await client.flushOutbox(), {
