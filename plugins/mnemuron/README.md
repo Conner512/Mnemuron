@@ -68,3 +68,7 @@ node --test plugins/mnemuron/test/*.test.mjs
 ```
 
 Use isolated data and configuration directories. Local tests do not constitute acceptance of a particular host version, installed cache, or deployment.
+
+## License
+
+This plugin is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE) for attribution. Include both files when distributing a stand-alone plugin package. The host application is separate software with its own licensing terms.

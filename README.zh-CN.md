@@ -110,4 +110,4 @@ docs/               指南、规格与测试计划
 
 ## 许可证
 
-项目尚未选择许可证。公开可见不代表已授予开源许可；在添加 `LICENSE` 文件前，请勿默认拥有代码复用或再分发授权。
+Mnemuron 采用 [Apache License 2.0](LICENSE)，署名信息见 [NOTICE](NOTICE)。第三方运行时与 Agent 宿主仍遵循各自的许可证。

@@ -2,7 +2,7 @@
 
 Thank you for helping make task continuity more reliable and easier to use. Focused bug fixes, reproducible reports, tests, documentation, and translations are welcome.
 
-The project is experimental. A repository license has not yet been selected; check the [license section](README.md#license) before contributing or redistributing code. There is no contributor agreement in this repository.
+The project is experimental and licensed under the [Apache License, Version 2.0](LICENSE). Unless explicitly stated otherwise, contributions intentionally submitted for inclusion are provided under that license, as described in its contribution clause. Contribute only material you have the right to license, and preserve any applicable third-party copyright and license notices. No separate contributor agreement is required by this repository.
 
 ## Start with a small, reproducible change
 

@@ -110,4 +110,4 @@ Use synthetic examples in reports. Do not attach real conversations, memory expo
 
 ## License
 
-A license has not been selected yet. This public repository does not currently grant an open-source license; please do not assume reuse or redistribution rights until a `LICENSE` file is added.
+Mnemuron is licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution. Third-party runtimes and agent hosts retain their own licenses.
