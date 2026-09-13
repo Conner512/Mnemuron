@@ -79,6 +79,16 @@ test('Q-01 Q-02: aggregate test runner continues after missing dependencies and 
   assert.equal(count,2);assert.equal(result.status,'failed');assert.equal(result.results[0].status,'blocked');assert.equal(result.results[1].passed,2);
 });
 
+test('Q-08: zero discovered tests and unapproved skips cannot produce green acceptance',()=>{
+  const run=output=>()=>({status:0,stdout:output});
+  assert.equal(runSuites([{name:'empty',command:'fixture',args:[]}],{run:run('# tests 0\n# pass 0')}).status,'failed');
+  const output='# tests 2\n# pass 1\n# skipped 1';
+  assert.equal(runSuites([{name:'skipped',command:'fixture',args:[]}],{run:run(output)}).status,'failed');
+  const result=runSuites([{name:'optional',command:'fixture',args:[],allowSkipped:true,skipReason:'Explicit synthetic runner contract'}],{run:run(output)});
+  assert.equal(result.status,'passed');assert.equal(result.results[0].passed,1);assert.equal(result.results[0].skipped,1);
+  assert.equal(runSuites([{name:'nested',command:'fixture',args:[]}],{run:run('# # tests 0\n# tests 2\n# pass 2\n# skipped 0')}).results[0].tests,2);
+});
+
 function secretFixture(t) {
   const root=mkdtempSync(path.join(os.tmpdir(),'mnemuron-secret-scope-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
   const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']});

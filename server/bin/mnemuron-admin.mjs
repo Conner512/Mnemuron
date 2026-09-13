@@ -17,6 +17,9 @@ function usage() {
   mnemuron-admin project-bootstrap-scopes --instance ID [--apply]
   mnemuron-admin prune
   mnemuron-admin memory-index --database EXISTING_FILE [--rebuild]
+  mnemuron-admin memory-web-visibility --memory ID --revision N --state-hash HASH (--allow | --deny)
+  mnemuron-admin memory-web-visibility --memory ID --inspect
+  mnemuron-admin memory-web-visibility --list [--limit 1..100] [--after ID]
   mnemuron-admin backup --file FILE
 
 Environment:
@@ -107,6 +110,13 @@ try {
       result = store.updateProjectBootstrapScopes(auth, args.instance, {
         apply: args.apply === true,
       });
+    } else if (command === 'memory-web-visibility') {
+      if(args.list===true && !args.memory && !args.allow && !args.deny && !args.inspect)result=store.webVisibility.list(auth,{limit:args.limit===undefined?20:Number(args.limit),after:args.after});
+      else if(args.inspect===true && args.memory && !args.allow && !args.deny)result=store.webVisibility.inspect(auth,args.memory);
+      else {
+        if(!args.memory || typeof args['state-hash']!=='string' || (args.allow===true)===(args.deny===true))throw new Error('An exact reviewed memory, revision, state hash and one of --allow/--deny are required.');
+        result=store.webVisibility.set(auth,args.memory,{allow:args.allow===true,revision:Number(args.revision),state_hash:args['state-hash']});
+      }
     } else if (command === "prune") {
       result = store.pruneExpired(auth);
     } else if(command==='memory-index') {

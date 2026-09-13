@@ -10,7 +10,7 @@ export class ReadonlyCoreClient {
     const c = this.config.core;
     const allowed = (method === "GET" && (route === "/v1/identity" || route === "/readyz/search"
       || /^\/v1\/memories\/[A-Za-z0-9_.:-]+(?:\?[^#]*)?$/.test(route)))
-      || (method === "POST" && ["/v1/memories/query", "/v1/project-context/preview"].includes(route));
+      || (method === "POST" && ["/v1/memories/query", "/v1/project-context/preview", "/v1/memory-summaries/query"].includes(route));
     if (!allowed) throw new BoundaryError(403, "CORE_ROUTE_DENIED");
     let result;
     try {
@@ -21,9 +21,14 @@ export class ReadonlyCoreClient {
     } catch { throw new BoundaryError(503, "CORE_UNAVAILABLE"); }
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
-      throw new BoundaryError(503, result.data.error_code);
+      const error=new BoundaryError(503, result.data.error_code);
+      if(['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED','VECTOR_UNAVAILABLE'].includes(result.data.degradation_code))error.degradation_code=result.data.degradation_code;
+      throw error;
     }
     if (result.status === 409 && result.data.error_code === 'TASK_VERSION_CHANGED') throw new BoundaryError(409, 'TASK_VERSION_CHANGED');
+    if(result.status===409 && ['MEMORY_VERSION_CHANGED','SOURCE_MANIFEST_CHANGED','SUMMARY_VERSION_CHANGED','CURSOR_EXPIRED'].includes(result.data.error_code))throw new BoundaryError(409,result.data.error_code);
+    if(result.status===400 && result.data.error_code==='INVALID_CURSOR')throw new BoundaryError(400,'INVALID_CURSOR');
+    if(result.status===422 && ['SUMMARY_DETAIL_TOO_LARGE','DETAIL_METADATA_TOO_LARGE'].includes(result.data.error_code))throw new BoundaryError(422,result.data.error_code);
     if (result.status === 422 && result.data.error_code === 'TASK_DETAIL_TOO_LARGE') throw new BoundaryError(422, 'TASK_DETAIL_TOO_LARGE');
     if (result.status === 404) throw new BoundaryError(404, result.data.error_code === 'TASK_CONTEXT_NOT_FOUND' ? 'TASK_CONTEXT_NOT_FOUND' : 'MEMORY_NOT_FOUND');
     if (result.status === 400) throw new BoundaryError(400, "INVALID_CORE_QUERY");
@@ -35,6 +40,7 @@ export class ReadonlyCoreClient {
     const identity = result.identity;
     if (!identity || identity.user_id !== mapping.mnemuron_user_id
       || identity.agent_instance_id !== mapping.agent_instance_id || identity.identity_status !== "server_verified"
+      || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
       || !Array.isArray(result.scopes) || result.scopes.length !== CORE_SCOPES.length
       || !CORE_SCOPES.every((scope) => result.scopes.includes(scope))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
   }
@@ -47,6 +53,7 @@ export class ReadonlyCoreClient {
     await this.checkIdentity(mapping);
     switch (name) {
       case "mnemuron_search_memories": return this.request("/v1/memories/query", args);
+      case "mnemuron_get_summary": return this.request("/v1/memory-summaries/query", args);
       case "mnemuron_get_memory": {
         const { memory_id, ...options } = args;
         const query = new URLSearchParams(Object.entries(options).map(([key, value]) => [key, String(value)]));

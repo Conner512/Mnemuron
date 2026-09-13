@@ -49,7 +49,8 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
     && c.logging.include_request_body === false, "safe logging");
   const tools = { mnemuron_auth_status: "memory:read", mnemuron_search_memories: "memory:read",
     mnemuron_get_memory: "memory:read", mnemuron_preview_project_context: "project:read" };
-  requireConfig(Object.keys(c.tools || {}).length === 4 && Object.entries(tools).every(([name, scope]) => c.tools[name]?.required_scope === scope), "fixed tool scopes");
+  if(c.tools?.mnemuron_get_summary)tools.mnemuron_get_summary='memory:read';
+  requireConfig(Object.keys(c.tools || {}).length === Object.keys(tools).length && Object.entries(tools).every(([name, scope]) => c.tools[name]?.required_scope === scope), "fixed tool scopes");
   for (const name of Object.keys(tools)) exactList(c.tools[name].profile,
     name === "mnemuron_auth_status" ? ["auth_only", "readonly"] : ["readonly"], "fixed tool profiles");
   if (c.mode === "oauth" && c.tool_profile === "readonly") {

@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gatewayFixture } from './fixture.mjs';
+import { gatewayFixture,approveWebMemory } from './fixture.mjs';
 import { memoryFixture, businessSnapshot } from '../../../server/test/helpers/core-memory-fixture.mjs';
 
 test('OAuth project preview honors explicit IDs through the actual MCP and Core boundary', async t => {
   const core = await memoryFixture(t);
+  approveWebMemory(core,core.store.saveMemory(core.a.auth,{scope:'project',project_id:core.alpha.project_id,content:'Synthetic Web-approved project memory'}).memory);
   const f = await gatewayFixture(t, { profile: 'readonly', coreFixture: core });
   const token = (await f.exchange(await f.authorize())).data.access_token;
   const before = businessSnapshot(core.store);
@@ -27,11 +28,11 @@ test('OAuth project preview honors explicit IDs through the actual MCP and Core 
   for (const project_id of [core.foreign.project_id, 'project-unknown']) {
     const result = await f.mcp('tools/call', { name: definition.name, arguments: { project_id, query: core.alpha.project_id } }, token);
     assert.equal(result.status, 200);
-    assert.equal(result.data.result.structuredContent.status, 'no_match');
-    assert.deepEqual(result.data.result.structuredContent.candidates, []);
+    assert.equal(result.data.result.structuredContent.status, 'project_context_unavailable');
+    assert.equal(result.data.result.structuredContent.candidates, undefined);
   }
   for (const args of [{}, { query: ' ' }, { project_id: '' }, { project_id: null }, { project_id: core.alpha.project_id, user_id: core.other.auth.user_id }]) {
-    assert.equal((await f.mcp('tools/call', { name: definition.name, arguments: args }, token)).status, 400);
+    assert.equal((await f.mcp('tools/call', { name: definition.name, arguments: args }, token)).data.result.isError, true);
   }
   assert.deepEqual(businessSnapshot(core.store), before);
 });
@@ -43,6 +44,7 @@ test('OAuth searches a bare synthetic marker and reads its full memory without b
   const marker = 'CASE-20400101-04';
   const memory = core.store.saveMemory(core.a.auth, { scope: 'project', project_id: core.alpha.project_id,
     content: `${marker}：Memory synthetic cross-client read check` }).memory;
+  approveWebMemory(core,memory);
   core.store.saveMemory(core.other.auth, { scope: 'project', project_id: core.foreign.project_id, content: `${marker}：Memory foreign` });
   const before = businessSnapshot(core.store);
   const search = await f.mcp('tools/call', { name: 'mnemuron_search_memories', arguments: { query: marker, project_id: core.alpha.project_id } }, token);

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { isUtf8 } from 'node:buffer';
 
 const prohibitedPath = /(?:^(?:private|evidence|backups|tmp|dist)\/|(?:^|\/)(?:credentials|node_modules|__pycache__|\.mnemuron|exports|vector-data|vector-snapshots|model-cache|audit-private|job-spool)\/|\.(?:sqlite3?|db)(?:-.*)?$|\.(?:log|jsonl|snapshot|dump|zip|tar|tgz|gz|bundle|key|pem|p12|pfx)$|(?:^|\/)(?:EXECUTION_STATUS|worktree-files|identity-map|accounts|recovery|memory-export|memories-export)\.json$)/i;
+const publicEmail = value => /^(?:noreply@github\.com|[^\s@]+@(?:users\.noreply\.github\.com|example\.(?:com|org|net))|\s*)$/.test(value.trim());
 const rules = [
   ['private-key', /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/g],
   ['token', /\b(?:ghp_|gho_|github_pat_|AKIA)[A-Za-z0-9_]{16,}/g],
@@ -105,7 +106,7 @@ export function checkPublication(args, cwd = path.resolve(import.meta.dirname, '
       for (const [index, text] of fields.entries()) {
         const file = `commit-${revision.slice(0,12)}/${['author','author-email','committer','committer-email','message'][index]}`;
         findings.push(...scanPublicationFile(file, text));
-        if ([1,3].includes(index) && !/^(?:[^\s@]+@(?:users\.noreply\.github\.com|example\.(?:com|org|net))|\s*)$/.test(text.trim())) {
+        if ([1,3].includes(index) && !publicEmail(text)) {
           findings.push({file,rule:'commit-email-review',line:1});
         }
       }
@@ -122,7 +123,7 @@ export function checkPublication(args, cwd = path.resolve(import.meta.dirname, '
         const text = git(['cat-file','tag',ref]);
         findings.push(...scanPublicationFile('tag-'+git(['rev-parse',ref]).trim().slice(0,12),text));
         const email = text.match(/^tagger .* <([^>]+)>/m)?.[1];
-        if (email && !/@(?:users\.noreply\.github\.com|example\.(?:com|org|net))$/.test(email)) findings.push({file:'tag-metadata',rule:'tag-email-review',line:1});
+        if (email && !publicEmail(email)) findings.push({file:'tag-metadata',rule:'tag-email-review',line:1});
       }
     }
   } else if (args.length >= 2 && args.length <= 3 && args[0] === '--ref' && /^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(args[1]) && (!args[2] || args[2] === '--history')) {

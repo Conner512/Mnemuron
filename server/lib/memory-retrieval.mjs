@@ -1,5 +1,6 @@
 import { ValidationError } from './errors.mjs';
 import { memoryScopeSql } from './memory-scope.mjs';
+import {webMemorySql} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
 export const normalizeSearch = value => String(value ?? '').normalize('NFKC').toLowerCase();
@@ -119,7 +120,7 @@ export class MemorySearch {
     try {
       const rows=this.db.prepare(`SELECT m.* FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
-        WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql}
+        WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)}
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})
         ORDER BY (instr(d.normalized,?)>0) DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
       ).all(tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes,normalizeSearch(query.trim()));

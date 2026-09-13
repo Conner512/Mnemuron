@@ -1,9 +1,10 @@
 # Read-only canonical Task details
 
-This is a source contract and isolated-test guide, not a deployment acceptance
-report. The Web gateway retains its four existing read-only tools and OAuth
-scopes. No memory writes, Resume, Task Scope change, injection or reconciliation
-operation is added.
+This is the **local/Core** canonical Task read contract, not a deployment report.
+The Web memory visibility policy intentionally does not authorize canonical Task
+fields; those Web arguments and navigation hints are no longer exposed. Examples
+below apply to authorized local clients, not the current ChatGPT Web gateway.
+See the [Web memory contract](../chatgpt-web-oauth-v0.1/web-memory-review.md).
 
 ## Availability is separate from returned content
 

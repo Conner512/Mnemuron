@@ -3,6 +3,11 @@
 This is a source-level contract, not a production deployment report. Public Web
 access remains read-only; no tools, scopes or handoff actions are added.
 
+The project/Task sections below describe local/Core contracts. The current Web
+gateway only lists approved memories for an exact project filter; it does not
+resolve project names or expose canonical Task information. See the
+[Web memory read contract](../chatgpt-web-oauth-v0.1/web-memory-review.md).
+
 ## Exact project selection
 
 `mnemuron_preview_project_context` accepts `project_id`, `query`, or both. At least

@@ -1,4 +1,4 @@
-import { BoundaryError, readSecret, seconds } from "../../../shared/oauth-common.mjs";
+import { BoundaryError, readSecret, seconds, secretHash } from "../../../shared/oauth-common.mjs";
 import { loadIdentityMap } from "./config.mjs";
 import { fetchAuthorizationJson } from "./auth-transport.mjs";
 
@@ -48,7 +48,8 @@ export class GatewayAuthorization {
     let mapping;
     try { mapping = loadIdentityMap(c); } catch { throw new BoundaryError(503, "IDENTITY_CONFIGURATION_UNAVAILABLE"); }
     if (!mapping.enabled || data.sub !== mapping.subject) throw new BoundaryError(403, "SUBJECT_DENIED");
-    return { mapping, scopes: new Set(data.scope.split(" ").filter(Boolean)) };
+    return { mapping, scopes: new Set(data.scope.split(" ").filter(Boolean)),
+      connection_id:secretHash(JSON.stringify([c.issuer,data.client_id,data.sub])) };
   }
 }
 

@@ -1,9 +1,10 @@
 import {digest,fail,strictObject,text} from '../model-providers/contracts.mjs';
 import {hash as digestText} from '../memory/revisions.mjs';
+import {SummaryPagination} from './pagination.mjs';
 
 export const scopeKey = row => JSON.stringify([row.user_id,row.scope,row.project_id || null,row.task_id || null,row.workstream_id || null,row.session_id || null]);
 export class DerivedMemory {
-  constructor(store) {this.store=store;this.db=store.db;this.migrate();}
+  constructor(store) {this.store=store;this.db=store.db;this.migrate();this.pagination=new SummaryPagination(this);}
   migrate(){this.db.exec(`
     CREATE TABLE IF NOT EXISTS memory_privacy (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,sensitivity TEXT NOT NULL DEFAULT 'sensitive',PRIMARY KEY(user_id,memory_id));
     CREATE TABLE IF NOT EXISTS memory_annotations (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,taxonomy_version TEXT NOT NULL,
@@ -97,21 +98,7 @@ export class DerivedMemory {
     this.db.prepare('INSERT OR REPLACE INTO memory_derived_outbox VALUES (?,?,?)').run(summaryId,'upsert','disabled');
     return summaryId;
   }
-  summaries(user,scope,{limit=20,offset=0}={}){
-    if(!Number.isInteger(limit) || limit<1 || limit>50 || !Number.isInteger(offset) || offset<0)fail('INVALID_PAGINATION');
-    const rows=this.db.prepare("SELECT * FROM memory_summaries WHERE user_id=? AND scope_key=? AND status='current' ORDER BY created_at DESC,summary_id LIMIT ? OFFSET ?").all(user,scope,limit+1,offset);
-    const visible=[];
-    for(const summary of rows.slice(0,limit)){
-      const deps=this.db.prepare('SELECT * FROM memory_summary_dependencies WHERE summary_id=?').all(summary.summary_id);
-      const metadata=JSON.parse(this.db.prepare('SELECT metadata_json FROM memory_jobs WHERE job_id=?').get(summary.job_id)?.metadata_json || '{}');
-      if(!deps.length || deps.some(d=>{const s=this.validateItem(d);return !s || this.category(s,metadata.taxonomy?.version)!==summary.category;}))continue;
-      const claims=this.db.prepare('SELECT claim_json FROM memory_summary_claims WHERE summary_id=? ORDER BY ordinal LIMIT 101').all(summary.summary_id).map(c=>JSON.parse(c.claim_json));
-      const selected=new Set(this.db.prepare("SELECT DISTINCT json_extract(claim_json,'$.memory_id') AS memory_id FROM memory_summary_claims WHERE summary_id=?").all(summary.summary_id).map(row=>row.memory_id));
-      const omitted=deps.filter(dependency=>!selected.has(dependency.memory_id));
-      visible.push({...summary,kind:'derived_summary',independently_fact_checked:false,claims:claims.slice(0,100),claims_truncated:claims.length>100,dependency_count:deps.length,
-        coverage_status:omitted.length?'partial':'complete',selected_source_count:deps.length-omitted.length,omitted_source_count:omitted.length,
-        omitted_sources:omitted.slice(0,100).map(({memory_id,revision})=>({memory_id,revision})),omitted_sources_truncated:omitted.length>100});
-    }
-    return {results:visible,next_offset:rows.length>limit?offset+limit:null,read_only:true};
+  summaries(user,scope,options={}){
+    return this.pagination.page(user,scope,options);
   }
 }

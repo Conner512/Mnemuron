@@ -23,12 +23,15 @@ test("MCP-05/08 full wire-response budget, protocol preflight and concurrent bac
   assert.equal((await first).status, 200);
   assert.equal((await f.mcp("tools/call", params, token, { headers: { accept: "application/json" } })).status, 406);
   assert.equal(calls, 1);
-  f.gateway.core.call = async () => ({ status: "preview", synthetic_padding: "x".repeat(5000) });
-  const oversized = await f.mcp("tools/call", params, token);
-  assert.equal(oversized.status, 422);
-  assert.equal(oversized.data.error_code, "TOOL_RESPONSE_TOO_LARGE");
-  f.gateway.core.call = async () => ({ status: "preview", synthetic_padding: "x".repeat(1000) });
-  const bounded = await f.mcp("tools/call", params, token);
+  const searchParams={name:'mnemuron_search_memories',arguments:{query:'synthetic'}};
+  const searchResult=n=>({read_only:true,query:'synthetic',effective_scope:{},retrieval:{},results:[{memory_id:'m',status:'active',content:'x'.repeat(n)}]});
+  f.gateway.core.call = async () => searchResult(5000);
+  const oversized = await f.mcp("tools/call", searchParams, token);
+  assert.equal(oversized.status, 200);
+  assert.equal(oversized.data.result.isError,true);
+  assert.equal(oversized.data.result.structuredContent.error.code, "TOOL_RESPONSE_TOO_LARGE");
+  f.gateway.core.call = async () => searchResult(1000);
+  const bounded = await f.mcp("tools/call", searchParams, token);
   assert.equal(bounded.status, 200);
   assert.ok(Buffer.byteLength(JSON.stringify(bounded.data)) <= f.gatewayConfig.limits.tool_response_bytes);
   const invalidId = await fetch(f.gatewayConfig.resource, { method: "POST", headers: {

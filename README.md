@@ -1,10 +1,10 @@
 # Mnemuron
 
-**Self-hosted task continuity and structured memory for AI agents.**
+**Self-hosted memory for AI agents, with optional task handoff.**
 
 English · [简体中文](README.zh-CN.md)
 
-Mnemuron helps an agent pick up work started in another session, on another device, or in another agent host. It keeps task state, source records, and reusable memories separate, then prepares a reviewable context packet when you want to continue.
+Mnemuron stores reusable memories with their sources and revisions, so authorized agents can search and read them across sessions and devices. Memory works independently of task handoff. When continuity is needed, a separate review-and-confirm flow prepares a context packet without treating summaries as authoritative task state.
 
 The central service stores data in SQLite. Adapters connect agent lifecycle events to the service and keep a local outbox when it is unavailable. There is no required cloud memory service or external vector database.
 
@@ -16,6 +16,7 @@ The central service stores data in SQLite. Adapters connect agent lifecycle even
 - **Keep context tied to its source.** Records retain their agent, session, and workstream provenance. Resuming a task preserves the destination agent's workstream.
 - **Distinguish facts from summaries.** Canonical task state, automatically derived checkpoints, and structured memories are separate records—not interchangeable versions of the truth.
 - **Retrieve and revise memory.** Search scoped memories with SQLite FTS5, inspect full content, and supersede or retract records while retaining lifecycle history.
+- **Read memories from ChatGPT Web.** An optional OAuth gateway provides versioned reads, bounded summaries and explicit search modes, without Web writes, project restoration or handoff. Per-record authorization and content-free read audits help inspect access without publishing memory contents.
 - **Make delivery observable.** Durable outboxes, idempotent retries, and delivery acknowledgements help distinguish queued, delivered, and completed work.
 
 ## How it works
@@ -87,7 +88,7 @@ npm test
 node scripts/check-publication.mjs --worktree
 ```
 
-Migration regressions read earlier source revisions from Git, so a ZIP download or shallow clone is not sufficient for the full suite. Tests use synthetic records and disposable local storage. See [CONTRIBUTING.md](CONTRIBUTING.md) for focused test commands and pull request guidance.
+Migration regressions use checked-in, hash-verified legacy fixtures. Tests use synthetic records and disposable local storage; OAuth tests also need the two separately locked dependency installations. Zero discovered tests and unapproved skips fail the aggregate runner. See [CONTRIBUTING.md](CONTRIBUTING.md) for focused commands and pull request guidance.
 
 ```text
 server/             HTTP API, SQLite storage, administration, and tests
@@ -102,7 +103,8 @@ docs/               Guides, specifications, and test plans
 ## Current boundaries
 
 - Built for single-user self-hosting, not a managed multi-tenant service.
-- Retrieval is lexical/FTS-based, not embedding-based semantic search.
+- Lexical/FTS retrieval works without models. Optional, operator-configured embedding and Qdrant modules provide hybrid/semantic retrieval; query egress approval and budgets remain required. Hybrid fallback is marked; unavailable semantic search is an error, not a fabricated success.
+- Derived summaries preserve source revisions and coverage. Read-only summary retrieval never schedules a model; see [Memory First](docs/memory-first-v0.1/README.md).
 - Automatic summaries can omit context. Source records and explicit task state remain distinct.
 - Capture and delivery depend on host hooks and permissions; complete capture across arbitrary hosts is not guaranteed.
 - Test plans describe acceptance requirements, not a production certification or deployment history.
