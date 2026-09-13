@@ -53,6 +53,31 @@ test('publication guard permits documented synthetic examples but rejects popula
   assert.ok(scanPublicationFile('server/seed/example.json', JSON.stringify({ ...seed, progress: ['synthetic result that belongs in a private report'] })).some(f => f.rule === 'seed-history'));
 });
 
+test('publication permits the exact GitHub no-reply address but rejects private and lookalike metadata', t => {
+  for (const [email, allowed] of [
+    ['noreply@github.com', true],
+    ['example@users.noreply.github.com', true],
+    ['person@github.com', false],
+    ['noreply+example@github.com', false],
+    ['noreply@github.com.example.invalid', false],
+  ]) {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'mnemuron-publication-email-'));
+    t.after(() => rmSync(root, {recursive:true,force:true}));
+    const git = args => execFileSync('git', ['-c','user.name=Example','-c',`user.email=${email}`,
+      '-c','commit.gpgsign=false','-c','tag.gpgsign=false',...args], {cwd:root,stdio:'pipe'});
+    git(['init','--quiet']);
+    git(['commit','--quiet','--allow-empty','-m','Synthetic metadata check']);
+    git(['tag','-a','fixture','-m','Synthetic metadata check']);
+    const result = checkPublication(['--all-refs'], root);
+    assert.equal(result.status, allowed ? 'passed' : 'failed');
+    if (!allowed) {
+      assert.ok(result.findings.some(f => f.rule === 'commit-email-review'));
+      assert.ok(result.findings.some(f => f.rule === 'tag-email-review'));
+    }
+    assert.ok(!JSON.stringify(result).includes(email));
+  }
+});
+
 test('database-copy smoke uses explicit synthetic targets and never overwrites an existing copy', async t => {
   const f = await memoryFixture(t);
   const before = businessSnapshot(f.store);

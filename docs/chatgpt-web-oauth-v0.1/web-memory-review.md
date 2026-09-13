@@ -223,11 +223,12 @@ See [daily operations](web-read-operations.md) for the identity and evidence
 boundaries. An OAuth connection is not a verified physical terminal, and an HTTP
 response finishing is not proof that ChatGPT consumed the entire body.
 
-The final local matrix passes **421/421**, with zero failures, skips or
-cancellations: Core 158, OAuth/Web 66, and the other suites unchanged. Eight new
+The final local matrix passes **422/422**, with zero failures, skips or
+cancellations: Core 159, OAuth/Web 66, and the other suites unchanged. Nine new
 tests cover owner-scoped grant inventory, exact returned references, Unicode page
 audits, denied/version/invalid-input errors, an interrupted transport, summary
-reference bounds, conflict-only returned revisions and safe offline log inspection.
+reference bounds, conflict-only returned revisions, safe offline log inspection
+and public commit/tag email metadata.
 They use isolated synthetic data and no external model or vector service. Deployment and real-client results
 must be recorded separately from these local counts.
 
@@ -274,6 +275,13 @@ revision 1, while the revoked fixture returned `MEMORY_NOT_FOUND`. The workstati
 then locked, so the final response's rendered text was not inspected; this last
 check is server-side request/result evidence, separate from the earlier observed
 client pagination and revocation checks. The verified rollback backup is retained.
+
+The first pull-request publication job rejected GitHub's signed automatic merge
+commit because its exact public no-reply email was not recognized. Function tests
+and the secret scan passed. The publication policy now recognizes only that exact
+additional public address; personal GitHub emails and suffix lookalikes remain
+rejected by a new regression test. This is a publication-tool correction, not a
+runtime permission change, and requires no service restart.
 
 Web writes, Organizer submission, project restoration and handoff remain out of
 scope. Real provider quality, real vector-service acceptance, long-running
