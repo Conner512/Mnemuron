@@ -1,0 +1,26 @@
+# Template only. Replace the executable/install paths and prepare service-owned private files.
+[Unit]
+Description=Mnemuron OAuth authorization service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mnemuron-oauth
+Group=mnemuron-oauth
+WorkingDirectory=/opt/mnemuron
+Environment=NODE_ENV=production
+Environment=MNEMURON_OAUTH_CONFIG=/etc/mnemuron-oauth/auth.runtime.json
+UnsetEnvironment=DEBUG NODE_DEBUG
+ExecStart=__REQUIRED_ABSOLUTE_LTS_NODE_PATH__ /opt/mnemuron/services/oauth/src/server.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mnemuron-oauth
+
+[Install]
+WantedBy=multi-user.target

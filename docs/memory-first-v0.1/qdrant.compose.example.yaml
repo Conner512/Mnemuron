@@ -1,0 +1,17 @@
+# Opt-in private deployment template. No test or install command starts this service.
+services:
+  vector:
+    image: qdrant/qdrant:v1.19.0
+    restart: "no"
+    ports:
+      - "127.0.0.1:6333:6333"
+    environment:
+      QDRANT__SERVICE__API_KEY: "${MNEMURON_VECTOR_SERVICE_KEY:?Set a private runtime key}"
+      QDRANT__TELEMETRY_DISABLED: "true"
+    volumes:
+      - "${MNEMURON_VECTOR_DATA_DIR:?Set a private data directory}:/qdrant/storage"
+      - "${MNEMURON_VECTOR_SNAPSHOT_DIR:?Set a private snapshot directory}:/qdrant/snapshots"
+    security_opt:
+      - no-new-privileges:true
+# No public ingress or Tunnel mapping. Remote private use additionally requires TLS.
+# Container loopback belongs to that container; choose a reviewed private origin.

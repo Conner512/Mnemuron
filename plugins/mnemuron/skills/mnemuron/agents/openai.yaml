@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mnemuron"
+  short_description: "Start and continue tasks across agents and devices"
+  default_prompt: "Use $mnemuron to start, preview, or continue a Mnemuron task."

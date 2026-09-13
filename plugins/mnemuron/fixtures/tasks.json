@@ -1,0 +1,31 @@
+[
+  {
+    "task_id": "task-mnemuron-plugin-spike",
+    "project_id": "project-mnemuron",
+    "project_name": "Mnemuron",
+    "title": "Example: Mnemuron ChatGPT Plugin Spike",
+    "aliases": [
+      "Mnemuron plugin",
+      "plugin spike",
+      "接入验证",
+      "插件原型"
+    ],
+    "goal": "Example task: validate capture, preview, explicit confirmation, and continuation between independently configured ChatGPT clients.",
+    "status": "active",
+    "progress": [],
+    "decisions": [],
+    "blockers": [],
+    "next_steps": [],
+    "resources": [
+      "docs/core-spec-v0.1.md"
+    ],
+    "workstreams": [
+      {
+        "workstream_id": "workstream-chatgpt-local-spike",
+        "name": "ChatGPT Desktop local spike",
+        "status": "active"
+      }
+    ],
+    "conflicts": []
+  }
+]

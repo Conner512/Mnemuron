@@ -1,0 +1,60 @@
+name: Isolated verification
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [core, plugin, openclaw, hermes, oauth, memory-unit, memory-integration, memory-model-contract, memory-worker, memory-vector, memory-schema]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - if: matrix.suite == 'oauth'
+        run: |
+          npm ci --prefix services/oauth --ignore-scripts
+          npm ci --prefix adapters/chatgpt-web --ignore-scripts
+      - if: matrix.suite == 'memory-schema'
+        run: npm ci --prefix adapters/chatgpt-web --ignore-scripts
+      - run: node scripts/test-all.mjs --suite '${{ matrix.suite }}'
+  publication:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Publication rules (no private evidence upload)
+        run: |
+          node scripts/check-publication.mjs --worktree
+          node scripts/check-publication.mjs --all-refs
+  secret-scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Install fixed scanner in disposable runner only
+        run: |
+          set -eu
+          SCANNER_DIR=$(mktemp -d)
+          cd "$SCANNER_DIR"
+          curl --fail --location --output checksums.txt https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_checksums.txt
+          curl --fail --location --output gitleaks_8.24.3_linux_x64.tar.gz https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz
+          awk '$2 == "gitleaks_8.24.3_linux_x64.tar.gz"' checksums.txt > selected-checksum.txt
+          test -s selected-checksum.txt
+          sha256sum --check selected-checksum.txt
+          tar -xzf gitleaks_8.24.3_linux_x64.tar.gz gitleaks
+          echo "$SCANNER_DIR" >> "$GITHUB_PATH"
+      - run: node scripts/check-secrets.mjs --history

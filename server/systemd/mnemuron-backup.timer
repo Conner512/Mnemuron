@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the Mnemuron verified backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+AccuracySec=1min
+Unit=mnemuron-backup.service
+
+[Install]
+WantedBy=timers.target

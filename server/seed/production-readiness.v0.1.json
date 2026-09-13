@@ -1,0 +1,56 @@
+{
+  "task_id": "task-mnemuron-production-readiness-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron Production Readiness v0.1",
+  "aliases": [
+    "Production Readiness",
+    "生产化验收",
+    "生产就绪"
+  ],
+  "goal": "Example task: record correctness, capacity, recovery, and security evidence before considering production readiness.",
+  "status": "active",
+  "progress": [],
+  "decisions": [],
+  "blockers": [],
+  "next_steps": [],
+  "resources": [
+    "docs/production-readiness-v0.1.md",
+    "docs/production-readiness-evidence-matrix-v0.1.md",
+    "docs/core-spec-v0.1.md",
+    "docs/chatgpt-mcp-delivery-receipt-v0.1.4.md",
+    "docs/dynamic-task-scope-v0.1.md",
+    "docs/deployment-evidence.md",
+    "docs/combination-resolver-v0.1.md",
+    "docs/openclaw-deployment.md",
+    "docs/capacity-backpressure-test-plan-v0.1.md"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-platform",
+      "name": "Central server",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-clientb",
+      "name": "Client B ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-clienta",
+      "name": "Client A ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-openclaw",
+      "name": "OpenClaw example client",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-hermes",
+      "name": "Hermes example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

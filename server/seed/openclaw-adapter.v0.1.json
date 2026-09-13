@@ -1,0 +1,29 @@
+{
+  "task_id": "task-mnemuron-openclaw-adapter-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron OpenClaw Adapter v0.1",
+  "aliases": [
+    "OpenClaw",
+    "OpenClaw adapter",
+    "OpenClaw 接入"
+  ],
+  "goal": "Example task: validate the OpenClaw adapter with your own isolated service and agent identity.",
+  "status": "active",
+  "progress": [],
+  "decisions": [],
+  "blockers": [],
+  "next_steps": [],
+  "resources": [
+    "adapters/openclaw/README.md",
+    "adapters/openclaw/openclaw.plugin.json"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-openclaw",
+      "name": "OpenClaw example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

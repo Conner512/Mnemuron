@@ -1,0 +1,93 @@
+{
+  "id": "mnemuron",
+  "name": "Mnemuron",
+  "description": "Capture OpenClaw sessions and resume shared Mnemuron tasks with provenance.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "mnemuron_status",
+      "mnemuron_preview_resume",
+      "mnemuron_preview_project_context",
+      "mnemuron_preview_task_branches",
+      "mnemuron_confirm_resume",
+      "mnemuron_remember",
+      "mnemuron_search_memories",
+      "mnemuron_supersede_memory",
+      "mnemuron_retract_memory",
+      "mnemuron_reconciliation_status",
+      "mnemuron_preview_reconciliation",
+      "mnemuron_confirm_reconciliation"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "serverUrl": {
+        "type": "string",
+        "description": "Mnemuron HTTPS base URL."
+      },
+      "apiKeyFile": {
+        "type": "string",
+        "description": "Path to the OpenClaw-specific Mnemuron API key file."
+      },
+      "outboxDir": {
+        "type": "string",
+        "description": "Private directory for events waiting to be synchronized."
+      },
+      "pendingResumeDir": {
+        "type": "string",
+        "description": "Private directory for confirmed Resume Packets awaiting a real agent session."
+      },
+      "taskScopeDir": {
+        "type": "string",
+        "description": "Private directory for durable conversation-to-task bindings activated by confirmed Resume Packets."
+      },
+      "deviceId": {
+        "type": "string"
+      },
+      "agentId": {
+        "type": "string"
+      },
+      "agentInstanceId": {
+        "type": "string"
+      },
+      "projectId": {
+        "type": "string"
+      },
+      "taskId": {
+        "type": "string"
+      },
+      "workstreamId": {
+        "type": "string"
+      },
+      "rawRetentionDays": {
+        "oneOf": [
+          {
+            "type": "integer",
+            "minimum": 1
+          },
+          {
+            "type": "string",
+            "enum": [
+              "permanent"
+            ]
+          }
+        ],
+        "default": 30
+      },
+      "requestTimeoutMs": {
+        "type": "integer",
+        "minimum": 250,
+        "maximum": 60000,
+        "default": 5000
+      },
+      "allowInsecureHttp": {
+        "type": "boolean",
+        "default": false
+      }
+    }
+  }
+}

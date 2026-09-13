@@ -1,0 +1,31 @@
+{
+  "config_version": "mnemuron-memory-first-v1",
+  "deployment_mode": "production",
+  "modules": {
+    "memory": { "enabled": true },
+    "handoff": { "enabled": false, "existing_inflight_policy": "drain_before_disable" }
+  },
+  "storage": {
+    "sqlite_path": "/var/lib/mnemuron/mnemuron.sqlite3",
+    "data_dir": "/var/lib/mnemuron",
+    "config_dir": "/etc/mnemuron",
+    "secrets_dir": "/etc/mnemuron/secrets",
+    "exports_dir": "/var/lib/mnemuron/exports",
+    "backup_dir": "/var/lib/mnemuron/backups",
+    "vector_data_dir": "/var/lib/mnemuron/vector-data",
+    "vector_snapshot_dir": "/var/lib/mnemuron/vector-snapshots",
+    "job_spool_dir": "/var/lib/mnemuron/job-spool",
+    "reject_private_paths_inside_git_worktree": true
+  },
+  "memory": {
+    "capture_extraction": { "enabled": false },
+    "preserve_atomic_records": true,
+    "automatic_fact_overwrite": false,
+    "taxonomy": { "version": "example-taxonomy-v1", "categories": ["uncategorized", "engineering", "preferences"] },
+    "retrieval": { "mode": "lexical" }
+  },
+  "providers": { "organizer": { "enabled": false }, "embedder": { "enabled": false } },
+  "vector_store": { "enabled": false },
+  "jobs": { "enabled": false, "lease_ms": 60000, "concurrency": 1, "batch_size": 20, "timezone": "UTC", "periods": ["daily", "weekly"], "poll_ms": 60000 },
+  "privacy": { "include_body_in_logs": false, "automatic_export": false }
+}

@@ -1,0 +1,80 @@
+# Local release archives, private acceptance evidence, and scratch work.
+# adapters/openclaw/dist/ contains implementation code and must stay tracked.
+/dist/
+/evidence/
+/tmp/
+/private/
+/backups/
+.dev/
+.mnemuron/
+# User-supplied review work packages are not publication artifacts.
+/Mnemuron_Memory_First_Codex_Plan/evidence/
+exports/
+vector-data/
+vector-snapshots/
+model-cache/
+audit-private/
+job-spool/
+*.snapshot
+*.dump
+*.jsonl
+identity-map.json
+accounts.json
+recovery.json
+
+# Keep local execution records private; publish reviewed generic specifications.
+/docs/core-optimization-v0.2/*
+!/docs/core-optimization-v0.2/CORE_OPTIMIZATION_PLAN.md
+!/docs/core-optimization-v0.2/ACCEPTANCE_TESTS.md
+!/docs/core-optimization-v0.2/retrieval-decision.md
+!/docs/core-optimization-v0.2/release-notes.md
+/scripts/verify-core-optimization-artifacts.mjs
+/docs/core-review-v0.3/*
+!/docs/core-review-v0.3/README.md
+
+# Archives may contain private source snapshots or execution records.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.bundle
+
+# Local dependencies and caches.
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+coverage/
+.nyc_output/
+
+# Runtime configuration and credentials; keep documented examples.
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+!*.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+
+# Runtime databases and logs.
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-*
+*.sqlite3-*
+*.db-*
+*.log
+
+# macOS metadata and editor temporary files.
+.DS_Store
+._*
+*.swp
+*.swo
+*~

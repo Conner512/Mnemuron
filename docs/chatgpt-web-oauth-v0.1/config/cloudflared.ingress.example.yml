@@ -1,0 +1,29 @@
+# Unapplied, locally-managed tunnel example. Preserve unrelated existing routes.
+# One shared public hostname, two separate loopback services, no path rewriting.
+# For a remotely-managed tunnel, apply these same scoped rules in its remote configuration.
+tunnel: __REQUIRED_APPROVED_TUNNEL_ID__
+credentials-file: /etc/cloudflared/__REQUIRED_TUNNEL_ID__.json
+
+ingress:
+  - hostname: memory.example.com
+    path: '^/(mcp|\.well-known/oauth-protected-resource(/mcp)?)$'
+    service: http://127.0.0.1:47832
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/\.well-known/(oauth-authorization-server|openid-configuration)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/(authorize(/[A-Za-z0-9_-]{1,128})?|token|jwks|revoke|introspect)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/interaction/[A-Za-z0-9_-]{1,128}(/(login|confirm|abort))?$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  # userinfo, assets, health, Core and private files are not public routes.
+  - service: http_status:404

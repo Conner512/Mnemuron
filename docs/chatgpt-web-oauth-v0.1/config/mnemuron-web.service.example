@@ -1,0 +1,25 @@
+# Template only. This service must not be able to read AS private keys or a Core administrator key.
+[Unit]
+Description=Mnemuron read-only HTTP MCP gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mnemuron-web
+Group=mnemuron-web
+WorkingDirectory=/opt/mnemuron
+Environment=NODE_ENV=production
+Environment=MNEMURON_WEB_CONFIG=/etc/mnemuron-web/gateway.runtime.json
+UnsetEnvironment=DEBUG NODE_DEBUG
+ExecStart=__REQUIRED_ABSOLUTE_LTS_NODE_PATH__ /opt/mnemuron/adapters/chatgpt-web/src/server.mjs
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

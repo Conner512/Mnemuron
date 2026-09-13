@@ -1,0 +1,12 @@
+{
+  "mappings": [
+    {
+      "issuer": "https://memory.example.com",
+      "subject": "__REQUIRED_IMMUTABLE_SUB_FROM_LOCAL_OWNER_SETUP__",
+      "mnemuron_user_id": "__REQUIRED_EXISTING_CORE_USER_ID__",
+      "agent_instance_id": "chatgpt-web-readonly",
+      "enabled": true
+    }
+  ],
+  "unknown_subject_policy": "deny"
+}

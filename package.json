@@ -1,0 +1,29 @@
+{
+  "name": "mnemuron",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test:all": "node scripts/test-all.mjs",
+    "test:memory-unit": "node scripts/test-all.mjs --suite memory-unit",
+    "test:memory-integration": "node scripts/test-all.mjs --suite memory-integration",
+    "test:memory-model-contract": "node scripts/test-all.mjs --suite memory-model-contract",
+    "test:memory-worker": "node scripts/test-all.mjs --suite memory-worker",
+    "test:memory-vector": "node scripts/test-all.mjs --suite memory-vector",
+    "test:memory-vector-real": "node server/bin/mnemuron-vector-acceptance.mjs",
+    "test:memory-application-real": "node adapters/chatgpt-web/acceptance/run-memory-vector.mjs",
+    "test:memory-joint-real": "node server/bin/mnemuron-memory-joint.mjs",
+    "test:memory-schema": "node scripts/test-all.mjs --suite memory-schema",
+    "test:memory-quality": "node --test --test-timeout=30000 server/test/memory-first-quality.test.mjs server/test/memory-first-quality-harness.test.mjs",
+    "test:publication": "node --test server/test/publication.test.mjs server/test/memory-first-privacy.test.mjs",
+    "test": "node --test --test-timeout=15000 server/test/*.test.mjs plugins/mnemuron/test/*.test.mjs adapters/openclaw/test/*.test.mjs && npm run test:hermes",
+    "test:hermes": "python3 -m unittest discover -s adapters/hermes/test -p 'test_*.py'",
+    "test:oauth": "node --test --test-timeout=30000 services/oauth/test/*.test.mjs adapters/chatgpt-web/test/*.test.mjs",
+    "test:capacity-local": "node server/bin/mnemuron-capacity-harness.mjs",
+    "test:failure-local": "node server/bin/mnemuron-failure-recovery-harness.mjs --quick"
+  }
+}

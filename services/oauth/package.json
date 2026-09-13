@@ -1,0 +1,17 @@
+{
+  "name": "@mnemuron/oauth",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "admin": "node bin/admin.mjs",
+    "test": "node --test --test-timeout=30000 test/*.test.mjs"
+  },
+  "dependencies": {
+    "oidc-provider": "9.12.2",
+    "otplib": "13.5.0"
+  }
+}

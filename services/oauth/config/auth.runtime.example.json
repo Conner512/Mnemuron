@@ -1,0 +1,113 @@
+{
+  "config_version": "mnemuron-oauth-config-v1",
+  "mode": "bootstrap_metadata_only",
+  "public_origin_mode": "shared",
+  "issuer": "https://memory.example.com",
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 47833
+  },
+  "database_file": "/var/lib/mnemuron-oauth/auth.sqlite3",
+  "private_jwks_file": "/etc/mnemuron-oauth/secrets/signing-jwks.json",
+  "cookie_keys_file": "/etc/mnemuron-oauth/secrets/cookie-keys.json",
+  "accounts_file": "/etc/mnemuron-oauth/private/owner-account.json",
+  "resource": "https://memory.example.com/mcp",
+  "resource_scopes": [
+    "memory:read",
+    "project:read"
+  ],
+  "oidc_scopes": [
+    "openid",
+    "offline_access"
+  ],
+  "routes": {
+    "authorization": "/authorize",
+    "resume": "/authorize/:uid",
+    "token": "/token",
+    "jwks": "/jwks",
+    "revocation": "/revoke",
+    "introspection": "/introspect",
+    "userinfo": "/userinfo",
+    "interaction": "/interaction/:uid"
+  },
+  "client_registration": {
+    "dynamic": false,
+    "cimd": false
+  },
+  "chatgpt_client": {
+    "client_id": "mnemuron-chatgpt-web",
+    "client_secret_file": "/etc/mnemuron-oauth/secrets/chatgpt-client-secret",
+    "token_endpoint_auth_method": "client_secret_post",
+    "redirect_uris": [
+      "__REQUIRED_EXACT_CHATGPT_REDIRECT_URI__"
+    ],
+    "grant_types": [
+      "authorization_code",
+      "refresh_token"
+    ],
+    "response_types": [
+      "code"
+    ],
+    "allowed_scopes": [
+      "openid",
+      "offline_access",
+      "memory:read",
+      "project:read"
+    ],
+    "pkce": {
+      "required": true,
+      "methods": [
+        "S256"
+      ]
+    }
+  },
+  "introspection_client": {
+    "client_id": "mnemuron-gateway-introspection",
+    "client_secret_file": "/etc/mnemuron-oauth/secrets/introspection-client-secret",
+    "auth_method": "client_secret_basic",
+    "role": "resource_server_only",
+    "allowed_resource": "https://memory.example.com/mcp",
+    "allowed_token_kind": "access_token",
+    "allow_user_authorization": false,
+    "allow_token_issuance": false
+  },
+  "token_policy": {
+    "access_token_format": "opaque",
+    "authorization_code_ttl_seconds": 60,
+    "access_token_ttl_seconds": 300,
+    "refresh_idle_ttl_seconds": 604800,
+    "refresh_absolute_ttl_seconds": 2592000,
+    "refresh_rotation": true,
+    "refresh_reuse_revokes_grant": true,
+    "interaction_ttl_seconds": 600,
+    "login_session_ttl_seconds": 28800
+  },
+  "login": {
+    "registration_enabled": false,
+    "mfa_required": true,
+    "cookie_secure": true,
+    "cookie_http_only": true,
+    "cookie_same_site": "lax",
+    "development_interactions": false
+  },
+  "limits": {
+    "login_attempts_per_account_per_15min": 10,
+    "token_requests_per_client_per_minute": 60,
+    "introspection_requests_per_client_per_minute": 600,
+    "request_body_bytes": 65536
+  },
+  "reverse_proxy": {
+    "trusted_peer_addresses": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "allowed_host": "memory.example.com",
+    "public_scheme": "https",
+    "trust_unvalidated_forwarded_headers": false
+  },
+  "log": {
+    "include_tokens": false,
+    "include_request_body": false,
+    "include_querystring": false
+  }
+}

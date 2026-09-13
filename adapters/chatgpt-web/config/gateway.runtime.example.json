@@ -1,0 +1,97 @@
+{
+  "config_version": "mnemuron-web-gateway-config-v1",
+  "mode": "bootstrap_metadata_only",
+  "public_origin_mode": "shared",
+  "tool_profile": "auth_only",
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 47832
+  },
+  "resource": "https://memory.example.com/mcp",
+  "protected_resource_metadata_path": "/.well-known/oauth-protected-resource/mcp",
+  "root_metadata_alias": true,
+  "issuer": "https://memory.example.com",
+  "authorization_server_metadata_url": "https://memory.example.com/.well-known/oauth-authorization-server",
+  "authorization_server_transport": {
+    "mode": "issuer_url"
+  },
+  "introspection": {
+    "endpoint": "https://memory.example.com/introspect",
+    "client_id": "mnemuron-gateway-introspection",
+    "client_secret_file": "/etc/mnemuron-web/secrets/introspection-client-secret",
+    "auth_method": "client_secret_basic",
+    "expected_oauth_client_id": "mnemuron-chatgpt-web",
+    "accepted_token_kind": "access_token",
+    "active_cache_seconds": 0,
+    "timeout_ms": 5000,
+    "max_response_bytes": 65536,
+    "follow_redirects": false
+  },
+  "identity_map_file": "/etc/mnemuron-web/private/identity-map.json",
+  "requested_scopes": [
+    "openid",
+    "offline_access",
+    "memory:read",
+    "project:read"
+  ],
+  "core": {
+    "base_url": "http://127.0.0.1:47831",
+    "credential_file": "/etc/mnemuron-web/secrets/core-readonly-token",
+    "required_internal_scopes": [
+      "memory:read",
+      "resume:read"
+    ],
+    "allow_plain_http_loopback_only": true,
+    "search_readiness_contract": "GET /readyz/search",
+    "timeout_ms": 5000,
+    "max_response_bytes": 262144,
+    "follow_redirects": false
+  },
+  "tools": {
+    "mnemuron_auth_status": {
+      "profile": [
+        "auth_only",
+        "readonly"
+      ],
+      "required_scope": "memory:read"
+    },
+    "mnemuron_search_memories": {
+      "profile": [
+        "readonly"
+      ],
+      "required_scope": "memory:read"
+    },
+    "mnemuron_get_memory": {
+      "profile": [
+        "readonly"
+      ],
+      "required_scope": "memory:read"
+    },
+    "mnemuron_preview_project_context": {
+      "profile": [
+        "readonly"
+      ],
+      "required_scope": "project:read"
+    }
+  },
+  "limits": {
+    "request_body_bytes": 65536,
+    "tool_response_bytes": 131072,
+    "concurrent_requests_per_subject": 4,
+    "requests_per_subject_per_minute": 120
+  },
+  "reverse_proxy": {
+    "trusted_peer_addresses": [
+      "127.0.0.1",
+      "::1"
+    ],
+    "allowed_host": "memory.example.com",
+    "public_scheme": "https",
+    "trust_unvalidated_forwarded_headers": false
+  },
+  "logging": {
+    "include_tokens": false,
+    "include_memory_content": false,
+    "include_request_body": false
+  }
+}

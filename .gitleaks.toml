@@ -1,0 +1,21 @@
+title = "Mnemuron publication boundary"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "mnemuron-credential"
+description = "Mnemuron runtime credentials are never source fixtures"
+regex = '''\bmnm_[A-Za-z0-9_-]{24,}'''
+keywords = ["mnm_"]
+
+[[rules]]
+id = "model-credential"
+description = "Model provider secrets, including example files"
+regex = '''\bsk-(?:proj-|ant-)?[A-Za-z0-9_-]{24,}'''
+keywords = ["sk-"]
+
+[[rules]]
+id = "authentication-material"
+description = "Inline OAuth, TOTP and recovery material requires review"
+regex = '''(?i)(?:client_secret|totp_secret|recovery_code|refresh_token)["']?\s*[:=]\s*["']([A-Za-z0-9_+/=.-]{16,})["']'''
+secretGroup = 1
