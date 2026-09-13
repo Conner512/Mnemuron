@@ -22,16 +22,13 @@ test("oversized project previews preserve read-only memory references within the
   const context = { config, auth: { scopes: new Set(["project:read"]) }, core: { call: async () => original }, id: "bounded" };
   const result = await prepareTool("mnemuron_preview_project_context", { query: "Example" }, context);
   assert.deepEqual(original, saved);
-  assert.equal(result.tasks[0].canonical_version, 3);
-  assert.equal(result.tasks[0].has_conflicts, true);
-  assert.equal(result.tasks[0].canonical_freshness, "updates_pending");
-  assert.deepEqual(result.structured_memories[0].provenance, original.structured_memories[0].provenance);
+  assert.deepEqual(result.tasks,[]);
+  assert.deepEqual(result.structured_memories[0].provenance, {source_preserved:true,details_omitted:true});
   assert.equal(result.structured_memories[0].memory_id, "memory-example");
   assert.equal(Array.from(result.structured_memories[0].content).length, 160);
   assert.equal(result.structured_memories[0].content_truncated, true);
   assert.equal(result.projection.full_context_returned, false);
-  assert.deepEqual(result.tasks[0].field_availability.progress, { recorded: true, item_count: 1, returned: 'omitted' });
-  assert.deepEqual(result.tasks[0].field_availability.goal, { recorded: null, item_count: null, returned: 'omitted' });
+  assert.equal(result.read_capabilities.task_field_details,false);
   assert.equal(result.task_detail_action, undefined);
   assert.equal(result.next_action.tool, "mnemuron_get_memory");
   assert.deepEqual(result.safety, { resume_created: false, task_scope_changed: false, context_injected: false });
@@ -39,4 +36,16 @@ test("oversized project previews preserve read-only memory references within the
   assert(Buffer.byteLength(JSON.stringify(wire)) <= config.limits.tool_response_bytes);
   config.limits.tool_response_bytes = 1024;
   await assert.rejects(prepareTool("mnemuron_preview_project_context", { query: "Example" }, context), error => error.code === "TOOL_RESPONSE_TOO_LARGE");
+});
+
+test('small and unresolved projects get the same safe projection, independent of byte budget',async()=>{
+  for(const status of ['project_context_preview','ambiguous','no_match']) {
+    const context={config:{tool_profile:'readonly',limits:{tool_response_bytes:131072}},auth:{scopes:new Set(['project:read'])},id:1,
+      core:{call:async()=>({status,read_only:true,project:{project_id:'p',name:'private-marker'},tasks:[{goal:'private-marker'}],
+        candidates:[{title:'private-marker'}],source_summary:{identities:['private-marker']},recent_activity:[{content:'private-marker'}],next_action:{type:'select_task_for_resume_preview'}})}};
+    const result=await prepareTool('mnemuron_preview_project_context',{project_id:'p'},context);
+    assert.ok(!JSON.stringify(result).includes('private-marker'));
+    assert.ok(!JSON.stringify(result).includes('select_task_for_resume_preview'));
+    assert.equal(result.read_capabilities.task_field_details,false);
+  }
 });

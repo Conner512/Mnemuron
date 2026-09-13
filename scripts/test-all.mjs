@@ -10,16 +10,21 @@ export function runSuites(suites, {run=spawnSync,env=process.env,cwd=path.resolv
   for (const suite of suites) {
     const result=run(suite.command,suite.args,{cwd,env:isolated,encoding:'utf8',timeout:180000,maxBuffer:32*1024*1024});
     const output=(result.stdout || '')+(result.stderr || '');
-    const count=label=>Number(output.match(new RegExp(`(?:#|ℹ) ${label} (\\d+)`))?.[1] || 0);
+    const count=label=>Number([...output.matchAll(new RegExp(`^(?:#|ℹ) ${label} (\\d+)\\s*$`,'gm'))].at(-1)?.[1] || 0);
     const pythonTests=Number(output.match(/Ran (\d+) tests?/)?.[1] || 0);
     const pythonCount=label=>Number(output.match(new RegExp(`\\b${label}=(\\d+)`))?.[1] || 0);
     const skipped=count('skipped') || pythonCount('skipped');
     const failed=count('fail') || pythonCount('failures')+pythonCount('errors');
+    const tests=count('tests') || pythonTests;
+    const cancelled=count('cancelled');
+    const unexpectedSkip=skipped>0 && !(suite.allowSkipped===true && typeof suite.skipReason==='string' && suite.skipReason.trim());
+    const passed=result.status===0 && tests>0 && failed===0 && cancelled===0 && !unexpectedSkip;
     results.push({suite:suite.name,exit_code:result.status,signal:result.signal,error_code:result.error?.code || null,
-      tests:count('tests') || pythonTests,passed:count('pass') || (pythonTests && result.status===0 ? pythonTests-skipped : 0),
-      failed,skipped,cancelled:count('cancelled'),
-      status:result.status===0?'passed':result.error?'blocked':'failed'});
-    if (result.status!==0) process.stderr.write(output);
+      tests,passed:count('pass') || (pythonTests && result.status===0 ? pythonTests-skipped : 0),
+      failed,skipped,cancelled,skip_reason:skipped && !unexpectedSkip?suite.skipReason:null,
+      status:passed?'passed':result.error?'blocked':'failed',
+      validation_error:!tests?'ZERO_TESTS':unexpectedSkip?'UNEXPECTED_SKIPS':null});
+    if (!passed) process.stderr.write(output);
   }
   return {status:results.every(r=>r.status==='passed')?'passed':'failed',results};
 }

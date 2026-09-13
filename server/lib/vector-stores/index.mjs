@@ -4,6 +4,7 @@ import {memoryScopeSql,resolveMemoryScope} from '../memory-scope.mjs';
 import {memorySummary,boundMemoryResponse} from '../memory-projection.mjs';
 import {scopeKey} from '../memory-derived/store.mjs';
 import {normalizeSearch,searchTokens} from '../memory-retrieval.mjs';
+import {isWebReader,webMemorySql} from '../memory/web-visibility.mjs';
 
 export const surrogate=value=>digest(['vector-private-v1',value]);
 const pointId=(...values)=>{const h=digest(values);return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
@@ -123,22 +124,38 @@ export class VectorIndex {
     const mode=payload.mode || 'lexical';if(!['lexical','hybrid','semantic'].includes(mode))fail('INVALID_RETRIEVAL_MODE');
     if(mode==='lexical')return this.store.queryMemories(auth,payload);
     // Existing validation and exact scope resolution remain authoritative.
-    const lexical=this.store.queryMemories(auth,{...payload,limit:Math.min(payload.limit || 10,20)}),scope=resolveMemoryScope(this.db,auth.user_id,payload),limit=lexical.result_limit;
+    let lexical=this.store.queryMemories(auth,{...payload,limit:Math.min(payload.limit || 10,20)});
+    const scope=resolveMemoryScope(this.db,auth.user_id,payload),limit=lexical.result_limit;
     try{
       const snapshot=this.snapshot(),e=this.embedders.get(snapshot.profile);if(!e)fail('NOT_CONFIGURED');
       const scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false});
-      const scopes=this.db.prepare(`SELECT DISTINCT m.user_id,m.scope,m.project_id,m.task_id,m.workstream_id,m.session_id FROM memories m WHERE m.user_id=? AND m.status='active' AND ${scopeSql.sql} LIMIT 129`).all(auth.user_id,...scopeSql.params);
+      const assertWebIndexFresh=()=>{
+        if(!isWebReader(auth))return;
+        const documents=this.db.prepare(`SELECT m.memory_id,d.revision,d.state_hash,d.scope_key,d.state FROM memories m
+          LEFT JOIN memory_vector_documents d ON d.user_id=m.user_id AND d.memory_id=m.memory_id AND d.generation=?
+          WHERE m.user_id=? AND m.status='active' AND ${scopeSql.sql} AND ${webMemorySql(auth)}`)
+          .iterate(snapshot.generation,auth.user_id,...scopeSql.params);
+        for(const document of documents)if(document.state!=='indexed' || !this.store.derivedMemory.validateItem({...document,user_id:auth.user_id}))fail('VECTOR_STALE');
+      };
+      assertWebIndexFresh();
+      const scopes=this.db.prepare(`SELECT DISTINCT m.user_id,m.scope,m.project_id,m.task_id,m.workstream_id,m.session_id FROM memories m WHERE m.user_id=? AND m.status='active' AND ${scopeSql.sql} AND ${webMemorySql(auth)} LIMIT 129`).all(auth.user_id,...scopeSql.params);
       if(scopes.length>128)fail('VECTOR_SCOPE_TOO_BROAD');
       const filter={must:[condition('owner',surrogate(auth.user_id)),condition('profile',snapshot.profile),condition('lifecycle','active'),{key:'scope',match:{any:scopes.map(row=>surrogate(scopeKey(row)))}}]};
       const {vectors}=await this.embed(e,[payload.query],'query',{sensitivity:'sensitive'});
       const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[];
+      assertWebIndexFresh();
+      // Network waits may outlive a privacy change; rebuild lexical results and conflicts now.
+      lexical=this.store.queryMemories(auth,{...payload,limit});
       for(const hit of hits){
         const point=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=? AND user_id=?').get(String(hit.id),snapshot.generation,auth.user_id);if(!point)continue;
         const row=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=? AND m.status='active' AND ${scopeSql.sql}`).get(auth.user_id,point.memory_id,...scopeSql.params);
-        if(!row || payload.memory_types && !payload.memory_types.includes(row.memory_type))continue;
+        if(!row || !this.store.webVisibility.visible(auth,row.memory_id) || payload.statuses && !payload.statuses.includes(row.status)
+          || payload.memory_types && !payload.memory_types.includes(row.memory_type))continue;
         const source=this.store.derivedMemory.currentSource(auth.user_id,point.memory_id);
         if(!source || source.revision!==point.revision || hit.payload?.content_hash!==digest(source.content) || hit.payload?.profile!==snapshot.profile || !e.profile.egress.sensitivities.includes(source.sensitivity))continue;
-        if(!semantic.some(m=>m.memory_id===row.memory_id))semantic.push(memorySummary(this.store.memoryFromRow(row)));
+        if(!semantic.some(m=>m.memory_id===row.memory_id)) {
+          const memory=memorySummary(this.store.memoryFromRow(row));semantic.push(isWebReader(auth)?this.store.webVisibility.project(auth,memory):memory);
+        }
       }
       const ranked=new Map(),add=(items,method)=>items.forEach((item,index)=>{const old=ranked.get(item.memory_id) || {item,rrf:0,methods:[]};old.rrf+=1/(60+index+1);old.methods.push(method);ranked.set(item.memory_id,old);});
       if(mode==='hybrid')add(lexical.results,'lexical');add(semantic,'semantic');
@@ -151,8 +168,13 @@ export class VectorIndex {
       }
       const result=[...ranked.values()].sort((a,b)=>Number(exact.has(b.item.memory_id))-Number(exact.has(a.item.memory_id)) || b.rrf-a.rrf || a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
         .map(r=>({...r.item,ranking:{method:'rrf-v1',score:r.rrf,matched_by:r.methods}}));
-      lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length};
+      lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length};
       boundMemoryResponse(lexical);return lexical;
-    }catch(error){if(mode==='semantic')fail('SEMANTIC_UNAVAILABLE');lexical.retrieval={...lexical.retrieval,mode,degraded:true,fallback:'lexical',degradation_code:'VECTOR_UNAVAILABLE'};return lexical;}
+    }catch(error){
+      const code=['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED'].includes(error.code)?error.code:'VECTOR_UNAVAILABLE';
+      if(mode==='semantic')throw Object.assign(new Error('Semantic retrieval unavailable.'),{statusCode:503,code:'SEMANTIC_UNAVAILABLE',errorCode:'SEMANTIC_UNAVAILABLE',degradation_code:code});
+      lexical=this.store.queryMemories(auth,{...payload,limit});
+      lexical.retrieval={...lexical.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return lexical;
+    }
   }
 }

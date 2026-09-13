@@ -97,11 +97,22 @@ export class MemoryRevisions {
     this.db.prepare('INSERT OR IGNORE INTO memory_source_links VALUES (?,?,?,?,?,?,?,?,?)').run(row.user_id,row.memory_id,revision,sourceId,start,end,version,selector,selector===null?'unknown':'utf16_code_units');
   }
   detail(userId, memoryId, {offset = 0, limit = 100} = {}) {
+    this.db.exec('SAVEPOINT memory_source_detail');
+    try { return this.readDetail(userId,memoryId,{offset,limit}); }
+    finally { this.db.exec('RELEASE memory_source_detail'); }
+  }
+  readDetail(userId, memoryId, {offset,limit}) {
     const current = this.latest(userId,memoryId);
     if (!current) return null;
+    // Replays can add sources without changing the memory revision. Pin the ordered link set too.
+    const version=createHash('sha256').update(json([userId,memoryId,current.revision]));
+    for(const link of this.db.prepare(`SELECT source_id,span_start,span_end,extraction_version,text_selector,span_unit
+      FROM memory_source_links WHERE user_id=? AND memory_id=? AND revision=?
+      ORDER BY source_id,span_start,span_end,extraction_version`).iterate(userId,memoryId,current.revision))version.update(json(link));
+    const sourceVersion=version.digest('hex');
     const rows = this.db.prepare(`SELECT s.*,l.span_start,l.span_end,l.extraction_version,l.text_selector,l.span_unit FROM memory_source_links l JOIN memory_sources s
       ON s.user_id=l.user_id AND s.source_id=l.source_id WHERE l.user_id=? AND l.memory_id=? AND l.revision=?
-      ORDER BY l.source_id,l.span_start LIMIT ? OFFSET ?`).all(userId,memoryId,current.revision,limit+1,offset);
+      ORDER BY l.source_id,l.span_start,l.span_end,l.extraction_version LIMIT ? OFFSET ?`).all(userId,memoryId,current.revision,limit+1,offset);
     const sources = rows.slice(0,limit).map(row => {
       let availability = row.source_status;
       if (row.source_event_id) {
@@ -114,7 +125,7 @@ export class MemoryRevisions {
         span_available:row.span_start>=0 && row.text_selector!==null && row.span_unit!=='unknown',
         content_length_unit:row.source_kind==='captured_event'?'utf8_json_bytes':'unicode_code_points'};
     });
-    return {revision:current.revision,content_hash:current.content_hash,evidence_kind:current.evidence_kind,
+    return {revision:current.revision,source_version:sourceVersion,content_hash:current.content_hash,evidence_kind:current.evidence_kind,
       independently_fact_checked:false, sources,next_source_offset:rows.length>limit?offset+limit:null};
   }
 }

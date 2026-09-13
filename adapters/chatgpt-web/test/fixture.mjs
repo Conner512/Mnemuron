@@ -4,6 +4,13 @@ import { testIngress } from "../../../services/oauth/test/ingress.mjs";
 import { writePrivate } from "../../../shared/oauth-common.mjs";
 import { createGateway } from "../src/server.mjs";
 
+export function approveWebMemory(core,...memories) {
+  for(const memory of memories) {
+    const {revision,state_hash}=core.store.revisions.latest(core.a.auth.user_id,memory.memory_id);
+    core.store.webVisibility.set(core.a.auth,memory.memory_id,{allow:true,revision,state_hash});
+  }
+}
+
 export async function gatewayFixture(t, { profile = "auth_only", coreFixture, mutate = () => {}, sharedOrigin = false, loopbackAuth = false, authMutate = () => {} } = {}) {
   const ingressPort = sharedOrigin ? await freePort() : undefined;
   const f = await fixture(t, { mutate: (config) => {
@@ -41,7 +48,7 @@ export async function gatewayFixture(t, { profile = "auth_only", coreFixture, mu
   writePrivate(config.identity_map_file, map);
   if (coreFixture) {
     const credential = coreFixture.store.issueCredential({ userId: coreFixture.a.auth.user_id, deviceId: "synthetic-web",
-      agentId: "web", agentInstanceId: "synthetic-web-readonly", scopes: ["memory:read", "resume:read"] });
+      agentId: "chatgpt-web", agentInstanceId: "synthetic-web-readonly", scopes: ["memory:read", "resume:read"] });
     f.coreCredential = credential;
     writePrivate(config.core.credential_file, credential.api_key);
   }

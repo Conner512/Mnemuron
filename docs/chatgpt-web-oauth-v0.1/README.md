@@ -19,16 +19,25 @@ The gateway uses the official MCP SDK's stateless Streamable HTTP transport. Eve
 | --- | --- | --- |
 | `bootstrap_metadata_only` | Public discovery; `/mcp` returns a 401 challenge; authorization is unavailable | None; no core credential read |
 | `oauth` + `auth_only` | Real login/consent/token lifecycle; `mnemuron_auth_status` only | None |
-| `oauth` + `readonly` | Diagnostic and the three business read tools below | Dedicated read-only agent credential |
+| `oauth` + `readonly` | Diagnostic and configured memory read tools below | Dedicated read-only agent credential plus Web visibility policy |
 
 | Tool | OAuth scope | Fixed Core route |
 | --- | --- | --- |
 | `mnemuron_auth_status` | `memory:read` | None; no personal identity in the result |
 | `mnemuron_search_memories` | `memory:read` | `POST /v1/memories/query` |
 | `mnemuron_get_memory` | `memory:read` | `GET /v1/memories/:id` |
+| `mnemuron_get_summary` (opt-in) | `memory:read` | `POST /v1/memory-summaries/query` |
 | `mnemuron_preview_project_context` | `project:read` | `POST /v1/project-context/preview` |
 
 Only the local `issuer + immutable sub` mapping selects the Core user and agent. Tool parameters and `_meta` cannot select credentials or override that identity. This is one owner's authorized data, **not** per-project OAuth access control: project and task parameters narrow a query, not the underlying grant.
+
+Core additionally verifies the destination from the dedicated credential's `agent_id=chatgpt-web`. The gateway requires the matching `web-memory-visibility-v1` policy marker; an older Core or a generic agent key fails closed. Explicitly classified `public` memories are visible. `internal` and default `sensitive` memories need local, current-version Web grants; `secret` memories are never eligible. Model/embedding egress approval is not a Web grant. Changes and retractions invalidate existing grants, including history reads. No existing private memory is auto-approved during migration.
+
+`mnemuron_preview_project_context` is a compatibility memory filter, not project restoration: it requires an exact project identifier and only returns eligible memories. It omits Task fields, project metadata, checkpoints, recent raw activity and Resume instructions, regardless of response size. Use memory search for natural-language questions.
+
+See [Web memory read contract and local verification](web-memory-review.md) for upgrade precautions, explicit local grant management, summary cursors, error handling and remaining acceptance gates.
+
+See [Daily grant and individual read-audit operations](web-read-operations.md) for metadata-only grant inventory, per-request evidence and real-client acceptance.
 
 The gateway does not register memory writes, Resume confirmation, task switching, hooks, capture, or arbitrary REST proxying. It does not collect complete conversations or generate Stop ACKs. Existing local API-key clients and the Preview → Confirm → next-turn delivery → Stop ACK contract are unchanged. `production_ready` remains `false`.
 
@@ -152,7 +161,7 @@ On each business read, the gateway verifies the Core credential belongs to the m
 
 Changing the gateway profile does not establish that an existing ChatGPT connection has loaded its new tools. If `mnemuron_auth_status` reports `readonly` but the client still lists only that diagnostic tool, inspect the saved connection's actions and refresh its metadata. For developer-mode connections, open the existing connection in ChatGPT Plugins, select **Refresh**, verify the advertised tools, then retest in a new conversation. Published plugins use reviewed metadata snapshots and require a new published version instead. See [OpenAI's metadata refresh instructions](https://developers.openai.com/plugins/deploy/connect-chatgpt#refresh-metadata).
 
-The saved server URL must include `/mcp`. In `readonly`, expect exactly the four tools listed above; refreshing metadata must not add write, Resume or handoff capabilities. Check the returned search IDs with `mnemuron_get_memory`, follow pagination until `content_complete=true`, and compare the real tool results with successful gateway requests. An authenticated status response alone is not memory-read acceptance. Keep account-specific results and memory contents outside the repository.
+The saved server URL must include `/mcp`. In `readonly`, expect four tools, or five when the optional summary tool is explicitly configured; refreshing metadata must not add write, Resume or handoff capabilities. Check the returned search IDs with `mnemuron_get_memory`, follow pagination until `content_complete=true`, and compare the real tool results with successful gateway requests. An authenticated status response alone is not memory-read acceptance. Keep account-specific results and memory contents outside the repository.
 
 ## Limits, failures and maintenance
 

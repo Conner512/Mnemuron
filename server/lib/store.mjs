@@ -16,6 +16,7 @@ import {MemorySources} from './memory/sources.mjs';
 import { HandoffPolicy } from "./handoff-policy.mjs";
 import { MemoryRevisions, exactText } from "./memory/revisions.mjs";
 import { MemoryService } from "./memory/service.mjs";
+import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,WEB_READ_POLICY} from './memory/web-visibility.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -649,6 +650,7 @@ export class MnemuronStore {
       this.revisions = new MemoryRevisions(this.db);
       this.memoryTransaction(() => this.revisions.migrate());
       this.derivedMemory = new DerivedMemory(this);
+      this.webVisibility = new WebMemoryVisibility(this);
       this.memorySources = new MemorySources(this);
       this.memoryConfig = options.memoryConfig || {};
       const jobConfig=this.memoryConfig.jobs || {};
@@ -3885,19 +3887,23 @@ export class MnemuronStore {
     this.requireScope(auth,'memory:read');
     if(!payload || !['user','project','task','workstream','session'].includes(payload.scope))throw new ValidationError('Exact summary scope is required.');
     const effective=resolveMemoryScope(this.db,auth.user_id,payload,{write:true});
-    const result=this.derivedMemory.summaries(auth.user_id,scopeKey({user_id:auth.user_id,scope:payload.scope,...effective}),{offset:payload.offset,limit:payload.limit});
-    while(Buffer.byteLength(JSON.stringify(result))>128*1024 && result.results.length){result.results.pop();result.truncated=true;}
-    return {...result,production_ready:false};
+    const result=this.derivedMemory.summaries(auth.user_id,scopeKey({user_id:auth.user_id,scope:payload.scope,...effective}),
+      {offset:payload.offset,limit:payload.limit,cursor:payload.cursor,category:payload.category,auth,budget:isWebReader(auth)?48*1024:128*1024});
+    const {offset,cursor,...request}=payload;
+    return {...result,next_request:result.next_cursor?{...request,cursor:result.next_cursor}:null,production_ready:false};
   }
 
   async searchMemories(auth,payload) {
     const mode=payload?.mode || this.memoryConfig.memory?.retrieval?.mode || 'lexical';
     if(!['lexical','hybrid','semantic'].includes(mode))throw new ValidationError('Invalid retrieval mode.');
-    if(mode==='lexical')return this.queryMemories(auth,payload);
+    if(mode==='lexical') {
+      const result=this.queryMemories(auth,payload);
+      result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical'};return result;
+    }
     if(this.vectorIndex)return this.vectorIndex.search(auth,{...payload,mode});
     const result=this.queryMemories(auth,payload);
-    if(mode==='semantic')throw new ModelError('SEMANTIC_UNAVAILABLE');
-    result.retrieval={...result.retrieval,mode,degraded:true,fallback:'lexical',degradation_code:'VECTOR_DISABLED'};return result;
+    if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:'VECTOR_DISABLED'});
+    result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'VECTOR_DISABLED'};return result;
   }
 
   queryMemories(auth, payload) {
@@ -3938,7 +3944,7 @@ export class MnemuronStore {
     const includeShared = payload.include_shared !== false;
     const effectiveScope = resolveMemoryScope(this.db, auth.user_id, payload, { workstreamIds });
     const selection = this.memorySearch.candidates(auth.user_id, payload.query, effectiveScope,
-      {workstreamIds, includeShared, statuses, memoryTypes});
+      {workstreamIds, includeShared, statuses, memoryTypes, auth});
     const rows = selection.rows;
     const currentTime = Date.now();
     const candidates = rows
@@ -4008,7 +4014,7 @@ export class MnemuronStore {
         automatic_resolution_performed: false,
       }];
     });
-    const task = payload.task_id
+    const task = payload.task_id && !isWebReader(auth)
       ? this.listTasks(auth.user_id).find((candidate) => candidate.task_id === payload.task_id)
       : null;
     const result = {
@@ -4057,6 +4063,16 @@ export class MnemuronStore {
       },
     };
     boundMemoryResponse(result);
+    if(isWebReader(auth)) {
+      result.effective_scope={project_id:payload.project_id || null,task_id:payload.task_id || null,
+        session_id:payload.session_id || null,source_workstream_ids:workstreamIds || []};
+      result.results=result.results.map(memory=>this.webVisibility.project(auth,memory));
+      result.conflict_presentation.potential_conflicts=result.conflict_presentation.potential_conflicts.map(conflict=>({
+        classification:conflict.classification,memory_type:conflict.memory_type,memory_ids:conflict.memory_ids,
+        variants:conflict.variants.map(memory=>this.webVisibility.project(auth,memory)),automatic_resolution_performed:false,
+      }));
+      result.visibility_policy=WEB_READ_POLICY;
+    }
     this.audit({
       auth,
       action: "memory.query",
@@ -4078,7 +4094,10 @@ export class MnemuronStore {
     const offset = payload.content_offset ?? 0, limit = payload.content_limit ?? 8192;
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 8192) throw new ValidationError('Invalid content_offset/content_limit.');
     const row = this.db.prepare(`SELECT * FROM memories WHERE user_id=? AND memory_id=? ${includeHistory ? '' : "AND status='active'"}`).get(auth.user_id,memoryId);
-    if (!row) throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    if (!row || !this.webVisibility.visible(auth,memoryId)) throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    const revision=this.revisions.latest(auth.user_id,memoryId)?.revision;
+    if(payload.revision!==undefined && (!Number.isSafeInteger(payload.revision) || payload.revision!==revision))throw new ConflictError('Memory changed; restart reading.','MEMORY_VERSION_CHANGED');
+    if(isWebReader(auth) && (offset>0 || (payload.source_offset ?? 0)>0) && payload.revision===undefined)throw new ValidationError('Continuation requires revision.');
     const memory = this.memoryFromRow(row), length = Array.from(memory.content).length;
     if (offset > length) throw new ValidationError('content_offset exceeds content length.');
     const sourceIds=memory.source_event_ids.slice(0,100);
@@ -4091,16 +4110,30 @@ export class MnemuronStore {
     const end=offset+Array.from(memory.content).length;
     const sourceOffset = payload.source_offset ?? 0;
     if (!Number.isSafeInteger(sourceOffset) || sourceOffset<0) throw new ValidationError("Invalid source_offset.");
+    if(payload.source_version!==undefined && (typeof payload.source_version!=='string' || !/^[a-f0-9]{64}$/.test(payload.source_version)))throw new ValidationError('Invalid source_version.');
+    if(isWebReader(auth) && sourceOffset>0 && payload.source_version===undefined)throw new ValidationError('Source continuation requires source_version.');
     const sourceManifest = this.revisions.detail(auth.user_id,memoryId,{offset:sourceOffset,limit:20});
+    if(sourceManifest && sourceManifest.revision!==revision)throw new ConflictError('Memory changed; restart reading.','MEMORY_VERSION_CHANGED');
+    if(payload.source_version!==undefined && payload.source_version!==sourceManifest?.source_version)throw new ConflictError('Sources changed; restart source reading.','SOURCE_MANIFEST_CHANGED');
     const result={read_only:true,memory,sources,source_manifest:sourceManifest,source_ids_truncated:row.source_event_ids_json ? JSON.parse(row.source_event_ids_json).length>100 : false,
-      content_offset:offset,content_length:length,content_length_unit:'unicode_code_points',next_offset:end<length?end:null,content_complete:end===length,budget_bytes:MEMORY_RESPONSE_BYTES};
+      revision,content_offset:offset,content_length:length,content_length_unit:'unicode_code_points',next_offset:end<length?end:null,content_complete:end===length,budget_bytes:MEMORY_RESPONSE_BYTES,
+      next_request:end<length?{memory_id:memoryId,include_history:includeHistory,revision,source_version:sourceManifest?.source_version,content_offset:end,content_limit:limit,source_offset:sourceOffset}:null,
+      next_source_request:sourceManifest?.next_source_offset!==null && sourceManifest?.next_source_offset!==undefined?{memory_id:memoryId,include_history:includeHistory,revision,source_version:sourceManifest.source_version,content_offset:offset,content_limit:limit,source_offset:sourceManifest.next_source_offset}:null};
+    if(isWebReader(auth)) {
+      result.memory=webMemoryProjection(memory);result.sources=[];result.source_ids_truncated=false;
+      result.source_manifest=sourceManifest?{revision:sourceManifest.revision,source_version:sourceManifest.source_version,evidence_kind:sourceManifest.evidence_kind,
+        independently_fact_checked:false,sources:sourceManifest.sources.map(webSourceProjection),next_source_offset:sourceManifest.next_source_offset}:null;
+      result.visibility_policy=WEB_READ_POLICY;
+    }
     // Legacy metadata may predate current input limits; retain IDs, omit oversized optional metadata.
     if (serializedBytes(result)>MEMORY_RESPONSE_BYTES) {
       result.metadata_truncated=true;
       for (const key of ['generation','topic','topic_key','source','retraction']) delete memory[key];
     }
     if (serializedBytes(result)>MEMORY_RESPONSE_BYTES) throw Object.assign(new Error('Legacy metadata exceeds detail budget.'),{statusCode:422,errorCode:'DETAIL_METADATA_TOO_LARGE'});
-    this.audit({auth,action:'memory.read',targetType:'memory',targetId:memoryId});
+    this.audit({auth,action:'memory.read',targetType:'memory',targetId:memoryId,
+      metadata:{revision,content_offset:offset,content_returned_length:end-offset,content_complete:result.content_complete,
+        source_offset:sourceOffset,source_version:sourceManifest?.source_version || null}});
     return result;
   }
 
@@ -4335,6 +4368,19 @@ export class MnemuronStore {
 
   previewProjectContext(auth, payload) {
     this.requireScope(auth, "resume:read");
+    if(isWebReader(auth)) {
+      if(payload?.task_id || TASK_READ_OPTIONS.some(key=>Object.hasOwn(payload || {},key)))throw new AuthorizationError('web:task-details:unavailable');
+      const id=payload?.project_id || payload?.query;
+      const unavailable={status:'project_context_unavailable',read_only:true,read_capabilities:{task_field_details:false},next_action:{type:'search_memory',tool:'mnemuron_search_memories'}};
+      if(typeof id!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(id))return unavailable;
+      const rows=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.project_id=? AND m.status='active' AND ${webMemorySql(auth)} ORDER BY m.created_at DESC,m.memory_id LIMIT ?`).all(auth.user_id,id,PROJECT_CONTEXT_MEMORY_LIMIT);
+      if(!rows.length)return unavailable;
+      return {schema_version:PROJECT_CONTEXT_SCHEMA_VERSION,status:'project_context_preview',read_only:true,project:{project_id:id},tasks:[],
+        structured_memories:rows.map(row=>this.webVisibility.project(auth,memorySummary(this.memoryFromRow(row),160))),
+        read_capabilities:{task_field_details:false},visibility_policy:WEB_READ_POLICY,
+        source_summary:{included_memory_count:rows.length},projection:{gateway_summary_only:true,full_context_returned:false,omitted_fields:['tasks','checkpoints','recent_activity','project_metadata']},
+        safety:{resume_created:false,task_scope_changed:false,context_injected:false},next_action:{type:'read_memory',tool:'mnemuron_get_memory'}};
+    }
     if (payload && Object.hasOwn(payload, 'task_id')) return readTaskContext(this, auth, payload);
     if (payload && TASK_READ_OPTIONS.some(key => Object.hasOwn(payload, key))) {
       throw new ValidationError('Task read options require task_id.');
@@ -5770,6 +5816,7 @@ export class MnemuronStore {
       agent_id: auth.agent_id,
       agent_instance_id: auth.agent_instance_id,
       identity_status: "server_verified",
+      ...(isWebReader(auth)?{web_read_policy:WEB_READ_POLICY}:{}),
     };
   }
 

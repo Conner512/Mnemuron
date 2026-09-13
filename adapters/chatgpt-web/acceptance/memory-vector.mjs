@@ -60,7 +60,8 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
   };
   const search=async(query,extra={})=>{const r=await request('/v1/memories/query',{query,...bindings,...extra});assert.equal(r.status,200);return r.data;};
   const call=async(name,args={})=>web.mcp('tools/call',{name,arguments:args},token);
-  const tool=async(name,args)=>{const r=await call(name,args);assert.equal(r.status,200);assert.ok(r.data.result?.structuredContent);return r.data.result.structuredContent;};
+  const tool=async(name,args)=>{const r=await call(name,args);assert.equal(r.status,200);assert.ok(r.data.result?.structuredContent);assert.notEqual(r.data.result.isError,true);return r.data.result.structuredContent;};
+  const grant=memory=>{const {revision,state_hash}=app.store.revisions.latest(auth.user_id,memory.memory_id);app.store.webVisibility.set(auth,memory.memory_id,{allow:true,revision,state_hash});};
   const forbid=()=>[memories.foreign,memories.wrongProject,memories.wrongSession].map(m=>m.memory_id);
   const assertScope=rows=>{assert.ok(rows.length);assert.ok(rows.every(r=>!forbid().includes(r.memory_id)));assert.equal(new Set(rows.map(r=>r.memory_id)).size,rows.length);};
   const check=async(name,fn)=>{
@@ -109,7 +110,7 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
         dimensions:768,distance:'Cosine',query_prefix:'',document_prefix:'',normalization:'l2',chunker_version:'utf8-chunks-v1'}},
       vector_store:{...target,base_url:relay.origin,collection_prefix:prefix,auth:{secret_file:proxyKeyFile},egress:{approved:true,origins:[relay.origin],addresses:['127.0.0.1'],allow_private:true}}};
     await start();t.after(async()=>{if(app?.server.listening){app.server.closeAllConnections();await app.close();}});
-    const issue=userId=>app.store.issueCredential({userId,label:'Synthetic application acceptance',deviceId:'synthetic-device',agentId:'synthetic',agentInstanceId:userId+'-agent',scopes:['memory:read','memory:write']});
+    const issue=userId=>app.store.issueCredential({userId,label:'Synthetic application acceptance',deviceId:'synthetic-device',agentId:'synthetic',agentInstanceId:userId+'-agent',scopes:['memory:read','memory:write','admin:tasks']});
     credential=issue('synthetic-owner');otherCredential=issue('synthetic-other-owner');credentials.push(credential.api_key,otherCredential.api_key);auth=app.store.authenticate(credential.api_key);
     app.store.ensureProject(auth,bindings.project_id,'Synthetic A');app.store.ensureProject(auth,'project-synthetic-b','Synthetic B');
     await check('memory_only_http_save',async()=>{
@@ -150,6 +151,7 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       assert.equal((await search('8.4.1',{mode:'hybrid'})).results[0].memory_id,memories.router.memory_id);
     });
     await restart('hybrid');
+    for(const [name,memory] of Object.entries(memories))if(name!=='foreign')grant(memory);
     await check('oauth_mcp_discovery',async()=>{
       web=await gatewayFixture(t,{profile:'readonly',coreFixture:{store:app.store,baseUrl:`http://127.0.0.1:${corePort}`,a:{auth}},mutate:c=>{c.core.timeout_ms=5000;}});
       assert.equal((await web.mcp('tools/list')).status,401);
@@ -164,8 +166,9 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       const searchResult=await tool('mnemuron_search_memories',{query:'网络设备',...bindings,limit:20});assertScope(searchResult.results);
       assert.equal(searchResult.retrieval.mode,'hybrid');assert.equal(searchResult.retrieval.degraded,false);
       const selected=searchResult.results.find(m=>m.memory_id===memories.long.memory_id);assert.ok(selected);
-      let offset=0,content='',pages=0;do{
-        const detail=await tool('mnemuron_get_memory',{memory_id:selected.memory_id,content_offset:offset,content_limit:700});
+      let offset=0,content='',pages=0,revision;do{
+        const detail=await tool('mnemuron_get_memory',{memory_id:selected.memory_id,content_offset:offset,content_limit:700,...(revision?{revision}:{})});
+        revision=detail.revision;
         assert.equal(detail.content_offset,offset);assert.equal(detail.source_manifest.sources[0].source_kind,'explicit_memory');
         assert.ok(detail.source_manifest.revision>=1);content+=detail.memory.content;pages++;assert.ok(pages<20);
         if(detail.content_complete){assert.equal(detail.next_offset,null);break;}assert.ok(detail.next_offset>offset);offset=detail.next_offset;
@@ -173,18 +176,20 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       assert.equal(content,bodies.long);assert.ok(pages>1);return {search_returned_id_used:true,pages,unicode_code_points:Array.from(content).length,full_source_exact:true};
     });
     await check('web_scope_and_write_denial',async()=>{
-      assert.equal((await call('mnemuron_get_memory',{memory_id:memories.foreign.memory_id})).status,404);
-      assert.equal((await call('mnemuron_search_memories',{query:'network',user_id:'synthetic-other-owner'})).status,400);
-      assert.equal((await call('mnemuron_search_memories',{query:'network',mode:'semantic'})).status,400);
+      assert.equal((await call('mnemuron_get_memory',{memory_id:memories.foreign.memory_id})).data.result.structuredContent.error.code,'MEMORY_NOT_FOUND');
+      assert.equal((await call('mnemuron_search_memories',{query:'network',user_id:'synthetic-other-owner'})).data.result.isError,true);
+      assert.equal((await tool('mnemuron_search_memories',{query:'network',mode:'semantic'})).retrieval.effective_mode,'semantic');
       for(const name of ['mnemuron_remember','mnemuron_confirm_resume','mnemuron_delete_memory']){const r=await call(name,{});assert.ok(r.data.error || r.data.result?.isError);}
-      assert.equal((await request('/v1/memories',{scope:'user',content:'Synthetic forbidden write'},{key:web.coreCredential.api_key})).status,403);
+      assert.equal((await request('/v1/memories',{scope:'user',content:'Synthetic forbidden write'},{key:web.coreCredential.api_key})).status,404);
       const preview=await tool('mnemuron_preview_project_context',{query:bindings.project_id});assert.equal(preview.safety.resume_created,false);
     });
     await check('readonly_business_state',async()=>{assert.equal(business(),readSnapshot);return {memory_and_handoff_mutations:0};});
     await check('source_retraction_before_vector_cleanup',async()=>{
       assert.equal((await request('/v1/memories/'+memories.disk.memory_id+'/retract',{})).status,200);
       const r=await tool('mnemuron_search_memories',{query:'disk',...bindings,limit:20});assert.ok(!r.results.some(m=>m.memory_id===memories.disk.memory_id));
-      assert.equal((await call('mnemuron_get_memory',{memory_id:memories.disk.memory_id})).status,404);
+      assert.equal((await call('mnemuron_get_memory',{memory_id:memories.disk.memory_id})).data.result.isError,true);
+      assert.equal((await call('mnemuron_get_memory',{memory_id:memories.disk.memory_id,include_history:true})).data.result.isError,true);
+      grant(memories.disk);
       const history=await tool('mnemuron_get_memory',{memory_id:memories.disk.memory_id,include_history:true});assert.equal(history.memory.status,'retracted');
       await app.store.vectorIndex.sync(generation);
     });
@@ -196,7 +201,7 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       return {fault:'owned-relay-503',qdrant_service_stopped:false,lexical_source_retained:true};
     });
     await check('semantic_error_through_web',async()=>{
-      await restart('semantic');const r=await call('mnemuron_search_memories',{query:'network',...bindings});assert.equal(r.status,503);assert.equal(r.data.error_code,'SEMANTIC_UNAVAILABLE');
+      await restart('semantic');const r=await call('mnemuron_search_memories',{query:'network',...bindings});assert.equal(r.status,200);assert.equal(r.data.result.isError,true);assert.equal(r.data.result.structuredContent.error.code,'SEMANTIC_UNAVAILABLE');
       relay.offline=false;assert.equal((await tool('mnemuron_search_memories',{query:'network',...bindings})).retrieval.degraded,false);
     });
     await check('isolated_app_reopen',async()=>{

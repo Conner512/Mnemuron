@@ -7,7 +7,9 @@ import { BoundaryError, WindowLimit, RESOURCE_SCOPES, OAUTH_SCOPES, requestBound
 import { validateGatewayConfig, loadGatewayConfig, loadIdentityMap } from "./config.mjs";
 import { GatewayAuthorization } from "./authorization.mjs";
 import { ReadonlyCoreClient } from "./core-client.mjs";
-import { createMcpServer, prepareTool, enabledTools } from "./tools.mjs";
+import { createMcpServer, toolDefinitions, enabledTools } from "./tools.mjs";
+import {requireScope} from './authorization.mjs';
+import {readObservation} from './read-audit.mjs';
 
 export function createGateway(input, { isolated = false, logger = () => {} } = {}) {
   const config = validateGatewayConfig(input, { isolated });
@@ -24,15 +26,23 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
     const started = Date.now();
     let key;
     let errorCode, tool;
+    let connectionId,read,readOutcome='not_executed',logged=false;
     let ownsSlot = false;
     response.setHeader("x-request-id", requestId);
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("referrer-policy", "no-referrer");
     response.setHeader("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
-    response.on("finish", () => logger({ time: new Date().toISOString(), request_id: requestId, component: "web",
+    const record = transportOutcome => {
+      if(logged)return;logged=true;
+      logger({ schema_version:'web-read-audit-v1',time: new Date().toISOString(), request_id: requestId, component: "web",
       status: response.statusCode, duration_ms: Date.now() - started, subject_hash: key, tool,
-      error_code: errorCode || (response.statusCode >= 400 ? "MCP_REQUEST_REJECTED" : undefined) }));
+      connection_id:connectionId,connection_kind:'oauth_client_subject',physical_device_verified:false,
+      transport_outcome:transportOutcome,read_outcome:readOutcome,client_consumption_verified:false,read,
+      error_code: errorCode || (response.statusCode >= 400 ? "MCP_REQUEST_REJECTED" : undefined) });
+    };
+    response.on('finish',()=>record('response_finished'));
+    response.on('close',()=>record('connection_closed'));
     try {
       const url = requestBoundary(request, origin, { isolated });
       // Shared-host browser cookies belong to the AS, never to MCP authentication or the SDK.
@@ -61,6 +71,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       if (url.pathname !== "/mcp") throw new BoundaryError(404, "NOT_FOUND");
       if (!authorization) throw new BoundaryError(401, "AUTH_REQUIRED");
       const auth = await authorization.verify(request);
+      connectionId=auth.connection_id;
       key = secretHash(`${config.issuer}|${auth.mapping.subject}`);
       limits.take(`subject:${key}`, config.limits.requests_per_subject_per_minute);
       if ((concurrent.get(key) || 0) >= config.limits.concurrent_requests_per_subject) throw new BoundaryError(429, "BUSY");
@@ -79,17 +90,17 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       if (!body || typeof body !== "object" || Array.isArray(body) || body.jsonrpc !== "2.0") {
         throw new BoundaryError(400, "INVALID_MCP_REQUEST");
       }
-      if (body.id !== undefined && !((typeof body.id === "string" && body.id.length <= 128) || Number.isSafeInteger(body.id))) {
+      if (body.id !== undefined && !((typeof body.id === "string" && Buffer.byteLength(body.id) <= 128) || Number.isSafeInteger(body.id))) {
         throw new BoundaryError(400, "INVALID_MCP_REQUEST_ID");
       }
-      let prepared;
       if (body.method === "tools/call") {
         if (body.id === undefined || !body.params || typeof body.params.name !== "string") throw new BoundaryError(400, "INVALID_MCP_REQUEST");
         if (enabledTools(config).includes(body.params.name)) tool = body.params.name;
-        const result = await prepareTool(body.params.name, body.params.arguments, { config, auth, core, id: body.id });
-        prepared = { name: body.params.name, result };
+        if(tool)requireScope(auth,toolDefinitions[tool].scope);
       }
-      const mcp = createMcpServer({ config, auth, prepared });
+      const mcp = createMcpServer({ config, auth, core, id:body.id,
+        onError:code=>{errorCode=code;readOutcome='tool_error';},
+        onResult:(name,result)=>{read=readObservation(name,result);readOutcome='success';} });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
       const closed = () => { void transport.close(); void mcp.close(); };
       response.once("close", closed);

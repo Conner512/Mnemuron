@@ -67,6 +67,10 @@
       ],
       "required_scope": "memory:read"
     },
+    "mnemuron_get_summary": {
+      "profile": ["readonly"],
+      "required_scope": "memory:read"
+    },
     "mnemuron_preview_project_context": {
       "profile": [
         "readonly"

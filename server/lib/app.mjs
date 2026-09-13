@@ -1,5 +1,6 @@
 import http from "node:http";
 import { URL } from "node:url";
+import {isWebReader} from './memory/web-visibility.mjs';
 import {
   AuthenticationError,
   MnemuronStore,
@@ -97,6 +98,10 @@ export function createMnemuronApp({
       }
 
       const auth = store.authenticate(bearerToken(request));
+      if(isWebReader(auth) && !(
+        request.method==='GET' && (['/v1/identity','/readyz/search'].includes(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview'].includes(pathname)))
+        throw new NotFoundError('Endpoint not available to this destination.');
 
       if (request.method === 'GET' && pathname === '/v1/capabilities') {
         responseStatus = 200;
@@ -242,7 +247,8 @@ export function createMnemuronApp({
           if (!['true','false'].includes(value)) throw new ValidationError('include_history must be true or false.');
           options.include_history = value === 'true';
         }
-        for (const field of ['content_offset','content_limit','source_offset']) if (url.searchParams.has(field)) options[field] = Number(url.searchParams.get(field));
+        for (const field of ['content_offset','content_limit','source_offset','revision']) if (url.searchParams.has(field)) options[field] = Number(url.searchParams.get(field));
+        if(url.searchParams.has('source_version'))options.source_version=url.searchParams.get('source_version');
         return sendJson(response, 200, store.memoryDetail(auth, deleteMemory[0], options));
       }
       if (request.method === "DELETE" && deleteMemory) {
@@ -409,6 +415,7 @@ export function createMnemuronApp({
           error: responseStatus >= 500 ? "Internal server error." : error.message,
           error_code: responseStatus >= 500 && !['SEARCH_UNAVAILABLE','SEARCH_RETRYABLE','SEMANTIC_UNAVAILABLE'].includes(error.errorCode) ? "INTERNAL_ERROR" : error.errorCode
             || (responseStatus === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_FAILED"),
+          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
         });
       }
     } finally {
