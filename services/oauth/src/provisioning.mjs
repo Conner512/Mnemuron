@@ -1,10 +1,11 @@
+import {CONSOLE_READ_SCOPES,CONSOLE_WRITE_SCOPES} from '../../../shared/console-contract.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import {randomSecret,secretHash,readPrivate,writePrivate,requireConfig,CORE_SCOPES} from '../../../shared/oauth-common.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 
-export function provisionIdentities(identities,core,{credentialDirectory,identityMapFile,afterCore=()=>{}}) {
+export function provisionIdentities(identities,core,{credentialDirectory,identityMapFile,afterCore=()=>{},consoleOperations=false}) {
   storageDoctor({credential_directory:credentialDirectory,identity_map:identityMapFile});
   const db=identities.db;
   const operations=db.prepare("SELECT * FROM identity_operations WHERE kind LIKE 'provision:%' AND state NOT IN ('completed','superseded') ORDER BY created,operation_id").all();
@@ -18,7 +19,7 @@ export function provisionIdentities(identities,core,{credentialDirectory,identit
       if(row.payload_cipher)return identities.unseal(row.payload_cipher,a.account_id,'provision');
       const bindings=['web','console'].map(purpose=>({purpose,credential_id:randomUUID(),api_key:`mnm_${randomSecret()}`,
         user_id:a.user_id,agent_instance_id:`${purpose}-${a.account_id}`,agent_id:purpose==='web'?'chatgpt-web':'mnemuron-console',
-        scopes:purpose==='web'?[...CORE_SCOPES]:['memory:read','resume:read','console:read'],
+        scopes:purpose==='web'?[...CORE_SCOPES]:[...(consoleOperations?CONSOLE_WRITE_SCOPES:CONSOLE_READ_SCOPES)],
         credential_file:path.join(credentialDirectory,`${a.account_id}-${purpose}-v${a.security_version}.key`)}));
       db.prepare("UPDATE identity_operations SET state='prepared',payload_cipher=? WHERE operation_id=?")
         .run(identities.seal(bindings,a.account_id,'provision'),operation.operation_id);

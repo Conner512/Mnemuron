@@ -67,7 +67,7 @@ Recovery proof policy is pending; no weaker operator reset is enabled.`);return;
       requireConfig(args.has('--confirm'),'explicit confirmation');
       const file=args.get('--core-database');requireConfig(fs.existsSync(file),'existing Core database');
       const core=new MnemuronStore(file);
-      try{result=provisionIdentities(ids,core,{credentialDirectory:args.get('--credential-directory'),identityMapFile:args.get('--identity-map')});}finally{core.close();}
+      try{result=provisionIdentities(ids,core,{credentialDirectory:args.get('--credential-directory'),identityMapFile:args.get('--identity-map'),consoleOperations:config.identity.console_operations===true});}finally{core.close();}
     } else if(command==='recovery-inspect'||command==='recovery-reset') {
       const target=ids.byId(args.get('--account-id'));requireConfig(!!target,'exact recovery account required');
       if(command==='recovery-reset') {

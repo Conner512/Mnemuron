@@ -1,4 +1,5 @@
 import {createHash} from 'node:crypto';
+import {consoleWritable} from '../../../shared/console-contract.mjs';
 import {ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
 
 export const WEB_READ_POLICY = 'web-memory-visibility-v1';
@@ -39,7 +40,7 @@ export class WebMemoryVisibility {
     return webMemoryProjection({...memory,revision:revision ?? null});
   }
   list(auth,{limit=20,after}={}) {
-    this.store.requireScope(auth,'admin:tasks');
+    if(!consoleWritable(auth))this.store.requireScope(auth,'admin:tasks');
     if(!Number.isSafeInteger(limit) || limit<1 || limit>100 || (after!==undefined && (typeof after!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(after))))throw new ValidationError('Invalid grant inventory page.');
     const rows=this.db.prepare('SELECT memory_id FROM memory_web_grants WHERE user_id=? AND memory_id>? ORDER BY memory_id LIMIT ?').all(auth.user_id,after || '',limit+1);
     const grants=rows.slice(0,limit).map(row=>this.inspect(auth,row.memory_id));
@@ -47,7 +48,7 @@ export class WebMemoryVisibility {
       next_request:rows.length>limit?{limit,after:grants.at(-1).memory_id}:null};
   }
   inspect(auth,id) {
-    this.store.requireScope(auth,'admin:tasks');
+    if(!consoleWritable(auth))this.store.requireScope(auth,'admin:tasks');
     const current=this.store.revisions.latest(auth.user_id,id);
     if(!current)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';
@@ -55,7 +56,7 @@ export class WebMemoryVisibility {
       allowed:this.visible({...auth,agent_id:'chatgpt-web'},id),content_returned:false,policy:WEB_READ_POLICY};
   }
   set(auth,id,{allow,revision,state_hash}={}) {
-    this.store.requireScope(auth,'admin:tasks');
+    if(!consoleWritable(auth))this.store.requireScope(auth,'admin:tasks');
     if(typeof allow!=='boolean')throw new ValidationError('Explicit allow or deny is required.');
     return this.store.memoryTransaction(()=>{
       const current=this.store.revisions.latest(auth.user_id,id);

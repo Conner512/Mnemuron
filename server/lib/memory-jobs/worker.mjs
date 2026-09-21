@@ -47,9 +47,9 @@ function validateSummary(sources,results,multiSpan){
   return sources.flatMap(source=>(selected.get(source.memory_id) || []).sort((a,b)=>a.start-b.start));
 }
 export class MemoryWorker {
-  constructor(store,jobs,organizer,{workerId='local-memory-worker',userId=null}={}){this.store=store;this.jobs=jobs;this.organizer=organizer;this.workerId=workerId;this.userId=userId;}
+  constructor(store,jobs,organizer,{workerId='local-memory-worker',userId=null,profileFilter=null}={}){this.store=store;this.jobs=jobs;this.organizer=organizer;this.workerId=workerId;this.userId=userId;this.profileFilter=profileFilter;}
   async runOne(){
-    const job=this.jobs.claim(this.workerId,{userId:this.userId});if(!job)return null;
+    const job=this.jobs.claim(this.workerId,{userId:this.userId,profile:this.profileFilter});if(!job)return null;
     const profile=this.organizer?.profile,retry=profile?.retry || {max_attempts:1,base_ms:1000,max_ms:1000};
     try{
       if(!profile?.enabled || profile.fingerprint!==job.profile)fail('NOT_CONFIGURED');

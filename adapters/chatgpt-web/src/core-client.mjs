@@ -44,6 +44,7 @@ export class ReadonlyCoreClient {
       || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
       || !Array.isArray(result.scopes) || result.scopes.length !== CORE_SCOPES.length
       || !CORE_SCOPES.every((scope) => result.scopes.includes(scope))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
+    return result;
   }
   async ready(mapping) {
     await this.checkIdentity(mapping);
@@ -51,11 +52,14 @@ export class ReadonlyCoreClient {
     if (result.ready !== true || result.component !== "memory_search") throw new BoundaryError(503, "SEARCH_UNAVAILABLE");
   }
   async call(name, args, mapping) {
-    await this.checkIdentity(mapping);
+    const identity=await this.checkIdentity(mapping);
     switch (name) {
       case "mnemuron_search_memories": {
         // A new account does not inherit the legacy owner's paid model allocation.
         if(this.config.identity_mode!=='multi_account_v1')return this.request('/v1/memories/query',args);
+        // This flag is self-scoped Core metadata, not a tool argument. Pin the allocation
+        // guard so a model removed between identity/read cannot fall back to a shared key.
+        if(identity?.personal_retrieval?.configured===true)return this.request('/v1/memories/query',{...args,mode:args.mode||'lexical',personal_model_only:true});
         if(args.mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
         const result=await this.request('/v1/memories/query',{...args,mode:'lexical'});
         if(args.mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};

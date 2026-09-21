@@ -1,5 +1,8 @@
 # Integrated account console (experimental)
 
+> **Opt-in functional update:** [console actions v0.4](console-functional-actions-v0.4.md) adds separately authorized human-console writes, owner-isolated models and explicit operator roles. The original read-only mode remains the default; old `blocked_policy` statements below describe that mode, not the new enabled mode. ChatGPT MCP scopes are unchanged.
+
+
 This is an **opt-in local implementation**, not a deployment instruction to run
 against an existing installation without a maintenance review. No production
 accounts, invitations, recovery proofs, domain routes or model permissions are

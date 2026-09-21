@@ -1,13 +1,13 @@
 {
   "schema_version": "account-ownership-inventory-v1",
   "core": {
-    "user_id": ["audit_events","checkpoints","credentials","events","handoff_drain_resumes","memories","memory_annotations","memory_category_overrides","memory_create_operations","memory_fingerprints","memory_index_outbox","memory_job_items","memory_jobs","memory_owner_model_usage","memory_owner_vector_usage","memory_privacy","memory_processing_outbox","memory_revisions","memory_source_links","memory_source_pins","memory_sources","memory_summaries","memory_summary_dependencies","memory_vector_documents","memory_vector_points","memory_web_grants","projects","resolver_selections","resume_delivery_receipts","resume_injection_events","resumes","task_bootstrap_previews","task_canonical_revisions","task_reconciliation_proposals","tasks"],
+    "user_id": ["audit_events","checkpoints","credentials","events","handoff_drain_resumes","memories","memory_annotations","memory_category_overrides","memory_create_operations","memory_fingerprints","memory_index_outbox","memory_job_items","memory_jobs","memory_owner_model_usage","memory_owner_vector_usage","memory_privacy","memory_processing_outbox","memory_revisions","memory_source_links","memory_source_pins","memory_sources","memory_summaries","memory_summary_dependencies","memory_vector_documents","memory_vector_points","memory_web_grants","projects","resolver_selections","resume_delivery_receipts","resume_injection_events","resumes","task_bootstrap_previews","task_canonical_revisions","task_reconciliation_proposals","tasks","console_operations","console_models","console_imports","console_vector_requests","console_settings","memory_vector_owners","memory_vector_owner_active"],
     "summary_parent": ["memory_derived_outbox","memory_summary_claims"],
     "memory_parent_fts_internal": ["memory_search_docs","memory_search_fts","memory_search_fts_config","memory_search_fts_data","memory_search_fts_docsize","memory_search_fts_idx"],
     "operator_only_infrastructure": ["handoff_module_state","memory_model_budget","memory_profile_state","memory_search_state","memory_vector_active","memory_vector_calls","memory_vector_generations","settings"]
   },
   "oauth": {
-    "immutable_account": ["identity_accounts","identity_bindings","identity_operations","identity_recovery_claims"],
+    "immutable_account": ["identity_accounts","identity_bindings","identity_operations","identity_recovery_claims","identity_console_roles","identity_console_operations","identity_console_enrollments"],
     "account_or_restricted_bootstrap": ["identity_sessions","identity_audit"],
     "operator_invitation_batch_then_registration": ["identity_invitations"],
     "subject_or_protocol_transaction": ["oauth_records","oauth_revoked_grants","oauth_mfa_steps","oauth_csrf"],

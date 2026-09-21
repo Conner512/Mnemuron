@@ -1,0 +1,44 @@
+name: Console browser integration
+on:
+  pull_request:
+    paths:
+      - 'web/console/**'
+      - 'services/oauth/**'
+      - 'server/lib/**'
+      - 'shared/**'
+      - 'scripts/test-console-browser.py'
+      - '.github/workflows/console-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Locked application dependencies
+        run: |
+          npm ci --prefix services/oauth --ignore-scripts
+          npm ci --prefix adapters/chatgpt-web --ignore-scripts
+      - name: Disposable browser test environment
+        run: |
+          python3 -m venv "$RUNNER_TEMP/console-browser-env"
+          "$RUNNER_TEMP/console-browser-env/bin/pip" install --disable-pip-version-check playwright==1.57.0
+          command -v google-chrome
+          google-chrome --version
+      - name: Real HTTP console workflows with synthetic identities only
+        run: '"$RUNNER_TEMP/console-browser-env/bin/python" scripts/test-console-browser.py'
+      - name: Synthetic non-secret preview screenshots
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: console-functional-synthetic-previews
+          path: ${{ runner.temp }}/mnemuron-browser-test-*/previews/*.png
+          retention-days: 3
+          if-no-files-found: error

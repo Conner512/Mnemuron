@@ -1,5 +1,8 @@
 # Account ownership and boundaries
 
+> **Opt-in functional update:** [console actions v0.4](../console-functional-actions-v0.4.md) adds separately authorized human-console writes, owner-isolated models and explicit operator roles. The original read-only mode remains the default; old `blocked_policy` statements below describe that mode, not the new enabled mode. ChatGPT MCP scopes are unchanged.
+
+
 This is an implementation inventory, not permission to deploy. The executable
 inventory beside this document covers every Core and OAuth table; regression
 tests fail when a table is added without a classification. `sqlite_%` tables

@@ -24,3 +24,13 @@ test('SEC-00: console search has an explicit no-egress mode while allocation pol
  const store={requireScope(){},searchMemories(principal,body){assert.equal(principal,auth);args=body;return {};}};
  consoleRead(store,auth,'memories',{query:'synthetic'});assert.equal(args.mode,'lexical');
 });
+test('console allocation: only self-scoped Core metadata enables personal semantic reads, never tool-supplied identity',async()=>{
+ const calls=[],client=Object.create(ReadonlyCoreClient.prototype);client.config={identity_mode:'multi_account_v1'};
+ client.checkIdentity=async()=>({personal_retrieval:{configured:true}});
+ client.request=async(route,body)=>{calls.push({route,body});return {results:[]};};
+ await client.call('mnemuron_search_memories',{query:'synthetic',mode:'semantic'},{});
+ assert.deepEqual(calls[0].body,{query:'synthetic',mode:'semantic',personal_model_only:true});
+ client.checkIdentity=async()=>({personal_retrieval:{configured:false}});
+ await assert.rejects(()=>client.call('mnemuron_search_memories',{query:'synthetic',mode:'semantic',personal_model_only:true},{}),e=>e.code==='SEMANTIC_UNAVAILABLE');
+ assert.equal(calls.length,1);
+});

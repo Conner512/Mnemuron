@@ -27,6 +27,15 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
     requireConfig(typeof c.identity?.encryption_key_file==='string' && c.identity.encryption_key_file.startsWith('/'),'identity encryption key file');
     for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])
       if(c.identity[name]!==undefined) boundedInteger(c.identity[name],null,min,max,name);
+    if(c.identity.console_operations!==undefined)requireConfig(typeof c.identity.console_operations==='boolean','console operations flag');
+    if(c.identity.recovery_policy){
+      const p=c.identity.recovery_policy;
+      requireConfig(Object.keys(p).every(k=>['password','totp'].includes(k)),'recovery policy fields');
+      for(const [action,proofs] of Object.entries(p))exactList(proofs,['recovery_code',action==='password'?'totp':'password'],'recovery proof pair');
+    }
+    if(c.identity.provisioning){const p=c.identity.provisioning;requireConfig(typeof p.enabled==='boolean','provisioning flag');
+      if(p.enabled)for(const k of ['core_database','credential_directory','identity_map_file'])requireConfig(typeof p[k]==='string'&&p[k].startsWith('/'),'private provisioning paths');
+    }
     if(c.identity.core) canonicalUrl(c.identity.core.base_url,{isolated,loopbackHttp:true,pathname:'/'});
   }
   requireConfig(c.login?.mfa_required === true && (c.login.registration_enabled === false || c.identity_mode==='multi_account_v1' && c.login.registration_enabled===true)

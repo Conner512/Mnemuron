@@ -17,6 +17,7 @@ import { HandoffPolicy } from "./handoff-policy.mjs";
 import { MemoryRevisions, exactText } from "./memory/revisions.mjs";
 import { MemoryService } from "./memory/service.mjs";
 import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,WEB_READ_POLICY} from './memory/web-visibility.mjs';
+import {ConsoleService} from './console/service.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -663,6 +664,7 @@ export class MnemuronStore {
       this.memoryService = new MemoryService({db:this.db,revisions:this.revisions,
         transaction:callback=>this.memoryTransaction(callback),project:row=>this.memoryFromRow(row),audit:event=>this.audit(event)});
       this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false});
+      this.consoleService = new ConsoleService(this);
       this.db.prepare(`
         INSERT OR IGNORE INTO settings (key, value_json, updated_at)
         VALUES ('raw_retention_days', ?, ?)
@@ -3895,11 +3897,22 @@ export class MnemuronStore {
   }
 
   async searchMemories(auth,payload) {
+    this.requireScope(auth,'memory:read');
+    if(payload?.personal_model_only!==undefined&&typeof payload.personal_model_only!=='boolean')throw new ValidationError('Invalid model allocation guard.');
     const mode=payload?.mode || this.memoryConfig.memory?.retrieval?.mode || 'lexical';
     if(!['lexical','hybrid','semantic'].includes(mode))throw new ValidationError('Invalid retrieval mode.');
     if(mode==='lexical') {
       const result=this.queryMemories(auth,payload);
       result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical'};return result;
+    }
+    const ownEmbedder=this.consoleService.models.raw(auth.user_id,'embedder');
+    if(ownEmbedder||payload?.personal_model_only===true){
+      try{if(!ownEmbedder)throw new ModelError('NOT_CONFIGURED');return await this.consoleService.vector(auth.user_id).search(auth,{...payload,mode});}
+      catch(error){
+        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
+        const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
+      }
     }
     if(this.vectorIndex)return this.vectorIndex.search(auth,{...payload,mode});
     const result=this.queryMemories(auth,payload);
@@ -4181,8 +4194,7 @@ export class MnemuronStore {
     const replacementId = randomUUID();
     const timestamp = nowIso();
     const actor = this.publicIdentity(auth);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return this.memoryTransaction(() => {
       this.db.prepare(`
         INSERT INTO memories (
           memory_id, user_id, credential_id, device_id, agent_id, agent_instance_id,
@@ -4233,11 +4245,7 @@ export class MnemuronStore {
         targetId: memoryId,
         metadata: { replacement_memory_id: replacementId, reason },
       });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+
     return {
       schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
       status: "superseded",
@@ -4250,6 +4258,7 @@ export class MnemuronStore {
       idempotent: false,
       canonical_task_state_overwritten: false,
     };
+    });
   }
 
   retractMemory(auth, memoryId, payload = {}) {

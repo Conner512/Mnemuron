@@ -25,9 +25,9 @@ ingress:
     originRequest:
       httpHostHeader: memory.example.com
   - hostname: memory.example.com
-    path: '^/(login|recover|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|jobs|connections|models|security|audit|storage|appearance|invitations|accounts))?/?|console-api/(me|logout|security|connections|audit|overview|memories|memory|summaries|summary|jobs|storage|models|invitations|accounts)|assets/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs))$'
+    path: '^/(login|recover(/(start|complete))?|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|jobs|connections|models|security|audit|storage|appearance|invitations|accounts))?/?|console-api/(me|logout|capabilities|action|security|connections|audit|overview|memories|memory|memory-meta|summaries|summary|jobs|job|projects|storage|export|operation|models|invitations|accounts)|assets/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs))$'
     service: http://127.0.0.1:47833
     originRequest:
       httpHostHeader: memory.example.com
-  # No wildcard assets, health, Core, admin, database or export routes.
+  # No wildcard assets, health, Core, admin or database routes. /console-api/export is an authenticated personal JSON export, never a database download.
   - service: http_status:404
