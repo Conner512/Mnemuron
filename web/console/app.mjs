@@ -1,4 +1,5 @@
-import {translate as t} from './appearance.mjs';
+import {translate as t, syncAppearance} from './appearance.mjs';
+import {icon, overviewView, appearanceView} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 const root=document.getElementById('console-root'),dialog=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
@@ -18,13 +19,13 @@ async function api(view,params={}) {
    if(!response.ok)throw new Error(data.error_code||'UNAVAILABLE');return data;
  } finally {state.finish(ticket);}
 }
-const empty=()=>`<div class="empty">${l('empty')}</div>`;
-function memoryRows(rows=[]) {return rows.length?rows.map(m=>`<div class="memory-row"><span class="glyph" aria-hidden="true">▤</span><button type="button" class="memory-link" data-memory="${esc(m.memory_id)}"><span>${esc([...String(m.content||m.summary||m.memory_id)].slice(0,160).join(''))}</span><small>${esc(m.memory_type||'')} · ${esc(date(m.created_at))}</small></button>${tag(m.status||'active')}<span aria-hidden="true">↗</span></div>`).join(''):empty();}
+const empty=()=>`<div class="empty"><span class="empty-icon">${icon('memories')}</span>${l('empty','p')}</div>`;
+function memoryRows(rows=[]) {return rows.length?rows.map(m=>`<div class="memory-row"><span class="glyph" aria-hidden="true">${icon('memories')}</span><button type="button" class="memory-link" data-memory="${esc(m.memory_id)}"><span>${esc([...String(m.content||m.summary||m.memory_id)].slice(0,160).join(''))}</span><small>${esc(m.memory_type||'')} · ${esc(date(m.created_at))}</small></button>${tag(m.status||'active')}<span aria-hidden="true">↗</span></div>`).join(''):empty();}
 function table(rows,columns){return rows?.length?`<table><thead><tr>${columns.map(([key,label])=>`<th data-i18n="${label||key}">${esc(t(label||key))}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${columns.map(([key])=>`<td>${esc(r[key]??'—')}</td>`).join('')}</tr>`).join('')}</tbody></table>`:empty();}
 function policy(note='blockedNote',actions=[]) {return `<div class="policy-box"><span class="tag">${l('blocked')}</span>${l(note,'p')}<div class="actions">${actions.map(disabled).join('')}</div></div>`;}
 function render(data) {
- let html='';const heading=`<div class="page-heading"><div><p class="eyebrow" data-i18n="workspaceLabel">${esc(t('workspaceLabel'))}</p>${l(page==='overview'?'hero':page,'h1')}${l(page==='overview'?'heroNote':'noDemo','p')}</div><span class="tag">${l('readOnly')}</span></div>`;
- if(page==='overview')html=`<section class="hero"><div><p class="eyebrow" data-i18n="heroLabel">${esc(t('heroLabel'))}</p><h2>Mnemuron · ${l('workspace')}</h2>${l('consentNote','p')}<a href="/app/connections">${l('connections')} →</a></div><div class="orb" aria-hidden="true">M</div></section><div class="metrics">${[['memories','memoryCount'],['sources','sourceCount'],['summaries','summaryCount'],['jobs','jobCount']].map(([key,label])=>`<div class="card metric">${tag('↗')}${l(label)}<strong>${Number.isInteger(data.counts?.[key])?data.counts[key]:'—'}</strong>${l('workspace','small')}</div>`).join('')}</div><div class="columns"><section class="card"><div class="card-heading">${l('recent','h2')}<a href="/app/memories">${l('viewAll')} →</a></div>${memoryRows(data.recent)}</section><section class="card">${l('policy','h2')}${policy('consentNote')}${l('pendingPolicies','p')}<div class="actions">${disabled('newMemory')}${disabled('organize')}${disabled('export')}</div></section></div>`;
+ let html='';const heading=`<div class="page-heading"><div><p class="eyebrow" data-i18n="workspaceLabel">${esc(t('workspaceLabel'))}</p>${l(page==='overview'?'hero':page,'h1')}${l(page==='overview'?'heroNote':`pageNote_${page}`,'p')}</div>${page==='overview'?`<a class="button browse-link" href="/app/memories">${icon('search')}${l('browseMemories')}</a>`:`<span class="tag">${l('readOnly')}</span>`}</div>`;
+ if(page==='overview')html=overviewView(data,{t,memoryRows});
  else if(page==='memories')html=`<section class="card"><form class="toolbar" id="search-form"><label>${l('query')}<input name="query" value="${esc(query)}" maxlength="2000" autocomplete="off"></label><button class="primary" type="submit" data-i18n="search">${esc(t('search'))}</button>${disabled('newMemory')}</form><div id="memory-rows">${memoryRows(data.results)}</div><div class="pagination">${offset?`<button type="button" data-offset="${Math.max(0,offset-25)}">${l('previous')}</button>`:''}${data.next_offset!==null&&data.next_offset!==undefined?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div></section>`;
  else if(page==='summaries')html=`<div class="columns"><section class="card">${l('summaries','h2')}${data.summaries?.length?data.summaries.map(s=>`<div class="memory-row"><button type="button" class="memory-link" data-summary="${esc(s.summary_id)}" data-revision="${s.revision}"><strong>${esc(s.category)}</strong><small>${esc(s.summary_id)}</small><small>${l('revisions')} ${s.revision} · ${l('sourceCount')} ${s.coverage}</small></button>${tag(s.status)}</div>`).join(''):empty()}</section><section class="card">${table(data.categories,[['category','scope'],['count','memoryCount']])}${policy('blockedNote',['organize'])}</section></div>`;
  else if(page==='jobs')html=`<section class="card">${table(data.jobs,[['job_id','identity'],['job_type','scope'],['state','state'],['processed','complete'],['total','sourceCount'],['last_error_code','error']])}${policy('blockedNote',['organize'])}</section>`;
@@ -32,9 +33,10 @@ function render(data) {
  else if(page==='security')html=`<div class="columns"><section class="card"><h2>${esc(data.username)}</h2><span class="tag">${l(data.mfa_verified?'passwordTotp':'pending')}</span>${l('securityNote','p')}<a href="/recover">${l('recover')} →</a></section><section class="card">${table(data.sessions?.map(s=>({...s,created:date(s.created),expires:date(s.expires)})),[['purpose','scope'],['created','created'],['expires','state']])}</section></div>`;
  else if(page==='audit')html=`<section class="card">${table([...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))].map(e=>({...e,created:date(e.created)})),[['action','scope'],['outcome','state'],['created','created']])}</section>`;
  else if(page==='storage')html=`<section class="card">${l('storageNote','p')}${table(Object.entries(data.counts||{}).map(([kind,count])=>({kind,count})),[['kind','scope'],['count','memoryCount']])}${policy('storageNote',['export','restore'])}</section>`;
- else if(page==='appearance')html=`<section class="card">${l('appearanceNote','p')}<p>Neural Indigo · Signal Teal · Paper Amber</p>${l('theme','h2')}${l('appearanceNote','p')}<p>${l('mode')}: <span data-current-mode data-i18n="${document.documentElement.dataset.mode}">${esc(t(document.documentElement.dataset.mode))}</span></p></section>`;
+ else if(page==='appearance')html=appearanceView(t);
  else if(['models','invitations','accounts'].includes(page))html=`<section class="card">${policy(page==='models'?'modelsNote':'platformNote',[page==='models'?'configure':page==='invitations'?'issue':'manage'])}</section>`;
  root.innerHTML=heading+html;
+ syncAppearance();
 }
 async function load() {
  const sequence=++requestSequence;

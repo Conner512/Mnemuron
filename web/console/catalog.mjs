@@ -30,4 +30,43 @@ export const catalog={
   passwordConfirm:'Confirm password',alreadyShown:'The secret was already displayed. It is not shown again; use your saved authenticator or recovery codes.',oauthClient:'Application requesting access',scopeIdentity:'Identify your Mnemuron account',scopeOffline:'Keep this connection with revocable, rotating refresh tokens',scopeMemory:'Read memories you authorize',scopeProject:'Read project context you authorize',systemLabel:'PERSONAL MEMORY SYSTEM',workspaceLabel:'PERSONAL WORKSPACE',heroLabel:'YOUR MEMORY, CONNECTED',passwordTotp:'Password and authenticator code',back:'Return to the safe entry point',expired:'This step expired. Start again from the safe entry point.',loginFailed:'The sign-in details or account are unavailable. Check your credentials and try again.',rateLimited:'Too many attempts. Please try again later.',pendingStep:'This step is unavailable. Check your current registration status.',
  }
 };
+
+// Presentation copy is separate from backend status codes and never translates memory content.
+Object.assign(catalog['zh-CN'], {
+  connectionHeadline:'ChatGPT，接上你的个人记忆。', connectionDescription:'从已授权的记忆中找回上下文。来源、版本与访问范围，始终清晰可查。',
+  manageConnections:'管理我的连接', browseMemories:'浏览记忆', ownedRecords:'仅当前账户', recentLabel:'近期记忆', processingLabel:'整理概况',
+  memoryProcessing:'记忆整理', atomicNote:'保留原文与版本', derivedNote:'来源关联的派生视图', jobStatusNote:'进入任务页查看执行状态',
+  summaryBoundary:'摘要是派生视图，不覆盖原文。遗漏与待核实信息保留在来源中。', viewJobs:'查看整理任务', inspectMemoryNote:'点开任意记忆，查看正文、来源与修订历史。',
+  personalizeLabel:'个性化工作空间', fixedLayout:'A · 统一布局', themeName_a:'神经靛蓝', themeName_b:'信号青绿', themeName_c:'纸感琥珀',
+  themeNote_a:'柔和靛蓝，清晰专注', themeNote_b:'自然青绿，沉稳明快', themeNote_c:'温暖琥珀，舒适阅读',
+  modeNote:'选择适合当前环境的明暗模式。', languageNote:'仅切换界面语言，记忆正文保持原样。',
+  appearanceScopeNote:'外观偏好独立保存于当前账户。切换不会改变数据、访问权限或正在填写的内容。',
+  authHeadlineFirst:'记住重要的。', authHeadlineSecond:'只属于你的。', authDescription:'用一个独立空间连接你的记忆，让每次对话从理解开始。',
+  authEyebrow:'连接到你的记忆空间', accountMenu:'当前账户与退出', authFooter:'Mnemuron · 个人记忆，持续上下文',
+  pageNote_memories:'搜索、查看并追溯属于你的每一条记忆。', pageNote_summaries:'分类整理与来源关联的摘要，始终与原始记忆分开。',
+  pageNote_jobs:'查看整理任务的进度、结果与需要处理的问题。', pageNote_connections:'在同一处查看你的应用授权和 Agent 连接。',
+  pageNote_models:'查看模型配置边界与外发政策。密钥不会在页面回显。', pageNote_security:'管理你的身份、验证器与账户访问。',
+  pageNote_audit:'仅查看当前账户的访问与安全事件。', pageNote_storage:'了解个人记录与存储边界。个人数据不等于整库备份。',
+  pageNote_appearance:'一种布局，多种心境。让你的记忆空间更适合你。', pageNote_invitations:'查看注册准入规则。签发能力由明确的运维权限控制。',
+  pageNote_accounts:'账户管理与个人记忆读取相互独立。',
+});
+Object.assign(catalog.en, {
+  connectionHeadline:'Connect ChatGPT to your personal memory.', connectionDescription:'Find context in memories you authorize. Keep every source, revision and access boundary in view.',
+  manageConnections:'Manage my connections', browseMemories:'Browse memories', ownedRecords:'This account only', recentLabel:'RECENT MEMORIES', processingLabel:'PROCESSING',
+  memoryProcessing:'Memory organization', atomicNote:'Originals and revisions retained', derivedNote:'Source-linked derived views', jobStatusNote:'Open jobs for execution status',
+  summaryBoundary:'Summaries are derived views, not replacements for originals. Check sources for omissions and uncertainty.', viewJobs:'View organizer jobs', inspectMemoryNote:'Open a memory to inspect its content, provenance and revision history.',
+  personalizeLabel:'PERSONALIZE YOUR WORKSPACE', fixedLayout:'A · Unified layout', themeName_a:'Neural Indigo', themeName_b:'Signal Teal', themeName_c:'Paper Amber',
+  themeNote_a:'Soft indigo. Clear focus.', themeNote_b:'Natural teal. Quiet clarity.', themeNote_c:'Warm amber. Thoughtful reading.',
+  modeNote:'Choose the appearance that suits your environment.', languageNote:'Translate the interface, never your original memories.',
+  appearanceScopeNote:'Appearance preferences belong to this account. Switching never changes data, access permissions or your current form.',
+  authHeadlineFirst:'Remember what matters.', authHeadlineSecond:'Keep it yours.', authDescription:'An independent space for your memories. Start every conversation with context.',
+  authEyebrow:'CONNECT TO YOUR MEMORY', accountMenu:'Current account and sign out', authFooter:'Mnemuron · Personal memory, continuous context',
+  pageNote_memories:'Search, inspect and trace every memory in your own space.', pageNote_summaries:'Source-linked categories and summaries, kept separate from original memories.',
+  pageNote_jobs:'Inspect organizer progress, results and items that need attention.', pageNote_connections:'Review your application grants and Agent connections in one place.',
+  pageNote_models:'Review model boundaries and egress policy. Secret keys are never displayed.', pageNote_security:'Your identity, authenticator and account access.',
+  pageNote_audit:'Access and security events for the current account only.', pageNote_storage:'Understand your record totals. Personal data is not a whole-database backup.',
+  pageNote_appearance:'One layout, a different mood. Make this memory space yours.', pageNote_invitations:'Review registration rules. Issuance requires explicit operator permission.',
+  pageNote_accounts:'Account administration does not grant access to personal memories.',
+});
+
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;
