@@ -1,12 +1,12 @@
 import { BoundaryError, readSecret, seconds, secretHash } from "../../../shared/oauth-common.mjs";
-import { loadIdentityMap } from "./config.mjs";
+import { loadIdentityMappings } from "./config.mjs";
 import { fetchAuthorizationJson } from "./auth-transport.mjs";
 
 export class GatewayAuthorization {
   constructor(config) {
     this.config = config;
     this.secret = readSecret(config.introspection.client_secret_file);
-    loadIdentityMap(config);
+    loadIdentityMappings(config);
   }
   async metadata() {
     const c = this.config;
@@ -46,10 +46,10 @@ export class GatewayAuthorization {
       || data.client_id !== c.introspection.expected_oauth_client_id || data.token_kind !== "access_token"
       || data.token_type !== "Bearer") throw new BoundaryError(401, "INVALID_TOKEN");
     let mapping;
-    try { mapping = loadIdentityMap(c); } catch { throw new BoundaryError(503, "IDENTITY_CONFIGURATION_UNAVAILABLE"); }
-    if (!mapping.enabled || data.sub !== mapping.subject) throw new BoundaryError(403, "SUBJECT_DENIED");
-    return { mapping, scopes: new Set(data.scope.split(" ").filter(Boolean)),
-      connection_id:secretHash(JSON.stringify([c.issuer,data.client_id,data.sub])) };
+    try { mapping = loadIdentityMappings(c).find(item=>item.subject===data.sub && item.issuer===c.issuer); } catch { throw new BoundaryError(503, "IDENTITY_CONFIGURATION_UNAVAILABLE"); }
+    if (!mapping?.enabled || (c.identity_mode==='multi_account_v1' && (data.account_id!==mapping.account_id || data.security_version!==mapping.security_version))) throw new BoundaryError(403, "SUBJECT_DENIED");
+    return Object.freeze({ mapping, scopes: new Set(data.scope.split(" ").filter(Boolean)),
+      connection_id:secretHash(JSON.stringify([c.issuer,data.client_id,data.sub])) });
   }
 }
 

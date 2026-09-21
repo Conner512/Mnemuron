@@ -21,7 +21,15 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   exactList(c.resource_scopes, RESOURCE_SCOPES, "resource_scopes");
   exactList(c.oidc_scopes, ["openid", "offline_access"], "oidc_scopes");
   requireConfig(c.client_registration?.dynamic === false && c.client_registration?.cimd === false, "static clients only");
-  requireConfig(c.login?.mfa_required === true && c.login.registration_enabled === false
+  c.identity_mode ??= 'legacy_owner';
+  requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
+  if(c.identity_mode==='multi_account_v1') {
+    requireConfig(typeof c.identity?.encryption_key_file==='string' && c.identity.encryption_key_file.startsWith('/'),'identity encryption key file');
+    for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])
+      if(c.identity[name]!==undefined) boundedInteger(c.identity[name],null,min,max,name);
+    if(c.identity.core) canonicalUrl(c.identity.core.base_url,{isolated,loopbackHttp:true,pathname:'/'});
+  }
+  requireConfig(c.login?.mfa_required === true && (c.login.registration_enabled === false || c.identity_mode==='multi_account_v1' && c.login.registration_enabled===true)
     && c.login.development_interactions === false && c.login.cookie_secure === true
     && c.login.cookie_http_only === true && c.login.cookie_same_site === "lax", "login security policy");
   requireConfig(c.log?.include_tokens === false && c.log.include_request_body === false
@@ -68,7 +76,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
     requireConfig(isolated || (callback.protocol === "https:" && callback.hostname === "chatgpt.com"
       && (callback.pathname === "/connector_platform_oauth_redirect"
         || /^\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(callback.pathname))), "exact ChatGPT callback");
-    for (const key of ["database_file", "private_jwks_file", "cookie_keys_file", "accounts_file"]) {
+    for (const key of ["database_file", "private_jwks_file", "cookie_keys_file", ...(c.identity_mode==='legacy_owner' ? ['accounts_file'] : [])]) {
       requireConfig(typeof c[key] === "string" && c[key].startsWith("/"), key);
     }
   }

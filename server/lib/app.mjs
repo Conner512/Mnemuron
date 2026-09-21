@@ -1,6 +1,7 @@
 import http from "node:http";
 import { URL } from "node:url";
 import {isWebReader} from './memory/web-visibility.mjs';
+import {isConsoleReader,consoleRead} from './console-read.mjs';
 import {
   AuthenticationError,
   MnemuronStore,
@@ -98,6 +99,13 @@ export function createMnemuronApp({
       }
 
       const auth = store.authenticate(bearerToken(request));
+      if(isConsoleReader(auth) && !(
+        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|memories|summaries|summary|jobs|storage|connections|audit)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
+        throw new NotFoundError('Endpoint not available to this destination.');
+      if(request.method==='GET'&&pathname.startsWith('/v1/console/')) {
+        responseStatus=200;return sendJson(response,200,await consoleRead(store,auth,pathname.slice('/v1/console/'.length),Object.fromEntries(url.searchParams)));
+      }
       if(isWebReader(auth) && !(
         request.method==='GET' && (['/v1/identity','/readyz/search'].includes(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
         || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview'].includes(pathname)))

@@ -24,15 +24,19 @@ export class VectorIndex {
         scope_key TEXT NOT NULL,content_hash TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(generation,user_id,memory_id));
       CREATE TABLE IF NOT EXISTS memory_vector_points (point_id TEXT PRIMARY KEY,generation TEXT NOT NULL,user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,chunk INTEGER NOT NULL);
       CREATE INDEX IF NOT EXISTS memory_vector_point_doc ON memory_vector_points(generation,user_id,memory_id);
-      CREATE TABLE IF NOT EXISTS memory_vector_calls (profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(profile,day));`);
+      CREATE TABLE IF NOT EXISTS memory_vector_calls (profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(profile,day));
+      CREATE TABLE IF NOT EXISTS memory_owner_vector_usage (user_id TEXT NOT NULL,profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(user_id,profile,day));`);
   }
-  reserve(embedder){this.store.memoryTransaction(()=>{const p=embedder.profile,day=new Date(this.clock()).toISOString().slice(0,10);
+  reserve(embedder,userId){this.store.memoryTransaction(()=>{const p=embedder.profile,day=new Date(this.clock()).toISOString().slice(0,10);
+    if(typeof userId!=='string'||!userId)fail('INVALID_OWNER');
     if(this.db.prepare('SELECT state FROM memory_profile_state WHERE profile=?').get(p.fingerprint)?.state==='blocked_auth')fail('AUTH_FAILED');
     this.db.prepare('INSERT OR IGNORE INTO memory_vector_calls VALUES (?,?,0)').run(p.fingerprint,day);
     if(this.db.prepare('SELECT count FROM memory_vector_calls WHERE profile=? AND day=?').get(p.fingerprint,day).count>=p.limits.daily_requests)fail('BUDGET_EXHAUSTED');
     this.db.prepare('UPDATE memory_vector_calls SET count=count+1 WHERE profile=? AND day=?').run(p.fingerprint,day);
+    this.db.prepare(`INSERT INTO memory_owner_vector_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)
+      DO UPDATE SET count=count+1`).run(userId,p.fingerprint,day);
   });}
-  async embed(embedder,texts,inputType,options){try{return await embedder.embed(texts,inputType,{...options,reserve:()=>this.reserve(embedder)});}
+  async embed(embedder,texts,inputType,{userId,...options}){try{return await embedder.embed(texts,inputType,{...options,reserve:()=>this.reserve(embedder,userId)});}
     catch(error){if(error.code==='AUTH_FAILED')this.db.prepare('INSERT OR REPLACE INTO memory_profile_state VALUES (?,?)').run(embedder.profile.fingerprint,'blocked_auth');throw error;}}
   begin(profile){
     const embedder=this.embedders.get(profile);if(!embedder?.profile.enabled)fail('NOT_CONFIGURED');
@@ -72,7 +76,7 @@ export class VectorIndex {
           const chunks=splitDocument(source.content,Math.min(8192,Math.floor(e.profile.limits.input_tokens/4))),points=[];
           for(let start=0;start<chunks.length;start+=e.profile.limits.batch_size){
             this.renew(g);const part=chunks.slice(start,start+e.profile.limits.batch_size);
-            const result=await this.embed(e,part,'document',{sensitivity:source.sensitivity});
+            const result=await this.embed(e,part,'document',{sensitivity:source.sensitivity,userId:source.user_id});
             if(!this.owns(g) || !this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
             for(const [i,vector] of result.vectors.entries())points.push({id:pointId(id,source.user_id,source.memory_id,source.revision,g.profile,start+i),vector,
               payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),document:surrogate([source.user_id,source.memory_id]),revision:source.revision,
@@ -141,7 +145,7 @@ export class VectorIndex {
       const scopes=this.db.prepare(`SELECT DISTINCT m.user_id,m.scope,m.project_id,m.task_id,m.workstream_id,m.session_id FROM memories m WHERE m.user_id=? AND m.status='active' AND ${scopeSql.sql} AND ${webMemorySql(auth)} LIMIT 129`).all(auth.user_id,...scopeSql.params);
       if(scopes.length>128)fail('VECTOR_SCOPE_TOO_BROAD');
       const filter={must:[condition('owner',surrogate(auth.user_id)),condition('profile',snapshot.profile),condition('lifecycle','active'),{key:'scope',match:{any:scopes.map(row=>surrogate(scopeKey(row)))}}]};
-      const {vectors}=await this.embed(e,[payload.query],'query',{sensitivity:'sensitive'});
+      const {vectors}=await this.embed(e,[payload.query],'query',{sensitivity:'sensitive',userId:auth.user_id});
       const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[];
       assertWebIndexFresh();
       // Network waits may outlive a privacy change; rebuild lexical results and conflicts now.

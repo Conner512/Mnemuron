@@ -9,6 +9,8 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
   requireConfig(c.config_version === "mnemuron-web-gateway-config-v1", "config_version");
   requireConfig(["oauth", "bootstrap_metadata_only"].includes(c.mode), "mode");
   requireConfig(["auth_only", "readonly"].includes(c.tool_profile), "tool_profile");
+  c.identity_mode ??= 'legacy_owner';
+  requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
   canonicalUrl(c.issuer, { isolated, pathname: "/" });
   canonicalUrl(c.resource, { isolated, pathname: "/mcp" });
   c.public_origin_mode = publicOriginMode(c);
@@ -69,10 +71,17 @@ export function loadGatewayConfig(file, options) {
 }
 
 export function loadIdentityMap(config) {
+  const mappings=loadIdentityMappings(config);
+  requireConfig(mappings.length===1,'single mapping required by legacy operator command');
+  return mappings[0];
+}
+
+export function loadIdentityMappings(config) {
   const data = readPrivate(config.identity_map_file, { json: true });
   requireConfig(data.unknown_subject_policy === "deny" && Array.isArray(data.mappings)
-    && data.mappings.length === 1, "single-owner identity map");
-  const mapping = data.mappings[0];
+    && (config.identity_mode==='multi_account_v1' || data.mappings.length===1), "identity map");
+  const subjects=new Set(),users=new Set(),credentials=new Set();
+  for(const mapping of data.mappings) {
   requireConfig(mapping.issuer === config.issuer && typeof mapping.subject === "string"
     && /^[A-Za-z0-9_-]{16,128}$/.test(mapping.subject) && !mapping.subject.includes("__REQUIRED")
     && typeof mapping.enabled === "boolean", "immutable mapped subject");
@@ -82,5 +91,16 @@ export function loadIdentityMap(config) {
         && !mapping[key].includes("__REQUIRED"), `mapped ${key}`);
     }
   }
-  return mapping;
+  requireConfig(!subjects.has(mapping.subject),'duplicate subject');subjects.add(mapping.subject);
+  if(config.identity_mode==='multi_account_v1') {
+    requireConfig(typeof mapping.account_id==='string' && Number.isSafeInteger(mapping.security_version) && mapping.security_version>0,'account mapping version');
+    requireConfig(!users.has(mapping.mnemuron_user_id),'duplicate owner binding');users.add(mapping.mnemuron_user_id);
+    if(config.tool_profile==='readonly') {
+      requireConfig(typeof mapping.credential_file==='string' && mapping.credential_file.startsWith('/') && typeof mapping.credential_id==='string','per-account credential');
+      const credential=readPrivate(mapping.credential_file);
+      requireConfig(!credentials.has(credential),'shared credential forbidden');credentials.add(credential);
+    }
+  }
+  }
+  return data.mappings.map(mapping=>Object.freeze(mapping));
 }

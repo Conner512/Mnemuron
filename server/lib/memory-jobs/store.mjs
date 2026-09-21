@@ -12,7 +12,8 @@ export class MemoryJobs {
       CREATE TABLE IF NOT EXISTS memory_job_items (job_id TEXT NOT NULL,ordinal INTEGER NOT NULL,user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,
         state_hash TEXT NOT NULL,scope_key TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT,PRIMARY KEY(job_id,ordinal));
       CREATE TABLE IF NOT EXISTS memory_profile_state (profile TEXT PRIMARY KEY,state TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS memory_model_budget (profile TEXT NOT NULL,day TEXT NOT NULL,reserved_calls INTEGER NOT NULL,PRIMARY KEY(profile,day));`);
+      CREATE TABLE IF NOT EXISTS memory_model_budget (profile TEXT NOT NULL,day TEXT NOT NULL,reserved_calls INTEGER NOT NULL,PRIMARY KEY(profile,day));
+      CREATE TABLE IF NOT EXISTS memory_owner_model_usage (user_id TEXT NOT NULL,profile TEXT NOT NULL,day TEXT NOT NULL,reserved_calls INTEGER NOT NULL,PRIMARY KEY(user_id,profile,day));`);
   }
   enqueue({type,userId,scope,profile,metadata,items,highwater=0}) {
     if(!['classification','summary'].includes(type) || !items.length || items.some(i=>i.user_id!==userId || i.scope_key!==scope))fail('INVALID_JOB');
@@ -42,7 +43,8 @@ export class MemoryJobs {
     });
   }
   get(id){const job=this.db.prepare('SELECT * FROM memory_jobs WHERE job_id=?').get(id);return job?{...job,metadata:JSON.parse(job.metadata_json)}:null;}
-  owns(job){const row=this.get(job.job_id);return row?.state==='leased' && row.fence===job.fence && row.lease_owner===job.lease_owner && row.lease_expires>this.clock();}
+  owns(job){const row=this.get(job.job_id);return row?.state==='leased' && row.fence===job.fence && row.lease_owner===job.lease_owner && row.lease_expires>this.clock()
+    && ['user_id','scope_key','profile','input_hash','group_key','job_type'].every(key=>row[key]===job[key]) && JSON.stringify(row.metadata)===JSON.stringify(job.metadata);}
   renew(job){if(!this.owns(job))fail('LEASE_LOST');this.db.prepare('UPDATE memory_jobs SET lease_expires=? WHERE job_id=? AND fence=?').run(this.clock()+this.leaseMs,job.job_id,job.fence);}
   items(job){return this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? ORDER BY ordinal').all(job.job_id);}
   reserve(job,limit){return this.store.memoryTransaction(()=>{
@@ -51,10 +53,19 @@ export class MemoryJobs {
     const current=this.db.prepare('SELECT reserved_calls FROM memory_model_budget WHERE profile=? AND day=?').get(job.profile,day);
     if(current.reserved_calls>=limit)fail('BUDGET_EXHAUSTED');
     this.db.prepare('UPDATE memory_model_budget SET reserved_calls=reserved_calls+1 WHERE profile=? AND day=?').run(job.profile,day);
+    // Account attribution is not a new cost allocation policy; the existing global ceiling still applies.
+    this.db.prepare(`INSERT INTO memory_owner_model_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)
+      DO UPDATE SET reserved_calls=reserved_calls+1`).run(job.user_id,job.profile,day);
   });}
   saveChunk(job,items,results){return this.store.memoryTransaction(()=>{
     if(!this.owns(job))fail('LEASE_LOST');
-    for(const item of items)if(!this.store.derivedMemory.validateItem(item))fail('STALE_INPUT');
+    for(const item of items) {
+      const saved=this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? AND ordinal=?').get(job.job_id,item.ordinal);
+      if(!saved||item.job_id!==job.job_id||item.user_id!==job.user_id||item.scope_key!==job.scope_key
+        ||['user_id','memory_id','revision','state_hash','scope_key'].some(key=>saved[key]!==item[key]))fail('INVALID_JOB_ITEM');
+      if(!this.store.derivedMemory.validateItem(item))fail('STALE_INPUT');
+    }
+    if(results.some(result=>!items.some(item=>item.memory_id===result.memory_id)))fail('INVALID_SOURCE_SET');
     for(const item of items)this.db.prepare("UPDATE memory_job_items SET state='done',result_json=? WHERE job_id=? AND ordinal=?")
       .run(JSON.stringify(results.filter(r=>r.memory_id===item.memory_id)),job.job_id,item.ordinal);
     this.db.prepare("UPDATE memory_jobs SET processed=(SELECT COUNT(*) FROM memory_job_items WHERE job_id=? AND state='done'),updated_at=? WHERE job_id=?")
@@ -62,7 +73,7 @@ export class MemoryJobs {
   });}
   publish(job,callback){return this.store.memoryTransaction(()=>{
     if(!this.owns(job))fail('LEASE_LOST');const items=this.items(job);
-    if(items.some(i=>i.state!=='done' || !this.store.derivedMemory.validateItem(i)))fail('STALE_INPUT');
+    if(items.some(i=>i.user_id!==job.user_id || i.scope_key!==job.scope_key || i.state!=='done' || !this.store.derivedMemory.validateItem(i)))fail('STALE_INPUT');
     const ref=callback(items,items.flatMap(i=>JSON.parse(i.result_json)));
     this.db.prepare("UPDATE memory_jobs SET state='succeeded',result_ref=?,lease_owner=NULL,lease_expires=NULL,last_error_code=NULL,updated_at=? WHERE job_id=?")
       .run(ref || null,this.clock(),job.job_id);return ref;

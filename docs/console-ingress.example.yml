@@ -1,0 +1,33 @@
+# UNAPPLIED example for the opt-in integrated console. Not a production change.
+# Review policies, private configuration and existing routes before deployment.
+tunnel: __REQUIRED_APPROVED_TUNNEL_ID__
+credentials-file: /etc/cloudflared/__REQUIRED_TUNNEL_ID__.json
+
+ingress:
+  - hostname: memory.example.com
+    path: '^/(mcp|\.well-known/oauth-protected-resource(/mcp)?)$'
+    service: http://127.0.0.1:47832
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/\.well-known/(oauth-authorization-server|openid-configuration)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/(authorize(/[A-Za-z0-9_-]{1,128})?|token|jwks|revoke|introspect)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/interaction/[A-Za-z0-9_-]{1,128}(/(login|confirm|abort))?$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/(login|recover|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|jobs|connections|models|security|audit|storage|appearance|invitations|accounts))?/?|console-api/(me|logout|security|connections|audit|overview|memories|memory|summaries|summary|jobs|storage|models|invitations|accounts)|assets/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs))$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  # No wildcard assets, health, Core, admin, database or export routes.
+  - service: http_status:404

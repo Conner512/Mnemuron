@@ -8,7 +8,7 @@ Mnemuron stores reusable memories with their sources and revisions, so authorize
 
 The central service stores data in SQLite. Adapters connect agent lifecycle events to the service and keep a local outbox when it is unavailable. There is no required cloud memory service or external vector database.
 
-> **Status: experimental.** The project targets a single user's self-hosted workspace. APIs, schemas, and host integrations may change. `production_ready` remains `false`; adapter availability is not a claim that every host version or deployment is supported.
+> **Status: experimental.** Single-owner self-hosting remains the default. An opt-in account-isolated console is available for local evaluation; deployment and recovery policies require separate review. APIs, schemas, and host integrations may change. `production_ready` remains `false`; adapter availability is not a claim that every host version or deployment is supported.
 
 ## Why Mnemuron?
 
@@ -75,6 +75,7 @@ These are source integrations, not a universal installer. Host plugin loading, h
 
 - [Getting started](docs/getting-started.md) — a local, authenticated API walkthrough.
 - [Documentation index](docs/README.md) — concepts, protocol contracts, adapters, and operations.
+- [Account console preview](docs/integrated-console-v0.3.md) — invitation-based registration, local TOTP, account-bound reads, migration and deliberately blocked operations.
 - [Core specification](docs/core-spec-v0.1.md) — the data model and continuity boundaries.
 - [Deployment guide](docs/pve-lxc-deployment-v0.1.md) — an optional Linux/LXC deployment example; Proxmox is not required by the core API.
 - [Core optimization notes](docs/core-optimization-v0.2/release-notes.md) and [retrieval/sync review](docs/core-review-v0.3/README.md) — implementation changes and compatibility notes.
@@ -95,6 +96,7 @@ server/             HTTP API, SQLite storage, administration, and tests
 plugins/mnemuron/   ChatGPT / Codex plugin
 adapters/           OpenClaw, Hermes, and optional read-only HTTP MCP integrations
 services/oauth/     Optional password + TOTP authorization service
+web/console/        Same-origin desktop console, themes and bilingual catalogue
 shared/             Shared OAuth/gateway boundary helpers
 scripts/            Benchmarks, regression runners, and publication checks
 docs/               Guides, specifications, and test plans
@@ -102,7 +104,7 @@ docs/               Guides, specifications, and test plans
 
 ## Current boundaries
 
-- Built for single-user self-hosting, not a managed multi-tenant service.
+- Single-owner by default, with opt-in account isolation and a desktop console. This is not a managed multi-tenant service or a production certification.
 - Lexical/FTS retrieval works without models. Optional, operator-configured embedding and Qdrant modules provide hybrid/semantic retrieval; query egress approval and budgets remain required. Hybrid fallback is marked; unavailable semantic search is an error, not a fabricated success.
 - Derived summaries preserve source revisions and coverage. Read-only summary retrieval never schedules a model; see [Memory First](docs/memory-first-v0.1/README.md).
 - Automatic summaries can omit context. Source records and explicit task state remain distinct.
