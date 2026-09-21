@@ -6,6 +6,8 @@ import { AuthStore } from "./sqlite-adapter.mjs";
 import { Accounts } from "./accounts.mjs";
 import { IdentityRepository } from './identity-repository.mjs';
 import {consoleRequest} from './console.mjs';
+import {IdentityMaintenance} from './identity-maintenance.mjs';
+import {RecoveryService} from './recovery.mjs';
 import {ConsoleCore} from './console-core.mjs';
 import {sendPage,label} from '../../../web/console/render.mjs';
 import { makeProvider } from "./provider.mjs";
@@ -39,7 +41,7 @@ function authorizationError(response, config, params, code) {
 
 export function createAuthorizationServer(input, { isolated = false, logger = () => {} } = {}) {
   const config = validateAuthConfig(input, { isolated });
-  let store, accounts, provider, secrets, release;
+  let store, accounts, provider, secrets, release, identityMaintenance, recovery;
   try {
     if (config.mode === "oauth") {
       if(config.identity_mode==='multi_account_v1') storageDoctor({
@@ -52,7 +54,7 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         keyFile:config.identity.encryption_key_file,issuer:config.issuer,batchLimit:config.identity.invitation_batch_limit,
         sessionTtl:config.identity.console_session_ttl_seconds}) : new Accounts(config.accounts_file, store);
       if(config.identity_mode==='legacy_owner') accounts.read();
-      else store.identity=accounts;
+      else {store.identity=accounts;identityMaintenance=new IdentityMaintenance(accounts,config);recovery=new RecoveryService(accounts,{policy:config.identity.recovery_policy});}
       provider = makeProvider(config, secrets, store, accounts);
     }
   } catch (error) { store?.close(); release?.(); throw error; }
@@ -96,10 +98,10 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         request.url = "/.well-known/openid-configuration";
         return callback(request, response);
       }
-      const handleConsole=()=>consoleRequest(request,response,{config,accounts,store,url,
+      const handleConsole=()=>consoleRequest(request,response,{config,accounts,store,url,identityMaintenance,recovery,
         invalidateAuthorization:nextSubject=>invalidateBrowserAuthorization(request,response,provider,{nextSubject}),coreFor:subject=>new ConsoleCore(config.identity?.core,
         accounts.principal(subject),accounts.bindings(subject).find(b=>b.purpose==='console'))});
-      if(await (request.method==='POST'&&/^\/(register|login)(\/|$)/.test(url.pathname)?consoleGate.run(handleConsole):handleConsole()))return;
+      if(await (request.method==='POST'&&/^\/(register|login|recover)(\/|$)/.test(url.pathname)?consoleGate.run(handleConsole):handleConsole()))return;
       if (url.pathname.startsWith("/interaction/")) {
         return await gate.run(() => interactionRequest(request, response, { provider, store, accounts, config, url }));
       }
@@ -175,9 +177,11 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
   server.requestTimeout = 10000;
   server.headersTimeout = 10000;
   server.maxRequestsPerSocket = 100;
+  const identityTimer=identityMaintenance?.enabled()?setInterval(()=>{void identityMaintenance.run().catch(()=>logger({component:'identity_worker',error_code:'PROVISIONING_INCOMPLETE'}));},5000):null;
+  identityTimer?.unref();
   const maintenance = store ? setInterval(() => { try { store.cleanup(); } catch { logger({ component: "oauth", error_code: "AUTH_STORAGE_UNAVAILABLE" }); } }, 60000) : null;
   maintenance?.unref();
-  server.on("close", () => { clearInterval(maintenance); store?.close(); release?.(); });
+  server.on("close", () => { clearInterval(maintenance); clearInterval(identityTimer); store?.close(); release?.(); });
   return { server, config, store, accounts, provider };
 }
 

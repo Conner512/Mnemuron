@@ -28,14 +28,14 @@ export class MemoryJobs {
       return id;
     });
   }
-  claim(worker,{userId=null}={}){
+  claim(worker,{userId=null,profile=null}={}){
     if(typeof worker!=='string' || !worker || worker.length>128)fail('INVALID_WORKER');
     return this.store.memoryTransaction(()=>{
       const now=this.clock();
       if(this.db.prepare("SELECT COUNT(*) AS n FROM memory_jobs WHERE state='leased' AND lease_expires>?").get(now).n>=this.concurrency)return null;
       const job=this.db.prepare(`SELECT j.* FROM memory_jobs j LEFT JOIN memory_profile_state p ON p.profile=j.profile
-        WHERE COALESCE(p.state,'ready')='ready' AND (? IS NULL OR j.user_id=?) AND ((j.state IN ('pending','retry_wait') AND j.run_after<=?) OR (j.state='leased' AND j.lease_expires<=?))
-        ORDER BY j.run_after,j.job_id LIMIT 1`).get(userId,userId,now,now);
+        WHERE COALESCE(p.state,'ready')='ready' AND (? IS NULL OR j.user_id=?) AND (? IS NULL OR j.profile=?) AND (? IS NOT NULL OR j.profile NOT LIKE 'console-%') AND ((j.state IN ('pending','retry_wait') AND j.run_after<=?) OR (j.state='leased' AND j.lease_expires<=?))
+        ORDER BY j.run_after,j.job_id LIMIT 1`).get(userId,userId,profile,profile,profile,now,now);
       if(!job)return null;
       this.db.prepare("UPDATE memory_jobs SET state='leased',attempt_count=attempt_count+1,lease_owner=?,lease_expires=?,fence=fence+1,updated_at=? WHERE job_id=?")
         .run(worker,now+this.leaseMs,now,job.job_id);

@@ -100,9 +100,12 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
-        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|memories|summaries|summary|jobs|storage|connections|audit)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
-        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
+        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|operation)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
+      if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){
+        const input=await readJson(request,64*1024);responseStatus=200;return sendJson(response,200,await store.consoleService.execute(auth,input));
+      }
       if(request.method==='GET'&&pathname.startsWith('/v1/console/')) {
         responseStatus=200;return sendJson(response,200,await consoleRead(store,auth,pathname.slice('/v1/console/'.length),Object.fromEntries(url.searchParams)));
       }
@@ -119,7 +122,7 @@ export function createMnemuronApp({
 
       if (request.method === "GET" && pathname === "/v1/identity") {
         responseStatus = 200;
-        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes });
+        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes,personal_retrieval:{configured:!!store.consoleService.models.raw(auth.user_id,'embedder')} });
       }
 
       if (request.method === "GET" && pathname === "/readyz/search") {
@@ -436,6 +439,8 @@ export function createMnemuronApp({
     }
   });
 
+  const consoleTimer=store.memoryConfig.console?.worker_enabled===true?setInterval(()=>{void store.consoleService.tick().catch(()=>logger?.({component:'console_worker',error_code:'WORKER_FAILED'}));},5000):null;
+  consoleTimer?.unref();
   return {
     server,
     store,
@@ -449,8 +454,10 @@ export function createMnemuronApp({
       });
     },
     close() {
+      clearInterval(consoleTimer);
       return new Promise((resolve, reject) => {
         server.close((error) => {
+          if(store.consoleService.busy){const wait=setInterval(()=>{if(!store.consoleService.busy){clearInterval(wait);store.close();error?reject(error):resolve();}},25);return;}
           store.close();
           if (error) reject(error);
           else resolve();

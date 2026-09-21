@@ -10,7 +10,7 @@ export function memoryRuntime(input) {
     notice:'Legacy handoff behavior retained; explicitly configure modules before switching to memory-only.' };
   if (typeof input !== 'object' || Array.isArray(input) || input.config_version !== 'mnemuron-memory-first-v1') throw new ValidationError('Invalid memory runtime config.', 'INVALID_MEMORY_CONFIG');
   const object=value=>value!==null && typeof value==='object' && !Array.isArray(value);
-  for(const key of ['modules','storage','memory','privacy','providers','vector_store','jobs','development']) {
+  for(const key of ['modules','storage','memory','privacy','providers','vector_store','jobs','development','console']) {
     if(Object.hasOwn(input,key) && !object(input[key]))throw new ValidationError('Invalid configuration section.','INVALID_MEMORY_CONFIG');
   }
   if(input.development?.synthetic_data!==undefined && typeof input.development.synthetic_data!=='boolean')throw new ValidationError('Invalid synthetic data flag.','INVALID_MEMORY_CONFIG');
@@ -19,11 +19,16 @@ export function memoryRuntime(input) {
   if (input.modules.handoff.existing_inflight_policy !== 'drain_before_disable') throw new ValidationError('Existing handoff must drain.', 'INVALID_DRAIN_POLICY');
   if (input.storage?.reject_private_paths_inside_git_worktree !== undefined && input.storage.reject_private_paths_inside_git_worktree !== true) throw new ValidationError('Storage isolation cannot be disabled.', 'INVALID_STORAGE_POLICY');
   try {
+    if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins']);
+      for(const k of ['worker_enabled','personal_vectors'])if(input.console[k]!==undefined&&typeof input.console[k]!=='boolean')throw new Error('invalid console switch');
+      if(input.console.key_file!==undefined&&(typeof input.console.key_file!=='string'||!input.console.key_file.startsWith('/')))throw new Error('invalid console key');
+      const origins=input.console.allowed_private_origins||[];if(!Array.isArray(origins)||origins.length>32||origins.some(o=>typeof o!=='string'||new URL(o).origin!==o))throw new Error('invalid private origins');
+    }
     const synthetic=input.deployment_mode==='test' && input.development?.synthetic_data===true;
     strictObject(input.providers || {},['organizer','embedder']);
     for(const kind of ['organizer','embedder'])if(input.providers?.[kind])validateProfile(input.providers[kind],{kind,synthetic});
     if(input.vector_store)vectorConfig(input.vector_store);
-    if(input.vector_store?.enabled && !input.providers?.embedder?.enabled)throw new Error('missing embedding');
+    if(input.vector_store?.enabled && !input.providers?.embedder?.enabled && input.console?.personal_vectors!==true)throw new Error('missing embedding');
     if(input.jobs){strictObject(input.jobs,['enabled','lease_ms','concurrency','batch_size','timezone','periods','poll_ms']);
       if(typeof input.jobs.enabled!=='boolean')throw new Error('invalid jobs');
       for(const [key,min,max] of [['lease_ms',100,600000],['concurrency',1,16],['batch_size',1,128],['poll_ms',1000,3600000]])if(input.jobs[key]!==undefined)integer(input.jobs[key],min,max);
@@ -41,7 +46,7 @@ export function memoryRuntime(input) {
     captureExtraction:input.memory?.capture_extraction?.enabled === true,
     deploymentMode:input.deployment_mode || 'production', syntheticData:input.development?.synthetic_data === true,
     organizerConfigured:input.providers?.organizer?.enabled===true,embedderConfigured:input.providers?.embedder?.enabled===true,
-    vectorConfigured:input.vector_store?.enabled===true,workerConfigured:input.jobs?.enabled===true };
+    vectorConfigured:input.vector_store?.enabled===true&&input.providers?.embedder?.enabled===true,workerConfigured:input.jobs?.enabled===true };
 }
 
 export function privateStoragePaths(config = {}, databasePath, configPath) {
@@ -58,7 +63,7 @@ export function privateStoragePaths(config = {}, databasePath, configPath) {
       else if (child && typeof child === 'object' && !Array.isArray(child)) references(child, prefix + key + '.');
     }
   };
-  references(config.providers, 'providers.'); references(config.vector_store, 'vector_store.'); references(config.jobs, 'jobs.');
+  references(config.console, 'console.'); references(config.providers, 'providers.'); references(config.vector_store, 'vector_store.'); references(config.jobs, 'jobs.');
   return paths;
 }
 

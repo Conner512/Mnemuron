@@ -15,7 +15,7 @@ export class AuthStore {
     try {
       const tables = new Set(["oauth_records", "oauth_revoked_grants", "oauth_mfa_steps", "oauth_rate_limits", "oauth_csrf"]);
       if (identity) for (const name of ['identity_accounts','identity_invitations','identity_sessions',
-        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims']) tables.add(name);
+        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments']) tables.add(name);
       const existing = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
       requireConfig(existing.every(row => tables.has(row.name)), "separate OAuth database; unknown business tables");
       this.db.exec(`
@@ -40,9 +40,10 @@ export class AuthStore {
 
   transaction(callback) {
     this.assertCompatible();
-    this.db.exec("BEGIN IMMEDIATE");
-    try { const value = callback(); this.db.exec("COMMIT"); return value; }
-    catch (error) { this.db.exec("ROLLBACK"); throw error; }
+    const nested=this.db.isTransaction,savepoint='oauth_'+randomSecret().replace(/[^a-zA-Z0-9]/g,'');
+    this.db.exec(nested?'SAVEPOINT '+savepoint:'BEGIN IMMEDIATE');
+    try { const value=callback();if(value?.then)throw new Error('Async transaction forbidden');this.db.exec(nested?'RELEASE '+savepoint:'COMMIT');return value; }
+    catch(error){this.db.exec(nested?'ROLLBACK TO '+savepoint+'; RELEASE '+savepoint:'ROLLBACK');throw error;}
   }
 
   assertCompatible() {

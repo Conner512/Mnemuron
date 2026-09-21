@@ -1,3 +1,4 @@
+import {consoleWritable} from '../../../shared/console-contract.mjs';
 import {hash} from './revisions.mjs';
 import {integer,fail} from '../model-providers/contracts.mjs';
 
@@ -40,7 +41,7 @@ export class MemorySources {
   }
   unpin(auth,pinId){this.store.requireScope(auth,'memory:retention');const result=this.db.prepare('DELETE FROM memory_source_pins WHERE user_id=? AND pin_id=?').run(auth.user_id,pinId);return {unpinned:result.changes};}
   setSensitivity(auth,id,value){
-    this.store.requireScope(auth,'memory:retention');if(!['public','internal','sensitive','secret'].includes(value) || !this.db.prepare('SELECT 1 FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id))fail('INVALID_PRIVACY_TARGET');
+    if(!consoleWritable(auth))this.store.requireScope(auth,'memory:retention');if(!['public','internal','sensitive','secret'].includes(value) || !this.db.prepare('SELECT 1 FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id))fail('INVALID_PRIVACY_TARGET');
     return this.store.memoryTransaction(()=>{
       this.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?) ON CONFLICT(user_id,memory_id) DO UPDATE SET sensitivity=excluded.sensitivity').run(auth.user_id,id,value);
       this.db.prepare("UPDATE memory_processing_outbox SET state='blocked_config' WHERE user_id=? AND memory_id=?").run(auth.user_id,id);

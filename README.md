@@ -10,6 +10,8 @@ The central service stores data in SQLite. Adapters connect agent lifecycle even
 
 > **Status: experimental.** Single-owner self-hosting remains the default. An opt-in account-isolated console is available for local evaluation; deployment and recovery policies require separate review. APIs, schemas, and host integrations may change. `production_ready` remains `false`; adapter availability is not a claim that every host version or deployment is supported.
 
+**Desktop console actions:** the opt-in [functional console guide](docs/console-functional-actions-v0.4.md) connects memory editing, personal model/worker settings, security, invitations and operator administration to real account-scoped services. Existing consoles stay read-only until explicitly enabled; the ChatGPT MCP remains read-only.
+
 ## Why Mnemuron?
 
 - **Continue work without starting over.** Discover a project, select a task or source branch, review its Resume Preview, and explicitly confirm before delivery.

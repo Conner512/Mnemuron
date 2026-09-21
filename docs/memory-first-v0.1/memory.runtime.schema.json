@@ -4,6 +4,7 @@
   "type": "object",
   "required": ["config_version", "modules"],
   "properties": {
+    "console": {"type":"object","additionalProperties":false,"properties":{"key_file":{"type":"string","pattern":"^/"},"worker_enabled":{"type":"boolean"},"personal_vectors":{"type":"boolean"},"allowed_private_origins":{"type":"array","maxItems":32,"items":{"type":"string"}}}},
     "config_version": {"const": "mnemuron-memory-first-v1"},
     "deployment_mode": {"enum": ["production", "test", "development"]},
     "development": {"type": "object", "properties": {"synthetic_data": {"type": "boolean"}}},

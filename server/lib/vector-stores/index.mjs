@@ -15,10 +15,12 @@ export function splitDocument(content,maxBytes){
   if(text)parts.push(text);return parts;
 }
 export class VectorIndex {
-  constructor(store,backend,embedders,{clock=()=>Date.now(),leaseMs=120000,prefix='memory'}={}){
-    this.store=store;this.db=store.db;this.backend=backend;this.embedders=embedders;this.clock=clock;this.leaseMs=leaseMs;this.prefix=prefix;
+  constructor(store,backend,embedders,{clock=()=>Date.now(),leaseMs=120000,prefix='memory',ownerId=null}={}){
+    this.store=store;this.db=store.db;this.backend=backend;this.embedders=embedders;this.clock=clock;this.leaseMs=leaseMs;this.prefix=prefix;this.ownerId=ownerId;
     this.db.exec(`CREATE TABLE IF NOT EXISTS memory_vector_generations (generation TEXT PRIMARY KEY,profile TEXT NOT NULL,collection_name TEXT NOT NULL UNIQUE,state TEXT NOT NULL,
       dimensions INTEGER NOT NULL,distance TEXT NOT NULL,created_at INTEGER NOT NULL,lease_owner TEXT,lease_expires INTEGER,fence INTEGER NOT NULL DEFAULT 0,checkpoint INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE IF NOT EXISTS memory_vector_owners(generation TEXT PRIMARY KEY,user_id TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS memory_vector_owner_active(user_id TEXT PRIMARY KEY,generation TEXT NOT NULL,profile TEXT NOT NULL,collection_name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_active (id INTEGER PRIMARY KEY CHECK(id=1),generation TEXT NOT NULL,profile TEXT NOT NULL,collection_name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_documents (generation TEXT NOT NULL,user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
         scope_key TEXT NOT NULL,content_hash TEXT NOT NULL,state TEXT NOT NULL,PRIMARY KEY(generation,user_id,memory_id));
@@ -31,7 +33,8 @@ export class VectorIndex {
     if(typeof userId!=='string'||!userId)fail('INVALID_OWNER');
     if(this.db.prepare('SELECT state FROM memory_profile_state WHERE profile=?').get(p.fingerprint)?.state==='blocked_auth')fail('AUTH_FAILED');
     this.db.prepare('INSERT OR IGNORE INTO memory_vector_calls VALUES (?,?,0)').run(p.fingerprint,day);
-    if(this.db.prepare('SELECT count FROM memory_vector_calls WHERE profile=? AND day=?').get(p.fingerprint,day).count>=p.limits.daily_requests)fail('BUDGET_EXHAUSTED');
+    const probes=this.ownerId?this.db.prepare('SELECT reserved_calls n FROM memory_model_budget WHERE profile=? AND day=?').get(p.fingerprint,day)?.n||0:0;
+    if(probes+this.db.prepare('SELECT count FROM memory_vector_calls WHERE profile=? AND day=?').get(p.fingerprint,day).count>=p.limits.daily_requests)fail('BUDGET_EXHAUSTED');
     this.db.prepare('UPDATE memory_vector_calls SET count=count+1 WHERE profile=? AND day=?').run(p.fingerprint,day);
     this.db.prepare(`INSERT INTO memory_owner_vector_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)
       DO UPDATE SET count=count+1`).run(userId,p.fingerprint,day);
@@ -41,11 +44,12 @@ export class VectorIndex {
   begin(profile){
     const embedder=this.embedders.get(profile);if(!embedder?.profile.enabled)fail('NOT_CONFIGURED');
     const generation=randomUUID(),name=this.prefix+'_'+digest([generation,profile]).slice(0,32),p=embedder.profile;
-    this.db.prepare('INSERT INTO memory_vector_generations VALUES (?,?,?,?,?,?,?,NULL,NULL,0,0)').run(generation,profile,name,'building',p.dimensions,p.distance,this.clock());return generation;
+    this.db.prepare('INSERT INTO memory_vector_generations VALUES (?,?,?,?,?,?,?,NULL,NULL,0,0)').run(generation,profile,name,'building',p.dimensions,p.distance,this.clock());if(this.ownerId)this.db.prepare('INSERT INTO memory_vector_owners VALUES(?,?)').run(generation,this.ownerId);return generation;
   }
-  snapshot(){const active=this.db.prepare('SELECT * FROM memory_vector_active WHERE id=1').get();if(!active)fail('VECTOR_NOT_READY');return Object.freeze({...active});}
-  state(){return {generations:this.db.prepare('SELECT state,COUNT(*) AS count FROM memory_vector_generations GROUP BY state').all(),active:!!this.db.prepare('SELECT 1 FROM memory_vector_active').get()};}
-  acquire(id){return this.store.memoryTransaction(()=>{const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id),now=this.clock();
+  snapshot(){const active=this.ownerId?this.db.prepare('SELECT * FROM memory_vector_owner_active WHERE user_id=?').get(this.ownerId):this.db.prepare('SELECT * FROM memory_vector_active WHERE id=1').get();if(!active)fail('VECTOR_NOT_READY');return Object.freeze({...active});}
+  state(){if(this.ownerId)return {generations:this.db.prepare('SELECT g.state,COUNT(*) AS count FROM memory_vector_generations g JOIN memory_vector_owners o ON o.generation=g.generation WHERE o.user_id=? GROUP BY g.state').all(this.ownerId),active:!!this.db.prepare('SELECT 1 FROM memory_vector_owner_active WHERE user_id=?').get(this.ownerId)};return {generations:this.db.prepare('SELECT state,COUNT(*) AS count FROM memory_vector_generations GROUP BY state').all(),active:!!this.db.prepare('SELECT 1 FROM memory_vector_active').get()};}
+  assertOwner(id){const owner=this.db.prepare('SELECT user_id FROM memory_vector_owners WHERE generation=?').get(id)?.user_id||null;if(owner!==this.ownerId)fail('VECTOR_NOT_READY');}
+  acquire(id){this.assertOwner(id);return this.store.memoryTransaction(()=>{const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id),now=this.clock();
     if(!row || !['building','ready','active'].includes(row.state) || row.lease_expires>now)fail('VECTOR_LEASE_BUSY');
     const owner=randomUUID();this.db.prepare('UPDATE memory_vector_generations SET lease_owner=?,lease_expires=?,fence=fence+1 WHERE generation=?').run(owner,now+this.leaseMs,id);
     return {...row,fence:row.fence+1,lease_owner:owner};
@@ -56,9 +60,9 @@ export class VectorIndex {
     integer(maxDocuments,1,1000000);const g=this.acquire(id),e=this.embedders.get(g.profile);let processed=0,after=0,complete=false;
     try{
       if(!e)fail('NOT_CONFIGURED');await this.backend.ensureCollection(g.collection_name,{dimensions:g.dimensions,distance:g.distance});
-      const highwater=this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM memories').get().n;
+      const highwater=this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM memories WHERE (? IS NULL OR user_id=?)').get(this.ownerId,this.ownerId).n;
       while(processed<maxDocuments){
-        const batch=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? AND rowid<=? ORDER BY rowid LIMIT 100').all(after,highwater);
+        const batch=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? AND rowid<=? AND (? IS NULL OR user_id=?) ORDER BY rowid LIMIT 100').all(after,highwater,this.ownerId,this.ownerId);
         if(!batch.length){complete=true;break;}
         for(const raw of batch){
           const source=this.store.derivedMemory.currentSource(raw.user_id,raw.memory_id),old=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,raw.user_id,raw.memory_id);
@@ -101,21 +105,23 @@ export class VectorIndex {
       return {processed,complete,generation:id};
     }finally{this.db.prepare('UPDATE memory_vector_generations SET lease_owner=NULL,lease_expires=NULL WHERE generation=? AND fence=? AND lease_owner=?').run(id,g.fence,g.lease_owner);}
   }
-  activate(id){return this.store.memoryTransaction(()=>{
+  activate(id){this.assertOwner(id);return this.store.memoryTransaction(()=>{
     const g=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id);if(!g || g.state!=='ready' || g.lease_expires>this.clock())fail('VECTOR_NOT_READY');
     // Full authoritative coverage check includes writes that raced with backfill.
-    let after=0;for(;;){const rows=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? ORDER BY rowid LIMIT 100').all(after);if(!rows.length)break;
+    let after=0;for(;;){const rows=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? AND (? IS NULL OR user_id=?) ORDER BY rowid LIMIT 100').all(after,this.ownerId,this.ownerId);if(!rows.length)break;
       for(const raw of rows){const s=this.store.derivedMemory.currentSource(raw.user_id,raw.memory_id);if(!s || !this.embedders.get(g.profile).profile.egress.sensitivities.includes(s.sensitivity))continue;
         const indexed=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,s.user_id,s.memory_id);
         if(!indexed || indexed.revision!==s.revision || indexed.state_hash!==s.state_hash || indexed.scope_key!==s.scope_key)fail('VECTOR_CATCHUP_REQUIRED');}
       after=rows.at(-1).cursor_id;
     }
-    this.db.prepare("UPDATE memory_vector_generations SET state='retired' WHERE state='active'").run();
+    this.db.prepare("UPDATE memory_vector_generations SET state='retired' WHERE state='active' AND generation IN (SELECT generation FROM memory_vector_owners WHERE user_id=?)").run(this.ownerId);
+    if(!this.ownerId)this.db.prepare("UPDATE memory_vector_generations SET state='retired' WHERE state='active' AND generation NOT IN (SELECT generation FROM memory_vector_owners)").run();
     this.db.prepare("UPDATE memory_vector_generations SET state='active' WHERE generation=?").run(id);
-    this.db.prepare('INSERT OR REPLACE INTO memory_vector_active VALUES (1,?,?,?)').run(id,g.profile,g.collection_name);
+    if(this.ownerId)this.db.prepare('INSERT OR REPLACE INTO memory_vector_owner_active VALUES(?,?,?,?)').run(this.ownerId,id,g.profile,g.collection_name);
+    else this.db.prepare('INSERT OR REPLACE INTO memory_vector_active VALUES (1,?,?,?)').run(id,g.profile,g.collection_name);
     return this.snapshot();
   });}
-  async reconcile(id){
+  async reconcile(id){this.assertOwner(id);
     const g=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id);if(!g)fail('VECTOR_NOT_READY');let offset=null,removed=0;
     do{const page=await this.backend.scroll(g.collection_name,offset);
       for(const point of page.points){const mapping=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=?').get(String(point.id),id),source=mapping && this.store.derivedMemory.currentSource(mapping.user_id,mapping.memory_id);
@@ -123,7 +129,7 @@ export class VectorIndex {
       offset=page.next_page_offset ?? null;
     }while(offset!==null);return {removed};
   }
-  async search(auth,payload){
+  async search(auth,payload){if(this.ownerId&&this.ownerId!==auth.user_id)fail('INVALID_OWNER');
     this.store.requireScope(auth,'memory:read');
     const mode=payload.mode || 'lexical';if(!['lexical','hybrid','semantic'].includes(mode))fail('INVALID_RETRIEVAL_MODE');
     if(mode==='lexical')return this.store.queryMemories(auth,payload);
