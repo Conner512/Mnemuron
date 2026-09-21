@@ -2,11 +2,11 @@ import fs from "node:fs";
 import http from "node:http";
 
 // Exercise the documented Cloudflare path expressions without a public tunnel.
-export function testIngress(origin, ports) {
-  const template = fs.readFileSync(new URL("../../../docs/chatgpt-web-oauth-v0.1/config/cloudflared.ingress.example.yml", import.meta.url), "utf8");
+export function testIngress(origin, ports, {consoleEnabled=false}={}) {
+  const template = fs.readFileSync(new URL(consoleEnabled?"../../../docs/console-ingress.example.yml":"../../../docs/chatgpt-web-oauth-v0.1/config/cloudflared.ingress.example.yml", import.meta.url), "utf8");
   const rules = [...template.matchAll(/    path: '([^']+)'\n    service: http:\/\/127\.0\.0\.1:(47832|47833)/g)]
     .map((match) => ({ pattern: new RegExp(match[1]), port: match[2] === "47832" ? ports.gatewayPort : ports.authPort }));
-  if (rules.length !== 4 || !template.includes("- service: http_status:404")) throw new Error("Unrecognized ingress fixture");
+  if (rules.length !== (consoleEnabled?5:4) || !template.includes("- service: http_status:404")) throw new Error("Unrecognized ingress fixture");
   const host = new URL(origin).host;
   return http.createServer((request, response) => {
     response.setHeader("cache-control", "no-store");

@@ -60,7 +60,7 @@ export async function gatewayFixture(t, { profile = "auth_only", coreFixture, mu
   await listen(gateway.server, f.ports.gatewayPort);
   t.after(async () => { await close(gateway.server); });
   if (sharedOrigin) {
-    f.ingress = testIngress(config.issuer, f.ports);
+    f.ingress = testIngress(config.issuer, f.ports,{consoleEnabled:f.config.identity_mode==='multi_account_v1'});
     await listen(f.ingress, ingressPort);
     t.after(() => close(f.ingress));
   }

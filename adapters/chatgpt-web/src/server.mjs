@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
 import { BoundaryError, WindowLimit, RESOURCE_SCOPES, OAUTH_SCOPES, requestBoundary, sendJson, readBody, secretHash, requireConfig } from "../../../shared/oauth-common.mjs";
-import { validateGatewayConfig, loadGatewayConfig, loadIdentityMap } from "./config.mjs";
+import { validateGatewayConfig, loadGatewayConfig, loadIdentityMappings } from "./config.mjs";
 import { GatewayAuthorization } from "./authorization.mjs";
 import { ReadonlyCoreClient } from "./core-client.mjs";
 import { createMcpServer, toolDefinitions, enabledTools } from "./tools.mjs";
@@ -14,7 +14,14 @@ import {readObservation} from './read-audit.mjs';
 export function createGateway(input, { isolated = false, logger = () => {} } = {}) {
   const config = validateGatewayConfig(input, { isolated });
   const authorization = config.mode === "oauth" ? new GatewayAuthorization(config) : null;
-  const core = config.mode === "oauth" && config.tool_profile === "readonly" ? new ReadonlyCoreClient(config) : null;
+  const multi=config.identity_mode==='multi_account_v1';
+  const core = config.mode === "oauth" && config.tool_profile === "readonly" && !multi ? new ReadonlyCoreClient(config) : null;
+  const requestCore = mapping => {
+    if(config.tool_profile!=='readonly')return null;
+    const client=multi?new ReadonlyCoreClient({...config,core:{...config.core,credential_file:mapping.credential_file}}):core;
+    requireConfig(client.token!==authorization.secret,'separate introspection and core credentials');
+    return client;
+  };
   requireConfig(!core || core.token !== authorization.secret, "separate introspection and core credentials");
   const origin = new URL(config.resource);
   const metadataUrl = `${origin.origin}${config.protected_resource_metadata_path}`;
@@ -60,9 +67,9 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
         let ready = false;
         if (url.pathname === "/readyz" && authorization) {
           await authorization.metadata();
-          const mapping = loadIdentityMap(config);
-          if (!mapping.enabled) throw new BoundaryError(503, "SUBJECT_DISABLED");
-          if (core) await core.ready(mapping);
+          const mappings=loadIdentityMappings(config);
+          if(!multi && !mappings[0].enabled)throw new BoundaryError(503,'SUBJECT_DISABLED');
+          for(const mapping of mappings.filter(m=>m.enabled))await requestCore(mapping)?.ready(mapping);
           ready = true;
         }
         return sendJson(response, url.pathname === "/livez" || ready ? 200 : 503,
@@ -98,7 +105,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
         if (enabledTools(config).includes(body.params.name)) tool = body.params.name;
         if(tool)requireScope(auth,toolDefinitions[tool].scope);
       }
-      const mcp = createMcpServer({ config, auth, core, id:body.id,
+      const mcp = createMcpServer({ config, auth, core:requestCore(auth.mapping), id:body.id,
         onError:code=>{errorCode=code;readOutcome='tool_error';},
         onResult:(name,result)=>{read=readObservation(name,result);readOutcome='success';} });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

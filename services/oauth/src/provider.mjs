@@ -53,7 +53,10 @@ export function makeProvider(config, secrets, store, accounts) {
       },
     },
     rotateRefreshToken: true, revokeGrantPolicy: () => true,
-    extraTokenClaims: (_ctx, token) => token.kind === "AccessToken" ? { token_kind: "access_token" } : undefined,
+    extraTokenClaims: (_ctx, token) => token.kind === "AccessToken" ? { token_kind: "access_token",
+      ...(accounts.principal?{account_id:accounts.principal(token.accountId).account_id,
+        security_version:accounts.principal(token.accountId).security_version}:{}),
+    } : undefined,
     findAccount: async (_ctx, subject) => accounts.eligible(subject)
       ? { accountId: subject, claims: async () => ({ sub: subject }) } : undefined,
     interactions: { url: (_ctx, interaction) => `/interaction/${interaction.uid}` },

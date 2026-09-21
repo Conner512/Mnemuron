@@ -1,39 +1,20 @@
 import http from "node:http";
-import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { loadAuthConfig, validateAuthConfig, loadAuthSecrets } from "./config.mjs";
 import { AuthStore } from "./sqlite-adapter.mjs";
 import { Accounts } from "./accounts.mjs";
+import { IdentityRepository } from './identity-repository.mjs';
+import {consoleRequest} from './console.mjs';
+import {ConsoleCore} from './console-core.mjs';
+import {sendPage,label} from '../../../web/console/render.mjs';
 import { makeProvider } from "./provider.mjs";
 import { interactionRequest } from "./interactions.mjs";
 import { BoundaryError, SerialGate, WindowLimit, OAUTH_SCOPES, parseForm, readBody,
-  requestBoundary, sendJson, equalSecret, privateDirectory } from "../../../shared/oauth-common.mjs";
-import path from "node:path";
-
-function acquireLease(file) {
-  const lease = `${file}.process-lock`;
-  privateDirectory(path.dirname(file), { create: true });
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const fd = fs.openSync(lease, "wx", 0o600);
-      fs.writeFileSync(fd, String(process.pid));
-      const inode = fs.fstatSync(fd).ino;
-      fs.closeSync(fd);
-      return () => { if (fs.existsSync(lease) && fs.lstatSync(lease).ino === inode) fs.unlinkSync(lease); };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      const stat = fs.lstatSync(lease);
-      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Invalid authorization process lock");
-      const pid = Number(fs.readFileSync(lease, "utf8"));
-      if (!Number.isInteger(pid) || pid <= 0) throw new Error("Invalid authorization process lock");
-      try { process.kill(pid, 0); throw new Error("Only one authorization server may own this database"); }
-      catch (probe) { if (probe.code !== "ESRCH") throw probe; }
-      if (fs.lstatSync(lease).ino === stat.ino) fs.unlinkSync(lease);
-    }
-  }
-  throw new Error("Authorization process lock unavailable");
-}
+  requestBoundary, sendJson, equalSecret } from "../../../shared/oauth-common.mjs";
+import {acquireAuthorizationLease} from './process-lease.mjs';
+import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
+import {invalidateBrowserAuthorization} from './browser-session.mjs';
 
 function bootstrapMetadata(config) {
   return { issuer: config.issuer, authorization_endpoint: `${config.issuer}/authorize`,
@@ -61,15 +42,22 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
   let store, accounts, provider, secrets, release;
   try {
     if (config.mode === "oauth") {
+      if(config.identity_mode==='multi_account_v1') storageDoctor({
+        identity_database:config.database_file,identity_key:config.identity.encryption_key_file,
+      });
       secrets = loadAuthSecrets(config);
-      release = acquireLease(config.database_file);
-      store = new AuthStore(config.database_file);
-      accounts = new Accounts(config.accounts_file, store);
-      accounts.read();
+      release = acquireAuthorizationLease(config.database_file);
+      store = new AuthStore(config.database_file,{identity:config.identity_mode==='multi_account_v1'});
+      accounts = config.identity_mode==='multi_account_v1' ? new IdentityRepository(store,{
+        keyFile:config.identity.encryption_key_file,issuer:config.issuer,batchLimit:config.identity.invitation_batch_limit,
+        sessionTtl:config.identity.console_session_ttl_seconds}) : new Accounts(config.accounts_file, store);
+      if(config.identity_mode==='legacy_owner') accounts.read();
+      else store.identity=accounts;
       provider = makeProvider(config, secrets, store, accounts);
     }
   } catch (error) { store?.close(); release?.(); throw error; }
   const gate = new SerialGate();
+  const consoleGate = new SerialGate();
   const limits = new WindowLimit();
   const callback = provider?.callback();
   const origin = new URL(config.issuer);
@@ -89,7 +77,8 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
       const url = requestBoundary(request, origin, { isolated });
       limits.take(`peer:${request.socket.remoteAddress}`, 1500);
       if (request.method === "GET" && ["/livez", "/readyz"].includes(url.pathname)) {
-        const ready = config.mode === "oauth" && store.ready({ writeProbe: url.pathname === "/readyz" }) && accounts.read().enabled;
+        const ready = config.mode === "oauth" && store.ready({ writeProbe: url.pathname === "/readyz" })
+          && (config.identity_mode==='multi_account_v1' || accounts.read().enabled);
         return sendJson(response, url.pathname === "/livez" || ready ? 200 : 503,
           { service: "mnemuron-oauth", mode: config.mode, ready, production_ready: false });
       }
@@ -107,6 +96,10 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         request.url = "/.well-known/openid-configuration";
         return callback(request, response);
       }
+      const handleConsole=()=>consoleRequest(request,response,{config,accounts,store,url,
+        invalidateAuthorization:nextSubject=>invalidateBrowserAuthorization(request,response,provider,{nextSubject}),coreFor:subject=>new ConsoleCore(config.identity?.core,
+        accounts.principal(subject),accounts.bindings(subject).find(b=>b.purpose==='console'))});
+      if(await (request.method==='POST'&&/^\/(register|login)(\/|$)/.test(url.pathname)?consoleGate.run(handleConsole):handleConsole()))return;
       if (url.pathname.startsWith("/interaction/")) {
         return await gate.run(() => interactionRequest(request, response, { provider, store, accounts, config, url }));
       }
@@ -163,6 +156,16 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
       return await gate.run(() => callback(request, response));
     } catch (error) {
       errorCode = error instanceof BoundaryError ? error.code : "AUTH_DEPENDENCY_UNAVAILABLE";
+      const route=request.url.split('?')[0],interaction=route.match(/^\/interaction\/([A-Za-z0-9_-]{1,128})(?:\/(login|confirm|abort))?$/);
+      if(!response.headersSent&&config.identity_mode==='multi_account_v1'&&request.headers.accept?.includes('text/html')
+        && (/^\/(register|login|recover)(\/|$)/.test(route)||interaction)) {
+        const status=error instanceof BoundaryError?error.status:503;
+        const restart=['AUTHORIZATION_RESTART_REQUIRED','INTERACTION_EXPIRED','INTERACTION_MISMATCH'].includes(errorCode);
+        const message=restart?'restartAuthorization':errorCode==='LOGIN_FAILED'?'loginFailed':status===429?'rateLimited':status>=500?'unavailable':errorCode==='BLOCKED_POLICY'?'blockedNote':'pendingStep';
+        const back=interaction&&!restart?`/interaction/${interaction[1]}`:route.startsWith('/register')?'/register':'/login';
+        const navigation=interaction&&restart?label('oauthRestartHelp','p'):`<a href="${back}">${label(interaction?'oauthRetry':'back')}</a>`;
+        sendPage(response,{title:'error',auth:true,authPurpose:interaction?'oauth':'console',body:`<div role="alert">${label(message,'p')}</div>${navigation}`},{status});return;
+      }
       if (!response.headersSent) sendJson(response, error instanceof BoundaryError ? error.status : 503,
         { error: error instanceof BoundaryError && error.status < 500 ? "invalid_request" : "temporarily_unavailable",
           error_code: error instanceof BoundaryError ? error.code : "AUTH_DEPENDENCY_UNAVAILABLE" });

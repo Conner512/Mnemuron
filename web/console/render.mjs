@@ -1,0 +1,27 @@
+import fs from 'node:fs';
+import {text} from './catalog.mjs';
+export const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+export const pages=['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts'];
+export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pages.find(p=>route===`/app/${p}`)??null;
+export const label=(key,tag='span')=>`<${tag} data-i18n="${key}">${text(key)}</${tag}>`;
+export const appearanceControls=()=>`<div class="appearance-controls"><label class="sr-only" for="theme" data-i18n="theme">${text('theme')}</label><select id="theme" data-pref="theme" disabled><option value="a">Neural Indigo</option><option value="b">Signal Teal</option><option value="c">Paper Amber</option></select><label class="sr-only" for="mode" data-i18n="mode">${text('mode')}</label><select id="mode" data-pref="mode" disabled><option value="light" data-i18n="light">${text('light')}</option><option value="dark" data-i18n="dark">${text('dark')}</option></select><label class="sr-only" for="locale" data-i18n="language">${text('language')}</label><select id="locale" data-pref="locale" disabled><option value="zh-CN">中文</option><option value="en">English</option></select></div>`;
+export function renderPage({title,body='',auth=false,authPurpose='console',account=null,csrf='',page='overview'}) {
+  const brandContent='<span class="brand-icon" aria-hidden="true">M</span>Mnemuron';
+  const brand=auth&&authPurpose==='oauth'?`<span class="brand">${brandContent}</span>`:`<a class="brand" href="${auth?'/login':'/app'}">${brandContent}</a>`;
+  const nav=pages.map((p,i)=>`${i===0?label('workspace','h2'):i===4?label('settings','h2'):i===10?label('platform','h2'):''}<a href="/app/${p}" ${p===page?'aria-current="page"':''}><span class="nav-icon" aria-hidden="true">${['◫','▤','◇','◷','↗','⚙','◈','≡','▱','◐','⌁','♙'][i]}</span>${label(p)}</a>`).join('');
+  const inside=auth?`<main id="main" tabindex="-1" class="auth-layout"><section class="auth-brand">${brand}<div><p class="eyebrow" data-i18n="systemLabel">${text('systemLabel')}</p>${label('hero','h1')}${label('heroNote','p')}<div class="auth-orbit" aria-hidden="true"><span>M</span></div></div>${label('brandNote','p')}</section><section class="auth-form"><header>${appearanceControls()}</header><div class="form-content">${label(title,'h1')}${body}</div></section></main>`:
+    `<aside class="sidebar">${brand}<p class="eyebrow" data-i18n="systemLabel">${text('systemLabel')}</p><div class="account-badge"><span class="avatar" aria-hidden="true">${escapeHtml(account?.username?.slice(0,1)||'·')}</span><div><strong>${escapeHtml(account?.username||'')}</strong>${label('workspace','small')}</div></div><nav aria-label="Mnemuron">${nav}</nav><p class="handoff">${label('handoff')}</p></aside><div class="workspace"><header class="topbar"><div>${label('workspace')} <span aria-hidden="true"> / </span> ${label(title)}</div>${appearanceControls()}<form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet" data-i18n="signOut">${text('signOut')}</button></form></header><main id="main" tabindex="-1"><div id="console-root">${body||`<div class="page-heading">${label(title,'h1')}${label('loading','p')}</div>`}</div></main><footer>${label('readOnly')} <span>·</span> ${label('notProduction')}</footer></div><dialog id="memory-dialog" aria-labelledby="detail-title"><div class="dialog-header">${label('detail','h2').replace('<h2','<h2 id="detail-title"')}<button type="button" data-close data-i18n="close">${text('close')}</button></div><div id="memory-content"></div></dialog>`;
+  return `<!doctype html><html lang="zh-CN" data-theme="a" data-mode="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${text(title)}</title><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
+}
+export function serveAsset(request,response,pathname) {
+  const file=pathname.match(/^\/assets\/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs)$/)?.[1];
+  if(!file||request.method!=='GET')return false;
+  const content=fs.readFileSync(new URL(file,import.meta.url));
+  response.writeHead(200,{'content-type':file.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8','cache-control':'no-cache','x-content-type-options':'nosniff'});response.end(content);return true;
+}
+export function sendPage(response,options,{status=200,redirectUri=''}={}) {
+  response.writeHead(status,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',
+    'content-security-policy':`default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self' ${redirectUri}; frame-ancestors 'none'; base-uri 'none'`,
+    'x-frame-options':'DENY','referrer-policy':'same-origin','x-content-type-options':'nosniff'});
+  response.end(renderPage(options));
+}

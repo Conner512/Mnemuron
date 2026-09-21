@@ -39,6 +39,7 @@ export class ReadonlyCoreClient {
     const result = await this.request("/v1/identity");
     const identity = result.identity;
     if (!identity || identity.user_id !== mapping.mnemuron_user_id
+      || (mapping.credential_id && identity.credential_id!==mapping.credential_id)
       || identity.agent_instance_id !== mapping.agent_instance_id || identity.identity_status !== "server_verified"
       || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
       || !Array.isArray(result.scopes) || result.scopes.length !== CORE_SCOPES.length
@@ -52,7 +53,14 @@ export class ReadonlyCoreClient {
   async call(name, args, mapping) {
     await this.checkIdentity(mapping);
     switch (name) {
-      case "mnemuron_search_memories": return this.request("/v1/memories/query", args);
+      case "mnemuron_search_memories": {
+        // A new account does not inherit the legacy owner's paid model allocation.
+        if(this.config.identity_mode!=='multi_account_v1')return this.request('/v1/memories/query',args);
+        if(args.mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
+        const result=await this.request('/v1/memories/query',{...args,mode:'lexical'});
+        if(args.mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};
+        return result;
+      }
       case "mnemuron_get_summary": return this.request("/v1/memory-summaries/query", args);
       case "mnemuron_get_memory": {
         const { memory_id, ...options } = args;

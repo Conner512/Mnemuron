@@ -1240,6 +1240,7 @@ export class MnemuronStore {
 
   registerAgent(auth, payload) {
     this.requireScope(auth, "admin:devices");
+    if(payload.user_id && payload.user_id!==auth.user_id) throw new AuthorizationError('same-owner device registration');
     const result = this.issueCredential({
       label: payload.label,
       userId: payload.user_id || auth.user_id,
@@ -5811,6 +5812,7 @@ export class MnemuronStore {
 
   publicIdentity(auth) {
     return {
+      ...((isWebReader(auth)||auth.agent_id==='mnemuron-console')?{credential_id:auth.credential_id}:{}),
       user_id: auth.user_id,
       device_id: auth.device_id,
       agent_id: auth.agent_id,

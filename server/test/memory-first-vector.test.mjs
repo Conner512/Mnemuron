@@ -33,6 +33,15 @@ test('V-01 V-02 V-03: authoritative outbox survives failure, points contain no s
   assert.equal(f.s.db.prepare('SELECT state FROM memory_index_outbox WHERE memory_id=?').get(c.memory_id).state,'disabled');
   f.backend.down=false;await f.index.sync(f.generation);assert.equal(points.size,3);
 });
+test('ISO-08: embedding usage is attributed per owner without exposing another owner ledger',async t=>{
+ const f=await indexed(t),other=f.s.issueCredential({label:'Synthetic other usage',userId:'other-usage-owner',deviceId:'test',agentId:'synthetic',agentInstanceId:'usage-other',scopes:['memory:read','memory:write']});
+ const auth=f.s.authenticate(other.api_key);f.s.saveMemory(auth,{scope:'user',content:'Synthetic other network memory'});
+ await f.index.sync(f.generation);await f.index.search(auth,{query:'network',mode:'semantic'});
+ const rows=f.s.db.prepare('SELECT user_id,SUM(count) n FROM memory_owner_vector_usage GROUP BY user_id').all();
+ assert.equal(rows.length,2);assert.ok(rows.every(r=>r.n>0));
+ assert.equal(rows.reduce((n,r)=>n+r.n,0),f.s.db.prepare('SELECT SUM(count) n FROM memory_vector_calls').get().n);
+ assert.throws(()=>f.index.reserve(f.e,''),e=>e.code==='INVALID_OWNER');
+});
 test('V-04 V-08 V-10 R-08: stale/foreign/future/orphan points never hydrate after lifecycle changes',async t=>{
   const f=await indexed(t),snap=f.index.snapshot(),points=f.backend.collections.get(snap.collection_name).points;
   const before=[...points.values()].find(p=>p.payload.document===surrogate([f.auth.user_id,f.a.memory_id]));

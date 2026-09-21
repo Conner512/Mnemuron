@@ -8,7 +8,7 @@ Mnemuron 保留记忆的来源和版本，让授权的 Agent 跨会话、跨设�
 
 中心服务使用 SQLite 存储数据。适配器将宿主生命周期事件接入服务，并在服务暂时不可用时保留本地待发送队列。不依赖云端记忆服务或外部向量数据库。
 
-> **当前状态：实验阶段。** 项目面向单用户自托管工作空间，API、数据结构和宿主集成仍可能变化。`production_ready` 保持 `false`；提供适配器源码不等于承诺兼容所有宿主版本或部署环境。
+> **当前状态：实验阶段。** 默认仍为单 owner 自托管，另提供需显式启用的账户隔离控制台供本地评估；部署及恢复策略需单独审查。API、数据结构和宿主集成仍可能变化。`production_ready` 保持 `false`；提供适配器源码不等于承诺兼容所有宿主版本或部署环境。
 
 ## 能解决什么问题？
 
@@ -75,6 +75,7 @@ curl --fail http://127.0.0.1:47831/readyz
 
 - [快速开始](docs/getting-started.md)：带身份认证的本地 API 示例。
 - [文档索引](docs/README.md)：概念、协议、适配器与运维文档。
+- [账户控制台预览](docs/integrated-console-v0.3.md)：注册码注册、本地 TOTP、逐账户读取、迁移，以及仍关闭的高风险操作。
 - [核心规格](docs/core-spec-v0.1.md)：数据模型与任务连续性边界。
 - [部署指南](docs/pve-lxc-deployment-v0.1.md)：可选的 Linux/LXC 部署示例；核心 API 不要求使用 Proxmox。
 - [核心优化说明](docs/core-optimization-v0.2/release-notes.md)与[检索及同步修订](docs/core-review-v0.3/README.md)：实现变更和兼容性说明。
@@ -95,6 +96,7 @@ server/             HTTP API、SQLite 存储、管理工具与测试
 plugins/mnemuron/   ChatGPT / Codex 插件
 adapters/           OpenClaw、Hermes 与可选只读 HTTP MCP 集成
 services/oauth/     可选密码 + TOTP 授权服务
+web/console/        同域桌面控制台、颜色主题与双语字典
 shared/             OAuth 与网关共用的边界检查
 scripts/            性能基准、回归运行器与发布内容检查
 docs/               指南、规格与测试计划
@@ -102,7 +104,7 @@ docs/               指南、规格与测试计划
 
 ## 当前边界
 
-- 面向单用户自托管，不是托管式多租户服务。
+- 默认单 owner，逐账户隔离与桌面控制台需显式启用；不是托管式多租户服务，也不是生产认证。
 - 词法/全文检索无需模型；可选的 Embedding 与 Qdrant 模块支持混合和语义检索，但必须配置查询外发许可与预算。混合降级会明确标记，语义搜索不可用时返回错误。
 - 派生摘要保留来源版本和覆盖范围；只读摘要查询不会启动模型任务，详见 [Memory First](docs/memory-first-v0.1/README.md)。
 - 自动摘要可能遗漏上下文，来源记录与明确的任务状态始终分开保留。
