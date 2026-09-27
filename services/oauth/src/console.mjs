@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
 import {text} from '../../../web/console/catalog.mjs';
+import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
 
 const field=(name,key,{type='text',autocomplete='off',pattern,maxlength=1024,value=''}={})=>`<label for="${name}" data-i18n="${key}">${text(key)}</label><input id="${name}" name="${name}" type="${type}" autocomplete="${autocomplete}" maxlength="${maxlength}"${pattern?` pattern="${pattern}" inputmode="numeric"`:''} value="${escapeHtml(value)}" required>${type==='password'?`<button type="button" data-password-toggle="${name}" data-i18n="showPassword">${text('showPassword')}</button>`:''}`;
 const form=(action,csrf,fields,submit='continue')=>`<form method="post" action="${action}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}">${fields}<button class="primary" type="submit" data-i18n="${submit}">${text(submit)}</button></form>`;
@@ -35,7 +36,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     ids.session(token,purpose,{csrf:body.get('csrf')||''});return token;
   };
   if(pathname==='/recover'||pathname.startsWith('/recover/')) {
-    if(!config.identity.recovery_policy||!identityMaintenance?.enabled()) {
+    if(!config.identity.recovery_policy||!identityMaintenance?.enabled()||identityMaintenance.external()) {
       if(request.method!=='GET')throw new BoundaryError(403,'BLOCKED_POLICY');
       return show('recover',`<div class="policy-box" data-policy="blocked_policy">${label('recoveryNotConfigured','p')}</div><a href="/login">${label('signIn')}</a>`);
     }
@@ -71,10 +72,13 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     throw new BoundaryError(404,'NOT_FOUND');
   }
   if(pathname.startsWith('/register')) {
-    if(!config.login.registration_enabled)throw new BoundaryError(403,'REGISTRATION_DISABLED');
+    if(!config.login.registration_enabled){
+      if(pathname==='/register'&&request.method==='GET')return show('register',`<div class="policy-box" data-policy="registration_disabled">${label('registrationDisabled','p')}</div><a href="/login">${label('signIn')}</a>`);
+      throw new BoundaryError(403,'REGISTRATION_DISABLED');
+    }
     if(pathname==='/register'&&request.method==='GET') {
       const s=ids.newSession('registration_start',{ttl:600});setCookie(response,config,'registration_start',s.token);
-      return show('register',label('inviteNote','p')+form('/register/reserve',s.csrf,field('code','invitation',{maxlength:43})));
+      return show('register',label('registrationSteps','p')+label('inviteNote','p')+form('/register/reserve',s.csrf,field('code','invitation',{maxlength:43}))+`<div class="form-links"><a href="/login">${label('signIn')}</a></div>`);
     }
     if(pathname==='/register/reserve'&&request.method==='POST') {
       const old=submit('registration_start',['code']);store.limit(`registration:peer:${request.socket.remoteAddress}`,30,900);
@@ -83,7 +87,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     }
     const token=cookie(request,config,'registration');const state=ids.registrationState(token);
     if(pathname==='/register/account'&&request.method==='GET'&&state.status==='reserved')
-      return show('register',form('/register/account',ids.formCsrf(token,'registration'),field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'new-password'})+field('password_confirm','passwordConfirm',{type:'password',autocomplete:'new-password'})));
+      return show('register',label('registrationCredentials','p')+form('/register/account',ids.formCsrf(token,'registration'),field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'new-password'})+field('password_confirm','passwordConfirm',{type:'password',autocomplete:'new-password'})));
     if(pathname==='/register/account'&&request.method==='POST') {
       submit('registration',['username','password','password_confirm']);
       store.limit(`registration:account:${String(body.get('username')||'').toLowerCase()}`,10,900);
@@ -140,12 +144,14 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   if(pathname==='/console-api/capabilities'&&request.method==='GET'){
     let core;try{core=await coreFor(account.subject).view('capabilities',{});}catch{core={writable:false,actions:[],reason:'CONSOLE_CORE_UNAVAILABLE'};}
     ids.session(token,'console');
-    sendJson(response,200,{...core,writable:config.identity.console_operations===true&&core.writable,
-      enabled:config.identity.console_operations===true,operator:ids.console.operator(account.account_id),resource:config.resource,
-      maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy});return true;
+    const operator=ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
+    sendJson(response,200,{...core,actions:(core.actions||[]).filter(action=>allowed_actions.includes(action)),allowed_actions,writable:allowed_actions.some(action=>(core.actions||[]).includes(action)),
+      enabled:config.identity.console_operations===true,operator,resource:config.resource,
+      account_id:account.account_id,management:consoleManagement(config),invitation_batch_limit:config.identity.invitation_batch_limit,
+      maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy&&!identityMaintenance?.external()});return true;
   }
   if(pathname==='/console-api/action'&&request.method==='POST'){
-    if(config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');
+    if(!consoleActionAllowed(config,String(body.get('action')||'')))throw new BoundaryError(403,'BLOCKED_POLICY');
     submit('console',['account_id','action','operation_id','payload']);
     if(body.get('account_id')!==principal.account_id)throw new BoundaryError(409,'STALE_ACCOUNT');
     if(!/^[A-Za-z0-9_.:-]{1,128}$/.test(body.get('operation_id')||''))throw new BoundaryError(400,'INVALID_OPERATION_ID');
@@ -177,15 +183,17 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   }
   if(pathname==='/console-api/audit'&&request.method==='GET') {
     const core=await coreFor(account.subject).view('audit',Object.fromEntries(url.searchParams));ids.session(token,'console');
-    sendJson(response,200,{entries:ids.db.prepare('SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? ORDER BY created DESC,rowid DESC LIMIT 100').all(account.account_id),core_entries:core.entries,next_offset:core.next_offset,read_only:true});return true;
+    const offset=Number(url.searchParams.get('offset')??0),limit=Number(url.searchParams.get('limit')??50);
+    const rows=ids.db.prepare('SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?').all(account.account_id,limit+1,offset);
+    sendJson(response,200,{entries:rows.slice(0,limit),core_entries:core.entries,offset,limit,next_offset:rows.length>limit||core.next_offset!==null?offset+limit:null,read_only:true});return true;
   }
   if(pathname==='/console-api/invitations'&&request.method==='GET'){
-    if(config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{invitations:ids.console.invitations(account.account_id),batch_limit:config.identity.invitation_batch_limit});return true;
+    if(!consoleManagement(config).invitations)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{invitations:ids.console.invitations(account.account_id),batch_limit:config.identity.invitation_batch_limit});return true;
   }
   if(pathname==='/console-api/accounts'&&request.method==='GET'){
-    if(config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{accounts:ids.console.listAccounts(account.account_id),maintenance_enabled:identityMaintenance?.enabled()===true});return true;
+    if(!consoleManagement(config).accounts)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{accounts:ids.console.listAccounts(account.account_id),maintenance_enabled:identityMaintenance?.enabled()===true});return true;
   }
-  if(['/console-api/models','/console-api/export','/console-api/operation'].includes(pathname)&&config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');
+  if(['/console-api/export','/console-api/operation'].includes(pathname)&&config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');
   if(coreFor && request.method==='GET' && /^\/console-api\/(overview|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|operation)$/.test(pathname)) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     const result=await core.view(view,Object.fromEntries(url.searchParams));

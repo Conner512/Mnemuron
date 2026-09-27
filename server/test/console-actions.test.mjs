@@ -19,6 +19,26 @@ async function setup(t){const f=await memoryFixture(t);const secret=f.root+'/con
 const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
 const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create',{content:text,scope:'user',memory_type:'fact',sensitivity:'sensitive'},owner);
 
+test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
+  const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
+  const caps=(await f.get('capabilities',{},basic)).body;
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility']);
+  const m=(await create(f,basic)).body.memory_id;assert.ok(m);
+  let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
+  assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);
+  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true},basic)).status,200);
+  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'},basic)).status,200);
+  meta=(await f.get('memory-meta',{memory_id:m},basic)).body;assert.equal(meta.web_allowed,false);
+  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true},basic)).status,400);
+  const corrected=await f.act('memory.correct',{memory_id:m,revision:meta.revision,content:'Synthetic basic correction'},basic);assert.equal(corrected.status,200);
+  assert.equal((await f.act('memory.retract',{memory_id:corrected.body.memory_id,revision:1},basic)).status,200);
+  const foreign=(await create(f,f.b)).body.memory_id;
+  assert.equal((await f.act('memory.retract',{memory_id:foreign,revision:1},basic)).status,404);
+  for(const action of ['jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','vector.schedule','connections.create','connections.rotate','connections.revoke','storage.import'])assert.equal((await f.act(action,{},basic)).status,403,action);
+  assert.equal((await f.get('export',{},basic)).status,403);
+  assert.equal((await f.request('POST','/v1/memories',{scope:'user',content:'no generic bypass'},basic)).status,404);
+});
+
 test('CON-01: old readers, other agents and MCP credentials cannot call console mutations',async t=>{
   const f=await setup(t),before=businessSnapshot(f.store);
   assert.equal((await f.act('memory.create',{scope:'user',content:'denied'},f.read)).status,403);

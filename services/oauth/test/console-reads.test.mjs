@@ -34,11 +34,16 @@ test('ISO-01..05 ISO-11..12 UI-07 INT-06: real console sessions isolate every re
  await new MemoryWorker(core.store,jobs,model).drain();
  for(const [index,owner] of owners.entries()) {
    const other=owners[1-index];
-   for(const view of ['overview','memories','summaries','jobs','connections','audit','security','storage']) {
+   const account=ids.byId(owner.account.account_id);
+   for(let n=0;n<6;n++)ids.audit(account.account_id,`synthetic.audit.page.${n}`);
+   const auditA=await json(owner.browser,'/console-api/audit?limit=2'),auditB=await json(owner.browser,'/console-api/audit?limit=2&offset=2');
+   assert.equal(auditA.status,200);assert.equal(auditB.status,200);assert.equal(auditA.data.entries.length,2);
+   assert.equal(new Set([...auditA.data.entries,...auditB.data.entries].map(e=>e.audit_id)).size,4);
+   for(const view of ['overview','memories','summaries','jobs','connections','audit','security','storage','models']) {
      const r=await json(owner.browser,`/console-api/${view}`);assert.equal(r.status,200,view);
      assert.ok(!JSON.stringify(r.data).includes(other.memory.memory_id),view);assert.ok(!JSON.stringify(r.data).includes(other.user),view);
    }
-   for(const route of ['models','accounts','invitations','export','restore','../../v1/admin'])assert.notEqual((await json(owner.browser,`/console-api/${route}`)).status,200,route);
+   for(const route of ['accounts','invitations','export','restore','../../v1/admin'])assert.notEqual((await json(owner.browser,`/console-api/${route}`)).status,200,route);
    assert.equal((await json(owner.browser,`/console-api/memories?user_id=${other.user}`)).status,400);
    const own=await json(owner.browser,`/console-api/memory?memory_id=${owner.memory.memory_id}&content_limit=64`);assert.equal(own.status,200);assert.equal(own.data.content_complete,false);
    assert.equal((await json(other.browser,`/console-api/memory?${new URLSearchParams(own.data.next_request)}`)).status,404);

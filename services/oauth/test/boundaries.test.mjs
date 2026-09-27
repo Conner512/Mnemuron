@@ -11,6 +11,25 @@ import { validateAuthConfig, loadAuthSecrets } from "../src/config.mjs";
 import { createAuthorizationServer } from "../src/server.mjs";
 import { initializeSecrets } from "../bin/admin.mjs";
 import { seconds, readPrivate, writePrivate, randomSecret } from "../../../shared/oauth-common.mjs";
+import {consoleManagement,consoleActionAllowed} from '../src/console-policy.mjs';
+
+test('CFG-MGMT: independent management settings are explicit booleans and default closed',async t=>{
+  const f=await fixture(t,{start:false});const base={...f.config,identity_mode:'multi_account_v1',identity:{encryption_key_file:path.join(f.directory,'identity-key')}};
+  const validate=p=>validateAuthConfig({...base,identity:{...base.identity,console_management:p}},{isolated:true});
+  for(const policy of [null,[],true,'enabled',{invitations:'true'},{accounts:1},{roles:true},{admin:true}])assert.throws(()=>validate(policy));
+  const config=validate({invitations:true,accounts:true,roles:false});assert.equal(consoleActionAllowed(config,'accounts.role'),false);
+  assert.equal(consoleActionAllowed(config,'invitations.issue'),true);assert.equal(consoleActionAllowed(config,'memory.create'),false);
+  assert.equal(consoleActionAllowed(config,'invitations.erase'),false);assert.equal(consoleActionAllowed(config,'accounts.reset_totp'),false);
+  assert.deepEqual(consoleManagement(validate({})),{invitations:false,accounts:false,roles:false});
+  assert.deepEqual(consoleManagement({...base,identity:{...base.identity,console_operations:true}}),{invitations:true,accounts:true,roles:true});
+});
+test('CFG-BASIC: basic console policies have exact keys, boolean values and no implicit escalation',async t=>{
+ const f=await fixture(t,{start:false});const base={...f.config,identity_mode:'multi_account_v1',identity:{encryption_key_file:path.join(f.directory,'identity-key')}};
+ for(const policy of [null,[],true,{memory:'true'},{security:1},{models:true},{recovery:true}])assert.throws(()=>validateAuthConfig({...base,identity:{...base.identity,console_basic_operations:policy}},{isolated:true}));
+ const config=validateAuthConfig({...base,identity:{...base.identity,console_basic_operations:{memory:true,security:true,oauth:true}}},{isolated:true});
+ assert.equal(consoleActionAllowed(config,'memory.create'),true);assert.equal(consoleActionAllowed(config,'memory.delete_all'),false);
+ assert.equal(consoleActionAllowed(config,'models.save'),false);assert.equal(consoleActionAllowed(config,'security.recovery_codes'),false);
+});
 
 test("CFG-01..06 insecure configuration, credential aliasing, secret permissions and bootstrap fail closed", async (t) => {
   const f = await fixture(t, { start: false });

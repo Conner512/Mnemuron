@@ -12,10 +12,12 @@ import {randomSecret,writePrivate,seconds} from '../../../shared/oauth-common.mj
 import {CONSOLE_WRITE_SCOPES} from '../../../shared/console-contract.mjs';
 import {main as operatorCommand} from '../bin/console-operator.mjs';
 
-async function setup(t,{maintenance=false,recovery=false,writable=true}={}){
+async function setup(t,{maintenance=false,recovery=false,writable=true,management,basic}={}){
  const core=await memoryFixture(t);const f=await fixture(t,{start:false,mutate:c=>{
    c.identity_mode='multi_account_v1';c.login.registration_enabled=true;
    c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:10,console_session_ttl_seconds:3600,console_operations:true,core:{base_url:core.baseUrl}};
+   if(management){c.identity.console_operations=false;c.identity.console_management=management;}
+   if(basic){c.identity.console_operations=false;c.identity.console_basic_operations=basic;}
    if(maintenance)c.identity.provisioning={enabled:true,core_database:core.databasePath,credential_directory:path.join(path.dirname(c.database_file),'keys'),identity_map_file:path.join(path.dirname(c.database_file),'map.json')};
    if(recovery)c.identity.recovery_policy={password:['recovery_code','totp'],totp:['recovery_code','password']};
  }});
@@ -38,6 +40,34 @@ test('HTTP-CON-01: real BFF binds CSRF, Origin, account and write credentials be
  const me=await x.get('me');const noOrigin=await x.a.browser.request('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.body.csrf,account_id:x.a.record.account_id,action:'memory.create',operation_id:randomUUID(),payload:JSON.stringify(p)})});assert.equal(noOrigin.status,403);
  assert.equal(x.core.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);
  const asset=await x.a.browser.request('/assets/actions.mjs');assert.equal(asset.status,200);assert.match(asset.headers.get('content-type'),/javascript/);
+});
+test('HTTP-BASIC-01: own memory editing is independent of paid models, scheduling, export and platform roles',async t=>{
+ const x=await setup(t,{basic:{memory:true,security:true,oauth:true}});
+ const caps=(await x.get('capabilities')).body;assert.equal(caps.enabled,false);assert.equal(caps.writable,true);
+ assert.ok(caps.allowed_actions.includes('memory.create'));assert.ok(caps.allowed_actions.includes('security.password'));
+ for(const a of ['models.save','models.test','vector.schedule','jobs.schedule','storage.import','accounts.role','connections.create']){
+  assert.ok(!caps.allowed_actions.includes(a),a);assert.equal((await x.act(a,{})).status,403,a);
+ }
+ let r=await x.act('memory.create',{scope:'user',content:'Synthetic basic settings acceptance'});assert.equal(r.status,200);const id=r.body.memory_id;
+ assert.equal((await x.get(`memory-meta?memory_id=${id}`,x.b)).status,404);
+ assert.equal((await x.get(`memory?memory_id=${id}&metadata=true`,x.b)).status,404);
+ assert.equal((await x.get(`memory?memory_id=${id}&metadata=true&user_id=${x.b.record.user_id}`)).status,400);
+ const meta=(await x.get(`memory-meta?memory_id=${id}`)).body;
+ assert.deepEqual((await x.get(`memory?memory_id=${id}&metadata=true`)).body,meta);
+ assert.equal((await x.act('memory.classify',{memory_id:id,revision:meta.revision,category:'technical'})).status,200);
+ assert.equal((await x.act('memory.retract',{memory_id:id,revision:meta.revision},x.b)).status,404);
+ assert.equal((await x.get('export')).status,404);assert.equal((await x.get('accounts')).status,403);
+ assert.equal((await x.act('security.sessions.revoke_others')).status,200);
+});
+test('HTTP-BASIC-02: security without Core write scopes does not grant memory or foreign access',async t=>{
+ const x=await setup(t,{basic:{memory:true,security:true,oauth:true},writable:false});
+ const caps=(await x.get('capabilities')).body;assert.equal(caps.writable,false);assert.ok(!caps.allowed_actions.includes('memory.create'));
+ assert.ok(caps.allowed_actions.includes('security.sessions.revoke_others'));
+ assert.equal((await x.act('memory.create',{scope:'user',content:'denied'})).status,403);
+ assert.equal((await x.act('security.session.revoke',{session_id:x.ids.session(x.b.console.token,'console').digest})).status,404);
+ assert.equal((await x.act('security.recovery_codes',await x.proof())).status,403);
+ x.f.app.config.identity.console_basic_operations.security=false;
+ assert.equal((await x.act('security.sessions.revoke_others')).status,403);
 });
 test('HTTP-CON-02: existing read-only accounts require explicit capability upgrade',async t=>{
  const x=await setup(t,{writable:false});assert.equal((await x.get('capabilities')).body.writable,false);
@@ -123,4 +153,69 @@ test('HTTP-CON-12: operator authority is rechecked after awaited password/TOTP p
  assert.equal(r.status,403);assert.equal(r.body.error_code,'OPERATOR_REQUIRED');
  assert.equal(x.ids.byId(x.b.record.account_id).status,'active');
  assert.equal(x.core.store.db.prepare('SELECT COUNT(*) n FROM credentials WHERE user_id=? AND revoked_at IS NOT NULL').get(x.b.record.user_id).n,0);
+});
+
+test('HTTP-BASIC-03: idempotent basic-only upgrade preserves account IDs, Web keys, and unrelated accounts',async t=>{
+ const x=await setup(t,{writable:false,basic:{memory:true,security:true,oauth:true}}),file=path.join(x.f.directory,'basic-operator.json');writePrivate(file,x.f.config);
+ const before=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();
+ const consoleId=x.ids.bindings(x.a.record.subject).find(b=>b.purpose==='console').credential_id;
+ const args=['enable-console-basic','--config',file,'--account-id',x.a.record.account_id,'--core-database',x.core.databasePath,'--confirm','--isolated-fixture'];
+ await operatorCommand(args);await operatorCommand(args);
+ const after=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();
+ assert.equal(after.length,before.length);
+ for(let i=0;i<after.length;i++)assert.deepEqual({...after[i],scopes_json:before[i].scopes_json,last_used_at:before[i].last_used_at},{...before[i]});
+ for(const row of after)if(row.credential_id!==consoleId)assert.deepEqual(row,before.find(b=>b.credential_id===row.credential_id));
+ assert.deepEqual(JSON.parse(after.find(r=>r.credential_id===consoleId).scopes_json),['memory:read','resume:read','console:read','memory:write','memory:organize']);
+ const caps=(await x.get('capabilities')).body;assert.equal(caps.writable,true);assert.ok(!caps.actions.includes('models.save'));
+ assert.equal((await x.act('memory.create',{scope:'user',content:'Synthetic narrow BFF memory'})).status,200);
+ assert.equal((await x.act('memory.create',{scope:'user',content:'No foreign upgrade'},x.b)).status,403);
+ assert.equal((await x.act('models.save',{})).status,403);assert.equal((await x.get('export')).status,404);
+});
+
+const managementOnly={invitations:true,accounts:true,roles:false};
+test('HTTP-MGMT-01: scoped operator management does not require or grant general console writes',async t=>{
+ const x=await setup(t,{writable:false,management:managementOnly});x.ids.console.role(x.a.record.account_id,true);
+ const caps=(await x.get('capabilities')).body;
+ assert.deepEqual(caps.management,managementOnly);assert.equal(caps.enabled,false);assert.equal(caps.writable,false);
+ assert.equal(caps.account_id,x.a.record.account_id);assert.equal(caps.invitation_batch_limit,10);
+ assert.equal((await x.get('accounts')).status,200);assert.equal((await x.get('invitations')).status,200);
+ for(const action of ['memory.create','jobs.schedule','models.save','security.password','security.totp.begin','security.recovery_codes','accounts.role']){
+   const r=await x.act(action,{});assert.equal(r.status,403,action);assert.equal(r.body.error_code,'BLOCKED_POLICY');
+ }
+ assert.equal((await x.get('export')).status,404);
+ const operation=randomUUID(),payload={count:2,ttl_minutes:7,...await x.proof()};
+ const issued=await x.act('invitations.issue',payload,x.a,operation);assert.equal(issued.status,200,JSON.stringify(issued.body));
+ assert.equal(issued.body.codes.length,2);assert.deepEqual((await x.act('invitations.issue',payload,x.a,operation)).body.codes,issued.body.codes);
+ const inventory=await x.get('invitations');assert.equal(inventory.status,200);assert.ok(!JSON.stringify(inventory.body).includes(issued.body.codes[0]));
+ assert.equal((await x.get('accounts',x.b)).status,403);assert.equal((await x.get('invitations',x.b)).status,403);
+ assert.equal((await x.act('invitations.issue',payload,x.b)).status,403);
+ assert.equal((await x.act('invitations.issue',payload,x.a,randomUUID(),{account_id:x.b.record.account_id})).status,409);
+ assert.equal((await x.act('invitations.issue',payload,x.a,randomUUID(),{csrf:'bad'})).status,401);
+ x.f.app.config.identity.console_management.invitations=false;
+ assert.equal((await x.act('invitations.issue',payload,x.a,operation)).status,403,'disabled policy must also block secret replay');
+ assert.equal(x.core.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,0);
+});
+test('HTTP-MGMT-02: explicit management policy overrides legacy role access even when other operations are enabled',async t=>{
+ const x=await setup(t,{management:managementOnly});x.ids.console.role(x.a.record.account_id,true);
+ x.f.app.config.identity.console_operations=true;
+ const r=await x.act('accounts.role',{account_id:x.b.record.account_id,operator:true,...await x.proof()});
+ assert.equal(r.status,403);assert.equal(r.body.error_code,'BLOCKED_POLICY');assert.equal(x.ids.console.operator(x.b.record.account_id),false);
+ x.f.app.config.identity.console_management.accounts=false;
+ assert.equal((await x.get('accounts')).status,403);
+ assert.equal((await x.act('accounts.disable',{account_id:x.b.record.account_id})).status,403);
+});
+test('HTTP-MGMT-03: scoped disable/enable preserves ownership and recreates only readonly account bindings',async t=>{
+ const x=await setup(t,{maintenance:true,writable:false,management:managementOnly});x.ids.console.role(x.a.record.account_id,true);
+ const before=x.ids.byId(x.b.record.account_id),old=x.ids.bindings(before.subject);
+ const disabled=await x.act('accounts.disable',{account_id:before.account_id,...await x.proof()});
+ assert.equal(disabled.status,200,JSON.stringify(disabled.body));assert.equal(disabled.body.status,'disabled');
+ assert.equal((await x.get('me',x.b)).status,401);assert.equal((await x.get('me')).status,200);
+ const enabled=await x.act('accounts.enable',{account_id:before.account_id,...await x.proof(x.a,30)});
+ assert.equal(enabled.status,200,JSON.stringify(enabled.body));assert.equal(enabled.body.status,'active');
+ const after=x.ids.byId(before.account_id);assert.equal(after.subject,before.subject);assert.equal(after.user_id,before.user_id);
+ for(const binding of x.ids.bindings(before.subject)){
+   assert.ok(!old.some(v=>v.credential_id===binding.credential_id));
+   const auth=x.core.store.authenticate(fs.readFileSync(binding.credential_file,'utf8').trim());
+   assert.ok(auth.scopes.every(s=>!s.endsWith(':write')&&!s.endsWith(':organize')));
+ }
 });

@@ -33,12 +33,12 @@ export function overviewView(data, {t, memoryRows}) {
   // The reference's trends and connected/completed badges were demo data. Never invent them.
   const count = key => Number.isSafeInteger(data.counts?.[key]) && data.counts[key] >= 0 ? data.counts[key].toLocaleString() : '—';
   return `<section class="hero"><div class="hero-copy"><p class="eyebrow">${l('heroLabel')}</p><h2>${l('connectionHeadline')}</h2>${l('connectionDescription','p')}<a class="button primary" href="/app/connections">${l('manageConnections')}${icon('arrow')}</a></div>${orbit()}</section>
-  <div class="metrics">${[['memories','memoryCount','memories'],['sources','sourceCount','audit'],['summaries','summaryCount','summaries'],['jobs','jobCount','jobs']].map(([key,title,glyph]) => `<section class="card metric"><div class="metric-heading">${l(title)}<span class="metric-icon">${icon(glyph)}</span></div><strong>${count(key)}</strong>${l('ownedRecords','small')}</section>`).join('')}</div>
+  <div class="metrics">${[['memories','memoryCount','memories'],['sources','sourceCount','audit'],['summaries','summaryCount','summaries'],['jobs','jobCount','jobs']].map(([key,title,glyph]) => `<a class="card metric" href="/app/${key==='sources'?'memories?focus=sources':key}"><div class="metric-heading">${l(title)}<span class="metric-icon">${icon(glyph)}</span></div><strong>${count(key)}</strong>${l('ownedRecords','small')}</a>`).join('')}</div>
   <div class="columns overview-columns"><section class="card recent-card"><div class="card-heading"><div><p class="eyebrow">${l('recentLabel')}</p>${l('recent','h2')}</div><a href="/app/memories">${l('viewAll')} ${icon('arrow')}</a></div>${memoryRows(data.recent)}${l('inspectMemoryNote','p')}</section>
   <section class="card processing-card"><div class="card-heading"><div><p class="eyebrow">${l('processingLabel')}</p>${l('memoryProcessing','h2')}</div><span class="metric-icon">${icon('jobs')}</span></div>
-  <div class="processing-stage"><span class="stage-icon">${icon('memories')}</span><div>${l('memoryCount')}<small>${l('atomicNote')}</small></div><strong>${count('memories')}</strong></div>
-  <div class="processing-stage"><span class="stage-icon">${icon('summaries')}</span><div>${l('summaryCount')}<small>${l('derivedNote')}</small></div><strong>${count('summaries')}</strong></div>
-  <div class="processing-stage"><span class="stage-icon">${icon('jobs')}</span><div>${l('jobCount')}<small>${l('jobStatusNote')}</small></div><strong>${count('jobs')}</strong></div>
+  <a class="processing-stage" href="/app/memories"><span class="stage-icon">${icon('memories')}</span><div>${l('memoryCount')}<small>${l('atomicNote')}</small></div><strong>${count('memories')}</strong></a>
+  <a class="processing-stage" href="/app/summaries"><span class="stage-icon">${icon('summaries')}</span><div>${l('summaryCount')}<small>${l('derivedNote')}</small></div><strong>${count('summaries')}</strong></a>
+  <a class="processing-stage" href="/app/jobs"><span class="stage-icon">${icon('jobs')}</span><div>${l('jobCount')}<small>${l('jobStatusNote')}</small></div><strong>${count('jobs')}</strong></a>
   <div class="privacy-note">${icon('security')}${l('summaryBoundary','p')}</div><a class="text-link" href="/app/jobs">${l('viewJobs')} ${icon('arrow')}</a></section></div>`;
 }
 

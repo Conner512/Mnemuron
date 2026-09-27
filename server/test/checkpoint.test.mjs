@@ -63,12 +63,15 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
 
     const userEventId = randomUUID();
     const assistantEventId = randomUUID();
+    // Stay inside the real retention window; a fixed historical date eventually
+    // tests expired raw data instead of checkpoint extraction.
+    const captured = minutes => new Date(Date.now() - (120 - minutes) * 60_000).toISOString();
     const events = [
       {
         event_id: userEventId,
         event_type: "user_message",
         hook_event_name: "UserPromptSubmit",
-        captured_at: "2026-08-24T01:00:00.000Z",
+        captured_at: captured(0),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -79,7 +82,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         event_id: assistantEventId,
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-08-24T01:01:00.000Z",
+        captured_at: captured(1),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -116,7 +119,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
         event_id: sessionEndId,
         event_type: "session_end",
         hook_event_name: "SessionEnd",
-        captured_at: "2026-08-24T01:02:00.000Z",
+        captured_at: captured(2),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -169,7 +172,7 @@ test("automatic checkpoints are immutable, traceable, idempotent, and included i
       event: {
         event_id: manualEventId,
         event_type: "user_message",
-        captured_at: "2026-08-24T02:00:00.000Z",
+        captured_at: captured(60),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clienta",
