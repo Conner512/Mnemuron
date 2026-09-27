@@ -28,13 +28,26 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
     for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])
       if(c.identity[name]!==undefined) boundedInteger(c.identity[name],null,min,max,name);
     if(c.identity.console_operations!==undefined)requireConfig(typeof c.identity.console_operations==='boolean','console operations flag');
+    if(c.identity.console_basic_operations!==undefined){
+      const p=c.identity.console_basic_operations;
+      requireConfig(p&&typeof p==='object'&&!Array.isArray(p),'console basic policy');
+      requireConfig(Object.entries(p).every(([key,value])=>['memory','security','oauth'].includes(key)&&typeof value==='boolean'),'console basic policy fields');
+    }
+    if(c.identity.console_management!==undefined){
+      const p=c.identity.console_management;
+      requireConfig(p&&typeof p==='object'&&!Array.isArray(p),'console management policy');
+      requireConfig(Object.entries(p).every(([key,value])=>['invitations','accounts','roles'].includes(key)&&typeof value==='boolean'),'console management fields');
+      requireConfig(p.roles!==true||p.accounts===true,'roles require account management');
+    }
     if(c.identity.recovery_policy){
       const p=c.identity.recovery_policy;
       requireConfig(Object.keys(p).every(k=>['password','totp'].includes(k)),'recovery policy fields');
       for(const [action,proofs] of Object.entries(p))exactList(proofs,['recovery_code',action==='password'?'totp':'password'],'recovery proof pair');
     }
     if(c.identity.provisioning){const p=c.identity.provisioning;requireConfig(typeof p.enabled==='boolean','provisioning flag');
-      if(p.enabled)for(const k of ['core_database','credential_directory','identity_map_file'])requireConfig(typeof p[k]==='string'&&p[k].startsWith('/'),'private provisioning paths');
+      requireConfig(p.mode===undefined||['in_process','external_worker'].includes(p.mode),'provisioning execution mode');
+      if(p.enabled&&p.mode!=='external_worker')for(const k of ['core_database','credential_directory','identity_map_file'])requireConfig(typeof p[k]==='string'&&p[k].startsWith('/'),'private provisioning paths');
+      if(p.mode==='external_worker')requireConfig(Object.keys(p).every(k=>['enabled','mode'].includes(k)),'external worker keeps privileged paths out of OAuth configuration');
     }
     if(c.identity.core) canonicalUrl(c.identity.core.base_url,{isolated,loopbackHttp:true,pathname:'/'});
   }

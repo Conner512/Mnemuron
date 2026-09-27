@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {ConsoleState,object,id,number,fingerprint} from './state.mjs';
 import {ConsoleModels} from './models.mjs';
-import {consoleWritable,CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {consoleActionWritable,CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {AuthorizationError,ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
 import {MemoryWorker,scheduleLibrary} from '../memory-jobs/worker.mjs';
 import {VectorIndex} from '../vector-stores/index.mjs';
@@ -11,9 +11,9 @@ const taxonomyDefault={version:'console-default-v1',categories:['uncategorized',
 const receipt=result=>({status:result.status,memory_id:result.replacement_memory?.memory_id||result.memory?.memory_id||result.memory_id,physically_deleted:false});
 export class ConsoleService {
   constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.busy=false;}
-  require(auth){if(!consoleWritable(auth))throw new AuthorizationError('console:write');}
+  require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(){return this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;}
-  capabilities(auth){return {version:'console-actions-v1',writable:consoleWritable(auth),actions:consoleWritable(auth)?CONSOLE_ACTIONS:[],taxonomy:this.taxonomy(),
+  capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(),
     secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
@@ -24,7 +24,7 @@ export class ConsoleService {
       web_allowed:row.status==='active'&&this.store.webVisibility.visible({...auth,agent_id:'chatgpt-web'},row.memory_id),scope:row.scope,topic:row.topic,memory_type:row.memory_type,status:row.status};}
   job(auth,jobId){const job=this.store.memoryJobs.get(id(jobId));if(!job||job.user_id!==auth.user_id)throw new NotFoundError('Job not found.','JOB_NOT_FOUND');return job;}
   settings(user){const row=this.db.prepare('SELECT * FROM console_settings WHERE user_id=?').get(user);return {revision:row?.revision||0,...(row?JSON.parse(row.settings_json):{schedule_enabled:false,timezone:'UTC',periods:['daily','weekly']})};}
-  async execute(auth,input){this.require(auth);object(input,['action','operation_id','payload']);const {action,operation_id:operation,payload:p}=input;id(operation);if(!CONSOLE_ACTIONS.includes(action))throw new NotFoundError('Action not found.');
+  async execute(auth,input){object(input,['action','operation_id','payload']);const {action,operation_id:operation,payload:p}=input;this.require(auth,action);id(operation);if(!CONSOLE_ACTIONS.includes(action))throw new NotFoundError('Action not found.');
     if(Buffer.byteLength(JSON.stringify(input))>56*1024)throw new ValidationError('Request too large.','CONSOLE_INPUT_TOO_LARGE');
     object(p,Object.keys(p||{}));
     if(action==='models.test')return this.probe(auth,p,operation);

@@ -1,5 +1,5 @@
 import {BoundaryError,readPrivate,fetchJson} from '../../../shared/oauth-common.mjs';
-import {CONSOLE_READ_SCOPES,CONSOLE_WRITE_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
+import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,consoleActionWritable,exactScopes} from '../../../shared/console-contract.mjs';
 export class ConsoleCore {
   constructor(config,principal,binding) {
     if(!binding||binding.purpose!=='console'||!config?.base_url)throw new BoundaryError(503,'CONSOLE_CORE_UNAVAILABLE');
@@ -21,12 +21,16 @@ export class ConsoleCore {
   async identity() {
     const identity=await this.request('/v1/identity'),i=identity.identity;
     if(i?.user_id!==this.principal.user_id||i?.credential_id!==this.binding.credential_id||i?.agent_id!=='mnemuron-console'||i?.agent_instance_id!==this.binding.agent_instance_id
-      || ![CONSOLE_READ_SCOPES,CONSOLE_WRITE_SCOPES].some(expected=>exactScopes(identity.scopes,expected)))throw new BoundaryError(503,'CORE_IDENTITY_MISMATCH');
+      || ![CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES].some(expected=>exactScopes(identity.scopes,expected)))throw new BoundaryError(503,'CORE_IDENTITY_MISMATCH');
     return identity;
   }
   async view(view,params={}) {
     await this.identity();
     if(view==='memory') {
+      if(params.metadata==='true'){
+        if(Object.keys(params).some(k=>!['memory_id','metadata'].includes(k))||!/^[A-Za-z0-9_.:-]{1,160}$/.test(params.memory_id||''))throw new BoundaryError(400,'INVALID_DETAIL_REQUEST');
+        return this.request(`/v1/console/memory-meta?${new URLSearchParams({memory_id:params.memory_id})}`);
+      }
       const {memory_id,...options}=params;
       if(!/^[A-Za-z0-9_.:-]{1,160}$/.test(memory_id||'')||Object.keys(options).some(k=>!['content_offset','content_limit','source_offset','revision','source_version','include_history'].includes(k)))throw new BoundaryError(400,'INVALID_DETAIL_REQUEST');
       return this.request(`/v1/memories/${encodeURIComponent(memory_id)}?${new URLSearchParams(options)}`);
@@ -35,7 +39,7 @@ export class ConsoleCore {
     return this.request(`/v1/console/${view}?${new URLSearchParams(params)}`);
   }
   async action(input) {
-    const identity=await this.identity();if(!exactScopes(identity.scopes,CONSOLE_WRITE_SCOPES))throw new BoundaryError(403,'CONSOLE_UPGRADE_REQUIRED');
+    const identity=await this.identity();if(!consoleActionWritable({...identity.identity,scopes:identity.scopes},input.action))throw new BoundaryError(403,'CONSOLE_UPGRADE_REQUIRED');
     return this.request('/v1/console/action',{method:'POST',body:input});
   }
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ReadonlyCoreClient} from '../src/core-client.mjs';
 import {consoleRead} from '../../../server/lib/console-read.mjs';
+import {memoryFixture} from '../../../server/test/helpers/core-memory-fixture.mjs';
 
 test('SEC-00: new multi-account readers cannot inherit an unallocated shared model budget',async()=>{
  const calls=[],client=Object.create(ReadonlyCoreClient.prototype);
@@ -19,10 +20,12 @@ test('SEC-00: new multi-account readers cannot inherit an unallocated shared mod
  await client.call('mnemuron_search_memories',{query:'synthetic',mode:'hybrid'},{});
  assert.equal(calls[2].body.mode,'hybrid','existing operator-approved legacy retrieval is preserved');
 });
-test('SEC-00: console search has an explicit no-egress mode while allocation policy is pending',()=>{
- let args;const auth={user_id:'synthetic-A',agent_id:'mnemuron-console'};
- const store={requireScope(){},searchMemories(principal,body){assert.equal(principal,auth);args=body;return {};}};
- consoleRead(store,auth,'memories',{query:'synthetic'});assert.equal(args.mode,'lexical');
+test('SEC-00: console search has an explicit no-egress mode while allocation policy is pending',async t=>{
+ const f=await memoryFixture(t),credential=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-console',agentId:'mnemuron-console',agentInstanceId:'no-egress',scopes:['console:read','memory:read','resume:read']});
+ f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic no-egress marker'});
+ let modelPathCalled=false;f.store.searchMemories=async()=>{modelPathCalled=true;throw new Error('Default console search must not invoke model retrieval');};
+ const result=await consoleRead(f.store,f.store.authenticate(credential.api_key),'memories',{query:'synthetic'});
+ assert.equal(result.retrieval.mode,'lexical');assert.equal(result.results.length,1);assert.equal(modelPathCalled,false);
 });
 test('console allocation: only self-scoped Core metadata enables personal semantic reads, never tool-supplied identity',async()=>{
  const calls=[],client=Object.create(ReadonlyCoreClient.prototype);client.config={identity_mode:'multi_account_v1'};

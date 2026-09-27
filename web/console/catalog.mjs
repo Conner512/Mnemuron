@@ -33,6 +33,14 @@ export const catalog={
 
 // Presentation copy is separate from backend status codes and never translates memory content.
 Object.assign(catalog['zh-CN'], {
+  viewWithoutWrite:'可以查看详情；修改操作尚未启用。不会因为点击查看而改变数据。',
+  inspectDetails:'查看详情',uncategorized:'未分类',preferences:'偏好',projects:'项目',technical:'技术',personal:'个人',decisions:'决策',superseded:'已被修订',retracted:'已撤回',
+  technicalDetails:'技术详情',protocol:'接口协议',updated:'更新时间',lastUsed:'最后使用',agentInstance:'Agent 实例',sessionIdentifier:'会话标识',processedCount:'已处理',attemptCount:'尝试次数',resultReference:'结果标识',
+  previousRecord:'查看修订前记忆',replacementRecord:'查看后续修订',summaryNotCurrent:'此摘要已失效，不能作为当前结论；可查看相关原始记忆。',current:'当前',stale:'已失效',
+  allCategories:'全部分类',category:'分类',resetFilters:'清除筛选',inspectSourcesNote:'请选择一条记忆，展开详情中的来源；不会载入原始事件正文。',
+  boundedSearchNote:'检索结果受候选窗口限制；请缩小关键词或筛选范围，不代表已列出全部记忆',
+  capabilitiesUnavailable:'权限信息暂时无法读取，修改操作已关闭；仍可尝试查看本人数据。',
+  contentRange:'本页字符',endOfContent:'已到正文末尾',sourceMetadata:'查看来源信息',nextSources:'下一页来源',
   connectionHeadline:'ChatGPT，接上你的个人记忆。', connectionDescription:'从已授权的记忆中找回上下文。来源、版本与访问范围，始终清晰可查。',
   manageConnections:'管理我的连接', browseMemories:'浏览记忆', ownedRecords:'仅当前账户', recentLabel:'近期记忆', processingLabel:'整理概况',
   memoryProcessing:'记忆整理', atomicNote:'保留原文与版本', derivedNote:'来源关联的派生视图', jobStatusNote:'进入任务页查看执行状态',
@@ -51,6 +59,14 @@ Object.assign(catalog['zh-CN'], {
   pageNote_accounts:'账户管理与个人记忆读取相互独立。',
 });
 Object.assign(catalog.en, {
+  viewWithoutWrite:'Details are available. Changes are not enabled; inspecting data will not modify it.',
+  inspectDetails:'Inspect details',uncategorized:'Uncategorized',preferences:'Preferences',projects:'Projects',technical:'Technical',personal:'Personal',decisions:'Decisions',superseded:'Superseded',retracted:'Retracted',
+  technicalDetails:'Technical details',protocol:'Protocol',updated:'Updated',lastUsed:'Last used',agentInstance:'Agent instance',sessionIdentifier:'Session ID',processedCount:'Processed',attemptCount:'Attempts',resultReference:'Result reference',
+  previousRecord:'Read previous memory',replacementRecord:'Read replacement memory',summaryNotCurrent:'This summary is no longer current. Inspect the related original memories instead.',current:'Current',stale:'Stale',
+  allCategories:'All categories',category:'Category',resetFilters:'Clear filters',inspectSourcesNote:'Open a memory and expand its sources. Raw event bodies are not loaded.',
+  boundedSearchNote:'Search is limited to a candidate window. Narrow the query or filters; this is not an exhaustive memory listing',
+  capabilitiesUnavailable:'Permissions could not be loaded. Changes are disabled; you can still try viewing your data.',
+  contentRange:'Characters on this page',endOfContent:'End of content',sourceMetadata:'Inspect provenance',nextSources:'Next source page',
   connectionHeadline:'Connect ChatGPT to your personal memory.', connectionDescription:'Find context in memories you authorize. Keep every source, revision and access boundary in view.',
   manageConnections:'Manage my connections', browseMemories:'Browse memories', ownedRecords:'This account only', recentLabel:'RECENT MEMORIES', processingLabel:'PROCESSING',
   memoryProcessing:'Memory organization', atomicNote:'Originals and revisions retained', derivedNote:'Source-linked derived views', jobStatusNote:'Open jobs for execution status',
@@ -447,5 +463,30 @@ Object.assign(catalog.en,{modelNotConfigured:'Not configured',nativeSchema:'Serv
 
 Object.assign(catalog['zh-CN'],{CSRF_REFRESH_REQUIRED:'表单校验已更新，请重新确认本次操作',EXPORT_SIZE_LIMIT:'导出超过 16 MiB，请使用运维备份或分批导出',BUDGET_EXHAUSTED:'今日模型调用额度已用尽',WEB_VISIBILITY_DENIED:'此分类或版本不允许授权；secret 不会发送给 ChatGPT',CONSOLE_REQUEST_FAILED:'操作未完成，请核对输入和服务状态',MODEL_URL_DENIED:'服务地址不符合网络安全策略'});
 Object.assign(catalog.en,{CSRF_REFRESH_REQUIRED:'Form protection refreshed; confirm this operation again',EXPORT_SIZE_LIMIT:'Export exceeds 16 MiB; use operator backup or split exports',BUDGET_EXHAUSTED:'Daily model-call limit reached',WEB_VISIBILITY_DENIED:'This class or revision cannot be granted; secret is never sent to ChatGPT',CONSOLE_REQUEST_FAILED:'Operation did not complete; check input and service state',MODEL_URL_DENIED:'Service URL is denied by network policy'});
+
+Object.assign(catalog['zh-CN'],{
+  registrationDisabled:'当前暂未开放注册。请联系平台管理员；已有账户可继续登录。',
+  registrationSteps:'创建用户：验证注册码 → 设置用户名与密码 → 绑定验证器 → 保存恢复码。所有步骤完成并绑定核心身份后才能登录。',
+  registrationCredentials:'用户名使用 1–100 位英文字母、数字、点、横线、下划线或 @；密码至少 14 位。请使用自己的验证器完成下一步。',
+  platform:'平台管理',capabilityBoundary:'操作受账户权限约束',invitationIdentifier:'注册码 / 批次编号',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
+  operatorManagement:'管理员操作',managementDisabled:'此项管理功能尚未由服务器启用。',rolesServerOnly:'角色只能通过服务器命令调整；此页面不能授予管理员权限，也不能查看其他人的记忆。',
+  invitationPrivateNote:'注册码为一次性凭证，有效期为 1–1440 整数分钟。仅在签发结果中显示，请通过可信渠道交给接收人。',
+  invitationSavedNote:'请现在复制并妥善保存注册码。关闭此窗口后，列表只显示状态，不显示原码。',
+  currentAccount:'当前账户',mfaStatus:'动态口令',bindingStatus:'核心身份',verified:'已验证',ready:'就绪',operator:'平台管理员',member:'普通用户',issued:'待使用',reserved:'注册中',consumed:'已使用',provisioning:'绑定中',pending_mfa:'待绑定验证器',
+  disableAccountNote:'停用将撤销该账户的登录会话、OAuth 授权和核心凭证。其记忆及历史仍保留，不会删除。',
+  enableAccountNote:'重新启用会建立新的账户凭证，不会恢复旧会话或旧密钥；对方需要重新登录与授权。'
+});
+Object.assign(catalog.en,{
+  registrationDisabled:'Registration is currently closed. Contact the platform operator; existing accounts can still sign in.',
+  registrationSteps:'Create an account: validate invitation → choose username and password → bind authenticator → save recovery codes. Sign-in requires all steps and a completed Core identity binding.',
+  registrationCredentials:'Use 1–100 letters, digits, dots, hyphens, underscores or @ for your username and at least 14 characters for your password. Have your own authenticator ready.',
+  platform:'Platform management',capabilityBoundary:'Actions follow account permissions',invitationIdentifier:'Invitation / batch ID',revocation_pending:'Sessions disabled; Core revocation pending. Refresh to verify completion.',
+  operatorManagement:'Operator actions',managementDisabled:'This management feature has not been enabled on the server.',rolesServerOnly:'Roles are managed by server command only. This page cannot grant operator rights or read another account’s memories.',
+  invitationPrivateNote:'Codes are single-use credentials, valid for 1–1440 whole minutes. They appear only in the issuance result; share them through a trusted channel.',
+  invitationSavedNote:'Copy and securely save these codes now. After this dialog closes, the inventory shows status only, never the original codes.',
+  currentAccount:'Current account',mfaStatus:'Authenticator',bindingStatus:'Core identity',verified:'Verified',ready:'Ready',operator:'Platform operator',member:'Member',issued:'Available',reserved:'Registering',consumed:'Used',provisioning:'Provisioning',pending_mfa:'Awaiting authenticator',
+  disableAccountNote:'Disabling revokes this account’s sessions, OAuth grants and Core credentials. Memories and history are retained, not deleted.',
+  enableAccountNote:'Enabling creates fresh account credentials, not old sessions or keys. The account must sign in and authorize again.'
+});
 
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

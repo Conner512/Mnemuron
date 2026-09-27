@@ -177,7 +177,7 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
   server.requestTimeout = 10000;
   server.headersTimeout = 10000;
   server.maxRequestsPerSocket = 100;
-  const identityTimer=identityMaintenance?.enabled()?setInterval(()=>{void identityMaintenance.run().catch(()=>logger({component:'identity_worker',error_code:'PROVISIONING_INCOMPLETE'}));},5000):null;
+  const identityTimer=identityMaintenance?.enabled()&&!identityMaintenance.external()?setInterval(()=>{void identityMaintenance.run().catch(()=>logger({component:'identity_worker',error_code:'PROVISIONING_INCOMPLETE'}));},5000):null;
   identityTimer?.unref();
   const maintenance = store ? setInterval(() => { try { store.cleanup(); } catch { logger({ component: "oauth", error_code: "AUTH_STORAGE_UNAVAILABLE" }); } }, 60000) : null;
   maintenance?.unref();

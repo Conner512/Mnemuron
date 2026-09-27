@@ -6,27 +6,32 @@ import {loadMemoryRuntimeFile} from '../../../server/lib/memory-runtime.mjs';
 import {BoundaryError,seconds} from '../../../shared/oauth-common.mjs';
 import {provisionIdentities} from './provisioning.mjs';
 
-// Optional local worker, configured only by the operator. Never expose arbitrary
-// file paths/SQL or a cross-user administrative Core token to a console request.
-export class IdentityMaintenance {
-  constructor(ids,config){this.ids=ids;this.config=config;this.busy=false;this.p=config.identity?.provisioning;
-    if(this.p?.enabled){storageDoctor({core_database:this.p.core_database,credential_directory:this.p.credential_directory,identity_map:this.p.identity_map_file,memory_config:this.p.memory_config_file});
-      if(!fs.existsSync(this.p.core_database))throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');}}
-  enabled(){return this.p?.enabled===true;}
-  open(){if(!this.enabled()||!fs.existsSync(this.p.core_database))throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');
-    const memoryConfig=this.p.memory_config_file?loadMemoryRuntimeFile(this.p.memory_config_file):undefined;
-    return new MnemuronStore(this.p.core_database,{memoryConfig,memoryConfigPath:this.p.memory_config_file});}
-  revoke({user_id}){const core=this.open();try{core.memoryTransaction(()=>{
+export function revokeCoreIdentity(core,user_id){
+  core.memoryTransaction(()=>{
     core.db.prepare('UPDATE credentials SET revoked_at=COALESCE(revoked_at,?) WHERE user_id=?').run(new Date().toISOString(),user_id);
     core.db.prepare("UPDATE memory_jobs SET state='cancelled',fence=fence+1,lease_owner=NULL,lease_expires=NULL WHERE user_id=? AND state NOT IN ('succeeded','cancelled')").run(user_id);
     core.db.prepare("UPDATE console_vector_requests SET state='cancelled' WHERE user_id=? AND state='pending'").run(user_id);
     core.db.prepare("UPDATE console_settings SET settings_json=json_set(settings_json,'$.schedule_enabled',json('false')) WHERE user_id=?").run(user_id);
     core.audit({auth:{user_id,credential_id:null},action:'identity.credentials.revoke_all',targetType:'account'});
-  });return true;}finally{core.close();}}
-  async run(){if(!this.enabled()||this.busy)return;this.busy=true;try{
+  });
+}
+
+// Optional local worker, configured only by the operator. Never expose arbitrary
+// file paths/SQL or a cross-user administrative Core token to a console request.
+export class IdentityMaintenance {
+  constructor(ids,config){this.ids=ids;this.config=config;this.busy=false;this.p=config.identity?.provisioning;
+    if(this.p?.enabled&&!this.external()){storageDoctor({core_database:this.p.core_database,credential_directory:this.p.credential_directory,identity_map:this.p.identity_map_file,memory_config:this.p.memory_config_file});
+      if(!fs.existsSync(this.p.core_database))throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');}}
+  enabled(){return this.p?.enabled===true;}
+  external(){return this.p?.mode==='external_worker';}
+  open(){if(!this.enabled()||this.external()||!fs.existsSync(this.p.core_database))throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');
+    const memoryConfig=this.p.memory_config_file?loadMemoryRuntimeFile(this.p.memory_config_file):undefined;
+    return new MnemuronStore(this.p.core_database,{memoryConfig,memoryConfigPath:this.p.memory_config_file});}
+  revoke({user_id}){const core=this.open();try{revokeCoreIdentity(core,user_id);return true;}finally{core.close();}}
+  async run(){if(!this.enabled()||this.external()||this.busy)return;this.busy=true;try{
     const pending=this.ids.db.prepare("SELECT * FROM identity_operations WHERE kind LIKE 'console-disable:%' AND state='revocation_pending'").all();
     for(const op of pending){const a=this.ids.byId(op.account_id);try{this.revoke({user_id:a.user_id});this.ids.db.prepare("UPDATE identity_operations SET state='completed',last_error=NULL WHERE operation_id=?").run(op.operation_id);}catch{this.ids.db.prepare("UPDATE identity_operations SET last_error='REVOCATION_INCOMPLETE' WHERE operation_id=?").run(op.operation_id);}}
-    const core=this.open();try{return provisionIdentities(this.ids,core,{credentialDirectory:this.p.credential_directory,identityMapFile:this.p.identity_map_file,consoleOperations:this.config.identity.console_operations===true});}finally{core.close();}
+    const core=this.open();try{return provisionIdentities(this.ids,core,{credentialDirectory:this.p.credential_directory,identityMapFile:this.p.identity_map_file,consoleOperations:this.config.identity.console_operations===true,consoleBasicOperations:this.config.identity.console_basic_operations?.memory===true});}finally{core.close();}
   }finally{this.busy=false;}}
   async setState(accountId,action){if(!this.enabled())throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');const a=this.ids.byId(accountId);if(!a)throw new BoundaryError(404,'ACCOUNT_NOT_FOUND');
     if(action==='disable'){
@@ -37,7 +42,7 @@ export class IdentityMaintenance {
         this.ids.audit(accountId,'account.disabled');});
       this.ids.store.revoke({subject:a.subject});await this.run();
       const pending=this.ids.db.prepare("SELECT 1 FROM identity_operations WHERE account_id=? AND kind LIKE 'console-disable:%' AND state='revocation_pending'").get(accountId);
-      if(pending)throw new BoundaryError(503,'REVOCATION_INCOMPLETE');return {status:'disabled',account_id:accountId};
+      if(pending){if(this.external())return {status:'revocation_pending',account_id:accountId,account_status:'disabled'};throw new BoundaryError(503,'REVOCATION_INCOMPLETE');}return {status:'disabled',account_id:accountId};
     }
     if(action==='enable'&&['active','provisioning'].includes(a.status)&&a.mfa_verified&&a.recovery_ack){await this.run();return {status:this.ids.byId(accountId).status,account_id:accountId,old_agent_keys_restored:false};}
     if(action!=='enable'||a.status!=='disabled'||!a.mfa_verified||!a.recovery_ack)throw new BoundaryError(409,'ACCOUNT_STATE_CONFLICT');

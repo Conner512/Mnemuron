@@ -8,13 +8,14 @@ import {IdentityMaintenance} from '../src/identity-maintenance.mjs';
 import {RecoveryService} from '../src/recovery.mjs';
 import {loadAuthConfig} from '../src/config.mjs';
 import {MnemuronStore} from '../../../server/lib/store.mjs';
-import {CONSOLE_READ_SCOPES,CONSOLE_WRITE_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
+import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 import {readPrivate,writePrivate,randomSecret,requireConfig} from '../../../shared/oauth-common.mjs';
 export async function main(argv){
   if(!argv.length||argv.includes('--help')){console.log(`Mnemuron local console operator (no secrets in arguments).
 core-key --output /private/new-console-key --confirm
 enable-console --config /private/auth.json --core-database /private/core.sqlite3 --account-id ID --confirm
+enable-console-basic --config /private/auth.json --core-database /private/core.sqlite3 --account-id ID --confirm
 grant-operator | revoke-operator --config /private/auth.json --account-id ID --confirm
 provision-once --config /private/auth.json --confirm
 recovery-begin --config /private/auth.json --proof-file /private/proofs.json --output /private/new-session.json --confirm
@@ -24,7 +25,7 @@ No command downloads memories, enables MCP writes, or restores shared databases.
   const [command,...rest]=argv,args=new Map();
   for(let i=0;i<rest.length;i++){const k=rest[i];requireConfig(/^--[a-z-]+$/.test(k)&&!args.has(k),'unique CLI flag');args.set(k,['--confirm','--isolated-fixture'].includes(k)?true:rest[++i]);}
   const allowed={
-    'core-key':['--output'], 'enable-console':['--config','--core-database','--account-id'],
+    'core-key':['--output'], 'enable-console':['--config','--core-database','--account-id'],'enable-console-basic':['--config','--core-database','--account-id'],
     'grant-operator':['--config','--account-id'],'revoke-operator':['--config','--account-id'],'provision-once':['--config'],
     'recovery-begin':['--config','--proof-file','--output'],'recovery-complete':['--config','--session-file','--proof-file']
   }[command];requireConfig(!!allowed&&args.has('--confirm'),'explicit command confirmation');
@@ -34,15 +35,18 @@ No command downloads memories, enables MCP writes, or restores shared databases.
   storageDoctor({auth_database:config.database_file,identity_key:config.identity.encryption_key_file});
   const store=new AuthStore(config.database_file,{identity:true}),ids=new IdentityRepository(store,{keyFile:config.identity.encryption_key_file,issuer:config.issuer,batchLimit:config.identity.invitation_batch_limit,sessionTtl:config.identity.console_session_ttl_seconds});
   try{let result;
-    if(command==='enable-console'){
+    if(command==='enable-console'||command==='enable-console-basic'){
+      const basic=command==='enable-console-basic',target=basic?CONSOLE_BASIC_SCOPES:CONSOLE_WRITE_SCOPES;
+      if(basic)requireConfig(config.identity.console_operations!==true&&config.identity.console_basic_operations?.memory===true,'basic-only console policy');
       const a=ids.byId(args.get('--account-id'));requireConfig(a&&ids.eligible(a.subject),'active exact account');
       const file=args.get('--core-database');storageDoctor({core_database:file});requireConfig(fs.existsSync(file),'existing Core database');
       const core=new MnemuronStore(file);try{
         const binding=ids.bindings(a.subject).find(b=>b.purpose==='console'),auth=core.authenticate(readPrivate(binding.credential_file));
         requireConfig(auth.user_id===a.user_id&&auth.credential_id===binding.credential_id&&auth.agent_id==='mnemuron-console'&&auth.agent_instance_id===binding.agent_instance_id,'exact Core binding');
-        requireConfig(exactScopes(auth.scopes,CONSOLE_READ_SCOPES)||exactScopes(auth.scopes,CONSOLE_WRITE_SCOPES),'expected Core scopes');
-        core.memoryTransaction(()=>{core.db.prepare('UPDATE credentials SET scopes_json=? WHERE user_id=? AND credential_id=? AND revoked_at IS NULL').run(JSON.stringify(CONSOLE_WRITE_SCOPES),a.user_id,binding.credential_id);core.audit({auth,action:'console.capability.enable',targetType:'credential',targetId:binding.credential_id});});
-        result={status:'enabled',account_id:a.account_id,chatgpt_scopes_unchanged:true};
+        requireConfig([CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,...(basic?[]:[CONSOLE_WRITE_SCOPES])].some(scopes=>exactScopes(auth.scopes,scopes)),'expected Core scopes');
+        const changed=!exactScopes(auth.scopes,target);
+        if(changed)core.memoryTransaction(()=>{core.db.prepare('UPDATE credentials SET scopes_json=? WHERE user_id=? AND credential_id=? AND revoked_at IS NULL').run(JSON.stringify(target),a.user_id,binding.credential_id);core.audit({auth,action:basic?'console.capability.enable_basic':'console.capability.enable',targetType:'credential',targetId:binding.credential_id});});
+        result={status:'enabled',account_id:a.account_id,access:basic?'basic_memory':'full',changed,chatgpt_scopes_unchanged:true};
       }finally{core.close();}
     }else if(command==='grant-operator'||command==='revoke-operator'){
       const account=args.get('--account-id'),a=ids.byId(account);requireConfig(a&&ids.eligible(a.subject),'active exact account');

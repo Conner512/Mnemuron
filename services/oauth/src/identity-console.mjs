@@ -23,7 +23,10 @@ export class IdentityConsole {
   }
   protectLastOperator(account){if(this.operator(account)&&this.db.prepare("SELECT COUNT(*) n FROM identity_console_roles r JOIN identity_accounts a ON a.account_id=r.account_id WHERE a.status='active'").get().n<=1)fail('LAST_OPERATOR',409);}
   overview(account){return {operator:this.operator(account),operation_access:'own_account_only',security_actions:['security.password','security.totp.begin','security.totp.complete','security.recovery_codes','security.session.revoke','security.sessions.revoke_others']};}
-  listAccounts(actor){this.requireOperator(actor);return this.db.prepare("SELECT a.account_id,a.username,a.status,a.mfa_verified,a.binding_ready,a.created,COALESCE(r.role,'member') role FROM identity_accounts a LEFT JOIN identity_console_roles r ON r.account_id=a.account_id ORDER BY a.created DESC LIMIT 500").all();}
+  listAccounts(actor){this.requireOperator(actor);return this.db.prepare(`SELECT a.account_id,a.username,a.status,a.mfa_verified,a.binding_ready,a.created,COALESCE(r.role,'member') role,
+    CASE WHEN EXISTS(SELECT 1 FROM identity_operations o WHERE o.account_id=a.account_id AND o.state='revocation_pending') THEN 'revocation_pending'
+      WHEN a.status='provisioning' THEN 'provisioning' ELSE 'complete' END maintenance_state
+    FROM identity_accounts a LEFT JOIN identity_console_roles r ON r.account_id=a.account_id ORDER BY a.created DESC LIMIT 500`).all();}
   invitations(actor){this.requireOperator(actor);return this.db.prepare('SELECT invitation_id,batch_id,issuer,created,expires,state FROM identity_invitations ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(r=>({...r,effective_state:['issued','reserved'].includes(r.state)&&r.expires<=seconds()?'expired':r.state}));}
   sessions(account,current){return this.db.prepare("SELECT digest,purpose,created,expires FROM identity_sessions WHERE account_id=? AND purpose='console' AND expires>? ORDER BY created DESC").all(account,seconds()).map(r=>({session_id:r.digest,purpose:r.purpose,created:r.created,expires:r.expires,current:r.digest===current}));}
   grants(subject){return this.db.prepare("SELECT id,payload,expires FROM oauth_records WHERE model='Grant' AND json_extract(payload,'$.accountId')=? AND expires>?").all(subject,seconds()).map(r=>({grant_id:r.id,client_id:JSON.parse(r.payload).clientId,expires:r.expires}));}
