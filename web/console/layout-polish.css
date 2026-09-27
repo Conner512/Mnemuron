@@ -102,7 +102,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .card>h2{margin-bottom:14px}.card>p{font-size:13px;line-height:1.8}
 .action-toolbar{margin:16px 0}.policy-box{line-height:1.7}
 /* Detail stays a right drawer; write forms are centered, bounded dialogs. */
-#operation-dialog{inset:0;margin:auto;width:min(720px,calc(100vw - 48px));max-width:none;height:auto;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 72px #00000026;overflow:auto}
+#operation-dialog{inset:0;margin:auto;width:min(720px,calc(100vw - 48px));max-width:none;height:fit-content;max-height:calc(100dvh - 48px);padding:0;border:1px solid var(--border);border-radius:16px;box-shadow:0 24px 72px #00000026;overflow:auto}
 #operation-dialog>.dialog-header{position:sticky;top:0;margin:0;padding:18px 24px;border-bottom:1px solid var(--border);z-index:2;background:var(--surface)}
 #operation-content{padding:24px}
 #operation-content form{gap:18px}
