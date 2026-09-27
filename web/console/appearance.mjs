@@ -33,7 +33,7 @@ function setPreference(property,value) {
 // Everything lives in this existing asset so old ingress allowlists still work.
 const selectControls=new Map();
 let openSelect=null,selectCounter=0,selectFrame=0;
-const supportsPopover=typeof HTMLElement.prototype.showPopover==='function';
+const supportsPopover=typeof globalThis.HTMLElement?.prototype?.showPopover==='function';
 const put=(node,key,value)=>{if(node.getAttribute(key)!==String(value))node.setAttribute(key,String(value));};
 const selectedText=select=>select.selectedOptions[0]?.label || '';
 const unavailable=option=>option.disabled || option.hidden || option.parentElement?.disabled || option.parentElement?.hidden;
