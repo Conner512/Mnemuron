@@ -7,6 +7,7 @@ on:
       - 'server/lib/**'
       - 'shared/**'
       - 'scripts/test-console-browser.py'
+      - 'scripts/console_select_checks.py'
       - '.github/workflows/console-browser.yml'
   workflow_dispatch:
 permissions:

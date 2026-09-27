@@ -1,6 +1,7 @@
 import os,json,subprocess,time,traceback,select,shutil,tempfile
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
+from console_select_checks import check_selects, choose_select
 repo=Path(__file__).resolve().parents[1]
 E=Path(tempfile.mkdtemp(prefix='mnemuron-browser-test-',dir=os.environ.get('RUNNER_TEMP')));os.chmod(E,0o700)
 P=E/'previews';P.mkdir();node=shutil.which('node');checks=[]
@@ -31,28 +32,37 @@ try:
   page.on('pageerror',lambda e:errors.append(str(e)))
   page.on('console',lambda m:errors.append(m.text) if m.type=='error' and ('Content Security Policy' in m.text or 'Refused' in m.text) else None)
   def goto(name):
-   page.goto(url+'/app/'+name);page.wait_for_function("document.querySelector('#console-root')?.querySelector('h1') && !document.querySelector('.loading-card')")
+   page.goto(url+'/app/'+name)
+   # Locator polling does not evaluate source strings inside the page. The
+   # application's strict CSP remains unchanged; never set bypass_csp.
+   page.locator('.loading-card').wait_for(state='detached')
+   page.locator('#console-root h1').wait_for()
    page.wait_for_timeout(180)
+  def pick(selector,value):
+   choose_select(page,selector,value)
   def begin(a,index=0):
    page.locator('[data-console-action="'+a+'"]').nth(index).click();page.locator('#operation-dialog form').wait_for()
   def submit():
-   page.locator('#operation-dialog button[type=submit]').click();page.locator('#operation-dialog .operation-result').wait_for(timeout=40000)
-   return json.loads(page.locator('#operation-dialog .operation-result').inner_text())
+   page.locator('#operation-dialog button[type=submit]').click();page.locator('#operation-dialog .operation-result').first.wait_for(timeout=40000)
+   result=json.loads(page.locator('#operation-dialog .operation-result').last.inner_text())
+   if page.locator('#issued-invitation-codes').count():result['codes']=page.locator('#issued-invitation-codes').inner_text().splitlines()
+   return result
   def close():
    page.locator('#operation-dialog [data-operation-close]').first.click();page.wait_for_timeout(150)
   goto('overview');check('Actual HTTP assets, modules and CSP render overview',page.locator('#console-root h1').count()==1)
+  check_selects(page,goto,check,P)
   goto('memories');check('New-memory action is enabled by real capabilities',page.locator('[data-console-action="memory.create"]').is_enabled())
   begin('memory.create');page.locator('[name=content]').fill('Synthetic browser created memory：型号 C9800-CL。');created=submit();check('UI creates persistent memory',created['status']=='saved');mid=created['memory_id'];close()
   page.locator('[data-memory="'+mid+'"]').click();page.locator('#memory-dialog [data-console-action="memory.classify"]').wait_for()
-  begin('memory.classify');page.locator('#operation-dialog [name=category]').select_option('technical');r=submit();check('Manual classification reaches backend',r['category']=='technical');close()
+  begin('memory.classify');pick('#operation-dialog [name=category]','technical');r=submit();check('Manual classification reaches backend',r['category']=='technical');close()
   page.locator('[data-memory="'+mid+'"]').click();begin('memory.visibility');page.locator('#operation-dialog [name=allow]').check();r=submit();check('Exact-revision ChatGPT grant is persisted',r['allowed']);close()
   page.locator('[data-memory="'+mid+'"]').click();begin('memory.correct');page.locator('#operation-dialog [name=content]').fill('Synthetic browser corrected memory：型号 C9300。');r=submit();newmid=r['memory_id'];check('Correction creates replacement without overwriting history',newmid!=mid);close()
   page.locator('[data-memory="'+newmid+'"]').click();begin('memory.retract');r=submit();check('Retraction retains lifecycle tombstone',r['physically_deleted']==False);close()
-  page.locator('[name=query]').fill('C9300');page.locator('[name=search_mode]').select_option('hybrid');page.locator('#search-form button[type=submit]').click();page.wait_for_timeout(200);check('Search form supports real retrieval-mode selection',page.locator('[name=search_mode]').input_value()=='hybrid')
-  goto('models');begin('models.save');page.locator('[name=enabled]').check();page.locator('[name=base_url]').fill(cfg['model_url']);page.locator('[name=model]').fill('synthetic-organizer');page.locator('[name=sensitivity]').select_option('sensitive');page.locator('[name=egress_approved]').check();r=submit();check('Personal model settings persist through real API',r['model']['config']['model']=='synthetic-organizer');close()
+  page.locator('[name=query]').fill('C9300');pick('[name=search_mode]','hybrid');page.locator('#search-form button[type=submit]').click();page.wait_for_timeout(200);check('Search form supports real retrieval-mode selection',page.locator('[name=search_mode]').input_value()=='hybrid')
+  goto('models');begin('models.save');page.locator('[name=enabled]').check();page.locator('[name=base_url]').fill(cfg['model_url']);page.locator('[name=model]').fill('synthetic-organizer');pick('[name=sensitivity]','sensitive');page.locator('[name=egress_approved]').check();r=submit();check('Personal model settings persist through real API',r['model']['config']['model']=='synthetic-organizer');close()
   begin('models.test');r=submit();check('UI model test executes real loopback HTTP, no personal input',r['real_memory_sent']==False and r['status']=='verified');close()
   goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick');page.locator('[data-retry]').click();page.wait_for_timeout(300);check('Worker publishes actual job results',page.locator('body').inner_text().count('succeeded')>0)
-  begin('jobs.schedule');page.locator('[name=type]').select_option('summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick');cmd('tick');goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
+  begin('jobs.schedule');pick('[name=type]','summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick');cmd('tick');goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
   page.locator('[data-summary]').first.click();page.locator('#memory-content .body-content').first.wait_for();check('Summary drawer loads source-grounded quotes',len(page.locator('#memory-content .body-content').first.inner_text())>0);page.locator('#memory-dialog [data-close]').click()
   goto('connections');begin('connections.create');page.locator('[name=label]').fill('Synthetic browser connection');page.locator('[name=agent_id]').fill('browser-test');page.locator('[name=device_id]').fill('desktop-fixture');r=submit();credential=r['credential']['credential_id'];check('Connection creates real owner-bound memory-only key',r['api_key'].startswith('mnm_') and r['credential']['scopes']==['memory:read']);close()
   page.locator('[data-console-action="connections.rotate"][data-id="'+credential+'"]').click();r=submit();rotated=r['credential']['credential_id'];check('Key rotation creates replacement key',rotated!=credential);close()
@@ -83,9 +93,9 @@ try:
    for theme in ['a','b','c']:
     for mode in ['light','dark']:
      for locale in ['zh-CN','en']:
-      page.locator('#theme').select_option(theme);page.locator('#mode').select_option(mode);page.locator('#locale').select_option(locale)
+      pick('#theme',theme);pick('#mode',mode);pick('#locale',locale)
       check('Desktop model forms '+str((width,theme,mode,locale)),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
-  page.set_viewport_size({'width':1440,'height':1100});page.locator('#theme').select_option('a');page.locator('#mode').select_option('light');page.locator('#locale').select_option('zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
+  page.set_viewport_size({'width':1440,'height':1100});pick('#theme','a');pick('#mode','light');pick('#locale','zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
   begin('memory.create');page.screenshot(path=str(P/'new-memory-functional.png'),full_page=True);close();goto('models');page.screenshot(path=str(P/'models-functional.png'),full_page=True)
   goto('jobs');page.screenshot(path=str(P/'jobs-functional.png'),full_page=True);goto('invitations');page.screenshot(path=str(P/'invitations-functional.png'),full_page=True)
   check('No browser JavaScript or CSP errors',not errors)
