@@ -1,7 +1,7 @@
 export const catalog={
  'zh-CN':{
   consoleLogin:'登录管理控制台',consoleLoginNote:'管理自己的记忆和连接。此登录不会自动向 ChatGPT 授权。',oauthLogin:'连接 ChatGPT',oauthLoginNote:'先验证你的 Mnemuron 账户，再明确允许只读访问。这不会登录管理控制台。',oauthConsent:'允许 ChatGPT 只读访问',oauthRestartHelp:'此链接只用于本次授权，并非固定的集成页面。请关闭此页，回到 ChatGPT 重新发起连接。',oauthRetry:'重试本次授权',
-  overview:'概览',memories:'记忆库',summaries:'分类与摘要',jobs:'整理任务',connections:'连接管理',models:'模型配置',security:'账户安全',audit:'审计记录',storage:'存储与备份',appearance:'外观设置',invitations:'注册码管理',accounts:'账户管理',handoff:'Handoff · 延后',
+  overview:'概览',memories:'记忆库',summaries:'分类与摘要',jobs:'整理任务',connections:'连接管理',models:'模型配置',security:'账户安全',audit:'审计记录',storage:'存储与备份',appearance:'外观设置',invitations:'注册码管理',accounts:'账户管理',
   workspace:'我的空间',settings:'连接与设置',platform:'平台管理 · 权限待定',brandNote:'个人记忆，持续连接。',hero:'你的记忆，井然有序。',heroNote:'保留每条信息的来源，让上下文在会话间延续。',
   login:'登录 Mnemuron',register:'创建你的账户',recover:'账户恢复',username:'用户名',password:'密码',otp:'动态验证码',invitation:'一次性注册码',continue:'继续',signIn:'登录',signOut:'退出当前会话',cancel:'取消',allow:'允许只读访问',
   authNote:'请使用 Mnemuron 账户，不要输入 ChatGPT 密码。',inviteNote:'注册码由服务器管理员签发，仅可使用一次。',totp:'绑定验证器',totpNote:'使用验证器扫描二维码，或手动输入密钥。密钥只在绑定期间可见。',verify:'验证并继续',copy:'复制',copied:'已复制',showPassword:'显示密码',hidePassword:'隐藏密码',
@@ -11,12 +11,12 @@ export const catalog={
   appearanceNote:'配色不改变布局、功能或权限。偏好按账户分别保存。',theme:'颜色主题',mode:'明暗模式',language:'语言',light:'浅色',dark:'深色',a:'Neural Indigo',b:'Signal Teal',c:'Paper Amber',
   securityNote:'登录需要密码与动态验证码。恢复证明组合尚待确认，不启用弱恢复。',modelsNote:'模型资源与费用策略待确认。不显示密钥或其他账户配置。',storageNote:'只展示本人记录的统计。整库备份、恢复与下载不在网页权限内。',platformNote:'当前账户没有平台管理授权。此页不返回其他账户的身份或统计。',
   error:'请求未完成',errorNote:'请返回并重试。未授权、过期或依赖故障不会跳过安全校验。',identity:'当前账户',state:'状态',created:'创建时间',scope:'范围',status:'状态',consent:'授权连接',consentNote:'仅允许读取你授权的记忆和项目。不会写入记忆、切换任务或确认 Resume。',
-  policy:'权限边界',pendingPolicies:'未批准操作保持关闭',notProduction:'尚未生产晋级',noDemo:'所有数据来自当前账户；不可用时不会显示演示数据。',newMemory:'新建记忆',organize:'手动整理',export:'导出记忆',restore:'整库恢复',configure:'修改配置',issue:'网页签发',manage:'角色管理',revoke:'撤销授权',
+  policy:'权限边界',pendingPolicies:'未批准操作保持关闭',noDemo:'所有数据来自当前账户；不可用时不会显示演示数据。',newMemory:'新建记忆',organize:'手动整理',export:'导出记忆',restore:'整库恢复',configure:'修改配置',issue:'网页签发',manage:'角色管理',revoke:'撤销授权',
   passwordConfirm:'再次输入密码',alreadyShown:'密钥已显示过。本页不会重新展示；请使用已保存的验证器或恢复码。',oauthClient:'请求连接的应用',scopeIdentity:'识别你的 Mnemuron 账户',scopeOffline:'使用可撤销、轮换的刷新令牌保持连接',scopeMemory:'读取你授权的记忆',scopeProject:'读取你授权的项目上下文',systemLabel:'个人记忆系统',workspaceLabel:'个人工作空间',heroLabel:'让记忆持续连接',passwordTotp:'密码与动态验证码',back:'返回安全入口',expired:'此步骤已过期，请从安全入口重新开始。',loginFailed:'登录信息无效或账户尚不可用。请检查凭证后重试。',rateLimited:'尝试过于频繁，请稍后重试。',pendingStep:'此步骤暂不可用，请重新检查当前注册状态。',
  },
  en:{
   consoleLogin:'Sign in to the console',consoleLoginNote:'Manage your memories and connections. This sign-in does not authorize ChatGPT.',oauthLogin:'Connect ChatGPT',oauthLoginNote:'Verify your Mnemuron account, then explicitly allow read-only access. This does not sign you in to the console.',oauthConsent:'Allow ChatGPT read-only access',oauthRestartHelp:'This link belongs to one authorization request, not a permanent integration page. Close this page and start a new connection from ChatGPT.',oauthRetry:'Retry this authorization',
-  overview:'Overview',memories:'Memory library',summaries:'Categories & summaries',jobs:'Organizer jobs',connections:'Connections',models:'Model settings',security:'Account security',audit:'Audit log',storage:'Storage & backup',appearance:'Appearance',invitations:'Registration codes',accounts:'Accounts',handoff:'Handoff · deferred',
+  overview:'Overview',memories:'Memory library',summaries:'Categories & summaries',jobs:'Organizer jobs',connections:'Connections',models:'Model settings',security:'Account security',audit:'Audit log',storage:'Storage & backup',appearance:'Appearance',invitations:'Registration codes',accounts:'Accounts',
   workspace:'My workspace',settings:'Connections & settings',platform:'Platform · policy pending',brandNote:'Personal memory. Lasting context.',hero:'Your memory, thoughtfully organized.',heroNote:'Keep the provenance of every detail. Carry context across conversations.',
   login:'Sign in to Mnemuron',register:'Create your account',recover:'Account recovery',username:'Username',password:'Password',otp:'Authenticator code',invitation:'One-time registration code',continue:'Continue',signIn:'Sign in',signOut:'Sign out of this session',cancel:'Cancel',allow:'Allow read-only access',
   authNote:'Use your Mnemuron account, not your ChatGPT password.',inviteNote:'Registration codes are issued by your operator and can only be used once.',totp:'Connect your authenticator',totpNote:'Scan the QR code or enter the key manually. The key is available only during enrollment.',verify:'Verify and continue',copy:'Copy',copied:'Copied',showPassword:'Show password',hidePassword:'Hide password',
@@ -26,7 +26,7 @@ export const catalog={
   appearanceNote:'Colors never change layout, capabilities or permissions. Preferences are stored per account.',theme:'Color theme',mode:'Color mode',language:'Language',light:'Light',dark:'Dark',a:'Neural Indigo',b:'Signal Teal',c:'Paper Amber',
   securityNote:'Sign-in requires a password and authenticator code. Recovery proof policy is pending; no weaker recovery is enabled.',modelsNote:'Model resources and cost policy are pending. Keys and other accounts’ configuration are never shown.',storageNote:'Only your record totals are shown. Whole-database backup, restore and download are not web capabilities.',platformNote:'This account has no platform management grant. This page returns no other account identities or statistics.',
   error:'Request not completed',errorNote:'Go back and try again. Authorization, expiry and dependency checks are never bypassed.',identity:'Current account',state:'State',created:'Created',scope:'Scope',status:'Status',consent:'Authorize connection',consentNote:'Read only memories and projects you authorize. No memory writes, task switching or Resume confirmation.',
-  policy:'Permission boundary',pendingPolicies:'Unapproved operations stay disabled',notProduction:'Not promoted to production',noDemo:'All data belongs to the current account. No demo fallback when unavailable.',newMemory:'New memory',organize:'Run organizer',export:'Export memories',restore:'Restore database',configure:'Change settings',issue:'Issue in browser',manage:'Manage roles',revoke:'Revoke grant',
+  policy:'Permission boundary',pendingPolicies:'Unapproved operations stay disabled',noDemo:'All data belongs to the current account. No demo fallback when unavailable.',newMemory:'New memory',organize:'Run organizer',export:'Export memories',restore:'Restore database',configure:'Change settings',issue:'Issue in browser',manage:'Manage roles',revoke:'Revoke grant',
   passwordConfirm:'Confirm password',alreadyShown:'The secret was already displayed. It is not shown again; use your saved authenticator or recovery codes.',oauthClient:'Application requesting access',scopeIdentity:'Identify your Mnemuron account',scopeOffline:'Keep this connection with revocable, rotating refresh tokens',scopeMemory:'Read memories you authorize',scopeProject:'Read project context you authorize',systemLabel:'PERSONAL MEMORY SYSTEM',workspaceLabel:'PERSONAL WORKSPACE',heroLabel:'YOUR MEMORY, CONNECTED',passwordTotp:'Password and authenticator code',back:'Return to the safe entry point',expired:'This step expired. Start again from the safe entry point.',loginFailed:'The sign-in details or account are unavailable. Check your credentials and try again.',rateLimited:'Too many attempts. Please try again later.',pendingStep:'This step is unavailable. Check your current registration status.',
  }
 };
@@ -468,7 +468,7 @@ Object.assign(catalog['zh-CN'],{
   registrationDisabled:'当前暂未开放注册。请联系平台管理员；已有账户可继续登录。',
   registrationSteps:'创建用户：验证注册码 → 设置用户名与密码 → 绑定验证器 → 保存恢复码。所有步骤完成并绑定核心身份后才能登录。',
   registrationCredentials:'用户名使用 1–100 位英文字母、数字、点、横线、下划线或 @；密码至少 14 位。请使用自己的验证器完成下一步。',
-  platform:'平台管理',capabilityBoundary:'操作受账户权限约束',invitationIdentifier:'注册码 / 批次编号',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
+  platform:'平台管理',invitationIdentifier:'注册码 / 批次编号',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
   operatorManagement:'管理员操作',managementDisabled:'此项管理功能尚未由服务器启用。',rolesServerOnly:'角色只能通过服务器命令调整；此页面不能授予管理员权限，也不能查看其他人的记忆。',
   invitationPrivateNote:'注册码为一次性凭证，有效期为 1–1440 整数分钟。仅在签发结果中显示，请通过可信渠道交给接收人。',
   invitationSavedNote:'请现在复制并妥善保存注册码。关闭此窗口后，列表只显示状态，不显示原码。',
@@ -480,7 +480,7 @@ Object.assign(catalog.en,{
   registrationDisabled:'Registration is currently closed. Contact the platform operator; existing accounts can still sign in.',
   registrationSteps:'Create an account: validate invitation → choose username and password → bind authenticator → save recovery codes. Sign-in requires all steps and a completed Core identity binding.',
   registrationCredentials:'Use 1–100 letters, digits, dots, hyphens, underscores or @ for your username and at least 14 characters for your password. Have your own authenticator ready.',
-  platform:'Platform management',capabilityBoundary:'Actions follow account permissions',invitationIdentifier:'Invitation / batch ID',revocation_pending:'Sessions disabled; Core revocation pending. Refresh to verify completion.',
+  platform:'Platform management',invitationIdentifier:'Invitation / batch ID',revocation_pending:'Sessions disabled; Core revocation pending. Refresh to verify completion.',
   operatorManagement:'Operator actions',managementDisabled:'This management feature has not been enabled on the server.',rolesServerOnly:'Roles are managed by server command only. This page cannot grant operator rights or read another account’s memories.',
   invitationPrivateNote:'Codes are single-use credentials, valid for 1–1440 whole minutes. They appear only in the issuance result; share them through a trusted channel.',
   invitationSavedNote:'Copy and securely save these codes now. After this dialog closes, the inventory shows status only, never the original codes.',
