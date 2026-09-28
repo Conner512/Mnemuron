@@ -1,0 +1,21 @@
+name: Connections isolated source
+on:
+  push:
+    branches: [feat/cloud-memory-connections-20260928]
+    paths: [.github/workflows/connections-source-review.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - run: git archive --format=tar.gz HEAD > "$RUNNER_TEMP/connections-source.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: connections-public-source
+          path: ${{ runner.temp }}/connections-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
