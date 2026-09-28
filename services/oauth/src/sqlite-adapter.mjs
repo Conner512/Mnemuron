@@ -15,7 +15,7 @@ export class AuthStore {
     try {
       const tables = new Set(["oauth_records", "oauth_revoked_grants", "oauth_mfa_steps", "oauth_rate_limits", "oauth_csrf"]);
       if (identity) for (const name of ['identity_accounts','identity_invitations','identity_sessions',
-        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments']) tables.add(name);
+        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments','identity_cloud_connections']) tables.add(name);
       const existing = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
       requireConfig(existing.every(row => tables.has(row.name)), "separate OAuth database; unknown business tables");
       this.db.exec(`
@@ -72,7 +72,7 @@ export class AuthStore {
               grantId || null, payload.uid || null, payload.userCode || null);
         });
       }
-      async find(id) { return store.find(this.model, "id", id); }
+      async find(id) { if(this.model==="Client" && store.identity?.connections)return store.identity.connections.clientDefinition(id);return store.find(this.model, "id", id); }
       async findByUid(uid) { return store.find(this.model, "uid", uid); }
       async findByUserCode(code) { return store.find(this.model, "user_code", code); }
       async consume(id) {

@@ -1,3 +1,4 @@
+import {mock} from 'node:test';
 // Synthetic loopback fixture for real browser/module/CSP acceptance. No production configuration is read.
 import path from 'node:path';
 import fs from 'node:fs';
@@ -23,7 +24,7 @@ await new Promise(r=>model.listen(0,'127.0.0.1',r));cleanup.push(()=>new Promise
 const modelUrl='http://127.0.0.1:'+model.address().port;
 const key=path.join(core.root,'console-key');writePrivate(key,randomSecret());
 core.store.memoryConfig.console={key_file:key,worker_enabled:false,allowed_private_origins:[modelUrl]};
-const f=await fixture(t,{start:false,mutate:c=>{c.identity_mode='multi_account_v1';c.login.registration_enabled=true;
+const f=await fixture(t,{start:false,mutate:c=>{c.identity_mode='multi_account_v1';c.login.registration_enabled=true;c.cloud_connections={enabled:true,allow_write:true,max_active:10,max_ttl_days:30};
  c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:20,console_session_ttl_seconds:3600,console_operations:true,core:{base_url:core.baseUrl},
  recovery_policy:{password:['recovery_code','totp'],totp:['recovery_code','password']},
  provisioning:{enabled:true,core_database:core.databasePath,credential_directory:path.join(path.dirname(c.database_file),'keys'),identity_map_file:path.join(path.dirname(c.database_file),'map.json')}};
@@ -40,10 +41,13 @@ for(const [i,o] of owners.entries()){
 }
 ids.console.role(owners[0].account.account_id,true);
 const Adapter=f.app.store.adapter();for(const o of owners)await new (Adapter)('Grant').upsert('synthetic-browser-'+o.account.account_id,{accountId:o.account.subject,clientId:f.config.chatgpt_client.client_id},3600);
-console.log(JSON.stringify({fixture:true,url:f.config.issuer,model_url:modelUrl,cookie:'mnm_fixture_console',accounts:owners.map(o=>({account_id:o.account.account_id,username:o.account.username,token:o.console.token})),password:'Synthetic password with spaces  '}));
+console.log(JSON.stringify({fixture:true,url:f.config.issuer,callback_uri:f.config.chatgpt_client.redirect_uris[0],model_url:modelUrl,cookie:'mnm_fixture_console',accounts:owners.map(o=>({account_id:o.account.account_id,username:o.account.username,token:o.console.token})),password:'Synthetic password with spaces  '}));
+let syntheticClock=false;
 const lines=readline.createInterface({input:process.stdin});
 lines.on('line',async line=>{
  try{const req=JSON.parse(line);if(req.command==='stop')return stop();const o=owners[req.owner||0];let reply;
+  if(req.command==='fresh_cloud_otp'){if(!syntheticClock){mock.timers.enable({apis:['Date'],now:Date.now()});syntheticClock=true;}mock.timers.setTime(Date.now()+30000);reply={otp:await generate({secret:o.setup.secret,epoch:seconds()})};}
+  if(req.command==='inspect_cloud')reply=(await f.introspect(req.token)).data;
   if(req.command==='otp')reply={otp:await generate({secret:o.setup.secret,epoch:seconds()+(req.offset||0)})};
   if(req.command==='tick'){core.store.memoryConfig.console.worker_enabled=true;await core.store.consoleService.tick();core.store.memoryConfig.console.worker_enabled=false;reply={done:true};}
   if(req.command==='invitation')reply=ids.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-browser-operator'});

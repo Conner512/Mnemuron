@@ -1,3 +1,4 @@
+import {CLOUD_ACTIONS,connectionPolicy} from '../../../shared/cloud-contract.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 const basicActions={
   memory:['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility'],
@@ -15,6 +16,7 @@ export function consoleManagement(config) {
 }
 
 export function consoleActionAllowed(config,action) {
+  if(CLOUD_ACTIONS.includes(action))return connectionPolicy(config).enabled===true;
   const management=consoleManagement(config);
   if(action==='accounts.role')return management.accounts&&management.roles;
   if(action.startsWith('accounts.'))return management.accounts&&['accounts.enable','accounts.disable'].includes(action);
@@ -26,8 +28,9 @@ export function consoleActionAllowed(config,action) {
 }
 
 export function consoleAllowedActions(config,core,operator){
-  return [...CONSOLE_ACTIONS,...identityActions,'storage.export'].filter(action=>{
+  return [...CONSOLE_ACTIONS,...identityActions,...CLOUD_ACTIONS,'storage.export'].filter(action=>{
     if(!consoleActionAllowed(config,action))return false;
+    if(CLOUD_ACTIONS.includes(action))return true;
     if(/^(invitations|accounts)\./.test(action))return operator;
     if(/^(security|oauth)\./.test(action))return true;
     return core.writable===true&&(action==='storage.export'||core.actions?.includes(action));

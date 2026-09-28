@@ -1,3 +1,4 @@
+import {oauthClient} from './cloud-connections.mjs';
 import { Provider, errors } from "oidc-provider";
 import { OAUTH_SCOPES, RESOURCE_SCOPES, seconds } from "../../../shared/oauth-common.mjs";
 
@@ -14,7 +15,7 @@ export function makeProvider(config, secrets, store, accounts) {
         token_endpoint_auth_method: "client_secret_basic", redirect_uris: [], grant_types: [], response_types: [] },
     ],
     clientAuthMethods: ["client_secret_post", "client_secret_basic"],
-    responseTypes: ["code"], scopes: OAUTH_SCOPES, claims: { openid: ["sub"] },
+    responseTypes: ["code"], scopes: [...OAUTH_SCOPES,...(config.cloud_connections?.allow_write?["memory:write"]:[])], claims: { openid: ["sub"] },
     subjectTypes: ["public"], pkce: { required: () => true },
     allowOmittingSingleRegisteredRedirectUri: false,
     cookies: { keys: secrets.cookieKeys, names: { session: "mnm_session", interaction: "mnm_interaction", resume: "mnm_resume" },
@@ -27,18 +28,23 @@ export function makeProvider(config, secrets, store, accounts) {
       pushedAuthorizationRequests: { enabled: false }, requestObjects: { enabled: false },
       rpInitiatedLogout: { enabled: false }, dPoP: { enabled: false },
       claimsParameter: { enabled: false }, userinfo: { enabled: false },
-      introspection: { enabled: true, allowedPolicy: async (_ctx, client, token) =>
-        client.clientId === config.introspection_client.client_id && token.kind === "AccessToken"
-        && token.clientId === config.chatgpt_client.client_id && token.aud === config.resource
-        && accounts.eligible(token.accountId) },
+      introspection: { enabled: true, allowedPolicy: async (_ctx, client, token) => {
+        const registered=oauthClient(config,accounts,token.clientId);
+        const allowed=client.clientId===config.introspection_client.client_id && token.kind==='AccessToken'
+          && !!registered && (registered.legacy || accounts.connections.clientAllowed(token.clientId,token.accountId))
+          && token.aud===config.resource && accounts.eligible(token.accountId);
+        if(allowed && !registered.legacy)accounts.connections.used(registered.row);
+        return allowed;
+      } },
       revocation: { enabled: true, allowedPolicy: async (_ctx, client, token) =>
-        client.clientId === config.chatgpt_client.client_id && token.clientId === client.clientId },
+        !!oauthClient(config,accounts,client.clientId) && token.clientId === client.clientId },
       resourceIndicators: { enabled: true,
         defaultResource: () => { throw new errors.InvalidTarget("One explicit resource is required"); },
         useGrantedResource: () => true,
         getResourceServerInfo: async (_ctx, resource, client) => {
-          if (resource !== config.resource || client.clientId !== config.chatgpt_client.client_id) throw new errors.InvalidTarget();
-          return { scope: RESOURCE_SCOPES.join(" "), audience: config.resource, accessTokenTTL: p.access_token_ttl_seconds, accessTokenFormat: "opaque" };
+          const registered=oauthClient(config,accounts,client.clientId);
+          if (resource !== config.resource || !registered) throw new errors.InvalidTarget();
+          return { scope: registered.scopes.filter(s=>s!=="openid"&&s!=="offline_access").join(" "), audience: config.resource, accessTokenTTL: p.access_token_ttl_seconds, accessTokenFormat: "opaque" };
         },
       },
     },
@@ -54,10 +60,11 @@ export function makeProvider(config, secrets, store, accounts) {
     },
     rotateRefreshToken: true, revokeGrantPolicy: () => true,
     extraTokenClaims: (_ctx, token) => token.kind === "AccessToken" ? { token_kind: "access_token",
+      ...(accounts.connections?accounts.connections.extraClaims(token):{}),
       ...(accounts.principal?{account_id:accounts.principal(token.accountId).account_id,
         security_version:accounts.principal(token.accountId).security_version}:{}),
     } : undefined,
-    findAccount: async (_ctx, subject) => accounts.eligible(subject)
+    findAccount: async (ctx, subject) => accounts.eligible(subject) && (ctx.oidc.client.clientId===config.chatgpt_client.client_id || accounts.connections?.clientAllowed(ctx.oidc.client.clientId,subject))
       ? { accountId: subject, claims: async () => ({ sub: subject }) } : undefined,
     interactions: { url: (_ctx, interaction) => `/interaction/${interaction.uid}` },
     renderError: async (ctx) => { ctx.type = "html"; ctx.body = "<!doctype html><title>Authorization failed</title><h1>Authorization failed</h1><p>Return to the client and start a new authorization request.</p>"; },

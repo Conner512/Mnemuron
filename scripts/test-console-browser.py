@@ -2,6 +2,7 @@ import os,json,subprocess,time,traceback,select,shutil,tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright, expect
 from console_select_checks import check_selects, choose_select
+from console_connection_checks import check_connections
 repo=Path(__file__).resolve().parents[1]
 E=Path(tempfile.mkdtemp(prefix='mnemuron-browser-test-',dir=os.environ.get('RUNNER_TEMP')));os.chmod(E,0o700)
 P=E/'previews';P.mkdir();node=shutil.which('node');checks=[]
@@ -64,9 +65,9 @@ try:
   goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick');page.locator('[data-retry]').click();page.wait_for_timeout(300);check('Worker publishes actual job results',page.locator('body').inner_text().count('succeeded')>0)
   begin('jobs.schedule');pick('[name=type]','summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick');cmd('tick');goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
   page.locator('[data-summary]').first.click();page.locator('#memory-content .body-content').first.wait_for();check('Summary drawer loads source-grounded quotes',len(page.locator('#memory-content .body-content').first.inner_text())>0);page.locator('#memory-dialog [data-close]').click()
-  goto('connections');begin('connections.create');page.locator('[name=label]').fill('Synthetic browser connection');page.locator('[name=agent_id]').fill('browser-test');page.locator('[name=device_id]').fill('desktop-fixture');r=submit();credential=r['credential']['credential_id'];check('Connection creates real owner-bound memory-only key',r['api_key'].startswith('mnm_') and r['credential']['scopes']==['memory:read']);close()
-  page.locator('[data-console-action="connections.rotate"][data-id="'+credential+'"]').click();r=submit();rotated=r['credential']['credential_id'];check('Key rotation creates replacement key',rotated!=credential);close()
-  page.locator('[data-console-action="connections.revoke"][data-id="'+rotated+'"]').click();r=submit();check('Key revocation reaches backend',r['status']=='revoked');close()
+  goto('connections');page.locator('[data-legacy-connections]>summary').click();begin('connections.create');page.locator('[name=label]').fill('Synthetic browser connection');page.locator('[name=agent_id]').fill('browser-test');page.locator('[name=device_id]').fill('desktop-fixture');r=submit();credential=r['credential']['credential_id'];check('Connection creates real owner-bound memory-only key',r['api_key'].startswith('mnm_') and r['credential']['scopes']==['memory:read']);close()
+  page.locator('[data-legacy-connections]>summary').click();page.locator('[data-console-action="connections.rotate"][data-id="'+credential+'"]').click();r=submit();rotated=r['credential']['credential_id'];check('Key rotation creates replacement key',rotated!=credential);close()
+  page.locator('[data-legacy-connections]>summary').click();page.locator('[data-console-action="connections.revoke"][data-id="'+rotated+'"]').click();r=submit();check('Key revocation reaches backend',r['status']=='revoked');close()
   goto('storage');begin('storage.export')
   with page.expect_download() as download:
    r=submit()
@@ -85,6 +86,7 @@ try:
   check('New web registration activates through configured provisioning',rp.locator('code').inner_text()=='active');registration.close()
   # B uses the real sign-in form, not an A session or an identity selector.
   bctx=browser.new_context();bp=bctx.new_page();bp.goto(url+'/login');bp.locator('[name=username]').fill(cfg['accounts'][1]['username']);bp.locator('[name=password]').fill(cfg['password']);bp.locator('[name=otp]').fill(cmd('otp',owner=1)['otp']);bp.locator('button[type=submit]').click();bp.wait_for_url('**/app');bp.goto(url+'/app/memories');bp.locator('[data-memory]').first.wait_for();check('Real username/password/TOTP login isolates B content','Synthetic private B sentinel' in bp.inner_text('body') and '蓝色纸船' not in bp.inner_text('body'));bp.goto(url+'/app/invitations');bp.wait_for_timeout(200);check('Member sees no operator invitation controls',bp.locator('[data-console-action="invitations.issue"]').count()==0);bctx.close()
+  check_connections(page,goto,check,cmd,cfg,close,P)
   for name in ['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts']:
    goto(name)
    check('Functional route '+name,page.locator('#console-root h1').count()==1 and page.locator('#console-root [role=alert]').count()==0)

@@ -101,19 +101,25 @@ export function createMnemuronApp({
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
         request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|operation)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
-        || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
+        || request.method==='POST' && ['/v1/console/action','/v1/console/cloud-enable','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
       if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){
         const input=await readJson(request,64*1024);responseStatus=200;return sendJson(response,200,await store.consoleService.execute(auth,input));
+      }
+      if(request.method==='POST'&&pathname==='/v1/console/cloud-enable'){
+        const input=await readJson(request,2048);responseStatus=200;return sendJson(response,200,store.cloudMemory.enable(store.authenticate(bearerToken(request)),input));
       }
       if(request.method==='GET'&&pathname.startsWith('/v1/console/')) {
         responseStatus=200;return sendJson(response,200,await consoleRead(store,auth,pathname.slice('/v1/console/'.length),Object.fromEntries(url.searchParams)));
       }
       if(isWebReader(auth) && !(
         request.method==='GET' && (['/v1/identity','/readyz/search'].includes(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
-        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview'].includes(pathname)))
+        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview','/v1/cloud-memory/action'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
 
+      if(request.method==='POST'&&pathname==='/v1/cloud-memory/action'){
+        const input=await readJson(request,32*1024);responseStatus=200;return sendJson(response,200,store.cloudMemory.execute(store.authenticate(bearerToken(request)),input));
+      }
       if (request.method === 'GET' && pathname === '/v1/capabilities') {
         responseStatus = 200;
         return sendJson(response,200,{read_only:true,production_ready:false,

@@ -1,3 +1,5 @@
+import {CLOUD_CORE_SCOPES} from '../../../shared/cloud-contract.mjs';
+import {exactScopes} from '../../../shared/console-contract.mjs';
 import { BoundaryError, fetchJson, readPrivate, CORE_SCOPES } from "../../../shared/oauth-common.mjs";
 
 export class ReadonlyCoreClient {
@@ -10,7 +12,7 @@ export class ReadonlyCoreClient {
     const c = this.config.core;
     const allowed = (method === "GET" && (route === "/v1/identity" || route === "/readyz/search"
       || /^\/v1\/memories\/[A-Za-z0-9_.:-]+(?:\?[^#]*)?$/.test(route)))
-      || (method === "POST" && ["/v1/memories/query", "/v1/project-context/preview", "/v1/memory-summaries/query"].includes(route));
+      || (method === "POST" && ["/v1/memories/query", "/v1/project-context/preview", "/v1/memory-summaries/query",...(this.config.cloud_connections?.allow_write?["/v1/cloud-memory/action"]:[])].includes(route));
     if (!allowed) throw new BoundaryError(403, "CORE_ROUTE_DENIED");
     let result;
     try {
@@ -19,6 +21,11 @@ export class ReadonlyCoreClient {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }, { timeoutMs: c.timeout_ms, maxBytes: c.max_response_bytes });
     } catch { throw new BoundaryError(503, "CORE_UNAVAILABLE"); }
+    if(route==="/v1/cloud-memory/action" && result.status!==200){
+      const code=result.data?.error_code;
+      const allowed=["MEMORY_VERSION_CHANGED","IDEMPOTENCY_CONFLICT","MEMORY_NOT_FOUND","MEMORY_DISABLED","INVALID_PAYLOAD","INVALID_CONSOLE_INPUT","INVALID_IDENTIFIER","INSUFFICIENT_SCOPE","LIFECYCLE_CONFLICT","CONTENT_TOO_LONG"];
+      throw new BoundaryError([400,403,404,409].includes(result.status)?result.status:503,allowed.includes(code)?code:([400,422].includes(result.status)?"INVALID_TOOL_ARGUMENTS":"CORE_UNAVAILABLE"));
+    }
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
       const error=new BoundaryError(503, result.data.error_code);
@@ -42,14 +49,19 @@ export class ReadonlyCoreClient {
       || (mapping.credential_id && identity.credential_id!==mapping.credential_id)
       || identity.agent_instance_id !== mapping.agent_instance_id || identity.identity_status !== "server_verified"
       || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
-      || !Array.isArray(result.scopes) || result.scopes.length !== CORE_SCOPES.length
-      || !CORE_SCOPES.every((scope) => result.scopes.includes(scope))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
+      || ![CORE_SCOPES,...(this.config.identity_mode==='multi_account_v1'&&this.config.cloud_connections?[CLOUD_CORE_SCOPES]:[])].some(expected=>exactScopes(result.scopes,expected))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     return result;
   }
   async ready(mapping) {
     await this.checkIdentity(mapping);
     const result = await this.request("/readyz/search");
     if (result.ready !== true || result.component !== "memory_search") throw new BoundaryError(503, "SEARCH_UNAVAILABLE");
+  }
+  async write(action,args,auth) {
+    if(!this.config.cloud_connections?.allow_write || !auth.scopes.has("memory:write"))throw new BoundaryError(403,"INSUFFICIENT_SCOPE");
+    const identity=await this.checkIdentity(auth.mapping);if(!exactScopes(identity.scopes,CLOUD_CORE_SCOPES))throw new BoundaryError(403,"CLOUD_WRITE_BINDING_REQUIRED");
+    const {operation_id,...payload}=args;
+    return this.request("/v1/cloud-memory/action",{action,operation_id,connection_id:auth.connection_id,payload});
   }
   async call(name, args, mapping) {
     const identity=await this.checkIdentity(mapping);

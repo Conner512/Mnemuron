@@ -5,8 +5,8 @@ useDefault = true
 [[rules]]
 id = "mnemuron-credential"
 description = "Mnemuron runtime credentials are never source fixtures"
-regex = '''\bmnm_[A-Za-z0-9_-]{24,}'''
-keywords = ["mnm_"]
+regex = '''\b(?:mnm_|mnmc_)[A-Za-z0-9_-]{24,}'''
+keywords = ["mnm_", "mnmc_"]
 
 [[rules]]
 id = "model-credential"

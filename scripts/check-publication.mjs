@@ -9,7 +9,7 @@ const publicEmail = value => /^(?:noreply@github\.com|[^\s@]+@(?:users\.noreply\
 const rules = [
   ['private-key', /-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/g],
   ['token', /\b(?:ghp_|gho_|github_pat_|AKIA)[A-Za-z0-9_]{16,}/g],
-  ['project-or-model-key', /\b(?:mnm_|sk-(?:proj-|ant-)?)[A-Za-z0-9_-]{24,}/g],
+  ['project-or-model-key', /\b(?:mnm_|mnmc_|sk-(?:proj-|ant-)?)[A-Za-z0-9_-]{24,}/g],
   ['bearer-or-jwt', /\bBearer\s+[A-Za-z0-9_.~-]{24,}|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g],
   ['inline-secret-review', /["']?(?:client_secret|api_key|access_token|refresh_token|totp_secret|recovery_codes?|password)["']?\s*[:=]\s*["'][A-Za-z0-9_+\/.=:-]{16,}["']/gi],
   ['personal-home', /\/(?:Users|home)\/(?!example\b|test\b|openclaw\b|hermes\b)[\w.-]+/g],

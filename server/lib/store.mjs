@@ -1,3 +1,4 @@
+import {CloudMemoryService} from './memory/cloud-service.mjs';
 import {
   createHash,
   randomBytes,
@@ -666,6 +667,7 @@ export class MnemuronStore {
         transaction:callback=>this.memoryTransaction(callback),project:row=>this.memoryFromRow(row),audit:event=>this.audit(event)});
       this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false});
       this.consoleService = new ConsoleService(this);
+    this.cloudMemory = new CloudMemoryService(this);
       this.db.prepare(`
         INSERT OR IGNORE INTO settings (key, value_json, updated_at)
         VALUES ('raw_retention_days', ?, ?)

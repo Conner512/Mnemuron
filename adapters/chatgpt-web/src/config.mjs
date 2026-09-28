@@ -1,3 +1,4 @@
+import {validateConnectionPolicy} from '../../../shared/cloud-contract.mjs';
 import fs from "node:fs";
 import { canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, OAUTH_SCOPES, CORE_SCOPES, publicOriginMode } from "../../../shared/oauth-common.mjs";
 
@@ -11,6 +12,7 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
   requireConfig(["auth_only", "readonly"].includes(c.tool_profile), "tool_profile");
   c.identity_mode ??= 'legacy_owner';
   requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
+  validateConnectionPolicy(c, requireConfig);
   canonicalUrl(c.issuer, { isolated, pathname: "/" });
   canonicalUrl(c.resource, { isolated, pathname: "/mcp" });
   c.public_origin_mode = publicOriginMode(c);

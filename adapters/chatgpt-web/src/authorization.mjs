@@ -41,15 +41,20 @@ export class GatewayAuthorization {
     if (!Number.isInteger(data.exp) || typeof data.client_id !== "string" || typeof data.sub !== "string"
       || typeof data.scope !== "string" || typeof data.aud !== "string"
       || (data.nbf !== undefined && !Number.isInteger(data.nbf))) throw new BoundaryError(503, "AUTH_DEPENDENCY_UNAVAILABLE");
+    const managed=c.cloud_connections?.enabled===true && c.identity_mode==='multi_account_v1'
+      && data.mnemuron_connection_verified===true && /^[A-Za-z0-9_-]{1,128}$/.test(data.mnemuron_connection_id||'')
+      && ['chatgpt','mcp'].includes(data.mnemuron_connection_kind) && /^mnmconn_[A-Za-z0-9_-]{43}$/.test(data.client_id);
     if (data.exp <= seconds() || (data.nbf !== undefined && data.nbf > seconds())
       || data.aud !== c.resource || (data.iss !== undefined && data.iss !== c.issuer)
-      || data.client_id !== c.introspection.expected_oauth_client_id || data.token_kind !== "access_token"
+      || (data.client_id !== c.introspection.expected_oauth_client_id && !managed) || data.token_kind !== "access_token"
       || data.token_type !== "Bearer") throw new BoundaryError(401, "INVALID_TOKEN");
     let mapping;
     try { mapping = loadIdentityMappings(c).find(item=>item.subject===data.sub && item.issuer===c.issuer); } catch { throw new BoundaryError(503, "IDENTITY_CONFIGURATION_UNAVAILABLE"); }
     if (!mapping?.enabled || (c.identity_mode==='multi_account_v1' && (data.account_id!==mapping.account_id || data.security_version!==mapping.security_version))) throw new BoundaryError(403, "SUBJECT_DENIED");
-    return Object.freeze({ mapping, scopes: new Set(data.scope.split(" ").filter(Boolean)),
-      connection_id:secretHash(JSON.stringify([c.issuer,data.client_id,data.sub])) });
+    const scopes=new Set(data.scope.split(" ").filter(Boolean));
+    if(scopes.has("memory:write") && (!managed || c.cloud_connections?.allow_write!==true))throw new BoundaryError(403,"INSUFFICIENT_SCOPE");
+    return Object.freeze({ mapping, scopes,
+      connection_id:secretHash(JSON.stringify((managed?[c.issuer,data.client_id,data.sub,data.mnemuron_connection_id]:[c.issuer,data.client_id,data.sub]))) });
   }
 }
 

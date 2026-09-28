@@ -1,3 +1,4 @@
+import {CloudConnections} from './cloud-connections.mjs';
 import {IdentityConsole} from './identity-console.mjs';
 import {randomBytes,randomUUID,createCipheriv,createDecipheriv,scrypt} from 'node:crypto';
 import {promisify} from 'node:util';
@@ -49,7 +50,7 @@ export class IdentityRepository {
       CREATE TABLE IF NOT EXISTS identity_recovery_claims (
         account_id TEXT NOT NULL,digest TEXT NOT NULL,session_digest TEXT NOT NULL,PRIMARY KEY(account_id,digest));
     `);
-    this.console = new IdentityConsole(this);
+    this.console = new IdentityConsole(this);this.connections=new CloudConnections(this,{issuer});
   }
   seal(value,account,purpose) {
     const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',this.key,iv);

@@ -24,12 +24,13 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
   };
   requireConfig(!core || core.token !== authorization.secret, "separate introspection and core credentials");
   const origin = new URL(config.resource);
-  const metadataUrl = `${origin.origin}${config.protected_resource_metadata_path}`;
-  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${OAUTH_SCOPES.join(" ")}"`;
+  const baseMetadataUrl = `${origin.origin}${config.protected_resource_metadata_path}`;
   const limits = new WindowLimit();
   const concurrent = new Map();
   const server = http.createServer(async (request, response) => {
     const requestId = randomUUID();
+    let metadataUrl=baseMetadataUrl;
+    let challenge=`Bearer resource_metadata="${metadataUrl}", scope="${OAUTH_SCOPES.join(" ")}"`;
     const started = Date.now();
     let key;
     let errorCode, tool;
@@ -52,6 +53,11 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
     response.on('close',()=>record('connection_closed'));
     try {
       const url = requestBoundary(request, origin, { isolated });
+      // Public hint selects discovery scope only. It never grants a capability or
+      // changes canonical resource/audience. Legacy /mcp stays read-only at linking.
+      const requestWrite=url.searchParams.get('access')==='readwrite' && config.cloud_connections?.allow_write===true;
+      if(requestWrite)metadataUrl+='?access=readwrite';
+      challenge=`Bearer resource_metadata="${metadataUrl}", scope="${[...OAUTH_SCOPES,...(requestWrite?["memory:write"]:[])].join(" ")}"`;
       // Shared-host browser cookies belong to the AS, never to MCP authentication or the SDK.
       delete request.headers.cookie;
       delete request.headers.cookie2;
@@ -61,7 +67,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       limits.take(`peer:${request.socket.remoteAddress}`, 600);
       if (request.method === "GET" && [config.protected_resource_metadata_path, "/.well-known/oauth-protected-resource"].includes(url.pathname)) {
         return sendJson(response, 200, { resource: config.resource, authorization_servers: [config.issuer],
-          scopes_supported: RESOURCE_SCOPES, bearer_methods_supported: ["header"] });
+          scopes_supported: [...RESOURCE_SCOPES,...(requestWrite?["memory:write"]:[])], bearer_methods_supported: ["header"] });
       }
       if (request.method === "GET" && ["/livez", "/readyz"].includes(url.pathname)) {
         let ready = false;
@@ -102,7 +108,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       }
       if (body.method === "tools/call") {
         if (body.id === undefined || !body.params || typeof body.params.name !== "string") throw new BoundaryError(400, "INVALID_MCP_REQUEST");
-        if (enabledTools(config).includes(body.params.name)) tool = body.params.name;
+        if (enabledTools(config,auth).includes(body.params.name)) tool = body.params.name;
         if(tool)requireScope(auth,toolDefinitions[tool].scope);
       }
       const mcp = createMcpServer({ config, auth, core:requestCore(auth.mapping), id:body.id,
@@ -120,7 +126,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       if (!response.headersSent) sendJson(response, status, { error_code: code },
         status === 401 ? { "www-authenticate": `${challenge}${code === "INVALID_TOKEN" ? ', error="invalid_token"' : ""}` }
           : status === 403 && code === "INSUFFICIENT_SCOPE" ? { "www-authenticate":
-            `Bearer resource_metadata="${metadataUrl}", scope="${error.requiredScope}", error="insufficient_scope"` } : {});
+            `Bearer resource_metadata="${metadataUrl}", scope="${error.requiredScope||"memory:write"}", error="insufficient_scope"` } : {});
       else if (!response.writableEnded) response.end();
     } finally {
       if (ownsSlot) {

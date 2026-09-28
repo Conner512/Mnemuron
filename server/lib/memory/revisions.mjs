@@ -68,7 +68,7 @@ export class MemoryRevisions {
     if (previous?.state_hash === stateHash) return previous.revision;
     const revision = (previous?.revision || 0) + 1, contentHash = hash(row.content);
     const events = parse(row.source_event_ids_json, []).map(id=>this.db.prepare('SELECT event_type FROM events WHERE user_id=? AND event_id=?').get(row.user_id,id));
-    const evidence = row.generation_method?.startsWith('explicit-') ? 'explicit_user_assertion'
+    const evidence = row.agent_id === 'chatgpt-web' ? 'tool_submitted' : row.generation_method?.startsWith('explicit-') ? 'explicit_user_assertion'
       : events.length && events.every(event=>event?.event_type==='user_message') ? 'observed_user_statement'
       : events.length && events.every(event=>event?.event_type==='assistant_message') ? 'assistant_suggestion' : 'unverified_inference';
     this.db.prepare('INSERT INTO memory_revisions VALUES (?,?,?,?,?,?,?,?,?,?)').run(row.user_id,row.memory_id,revision,row.content,

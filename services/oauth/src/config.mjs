@@ -1,3 +1,4 @@
+import {validateConnectionPolicy} from '../../../shared/cloud-contract.mjs';
 import fs from "node:fs";
 import { createPrivateKey } from "node:crypto";
 import {
@@ -23,6 +24,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   requireConfig(c.client_registration?.dynamic === false && c.client_registration?.cimd === false, "static clients only");
   c.identity_mode ??= 'legacy_owner';
   requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
+  validateConnectionPolicy(c, requireConfig);
   if(c.identity_mode==='multi_account_v1') {
     requireConfig(typeof c.identity?.encryption_key_file==='string' && c.identity.encryption_key_file.startsWith('/'),'identity encryption key file');
     for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])

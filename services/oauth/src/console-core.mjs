@@ -38,6 +38,10 @@ export class ConsoleCore {
     if(!['overview','memories','summaries','summary','jobs','job','storage','connections','audit','capabilities','models','memory-meta','export','projects','operation'].includes(view))throw new BoundaryError(404,'NOT_FOUND');
     return this.request(`/v1/console/${view}?${new URLSearchParams(params)}`);
   }
+  async enableCloud(credentialId){
+    const identity=await this.identity();if(!consoleActionWritable({...identity.identity,scopes:identity.scopes},'memory.create'))throw new BoundaryError(403,'CONSOLE_UPGRADE_REQUIRED');
+    return this.request('/v1/console/cloud-enable',{method:'POST',body:{credential_id:credentialId}});
+  }
   async action(input) {
     const identity=await this.identity();if(!consoleActionWritable({...identity.identity,scopes:identity.scopes},input.action))throw new BoundaryError(403,'CONSOLE_UPGRADE_REQUIRED');
     return this.request('/v1/console/action',{method:'POST',body:input});

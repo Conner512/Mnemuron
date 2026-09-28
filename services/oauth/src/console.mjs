@@ -1,3 +1,4 @@
+import {connectionPolicy} from '../../../shared/cloud-contract.mjs';
 import QRCode from 'qrcode';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
@@ -146,7 +147,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     ids.session(token,'console');
     const operator=ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
     sendJson(response,200,{...core,actions:(core.actions||[]).filter(action=>allowed_actions.includes(action)),allowed_actions,writable:allowed_actions.some(action=>(core.actions||[]).includes(action)),
-      enabled:config.identity.console_operations===true,operator,resource:config.resource,
+      enabled:config.identity.console_operations===true,operator,resource:config.resource,cloud_connections:connectionPolicy(config),
       account_id:account.account_id,management:consoleManagement(config),invitation_batch_limit:config.identity.invitation_batch_limit,
       maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy&&!identityMaintenance?.external()});return true;
   }
@@ -160,7 +161,9 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const action=body.get('action'),operation_id=body.get('operation_id');
     store.limit(`console:write:${account.account_id}`,60,60);
     let result;
-    if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
+    if(action.startsWith('cloud_connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id,{
+      enableWriter:()=>{const binding=ids.bindings(account.subject).find(b=>b.purpose==='web');if(!binding)throw new BoundaryError(503,'CLOUD_WRITE_BINDING_REQUIRED');return coreFor(account.subject).enableCloud(binding.credential_id);}});
+    else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
     else result=await coreFor(account.subject).action({action,operation_id,payload});
     if(result.login_required){await invalidateAuthorization();setCookie(response,config,'console','',0);}
@@ -178,8 +181,9 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   }
   if(pathname==='/console-api/connections'&&request.method==='GET') {
     const grants=ids.console.grants(account.subject);
+    const cloud=ids.connections.list(account.account_id,{status:url.searchParams.get('status')||'active',offset:Number(url.searchParams.get('offset')||0),limit:20,kind:url.searchParams.get('kind')||'',query:url.searchParams.get('query')||''});
     const core=await coreFor(account.subject).view('connections',{});ids.session(token,'console');
-    sendJson(response,200,{connections:grants,core_connections:core.connections,physical_device_verified:false,operations:'blocked_policy'});return true;
+    sendJson(response,200,{connections:grants,core_connections:core.connections,core_truncated:core.truncated===true,cloud,cloud_status:url.searchParams.get('status')||'active',cloud_query:url.searchParams.get('query')||'',cloud_kind:url.searchParams.get('kind')||'',cloud_policy:connectionPolicy(config),resource:config.resource,physical_device_verified:false,operations:'blocked_policy'});return true;
   }
   if(pathname==='/console-api/audit'&&request.method==='GET') {
     const core=await coreFor(account.subject).view('audit',Object.fromEntries(url.searchParams));ids.session(token,'console');
