@@ -147,7 +147,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const operator=ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
     sendJson(response,200,{...core,actions:(core.actions||[]).filter(action=>allowed_actions.includes(action)),allowed_actions,writable:allowed_actions.some(action=>(core.actions||[]).includes(action)),
       enabled:config.identity.console_operations===true,operator,resource:config.resource,
-      account_id:account.account_id,management:consoleManagement(config),invitation_batch_limit:config.identity.invitation_batch_limit,
+      account_id:account.account_id,management:consoleManagement(config),connection_management:ids.connections.capabilities(),invitation_batch_limit:config.identity.invitation_batch_limit,
       maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy&&!identityMaintenance?.external()});return true;
   }
   if(pathname==='/console-api/action'&&request.method==='POST'){
@@ -160,7 +160,8 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const action=body.get('action'),operation_id=body.get('operation_id');
     store.limit(`console:write:${account.account_id}`,60,60);
     let result;
-    if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
+    if(action.startsWith('connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);
+    else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
     else result=await coreFor(account.subject).action({action,operation_id,payload});
     if(result.login_required){await invalidateAuthorization();setCookie(response,config,'console','',0);}
@@ -177,9 +178,17 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       recovery_policy:config.identity.recovery_policy?'configured':'blocked_policy',operations:config.identity.console_operations?'available':'blocked_policy'});return true;
   }
   if(pathname==='/console-api/connections'&&request.method==='GET') {
+    if(url.searchParams.has('connection_id')){
+      if([...url.searchParams.keys()].length!==1)throw new BoundaryError(400,'INVALID_CONNECTION_INPUT');
+      sendJson(response,200,ids.connections.detail(account.account_id,url.searchParams.get('connection_id')));return true;
+    }
+    const result=ids.connections.list(account.account_id,Object.fromEntries(url.searchParams));
     const grants=ids.console.grants(account.subject);
-    const core=await coreFor(account.subject).view('connections',{});ids.session(token,'console');
-    sendJson(response,200,{connections:grants,core_connections:core.connections,physical_device_verified:false,operations:'blocked_policy'});return true;
+    let core;try{core=await coreFor(account.subject).view('connections',{});}catch{core={connections:[],unavailable:true};}ids.session(token,'console');
+    const legacy=grants.filter(g=>g.client_id===config.chatgpt_client.client_id);
+    sendJson(response,200,{...result,legacy_connections:legacy.length?[{kind:'legacy_system',label:'Legacy ChatGPT OAuth',grants:legacy,read_only:true,configuration_state:'ready',health:'unknown'}]:[],
+      historical_grants:grants.filter(g=>g.client_id!==config.chatgpt_client.client_id&&!ids.connections.clientRow(g.client_id)),
+      core_connections:core.connections,system_unavailable:core.unavailable===true,physical_device_verified:false});return true;
   }
   if(pathname==='/console-api/audit'&&request.method==='GET') {
     const core=await coreFor(account.subject).view('audit',Object.fromEntries(url.searchParams));ids.session(token,'console');

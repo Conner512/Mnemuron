@@ -17,6 +17,7 @@ import { HandoffPolicy } from "./handoff-policy.mjs";
 import { MemoryRevisions, exactText } from "./memory/revisions.mjs";
 import { MemoryService } from "./memory/service.mjs";
 import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,WEB_READ_POLICY} from './memory/web-visibility.mjs';
+import {CloudMemory} from './memory/cloud.mjs';
 import {ConsoleService} from './console/service.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
 import path from "node:path";
@@ -652,6 +653,7 @@ export class MnemuronStore {
       this.memoryTransaction(() => this.revisions.migrate());
       this.derivedMemory = new DerivedMemory(this);
       this.webVisibility = new WebMemoryVisibility(this);
+      this.cloudMemory = new CloudMemory(this);
       this.memorySources = new MemorySources(this);
       this.memoryConfig = options.memoryConfig || {};
       const jobConfig=this.memoryConfig.jobs || {};
@@ -3829,7 +3831,7 @@ export class MnemuronStore {
     }
   }
 
-  saveMemory(auth, payload, { idempotencyKey } = {}) {
+  saveMemory(auth, payload, { idempotencyKey, evidenceKind } = {}) {
     this.requireScope(auth, "memory:write");
     if (!this.runtime.memory) throw new ConflictError("New memory writes are disabled.", "MEMORY_DISABLED");
     const intent = memoryIntent(payload, auth);
@@ -3859,11 +3861,11 @@ export class MnemuronStore {
         "source_event_ids_json, source_checkpoint_id, generation_method, confidence, confidence_label, " +
         "warnings_json, content_fingerprint, topic, topic_key, created_at, updated_at) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '[]', NULL, " +
-        "'explicit-user-save-v0.1', 1.0, 'high', '[]', NULL, ?, ?, ?, ?)",
+        "?, 1.0, 'high', '[]', NULL, ?, ?, ?, ?)",
       ).run(
         memoryId, auth.user_id, auth.credential_id, auth.device_id, auth.agent_id, auth.agent_instance_id,
         intent.content, intent.scope, scope.project_id, scope.task_id, scope.workstream_id, scope.session_id,
-        intent.source, intent.memory_type, intent.topic, intent.topic ? normalize(intent.topic) : null,
+        intent.source, intent.memory_type, evidenceKind==='model_submitted'?'cloud-tool-submission-v1':'explicit-user-save-v0.1', intent.topic, intent.topic ? normalize(intent.topic) : null,
         createdAt, createdAt,
       );
       const row = this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(memoryId);
@@ -4152,7 +4154,7 @@ export class MnemuronStore {
     return result;
   }
 
-  supersedeMemory(auth, memoryId, payload) {
+  supersedeMemory(auth, memoryId, payload, {evidenceKind} = {}) {
     this.requireScope(auth, "memory:write");
     if (!this.runtime.memory) throw new ConflictError("New memory writes are disabled.", "MEMORY_DISABLED");
     assertIdentifier(memoryId, "memory_id");
@@ -4205,7 +4207,7 @@ export class MnemuronStore {
           content_fingerprint, topic, topic_key, supersedes_memory_id,
           lifecycle_reason, lifecycle_actor_json, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'explicit_correction', ?,
-                  'active', '[]', NULL, 'explicit-user-correction-v0.1', 1.0,
+                  'active', '[]', NULL, ?, 1.0,
                   'high', '[]', NULL, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         replacementId,
@@ -4221,6 +4223,7 @@ export class MnemuronStore {
         targetRow.workstream_id,
         targetRow.session_id,
         memoryType,
+        evidenceKind==='model_submitted'?'cloud-tool-submission-v1':'explicit-user-correction-v0.1',
         topic,
         topic ? normalize(topic) : null,
         memoryId,
@@ -5829,6 +5832,7 @@ export class MnemuronStore {
       agent_instance_id: auth.agent_instance_id,
       identity_status: "server_verified",
       ...(isWebReader(auth)?{web_read_policy:WEB_READ_POLICY}:{}),
+      ...(isWebReader(auth)&&this.cloudMemory?.binding(auth)?{cloud_memory:{...this.cloudMemory.binding(auth),enabled:this.runtime.cloudMemory===true}}:{}),
     };
   }
 

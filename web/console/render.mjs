@@ -35,7 +35,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
   return `<!doctype html><html lang="zh-CN" data-theme="a" data-mode="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
 }
 export function serveAsset(request,response,pathname) {
-  const file=pathname.match(/^\/assets\/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs)$/)?.[1];
+  const file=pathname.match(/^\/assets\/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs|connections\.mjs)$/)?.[1];
   if(!file||request.method!=='GET')return false;
   // Keep one public stylesheet URL: existing ingress rules and CSP remain valid.
   const content=file==='styles.css'?Buffer.concat([

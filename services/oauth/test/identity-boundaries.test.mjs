@@ -32,7 +32,7 @@ function finishInProcess(f,session,otp) {
 }
 
 test('INV-08/14: concurrent processes and lost completion response consume once and return the same account',async t=>{
- const f=identityFixture(t),p=await prepared(f),otp=await generate({secret:p.setup.secret,epoch:seconds()-30});
+ const f=identityFixture(t),p=await prepared(f),otp=await generate({secret:p.setup.secret});
  const replies=await Promise.all([finishInProcess(f,p.session,otp),finishInProcess(f,p.session,otp)]);
  assert.ok(replies.every(r=>r.account_id===replies[0].account_id && r.status==='provisioning'),JSON.stringify(replies));
  const retry=await f.identities.verifyEnrollment(p.session.token,otp);
@@ -42,6 +42,21 @@ test('INV-08/14: concurrent processes and lost completion response consume once 
  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_invitations WHERE state='consumed'").get().n,1);
  const codes=f.identities.takeRecoveryCodes(p.session.token);assert.equal(codes.length,8);
  assert.throws(()=>f.identities.takeRecoveryCodes(p.session.token));
+});
+test('INV-08/14: enrollment preflight reads reservation and account in one transaction',async t=>{
+ const f=identityFixture(t),p=await prepared(f),reads=[];
+ for(const name of ['reservation','byId']){
+   const original=f.identities[name].bind(f.identities);
+   f.identities[name]=(...args)=>{reads.push({name,transaction:f.store.db.isTransaction});return original(...args);};
+ }
+ const otp=await generate({secret:p.setup.secret});
+ const completed=await f.identities.verifyEnrollment(p.session.token,otp);
+ assert.equal(completed.status,'provisioning');
+ assert.deepEqual(await f.identities.verifyEnrollment(p.session.token,otp),completed);
+ assert.ok(reads.length>=4);
+ assert.ok(reads.every(read=>read.transaction),JSON.stringify(reads));
+ assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_audit WHERE action='registration.mfa_verified'").get().n,1);
+ assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_invitations WHERE state='consumed'").get().n,1);
 });
 test('INV-10/11: commit rechecks expiry and an abandoned unverified reservation can be reclaimed without inheriting identity',async t=>{
  const f=identityFixture(t),p=await prepared(f),otp=await generate({secret:p.setup.secret,epoch:seconds()-30});

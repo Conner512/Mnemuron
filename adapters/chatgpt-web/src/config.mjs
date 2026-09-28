@@ -1,15 +1,19 @@
 import fs from "node:fs";
-import { canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, OAUTH_SCOPES, CORE_SCOPES, publicOriginMode } from "../../../shared/oauth-common.mjs";
+import { canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, CORE_SCOPES, publicOriginMode,validateCloudPolicy,oauthScopesFor } from "../../../shared/oauth-common.mjs";
 
 export function validateGatewayConfig(input, { isolated = false } = {}) {
   requireConfig(Number(process.versions.node.split(".")[0]) >= 24, "Node.js 24 or later");
   requireConfig(isolated || !!process.release.lts, "production requires a supported Node.js LTS runtime");
   requireConfig(isolated || (!process.env.DEBUG && !process.env.NODE_DEBUG), "protocol debug logging must be disabled");
   const c = structuredClone(input);
+  validateCloudPolicy(c);
   requireConfig(c.config_version === "mnemuron-web-gateway-config-v1", "config_version");
   requireConfig(["oauth", "bootstrap_metadata_only"].includes(c.mode), "mode");
-  requireConfig(["auth_only", "readonly"].includes(c.tool_profile), "tool_profile");
+  requireConfig(["auth_only", "readonly","memory_readwrite"].includes(c.tool_profile), "tool_profile");
+  requireConfig(c.tool_profile!=='memory_readwrite'||c.cloud_memory?.enabled===true,'explicit cloud write deployment');
   c.identity_mode ??= 'legacy_owner';
+  if(c.connection_management!==undefined)requireConfig(typeof c.connection_management==='boolean'
+    &&(!c.connection_management||c.identity_mode==='multi_account_v1'),'connection registry gate');
   requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
   canonicalUrl(c.issuer, { isolated, pathname: "/" });
   canonicalUrl(c.resource, { isolated, pathname: "/mcp" });
@@ -29,7 +33,7 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
   }
   requireConfig(c.protected_resource_metadata_path === "/.well-known/oauth-protected-resource/mcp"
     && c.root_metadata_alias === true, "protected metadata routes");
-  exactList(c.requested_scopes, OAUTH_SCOPES, "requested scopes");
+  exactList(c.requested_scopes, oauthScopesFor(c), "requested scopes");
   const i = c.introspection;
   requireConfig(i?.endpoint === `${c.issuer}/introspect` && i.auth_method === "client_secret_basic"
     && i.accepted_token_kind === "access_token" && i.active_cache_seconds === 0 && i.follow_redirects === false,
@@ -52,10 +56,11 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
   const tools = { mnemuron_auth_status: "memory:read", mnemuron_search_memories: "memory:read",
     mnemuron_get_memory: "memory:read", mnemuron_preview_project_context: "project:read" };
   if(c.tools?.mnemuron_get_summary)tools.mnemuron_get_summary='memory:read';
+  if(c.tool_profile==='memory_readwrite')for(const name of ['mnemuron_save_memory','mnemuron_supersede_memory','mnemuron_retract_memory','mnemuron_get_operation'])tools[name]='memory:write';
   requireConfig(Object.keys(c.tools || {}).length === Object.keys(tools).length && Object.entries(tools).every(([name, scope]) => c.tools[name]?.required_scope === scope), "fixed tool scopes");
   for (const name of Object.keys(tools)) exactList(c.tools[name].profile,
-    name === "mnemuron_auth_status" ? ["auth_only", "readonly"] : ["readonly"], "fixed tool profiles");
-  if (c.mode === "oauth" && c.tool_profile === "readonly") {
+    name === "mnemuron_auth_status" ? ["auth_only", "readonly"] : tools[name]==='memory:write'?['memory_readwrite']:["readonly"], "fixed tool profiles");
+  if (c.mode === "oauth" && c.tool_profile !== "auth_only") {
     canonicalUrl(c.core?.base_url, { isolated, loopbackHttp: true, pathname: "/" });
     requireConfig(c.core.allow_plain_http_loopback_only === true && c.core.follow_redirects === false
       && c.core.search_readiness_contract === "GET /readyz/search", "core readiness contract");
@@ -85,7 +90,7 @@ export function loadIdentityMappings(config) {
   requireConfig(mapping.issuer === config.issuer && typeof mapping.subject === "string"
     && /^[A-Za-z0-9_-]{16,128}$/.test(mapping.subject) && !mapping.subject.includes("__REQUIRED")
     && typeof mapping.enabled === "boolean", "immutable mapped subject");
-  if (config.tool_profile === "readonly") {
+  if (config.tool_profile !== "auth_only") {
     for (const key of ["mnemuron_user_id", "agent_instance_id"]) {
       requireConfig(typeof mapping[key] === "string" && /^[A-Za-z0-9_.:-]{1,160}$/.test(mapping[key])
         && !mapping[key].includes("__REQUIRED"), `mapped ${key}`);
@@ -95,10 +100,30 @@ export function loadIdentityMappings(config) {
   if(config.identity_mode==='multi_account_v1') {
     requireConfig(typeof mapping.account_id==='string' && Number.isSafeInteger(mapping.security_version) && mapping.security_version>0,'account mapping version');
     requireConfig(!users.has(mapping.mnemuron_user_id),'duplicate owner binding');users.add(mapping.mnemuron_user_id);
-    if(config.tool_profile==='readonly') {
+    if(config.tool_profile!=='auth_only') {
       requireConfig(typeof mapping.credential_file==='string' && mapping.credential_file.startsWith('/') && typeof mapping.credential_id==='string','per-account credential');
       const credential=readPrivate(mapping.credential_file);
       requireConfig(!credentials.has(credential),'shared credential forbidden');credentials.add(credential);
+    }
+  }
+  if(mapping.cloud_write!==undefined){
+    const w=mapping.cloud_write;
+    requireConfig(w&&typeof w==='object'&&!Array.isArray(w)&&Object.keys(w).every(k=>['connection_id','account_id','security_version','agent_instance_id','credential_id','credential_file','allow_submitted_revision_grant'].includes(k)),'cloud binding fields');
+    requireConfig(/^[a-f0-9]{64}$/.test(w.connection_id)&&typeof w.account_id==='string'&&typeof w.credential_id==='string'&&typeof w.agent_instance_id==='string'
+      &&Number.isSafeInteger(w.security_version)&&w.security_version>0&&typeof w.allow_submitted_revision_grant==='boolean','cloud binding identity');
+    requireConfig(typeof w.credential_file==='string'&&w.credential_file.startsWith('/')&&w.credential_file!==mapping.credential_file,'separate cloud credential');
+    const token=readPrivate(w.credential_file);requireConfig(!credentials.has(token),'shared cloud credential forbidden');credentials.add(token);
+    if(config.identity_mode==='legacy_owner'&&config.tool_profile!=='auth_only')requireConfig(token!==readPrivate(config.core.credential_file),'separate legacy readonly credential');
+    if(config.identity_mode==='multi_account_v1')requireConfig(w.account_id===mapping.account_id&&w.security_version===mapping.security_version,'cloud binding account version');
+    Object.freeze(w);
+  }
+  if(mapping.connections!==undefined){
+    requireConfig(Array.isArray(mapping.connections)&&mapping.connections.length<=100,'connection map');const seen=new Set();
+    for(const b of mapping.connections){
+      requireConfig(b&&Object.keys(b).every(k=>['connection_id','account_id','security_version','agent_instance_id','credential_id','credential_file','allow_submitted_revision_grant','profile','client_id','connection_version'].includes(k)),'registered connection fields');
+      requireConfig(/^[a-f0-9]{64}$/.test(b.connection_id)&&!seen.has(b.connection_id)&&b.account_id===mapping.account_id&&b.security_version===mapping.security_version&&Number.isSafeInteger(b.connection_version)&&b.connection_version>0,'registered connection ownership');seen.add(b.connection_id);
+      requireConfig(['readonly','memory_readwrite'].includes(b.profile)&&typeof b.client_id==='string'&&typeof b.credential_id==='string'&&b.agent_instance_id===`connection-${b.connection_id}`&&typeof b.allow_submitted_revision_grant==='boolean'&&typeof b.credential_file==='string'&&b.credential_file.startsWith('/'),'registered credential');
+      const key=readPrivate(b.credential_file);requireConfig(!credentials.has(key),'shared connection key forbidden');credentials.add(key);Object.freeze(b);
     }
   }
   }

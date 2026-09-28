@@ -1,6 +1,8 @@
 {
   "config_version": "mnemuron-web-gateway-config-v1",
   "mode": "bootstrap_metadata_only",
+  "cloud_memory": {"enabled":false,"allow_submitted_revision_grant":false},
+  "connection_management": false,
   "public_origin_mode": "shared",
   "tool_profile": "auth_only",
   "listen": {

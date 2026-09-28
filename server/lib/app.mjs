@@ -110,9 +110,15 @@ export function createMnemuronApp({
         responseStatus=200;return sendJson(response,200,await consoleRead(store,auth,pathname.slice('/v1/console/'.length),Object.fromEntries(url.searchParams)));
       }
       if(isWebReader(auth) && !(
-        request.method==='GET' && (['/v1/identity','/readyz/search'].includes(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
-        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview'].includes(pathname)))
+        request.method==='GET' && (['/v1/identity','/readyz/search'].includes(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname) || /^\/v1\/cloud-memory\/operations\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        || request.method==='POST' && ['/v1/memories/query','/v1/memory-summaries/query','/v1/project-context/preview','/v1/cloud-memory/operations'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
+
+      if(request.method==='POST'&&pathname==='/v1/cloud-memory/operations'){
+        const input=await readJson(request,32768);responseStatus=200;return sendJson(response,200,store.cloudMemory.execute(auth,input));
+      }
+      const cloudOperation=routeMatch(pathname,/^\/v1\/cloud-memory\/operations\/([A-Za-z0-9_.:-]+)$/);
+      if(request.method==='GET'&&cloudOperation){responseStatus=200;return sendJson(response,200,store.cloudMemory.get(auth,url.searchParams.get('connection_id'),cloudOperation[0]));}
 
       if (request.method === 'GET' && pathname === '/v1/capabilities') {
         responseStatus = 200;

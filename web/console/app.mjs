@@ -2,10 +2,11 @@ import {actionButton,actionPage,mountActions,canAct} from './actions.mjs';
 import {translate as t, syncAppearance} from './appearance.mjs';
 import {icon, overviewView, appearanceView} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
+import {mountConnections} from './connections.mjs';
 const root=document.getElementById('console-root'),dialog=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
-let capabilities={enabled:false,writable:false},actions;
+let capabilities={enabled:false,writable:false},actions,connections;
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,query='',searchMode='lexical',offset=0,detailKind='memory';
 let category='',status='',detailStack=[];
 function readLocation(){const p=new URLSearchParams(location.search);query=p.get('query')||'';searchMode=p.get('mode')||'lexical';category=p.get('category')||'';status=p.get('status')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
@@ -16,7 +17,7 @@ const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 const tag=v=>`<span class="tag">${esc(v)}</span>`;
 const disabled=key=>`<button type="button" disabled title="${esc(t('blocked'))}" data-i18n="${key}">${esc(t(key))}</button>`;
 const date=value=>value?new Date(typeof value==='number'&&value<1e12?value*1000:value).toLocaleString(document.documentElement.lang):'—';
-function clear() {actions?.clear();state.clear();requestSequence++;detailSequence++;currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='lexical';offset=0;detail.replaceChildren();dialog.close();root.replaceChildren();document.body.removeAttribute('data-csrf');for(const input of document.querySelectorAll('input'))input.value='';}
+function clear() {actions?.clear();connections?.clear();state.clear();requestSequence++;detailSequence++;currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='lexical';offset=0;detail.replaceChildren();dialog.close();root.replaceChildren();document.body.removeAttribute('data-csrf');for(const input of document.querySelectorAll('input'))input.value='';}
 async function api(view,params={}) {
  const ticket=state.ticket();try {
    const response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});
@@ -48,13 +49,12 @@ function render(data) {
  else if(page==='memories')html=`<form class="toolbar memory-filters" id="search-form"><label class="query-field">${l('query')}<span class="query-input">${icon('search')}<input name="query" value="${esc(query)}" maxlength="2000" autocomplete="off" data-i18n-placeholder="search" placeholder="${esc(t('search'))}"></span></label><label class="filter-mode">${l('searchMode')}<select name="search_mode">${options(['lexical','hybrid','semantic'].map(v=>[v,v]),searchMode)}</select></label><label class="filter-category">${l('category')}<select name="category">${options([['','allCategories'],...(capabilities.taxonomy?.categories||[]).map(v=>[v,v])],category)}</select></label><label class="filter-status">${l('status')}<select name="status">${options([['','allStatuses'],...['active','superseded','retracted'].map(v=>[v,v])],status)}</select></label><button class="primary filter-submit" type="submit">${icon('search')}${l('search')}</button><button type="button" class="filter-reset" data-reset-filters>${l('resetFilters')}</button></form><section class="card memory-library">${new URLSearchParams(location.search).get('focus')==='sources'?`<p class="library-note">${l('inspectSourcesNote')}</p>`:''}${data.truncated||data.retrieval?.window_limited?`<p class="policy-box library-note">${l('boundedSearchNote')} (${esc(data.retrieval?.candidate_limit)})</p>`:''}<div id="memory-rows">${memoryTable(data.results)}</div><div class="library-footer"><p>${l('memoryCount')} · ${data.results?.length??0}${!canAct(capabilities,'memory.create')?` <span aria-hidden="true">/</span> ${l('readOnly')}`:''}</p>${pagination(data)}</div></section>`;
  else if(page==='summaries')html=`<div class="columns"><section class="card">${l('summaries','h2')}${data.summaries?.length?data.summaries.map(summaryRow).join(''):empty()}${pagination(data)}</section><section class="card">${l('category','h2')}${(data.categories||[]).map(c=>`<a class="category-link" href="/app/memories?category=${encodeURIComponent(c.category)}&amp;status=active"><span>${esc(t(c.category))}</span>${tag(c.count)}</a>`).join('')||empty()}${policy('blockedNote',['organize'])}</section></div>`;
  else if(page==='jobs')html=`<section class="card">${table(data.jobs,[['job_id','identity'],['job_type','scope'],['state','state'],['processed','complete'],['total','sourceCount'],['last_error_code','error']])}${policy('blockedNote',['organize'])}</section>`;
- else if(page==='connections')html=`<section class="card">${table(data.connections?.map(c=>({...c,expires:date(c.expires)})),[['client_id','identity'],['expires','state']])}${l('connections','h2')}${table(data.core_connections,[['label','identity'],['agent_id','scope'],['last_used_at','created']])}${policy('blockedNote',['revoke'])}${l('consentNote','p')}</section>`;
  else if(page==='security')html=`<div class="columns"><section class="card"><h2>${esc(data.username)}</h2><span class="tag">${l(data.mfa_verified?'passwordTotp':'pending')}</span>${l('securityNote','p')}<a href="/recover">${l('recover')} →</a></section><section class="card">${table(data.sessions?.map(s=>({...s,created:date(s.created),expires:date(s.expires)})),[['purpose','scope'],['created','created'],['expires','state']])}</section></div>`;
  else if(page==='audit')html=`<section class="card"><button type="button" data-retry>${l('refresh')}</button>${table([...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))].map(e=>({...e,created:date(e.created)})),[['action','scope'],['outcome','state'],['created','created'],['audit_id','operationId']])}${pagination(data)}</section>`;
  else if(page==='storage')html=`<section class="card">${l('storageNote','p')}${table(Object.entries(data.counts||{}).map(([kind,count])=>({kind,count})),[['kind','scope'],['count','memoryCount']])}${policy('storageNote',['export','restore'])}</section>`;
  else if(page==='appearance')html=appearanceView(t);
  else if(['models','invitations','accounts'].includes(page))html=`<section class="card">${policy(page==='models'?'modelsNote':'platformNote',[page==='models'?'configure':page==='invitations'?'issue':'manage'])}</section>`;
- const implementation=actionPage(page,data,capabilities);if(implementation!==null)html=implementation;
+ const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
  root.innerHTML=heading+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
 }
@@ -62,7 +62,7 @@ async function load() {
  const sequence=++requestSequence;
  if(page==='appearance'||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
  try {
-   const data=await api(page,page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{});
+   const data=await api(page,page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{});
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
    root.innerHTML=`<div class="page-heading">${l(page,'h1')}</div><div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
@@ -139,8 +139,9 @@ async function mutate(action,payload,operation_id) {
  }finally{state.finish(ticket);}
 }
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{if(dialog.open)dialog.close();await load();},isActive:()=>!!state.account});
+connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}
- else{try{capabilities=await api('capabilities');}catch{capabilities={enabled:false,writable:false,unavailable:true};}for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
+ else{try{capabilities={...await api('capabilities'),security_version:me.security_version};}catch{capabilities={enabled:false,writable:false,unavailable:true};}for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
 }catch(e){if(state.account)root.innerHTML=`<div class="card" role="alert">${l('unavailable','h2')}${l('errorNote','p')}</div>`;}

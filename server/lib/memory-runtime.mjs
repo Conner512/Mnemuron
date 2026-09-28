@@ -10,7 +10,7 @@ export function memoryRuntime(input) {
     notice:'Legacy handoff behavior retained; explicitly configure modules before switching to memory-only.' };
   if (typeof input !== 'object' || Array.isArray(input) || input.config_version !== 'mnemuron-memory-first-v1') throw new ValidationError('Invalid memory runtime config.', 'INVALID_MEMORY_CONFIG');
   const object=value=>value!==null && typeof value==='object' && !Array.isArray(value);
-  for(const key of ['modules','storage','memory','privacy','providers','vector_store','jobs','development','console']) {
+  for(const key of ['modules','storage','memory','privacy','providers','vector_store','jobs','development','console','cloud_memory']) {
     if(Object.hasOwn(input,key) && !object(input[key]))throw new ValidationError('Invalid configuration section.','INVALID_MEMORY_CONFIG');
   }
   if(input.development?.synthetic_data!==undefined && typeof input.development.synthetic_data!=='boolean')throw new ValidationError('Invalid synthetic data flag.','INVALID_MEMORY_CONFIG');
@@ -19,6 +19,8 @@ export function memoryRuntime(input) {
   if (input.modules.handoff.existing_inflight_policy !== 'drain_before_disable') throw new ValidationError('Existing handoff must drain.', 'INVALID_DRAIN_POLICY');
   if (input.storage?.reject_private_paths_inside_git_worktree !== undefined && input.storage.reject_private_paths_inside_git_worktree !== true) throw new ValidationError('Storage isolation cannot be disabled.', 'INVALID_STORAGE_POLICY');
   try {
+    if(input.cloud_memory){strictObject(input.cloud_memory,['enabled','allow_submitted_revision_grant']);
+      if(typeof input.cloud_memory.enabled!=='boolean'||typeof input.cloud_memory.allow_submitted_revision_grant!=='boolean')throw new Error('invalid cloud policy');}
     if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins']);
       for(const k of ['worker_enabled','personal_vectors'])if(input.console[k]!==undefined&&typeof input.console[k]!=='boolean')throw new Error('invalid console switch');
       if(input.console.key_file!==undefined&&(typeof input.console.key_file!=='string'||!input.console.key_file.startsWith('/')))throw new Error('invalid console key');
@@ -58,6 +60,7 @@ export function memoryRuntime(input) {
   }
   if (input.memory?.capture_extraction?.enabled !== undefined && typeof input.memory.capture_extraction.enabled !== 'boolean') throw new ValidationError('Invalid capture flag.', 'INVALID_MEMORY_CONFIG');
   return { version:'memory-first-v1', legacy:false, memory:input.modules.memory.enabled, handoff:input.modules.handoff.enabled,
+    cloudMemory:input.cloud_memory?.enabled===true,cloudSubmittedGrant:input.cloud_memory?.allow_submitted_revision_grant===true,
     captureExtraction:input.memory?.capture_extraction?.enabled === true,
     deploymentMode:input.deployment_mode || 'production', syntheticData:input.development?.synthetic_data === true,
     organizerConfigured:input.providers?.organizer?.enabled===true,embedderConfigured:input.providers?.embedder?.enabled===true,

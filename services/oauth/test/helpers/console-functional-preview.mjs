@@ -8,11 +8,13 @@ import {fixture} from '../fixture.mjs';
 import {pendingAccount} from './identity-fixture.mjs';
 import {memoryFixture} from '../../../../server/test/helpers/core-memory-fixture.mjs';
 import {provisionIdentities} from '../../src/provisioning.mjs';
-import {randomSecret,writePrivate,seconds} from '../../../../shared/oauth-common.mjs';
+import {prepareConnectionBinding,applyConnectionBinding,finishConnectionBinding} from '../../src/connection-provisioning.mjs';
+import {randomSecret,writePrivate,seconds,secretHash} from '../../../../shared/oauth-common.mjs';
 const cleanup=[],t={after:fn=>cleanup.push(fn)};
 let stopped=false;
 async function stop(){if(stopped)return;stopped=true;for(const fn of cleanup.reverse())await fn();process.exit(0);}
 const core=await memoryFixture(t);
+Object.assign(core.store.runtime,{cloudMemory:true,cloudSubmittedGrant:true});
 const model=http.createServer(async(req,res)=>{let data='';for await(const chunk of req)data+=chunk;const body=JSON.parse(data);let output={ok:true};
  try{const request=JSON.parse(body.messages?.find(m=>m.role==='user')?.content||'{}'),sources=request.input?.sources;
   if(sources)output={results:sources.map(s=>request.input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:s.content})};
@@ -24,7 +26,9 @@ const modelUrl='http://127.0.0.1:'+model.address().port;
 const key=path.join(core.root,'console-key');writePrivate(key,randomSecret());
 core.store.memoryConfig.console={key_file:key,worker_enabled:false,allowed_private_origins:[modelUrl]};
 const f=await fixture(t,{start:false,mutate:c=>{c.identity_mode='multi_account_v1';c.login.registration_enabled=true;
+ c.cloud_memory={enabled:true,allow_submitted_revision_grant:true};c.resource_scopes.push('memory:write');c.chatgpt_client.allowed_scopes.push('memory:write');
  c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:20,console_session_ttl_seconds:3600,console_operations:true,core:{base_url:core.baseUrl},
+ connection_management:{enabled:true,max_connections:20,pat_default_ttl_seconds:2592000,pat_max_ttl_seconds:7776000,secret_receipt_ttl_seconds:300,rotation_overlap_seconds:0},
  recovery_policy:{password:['recovery_code','totp'],totp:['recovery_code','password']},
  provisioning:{enabled:true,core_database:core.databasePath,credential_directory:path.join(path.dirname(c.database_file),'keys'),identity_map_file:path.join(path.dirname(c.database_file),'map.json')}};
 }});
@@ -44,11 +48,22 @@ console.log(JSON.stringify({fixture:true,url:f.config.issuer,model_url:modelUrl,
 const lines=readline.createInterface({input:process.stdin});
 lines.on('line',async line=>{
  try{const req=JSON.parse(line);if(req.command==='stop')return stop();const o=owners[req.owner||0];let reply;
-  if(req.command==='otp')reply={otp:await generate({secret:o.setup.secret,epoch:seconds()+(req.offset||0)})};
+  if(req.command==='otp'){
+   // Isolated test fixtures reset their proof window between independent UI cases.
+   // This stdin helper is not a service endpoint and never exists in production.
+   if(req.fresh){ids.db.prepare('DELETE FROM oauth_mfa_steps WHERE subject=?').run(o.account.subject);ids.db.prepare('DELETE FROM oauth_rate_limits WHERE key=?').run(secretHash(`console:reauth:${o.account.account_id}`));}
+   reply={otp:await generate({secret:o.setup.secret,epoch:seconds()+(req.offset||0)})};
+  }
+  if(req.command==='provision-connections'){
+   for(const op of ids.db.prepare("SELECT * FROM identity_operations WHERE kind LIKE 'connection-bind:%' AND state NOT IN ('completed','superseded')").all()){
+    const work=prepareConnectionBinding(ids,op,path.join(f.directory,'keys'));if(!work)continue;applyConnectionBinding(core.store,work);writePrivate(work.binding.credential_file,work.binding.api_key);finishConnectionBinding(ids,work);
+   }reply={done:true};
+  }
   if(req.command==='tick'){core.store.memoryConfig.console.worker_enabled=true;await core.store.consoleService.tick();core.store.memoryConfig.console.worker_enabled=false;reply={done:true};}
   if(req.command==='invitation')reply=ids.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-browser-operator'});
   if(req.command==='codes')reply={codes:o.codes};
   if(req.command==='cookies'){o.console=ids.newSession('console',{accountId:o.account.account_id});reply={token:o.console.token};}
+  if(req.command==='revoke-console-sessions'){ids.db.prepare("DELETE FROM identity_sessions WHERE account_id=? AND purpose='console'").run(o.account.account_id);reply={done:true};}
   console.log(JSON.stringify({request:req.command,...reply}));
  }catch(error){console.log(JSON.stringify({fixture_error:error.code||error.errorCode||'FAILED'}));}
 });

@@ -1,4 +1,5 @@
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {connectionActions} from './connections.mjs';
 const basicActions={
   memory:['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility'],
   security:['security.password','security.totp.begin','security.totp.complete','security.session.revoke','security.sessions.revoke_others'],
@@ -15,6 +16,7 @@ export function consoleManagement(config) {
 }
 
 export function consoleActionAllowed(config,action) {
+  if(action.startsWith('connections.'))return config.identity.connection_management?.enabled===true&&connectionActions.includes(action);
   const management=consoleManagement(config);
   if(action==='accounts.role')return management.accounts&&management.roles;
   if(action.startsWith('accounts.'))return management.accounts&&['accounts.enable','accounts.disable'].includes(action);
@@ -26,10 +28,10 @@ export function consoleActionAllowed(config,action) {
 }
 
 export function consoleAllowedActions(config,core,operator){
-  return [...CONSOLE_ACTIONS,...identityActions,'storage.export'].filter(action=>{
+  return [...new Set([...CONSOLE_ACTIONS,...identityActions,...connectionActions,'storage.export'])].filter(action=>{
     if(!consoleActionAllowed(config,action))return false;
     if(/^(invitations|accounts)\./.test(action))return operator;
-    if(/^(security|oauth)\./.test(action))return true;
+    if(/^(security|oauth|connections)\./.test(action))return true;
     return core.writable===true&&(action==='storage.export'||core.actions?.includes(action));
   });
 }

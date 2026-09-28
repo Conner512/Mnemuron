@@ -12,10 +12,11 @@ import {randomSecret,writePrivate,seconds} from '../../../shared/oauth-common.mj
 import {CONSOLE_WRITE_SCOPES} from '../../../shared/console-contract.mjs';
 import {main as operatorCommand} from '../bin/console-operator.mjs';
 
-async function setup(t,{maintenance=false,recovery=false,writable=true,management,basic}={}){
+async function setup(t,{maintenance=false,recovery=false,writable=true,management,basic,connections=false}={}){
  const core=await memoryFixture(t);const f=await fixture(t,{start:false,mutate:c=>{
    c.identity_mode='multi_account_v1';c.login.registration_enabled=true;
    c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:10,console_session_ttl_seconds:3600,console_operations:true,core:{base_url:core.baseUrl}};
+   if(connections)c.identity.connection_management={enabled:true,max_connections:20,pat_default_ttl_seconds:2592000,pat_max_ttl_seconds:7776000,secret_receipt_ttl_seconds:300,rotation_overlap_seconds:0};
    if(management){c.identity.console_operations=false;c.identity.console_management=management;}
    if(basic){c.identity.console_operations=false;c.identity.console_basic_operations=basic;}
    if(maintenance)c.identity.provisioning={enabled:true,core_database:core.databasePath,credential_directory:path.join(path.dirname(c.database_file),'keys'),identity_map_file:path.join(path.dirname(c.database_file),'map.json')};
@@ -40,6 +41,25 @@ test('HTTP-CON-01: real BFF binds CSRF, Origin, account and write credentials be
  const me=await x.get('me');const noOrigin=await x.a.browser.request('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.body.csrf,account_id:x.a.record.account_id,action:'memory.create',operation_id:randomUUID(),payload:JSON.stringify(p)})});assert.equal(noOrigin.status,403);
  assert.equal(x.core.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);
  const asset=await x.a.browser.request('/assets/actions.mjs');assert.equal(asset.status,200);assert.match(asset.headers.get('content-type'),/javascript/);
+});
+
+test('HTTP-CONNECTIONS: owner capability is independent, real CSRF/proof/idempotency, metadata and late session safety',async t=>{
+ const x=await setup(t,{connections:true,basic:{memory:false,security:true,oauth:true}}),p={kind:'generic_mcp',label:'Synthetic HTTP connection',profile:'readonly'},operation=randomUUID();
+ const capabilities=(await x.get('capabilities')).body;assert.equal(capabilities.operator,false);assert.ok(capabilities.allowed_actions.includes('connections.create'));assert.ok(!capabilities.allowed_actions.includes('models.save'));
+ assert.equal((await x.act('connections.create',p)).status,403);
+ assert.equal((await x.act('connections.create',p,x.a,operation,{account_id:x.b.record.account_id})).status,409);
+ assert.equal((await x.act('connections.create',p,x.a,operation,{csrf:'invalid'})).status,401);
+ const issued=await x.act('connections.create',{...p,...await x.proof()},x.a,operation);assert.equal(issued.status,200,JSON.stringify(issued.body));assert.match(issued.body.secret,/^mcp_pat_/);
+ const replay=await x.act('connections.create',p,x.a,operation);assert.equal(replay.body.secret,issued.body.secret);
+ const id=issued.body.connection.connection_id;
+ assert.equal((await x.get('connections?connection_id='+id,x.b)).status,404);
+ assert.equal((await x.act('connections.revoke',{connection_id:id,...await x.proof(x.b)},x.b)).status,404);
+ const list=await x.get('connections');assert.equal(list.body.connections.length,1);assert.ok(!JSON.stringify(list.body).includes(issued.body.secret));assert.equal((await x.get('connections?account_id='+x.b.record.account_id)).status,400);
+ const detail=await x.get('connections?connection_id='+id);assert.equal(detail.status,200);assert.ok(!JSON.stringify(detail.body).includes(issued.body.secret));
+ const asset=await x.a.browser.request('/assets/connections.mjs');assert.equal(asset.status,200);assert.match(asset.headers.get('content-type'),/javascript/);
+ const me=await x.get('me');const noOrigin=await x.a.browser.request('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.body.csrf,account_id:x.a.record.account_id,action:'connections.create',operation_id:randomUUID(),payload:JSON.stringify(p)})});assert.equal(noOrigin.status,403);
+ const original=x.ids.authenticate.bind(x.ids);x.ids.authenticate=async(...args)=>{const subject=await original(...args);x.ids.revokeSession(x.a.console.token);return subject;};
+ const late=await x.act('connections.rotate',{connection_id:id,...await x.proof(x.a,30)});assert.equal(late.status,401);assert.equal(x.ids.connections.row(x.a.record.account_id,id).version,1);
 });
 test('HTTP-BASIC-01: own memory editing is independent of paid models, scheduling, export and platform roles',async t=>{
  const x=await setup(t,{basic:{memory:true,security:true,oauth:true}});

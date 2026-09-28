@@ -15,7 +15,8 @@ export class AuthStore {
     try {
       const tables = new Set(["oauth_records", "oauth_revoked_grants", "oauth_mfa_steps", "oauth_rate_limits", "oauth_csrf"]);
       if (identity) for (const name of ['identity_accounts','identity_invitations','identity_sessions',
-        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments']) tables.add(name);
+        'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments','identity_cloud_bindings',
+        'identity_connections','identity_connection_tokens','identity_connection_operations','identity_connection_activity','identity_connection_credentials']) tables.add(name);
       const existing = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
       requireConfig(existing.every(row => tables.has(row.name)), "separate OAuth database; unknown business tables");
       this.db.exec(`
@@ -72,7 +73,7 @@ export class AuthStore {
               grantId || null, payload.uid || null, payload.userCode || null);
         });
       }
-      async find(id) { return store.find(this.model, "id", id); }
+      async find(id) { return this.model==='Client'?store.connections?.client(id):store.find(this.model, "id", id); }
       async findByUid(uid) { return store.find(this.model, "uid", uid); }
       async findByUserCode(code) { return store.find(this.model, "user_code", code); }
       async consume(id) {
@@ -98,6 +99,10 @@ export class AuthStore {
       AND expires>? AND NOT EXISTS(SELECT 1 FROM oauth_revoked_grants WHERE id=r.grant_id)`).get(model, value, seconds());
     if(!row)return undefined;
     const data=JSON.parse(row.payload);
+    if(data.clientId&&this.connections?.clientRow(data.clientId)){
+      const r=this.connections.clientRow(data.clientId);
+      if(!this.connections.current(r)||!this.connections.enabled()||data.accountId&&!this.connections.permitsClient(data.clientId,data.accountId))return undefined;
+    }
     if(this.identity && data.accountId) {
       const account=this.identity.account(data.accountId);
       if(!this.identity.eligible(data.accountId)||data.securityVersion!==account?.security_version)return undefined;
@@ -180,6 +185,7 @@ export class AuthStore {
     this.db.prepare("DELETE FROM oauth_csrf WHERE expires<=?").run(seconds());
     this.db.prepare("DELETE FROM oauth_rate_limits WHERE until<=?").run(seconds());
     if(this.identityMode)this.db.prepare('DELETE FROM identity_sessions WHERE expires<=?').run(seconds());
+    this.connections?.cleanup();
     // Tombstones outlive the maximum grant/family lifetime, preventing delayed writes from reviving grants.
     this.db.prepare("DELETE FROM oauth_revoked_grants WHERE revoked_at<?").run(seconds() - 35 * 86400);
   }
