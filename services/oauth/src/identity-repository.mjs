@@ -166,7 +166,8 @@ export class IdentityRepository {
     });
   }
   async verifyEnrollment(token,otp) {
-    const {s,i}=this.reservation(token),a=this.byId(s.account_id);
+    // A concurrent completion must not mix a reserved invitation with a verified account.
+    const {i,a}=this.store.transaction(()=>{const {s,i}=this.reservation(token);return {i,a:this.byId(s.account_id)};});
     if(a?.mfa_verified&&i.state==='consumed'&&['provisioning','active'].includes(a.status))return {account_id:a.account_id,status:a.status};
     if(!a||a.status!=='pending_mfa'||typeof otp!=='string'||!/^\d{6}$/.test(otp)) throw denied();
     const result=await verify({secret:this.unseal(a.mfa_cipher,a.account_id,'totp'),token:otp,epochTolerance:30});
