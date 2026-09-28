@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {renderPage,routeTitle} from '../../../web/console/render.mjs';
+import {renderPage,routeTitle,pages} from '../../../web/console/render.mjs';
 import {catalog} from '../../../web/console/catalog.mjs';
 import {SessionState} from '../../../web/console/session-state.mjs';
 test('UI-00 UI-01 INT-02: fixed geometry and full bilingual palette catalogue',()=>{
@@ -37,6 +37,19 @@ test('UI-01 UI-04: shell chrome is translatable and the skip link has a target',
   assert.match(page,/data-i18n="systemLabel"/);assert.match(page,/id="main"/);
   assert.match(page,/class="skip-link"[^>]*data-i18n="continue"/);
  }
+});
+test('console chrome omits retired status notices without removing navigation or logout',()=>{
+ for(const page of pages){
+  const html=renderPage({title:page,page,csrf:'synthetic-csrf',account:{account_id:'synthetic-account',username:'Synthetic'}});
+  assert.doesNotMatch(html,/class="handoff"|data-i18n="(?:handoff|capabilityBoundary|notProduction)"/);
+  assert.equal(html.match(/<footer>(.*?)<\/footer>/s)?.[1],'<span class="footer-mark">Mnemuron</span>');
+  assert.match(html,/action="\/console-api\/logout" method="post"/);
+  assert.match(html,/name="csrf" value="synthetic-csrf"/);
+  for(const target of pages)assert.ok(html.includes(`href="/app/${target}"`));
+ }
+ for(const locale of ['zh-CN','en'])for(const key of ['handoff','capabilityBoundary','notProduction'])assert.equal(Object.hasOwn(catalog[locale],key),false);
+ const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
+ assert.doesNotMatch(css,/\.handoff\b/);
 });
 test('six palettes keep small body, navigation and action text at 4.5:1 contrast',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
