@@ -39,7 +39,11 @@ jobs:
           NODE
           git apply --check --index --unidiff-zero "$RUNNER_TEMP/cloud-connections.patch"
           git apply --index --unidiff-zero "$RUNNER_TEMP/cloud-connections.patch"
-          git rm -rf .github/cloud-connection-transfer .github/workflows/cloud-connection-apply.yml
+          # The Actions token has content permission, not workflow permission.
+          # Workflow changes and temporary workflow cleanup are separate reviewed connector writes.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          git rm -rf .github/cloud-connection-transfer
+          test -z "$(git diff --cached --name-only -- .github/workflows)"
           git diff --cached --check
           git diff --cached --stat
       - name: Install existing locked application dependencies
