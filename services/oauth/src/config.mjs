@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import { createPrivateKey } from "node:crypto";
+import {validateConnectionPolicy} from './connections.mjs';
 import {
   canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, readSecret,
-  OAUTH_SCOPES, RESOURCE_SCOPES, publicOriginMode,
+  OAUTH_SCOPES, RESOURCE_SCOPES, publicOriginMode,validateCloudPolicy,resourceScopesFor,oauthScopesFor,
 } from "../../../shared/oauth-common.mjs";
 
 export function validateAuthConfig(input, { isolated = false } = {}) {
@@ -10,6 +11,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   requireConfig(isolated || !!process.release.lts, "production requires a supported Node.js LTS runtime");
   requireConfig(isolated || (!process.env.DEBUG && !process.env.NODE_DEBUG), "protocol debug logging must be disabled");
   const c = structuredClone(input);
+  validateCloudPolicy(c);
   requireConfig(c.config_version === "mnemuron-oauth-config-v1", "config_version");
   requireConfig(["oauth", "bootstrap_metadata_only"].includes(c.mode), "mode");
   canonicalUrl(c.issuer, { isolated, pathname: "/" });
@@ -18,12 +20,13 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   requireConfig(c.listen?.host === "127.0.0.1", "loopback listener");
   boundedInteger(c.listen.port, null, 1, 65535, "port");
   if (isolated && c.public_origin_mode === "separate") requireConfig(new URL(c.issuer).port === String(c.listen.port), "fixture origin port");
-  exactList(c.resource_scopes, RESOURCE_SCOPES, "resource_scopes");
+  exactList(c.resource_scopes, resourceScopesFor(c), "resource_scopes");
   exactList(c.oidc_scopes, ["openid", "offline_access"], "oidc_scopes");
   requireConfig(c.client_registration?.dynamic === false && c.client_registration?.cimd === false, "static clients only");
   c.identity_mode ??= 'legacy_owner';
   requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
   if(c.identity_mode==='multi_account_v1') {
+    validateConnectionPolicy(c.identity?.connection_management);
     requireConfig(typeof c.identity?.encryption_key_file==='string' && c.identity.encryption_key_file.startsWith('/'),'identity encryption key file');
     for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])
       if(c.identity[name]!==undefined) boundedInteger(c.identity[name],null,min,max,name);
@@ -65,7 +68,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
     && client.token_endpoint_auth_method === "client_secret_post", "ChatGPT client");
   exactList(client.grant_types, ["authorization_code", "refresh_token"], "grant_types");
   exactList(client.response_types, ["code"], "response_types");
-  exactList(client.allowed_scopes, OAUTH_SCOPES, "allowed_scopes");
+  exactList(client.allowed_scopes, oauthScopesFor(c), "allowed_scopes");
   requireConfig(client.pkce?.required === true, "PKCE required");
   exactList(client.pkce.methods, ["S256"], "PKCE S256");
   const introspection = c.introspection_client;

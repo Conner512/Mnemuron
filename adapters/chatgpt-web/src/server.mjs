@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
-import { BoundaryError, WindowLimit, RESOURCE_SCOPES, OAUTH_SCOPES, requestBoundary, sendJson, readBody, secretHash, requireConfig } from "../../../shared/oauth-common.mjs";
+import { BoundaryError, WindowLimit, resourceScopesFor, oauthScopesFor, requestBoundary, sendJson, readBody, secretHash, requireConfig } from "../../../shared/oauth-common.mjs";
 import { validateGatewayConfig, loadGatewayConfig, loadIdentityMappings } from "./config.mjs";
 import { GatewayAuthorization } from "./authorization.mjs";
 import { ReadonlyCoreClient } from "./core-client.mjs";
@@ -15,9 +15,13 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
   const config = validateGatewayConfig(input, { isolated });
   const authorization = config.mode === "oauth" ? new GatewayAuthorization(config) : null;
   const multi=config.identity_mode==='multi_account_v1';
-  const core = config.mode === "oauth" && config.tool_profile === "readonly" && !multi ? new ReadonlyCoreClient(config) : null;
-  const requestCore = mapping => {
-    if(config.tool_profile!=='readonly')return null;
+  const core = config.mode === "oauth" && config.tool_profile !== "auth_only" && !multi ? new ReadonlyCoreClient(config) : null;
+  const requestCore = (mapping,auth) => {
+    if(config.tool_profile==='auth_only')return null;
+    if(config.tool_profile==='memory_readwrite' && (auth?.scopes.has('memory:write')||auth?.registered) && mapping.cloud_write){
+      const client=new ReadonlyCoreClient({...config,core:{...config.core,credential_file:mapping.cloud_write.credential_file}},mapping.cloud_write);
+      requireConfig(client.token!==authorization.secret,'separate introspection and core credentials');return client;
+    }
     const client=multi?new ReadonlyCoreClient({...config,core:{...config.core,credential_file:mapping.credential_file}}):core;
     requireConfig(client.token!==authorization.secret,'separate introspection and core credentials');
     return client;
@@ -25,14 +29,14 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
   requireConfig(!core || core.token !== authorization.secret, "separate introspection and core credentials");
   const origin = new URL(config.resource);
   const metadataUrl = `${origin.origin}${config.protected_resource_metadata_path}`;
-  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${OAUTH_SCOPES.join(" ")}"`;
+  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${oauthScopesFor(config).join(" ")}"`;
   const limits = new WindowLimit();
   const concurrent = new Map();
   const server = http.createServer(async (request, response) => {
     const requestId = randomUUID();
     const started = Date.now();
     let key;
-    let errorCode, tool;
+    let errorCode, tool,generic=false;
     let connectionId,read,readOutcome='not_executed',logged=false;
     let ownsSlot = false;
     response.setHeader("x-request-id", requestId);
@@ -44,7 +48,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       if(logged)return;logged=true;
       logger({ schema_version:'web-read-audit-v1',time: new Date().toISOString(), request_id: requestId, component: "web",
       status: response.statusCode, duration_ms: Date.now() - started, subject_hash: key, tool,
-      connection_id:connectionId,connection_kind:'oauth_client_subject',physical_device_verified:false,
+      connection_id:connectionId,connection_kind:generic?'connection_pat':'oauth_client_subject',physical_device_verified:false,
       transport_outcome:transportOutcome,read_outcome:readOutcome,client_consumption_verified:false,read,
       error_code: errorCode || (response.statusCode >= 400 ? "MCP_REQUEST_REJECTED" : undefined) });
     };
@@ -61,7 +65,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       limits.take(`peer:${request.socket.remoteAddress}`, 600);
       if (request.method === "GET" && [config.protected_resource_metadata_path, "/.well-known/oauth-protected-resource"].includes(url.pathname)) {
         return sendJson(response, 200, { resource: config.resource, authorization_servers: [config.issuer],
-          scopes_supported: RESOURCE_SCOPES, bearer_methods_supported: ["header"] });
+          scopes_supported: resourceScopesFor(config), bearer_methods_supported: ["header"] });
       }
       if (request.method === "GET" && ["/livez", "/readyz"].includes(url.pathname)) {
         let ready = false;
@@ -75,12 +79,16 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
         return sendJson(response, url.pathname === "/livez" || ready ? 200 : 503,
           { service: "mnemuron-web", mode: config.mode, tool_profile: config.tool_profile, ready, production_ready: false });
       }
-      if (url.pathname !== "/mcp") throw new BoundaryError(404, "NOT_FOUND");
+      generic=url.pathname==='/mcp/generic';
+      if (url.pathname !== "/mcp"&&!(generic&&config.connection_management===true)) throw new BoundaryError(404, "NOT_FOUND");
+      if(url.search)throw new BoundaryError(400,'MCP_QUERY_DENIED');
       if (!authorization) throw new BoundaryError(401, "AUTH_REQUIRED");
-      const auth = await authorization.verify(request);
+      const auth = await authorization.verify(request,{generic});
       connectionId=auth.connection_id;
       key = secretHash(`${config.issuer}|${auth.mapping.subject}`);
       limits.take(`subject:${key}`, config.limits.requests_per_subject_per_minute);
+      limits.take(`connection:${auth.connection_id}`,config.limits.requests_per_subject_per_minute);
+      if(auth.token_id)limits.take(`token:${auth.token_id}`,config.limits.requests_per_subject_per_minute);
       if ((concurrent.get(key) || 0) >= config.limits.concurrent_requests_per_subject) throw new BoundaryError(429, "BUSY");
       concurrent.set(key, (concurrent.get(key) || 0) + 1);
       ownsSlot = true;
@@ -102,10 +110,13 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       }
       if (body.method === "tools/call") {
         if (body.id === undefined || !body.params || typeof body.params.name !== "string") throw new BoundaryError(400, "INVALID_MCP_REQUEST");
+        if(config.tool_profile==='memory_readwrite' && toolDefinitions[body.params.name]?.scope==='memory:write' && !enabledTools(config,auth).includes(body.params.name)){
+          requireScope(auth,'memory:write');throw new BoundaryError(403,'CLOUD_WRITE_NOT_ENABLED');
+        }
         if (enabledTools(config).includes(body.params.name)) tool = body.params.name;
         if(tool)requireScope(auth,toolDefinitions[tool].scope);
       }
-      const mcp = createMcpServer({ config, auth, core:requestCore(auth.mapping), id:body.id,
+      const mcp = createMcpServer({ config, auth, core:requestCore(auth.mapping,auth), id:body.id,
         onError:code=>{errorCode=code;readOutcome='tool_error';},
         onResult:(name,result)=>{read=readObservation(name,result);readOutcome='success';} });
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -113,12 +124,16 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       response.once("close", closed);
       await mcp.connect(transport);
       await transport.handleRequest(request, response, body);
+      if(auth.registered&&['success','tool_error'].includes(readOutcome)&&tool&&tool!=='mnemuron_auth_status'){
+        // Observability failure cannot undo a committed memory operation or fake client success.
+        try{await authorization.recordUse(request,{generic,failed:readOutcome==='tool_error'});}catch{logger({component:'web',error_code:'CONNECTION_HEALTH_UNAVAILABLE'});}
+      }
     } catch (error) {
       const status = error instanceof BoundaryError ? error.status : 503;
       const code = error instanceof BoundaryError ? error.code : "GATEWAY_UNAVAILABLE";
       errorCode = code;
       if (!response.headersSent) sendJson(response, status, { error_code: code },
-        status === 401 ? { "www-authenticate": `${challenge}${code === "INVALID_TOKEN" ? ', error="invalid_token"' : ""}` }
+        status === 401 ? { "www-authenticate": `${generic?'Bearer realm="mnemuron-generic-mcp"':challenge}${code === "INVALID_TOKEN" ? ', error="invalid_token"' : ""}` }
           : status === 403 && code === "INSUFFICIENT_SCOPE" ? { "www-authenticate":
             `Bearer resource_metadata="${metadataUrl}", scope="${error.requiredScope}", error="insufficient_scope"` } : {});
       else if (!response.writableEnded) response.end();

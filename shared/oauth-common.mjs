@@ -6,6 +6,17 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 export const RESOURCE_SCOPES = Object.freeze(["memory:read", "project:read"]);
 export const OAUTH_SCOPES = Object.freeze(["openid", "offline_access", ...RESOURCE_SCOPES]);
 export const CORE_SCOPES = Object.freeze(["memory:read", "resume:read"]);
+export const MEMORY_WRITE_CORE_SCOPES=Object.freeze([...CORE_SCOPES,'memory:write']);
+export const cloudEnabled=config=>config.cloud_memory?.enabled===true;
+export const resourceScopesFor=config=>cloudEnabled(config)?[...RESOURCE_SCOPES,'memory:write']:[...RESOURCE_SCOPES];
+export const oauthScopesFor=config=>['openid','offline_access',...resourceScopesFor(config)];
+export function validateCloudPolicy(config){
+  if(config.cloud_memory===undefined)return;
+  const c=config.cloud_memory;
+  requireConfig(c&&typeof c==='object'&&!Array.isArray(c)&&Object.keys(c).length===2
+    &&Object.keys(c).every(k=>['enabled','allow_submitted_revision_grant'].includes(k))
+    &&typeof c.enabled==='boolean'&&typeof c.allow_submitted_revision_grant==='boolean','explicit cloud policy');
+}
 export const secretHash = (value) => createHash("sha256").update(value).digest("hex");
 export const randomSecret = () => randomBytes(32).toString("base64url");
 export const seconds = () => Math.floor(Date.now() / 1000);

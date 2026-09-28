@@ -13,7 +13,7 @@ import {sendPage,label} from '../../../web/console/render.mjs';
 import { makeProvider } from "./provider.mjs";
 import { interactionRequest } from "./interactions.mjs";
 import { BoundaryError, SerialGate, WindowLimit, OAUTH_SCOPES, parseForm, readBody,
-  requestBoundary, sendJson, equalSecret } from "../../../shared/oauth-common.mjs";
+  requestBoundary, sendJson, equalSecret,oauthScopesFor } from "../../../shared/oauth-common.mjs";
 import {acquireAuthorizationLease} from './process-lease.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 import {invalidateBrowserAuthorization} from './browser-session.mjs';
@@ -22,14 +22,14 @@ function bootstrapMetadata(config) {
   return { issuer: config.issuer, authorization_endpoint: `${config.issuer}/authorize`,
     token_endpoint: `${config.issuer}/token`, jwks_uri: `${config.issuer}/jwks`,
     response_types_supported: ["code"], response_modes_supported: ["query"],
-    grant_types_supported: ["authorization_code", "refresh_token"], scopes_supported: OAUTH_SCOPES,
+    grant_types_supported: ["authorization_code", "refresh_token"], scopes_supported: oauthScopesFor(config),
     token_endpoint_auth_methods_supported: ["client_secret_post"], code_challenge_methods_supported: ["S256"],
     authorization_response_iss_parameter_supported: true, mnemuron_mode: "bootstrap_metadata_only" };
 }
 
-function authorizationError(response, config, params, code) {
-  if (params?.get("client_id") === config.chatgpt_client.client_id
-    && config.chatgpt_client.redirect_uris.includes(params.get("redirect_uri"))) {
+function authorizationError(response, config, params, code,client=config.chatgpt_client) {
+  if (params?.get("client_id") === client?.client_id
+    && client.redirect_uris.includes(params.get("redirect_uri"))) {
     const callback = new URL(params.get("redirect_uri"));
     callback.searchParams.set("error", code);
     callback.searchParams.set("iss", config.issuer);
@@ -54,7 +54,7 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         keyFile:config.identity.encryption_key_file,issuer:config.issuer,batchLimit:config.identity.invitation_batch_limit,
         sessionTtl:config.identity.console_session_ttl_seconds}) : new Accounts(config.accounts_file, store);
       if(config.identity_mode==='legacy_owner') accounts.read();
-      else {store.identity=accounts;identityMaintenance=new IdentityMaintenance(accounts,config);recovery=new RecoveryService(accounts,{policy:config.identity.recovery_policy});}
+      else {store.identity=accounts;accounts.connections.config=config;identityMaintenance=new IdentityMaintenance(accounts,config);recovery=new RecoveryService(accounts,{policy:config.identity.recovery_policy});}
       provider = makeProvider(config, secrets, store, accounts);
     }
   } catch (error) { store?.close(); release?.(); throw error; }
@@ -120,15 +120,17 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         params = parseForm(request.body);
       }
       if (initialAuthorization) {
-        if (params.get("client_id") !== config.chatgpt_client.client_id) return authorizationError(response, config, params, "invalid_client");
-        if (params.get("resource") !== config.resource) return authorizationError(response, config, params, "invalid_target");
+        const client=params.get('client_id')===config.chatgpt_client.client_id?config.chatgpt_client:accounts.connections?.client(params.get('client_id'));
+        const authError=code=>authorizationError(response,config,params,code,client);
+        if (!client) return authError('invalid_client');
+        if (params.get("resource") !== config.resource) return authError("invalid_target");
         const scopes = (params.get("scope") || "").split(" ").filter(Boolean);
-        if (scopes.some((scope) => !OAUTH_SCOPES.includes(scope))) return authorizationError(response, config, params, "invalid_scope");
-        if (params.has("response_mode") && params.get("response_mode") !== "query") return authorizationError(response, config, params, "unsupported_response_mode");
+        if (scopes.some((scope) => !(client.allowed_scopes||client.scope.split(' ')).includes(scope))) return authError("invalid_scope");
+        if (params.has("response_mode") && params.get("response_mode") !== "query") return authError("unsupported_response_mode");
         // OIDC requires explicit consent for offline access. Enforce that interaction even when the host omits prompt.
-        if (scopes.includes("offline_access")) {
+        if (scopes.includes("offline_access")||scopes.includes('memory:write')) {
           const prompts = (params.get("prompt") || "").split(" ").filter(Boolean);
-          if (prompts.includes("none")) return authorizationError(response, config, params, "interaction_required");
+          if (prompts.includes("none")) return authError("interaction_required");
           params.set("prompt", [...new Set([...prompts, "consent"])].join(" "));
           if (request.method === "GET") request.url = `/authorize?${params}`;
           else request.body = params.toString();
@@ -140,14 +142,23 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
           throw new BoundaryError(401, "INVALID_INTROSPECTION_CLIENT");
         }
         store.limit("introspection", config.limits.introspection_requests_per_client_per_minute);
+        if(params.get('token')?.startsWith('mcp_pat_')){
+          const claims=accounts.connections?.verifyPat(params.get('token'),params.get('resource'))||{active:false};
+          if(claims.active&&['memory_tool_success','memory_tool_failure'].includes(params.get('usage')))accounts.connections.markTool(claims,{failed:params.get('usage')==='memory_tool_failure'});
+          return sendJson(response,200,claims);
+        }
         if (params.get("token")?.includes(".")) return sendJson(response, 200, { active: false });
+        if(['memory_tool_success','memory_tool_failure'].includes(params.get('usage'))&&accounts.connections){
+          const token=await provider.AccessToken.find(params.get('token'));
+          if(token?.aud===config.resource&&accounts.connections.permitsClient(token.clientId,token.accountId))accounts.connections.markTool({...accounts.connections.claims(token.clientId,token.accountId),account_id:accounts.account(token.accountId).account_id},{failed:params.get('usage')==='memory_tool_failure'});
+        }
         return await callback(request, response);
       }
       if (protocolPost) {
-        if (request.headers.authorization || params.get("client_id") !== config.chatgpt_client.client_id) {
+        if (request.headers.authorization || (params.get("client_id") !== config.chatgpt_client.client_id&&!accounts.connections?.client(params.get('client_id')))) {
           return sendJson(response, 401, { error: "invalid_client" });
         }
-        store.limit("token", config.limits.token_requests_per_client_per_minute);
+        store.limit(`token:${params.get('client_id')}`, config.limits.token_requests_per_client_per_minute);
         if (url.pathname === "/token") {
           if (!["authorization_code", "refresh_token"].includes(params.get("grant_type"))) return sendJson(response, 400, { error: "unsupported_grant_type" });
           if ((params.get("grant_type") === "authorization_code" || params.has("resource")) && params.get("resource") !== config.resource) {

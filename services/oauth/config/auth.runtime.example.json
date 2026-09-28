@@ -1,6 +1,7 @@
 {
   "config_version": "mnemuron-oauth-config-v1",
   "mode": "bootstrap_metadata_only",
+  "cloud_memory": {"enabled":false,"allow_submitted_revision_grant":false},
   "public_origin_mode": "shared",
   "issuer": "https://memory.example.com",
   "listen": {

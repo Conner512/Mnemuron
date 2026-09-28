@@ -6,6 +6,7 @@ import {consoleFixture,pendingAccount} from './helpers/identity-fixture.mjs';
 import {memoryFixture} from '../../../server/test/helpers/core-memory-fixture.mjs';
 import {writePrivate} from '../../../shared/oauth-common.mjs';
 import {IdentityMaintenance} from '../src/identity-maintenance.mjs';
+import {generate} from 'otplib';
 
 async function setup(t){
  const core=await memoryFixture(t),f=await consoleFixture(t,{core}),ids=f.app.accounts;
@@ -18,6 +19,32 @@ async function setup(t){
    web:{uid:process.getuid(),gid:process.getgid(),credential_directory:path.join(f.directory,'web-keys'),identity_map_file:path.join(f.directory,'web-map.json')}};
  return {core,f,ids,account,worker,maintenance:new IdentityMaintenance(ids,f.config)};
 }
+async function connectionSetup(t){
+ const x=await setup(t),{runIsolatedMaintenance}=await import('../src/isolated-maintenance.mjs');runIsolatedMaintenance(x.worker,{isolated:true});
+ x.worker.connection_management=true;x.f.config.identity.connection_management={enabled:true,max_connections:20,pat_default_ttl_seconds:2592000,pat_max_ttl_seconds:7776000,secret_receipt_ttl_seconds:300,rotation_overlap_seconds:0};
+ writePrivate(x.worker.auth.config_file,x.f.config,{replace:true});x.ids.connections.config=x.f.config;
+ const a=x.ids.byId(x.account.account.account_id),s=x.ids.newSession('console',{accountId:a.account_id});
+ const c=await x.ids.connections.execute(a.account_id,x.ids.session(s.token,'console'),'connections.create',{kind:'generic_mcp',label:'Synthetic isolated connection',profile:'readonly',current_password:'Synthetic password with spaces  ',otp:await generate({secret:x.account.setup.secret})},'synthetic-worker-connection');
+ return {...x,a,connection:c.connection,run:options=>runIsolatedMaintenance(x.worker,{isolated:true,...options})};
+}
+test('B-WORKER-01: connection Core/key publication retries fixed IDs, completed work is idempotent and old bindings preserved',async t=>{
+ const x=await connectionSetup(t),before=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();
+ assert.throws(()=>x.run({afterPhase:name=>{if(name==='core.apply-connection')throw new Error('Synthetic interruption');}}));
+ assert.equal(x.ids.connections.public(x.ids.connections.row(x.a.account_id,x.connection.connection_id)).provisioning,true);
+ const prepared=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();assert.equal(prepared.length,before.length+1);
+ assert.equal(x.run().connection_completed,1);assert.deepEqual(x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all(),prepared);
+ assert.equal(x.run().connection_completed,0);
+ const map=JSON.parse(fs.readFileSync(x.worker.web.identity_map_file)),connection=map.mappings[0].connections[0];assert.equal(connection.connection_id,x.connection.connection_id);
+ assert.deepEqual(x.core.store.authenticate(fs.readFileSync(connection.credential_file,'utf8').trim()).scopes,['memory:read','resume:read']);
+ for(const r of before)assert.deepEqual(x.core.store.db.prepare('SELECT * FROM credentials WHERE credential_id=?').get(r.credential_id),r);
+});
+test('B-WORKER-02: disable racing publication discards new keys; stale account work cannot starve maintenance',async t=>{
+ const x=await connectionSetup(t);
+ assert.throws(()=>x.run({afterPhase:name=>{if(name==='core.apply-connection')x.ids.db.prepare("UPDATE identity_connections SET state='disabled',version=version+1 WHERE connection_id=?").run(x.connection.connection_id);}}));
+ const key=x.ids.db.prepare('SELECT credential_id FROM identity_connection_credentials WHERE connection_id=?').get(x.connection.connection_id);
+ assert.ok(x.core.store.db.prepare('SELECT revoked_at FROM credentials WHERE credential_id=?').get(key.credential_id).revoked_at);
+ assert.equal(x.run().connection_completed,0);assert.equal(JSON.parse(fs.readFileSync(x.worker.web.identity_map_file)).mappings[0].connections?.length??0,0);
+});
 test('ISO-WORKER-01: separate fixed phases provision and revoke without giving OAuth a Core path',async t=>{
  const x=await setup(t),{runIsolatedMaintenance}=await import('../src/isolated-maintenance.mjs');
  assert.throws(()=>x.maintenance.open());await x.maintenance.run();assert.equal(x.ids.byId(x.account.account.account_id).status,'provisioning');
@@ -91,4 +118,31 @@ test('ISO-WORKER-07: basic provisioning requires matching root and auth policy, 
  assert.throws(()=>validateWorkerConfig({...x.worker,console_access:'full'},{isolated:true}));
  x.f.config.identity.console_basic_operations={memory:true};x.f.config.identity.console_operations=true;writePrivate(x.worker.auth.config_file,x.f.config,{replace:true});
  assert.throws(()=>runIsolatedMaintenance(x.worker,{isolated:true}));
+});
+
+test('A-BASE-04/05: cloud binding is explicit, durable across interrupted publication and separate from old readonly credentials',async t=>{
+ const x=await setup(t),{runIsolatedMaintenance}=await import('../src/isolated-maintenance.mjs');
+ const {queueCloudBinding}=await import('../src/cloud-provisioning.mjs');
+ runIsolatedMaintenance(x.worker,{isolated:true});const a=x.ids.byId(x.account.account.account_id);
+ const old=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();
+ assert.throws(()=>queueCloudBinding(x.ids,x.f.config,a.account_id,{allowSubmittedRevisionGrant:false}));
+ x.f.config.cloud_memory={enabled:true,allow_submitted_revision_grant:false};x.f.config.resource_scopes.push('memory:write');x.f.config.chatgpt_client.allowed_scopes.push('memory:write');
+ x.worker.cloud_memory={...x.f.config.cloud_memory};
+ writePrivate(x.worker.auth.config_file,x.f.config,{replace:true});
+ const op=queueCloudBinding(x.ids,x.f.config,a.account_id,{allowSubmittedRevisionGrant:false});
+ assert.deepEqual(queueCloudBinding(x.ids,x.f.config,a.account_id,{allowSubmittedRevisionGrant:false}),op);
+ assert.throws(()=>queueCloudBinding(x.ids,x.f.config,a.account_id,{allowSubmittedRevisionGrant:true}));
+ assert.throws(()=>runIsolatedMaintenance(x.worker,{isolated:true,afterPhase:name=>{if(name==='core.apply-cloud')throw new Error('synthetic response loss');}}));
+ const prepared=x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all();assert.equal(prepared.length,old.length+1);
+ assert.equal(runIsolatedMaintenance(x.worker,{isolated:true}).cloud_completed,1);
+ assert.deepEqual(x.core.store.db.prepare('SELECT * FROM credentials ORDER BY credential_id').all(),prepared);
+ const map=JSON.parse(fs.readFileSync(x.worker.web.identity_map_file)),m=map.mappings.find(m=>m.account_id===a.account_id);
+ assert.ok(m.cloud_write);assert.notEqual(m.credential_file,m.cloud_write.credential_file);
+ assert.deepEqual(x.core.store.authenticate(fs.readFileSync(m.credential_file,'utf8').trim()).scopes,['memory:read','resume:read']);
+ const write=x.core.store.authenticate(fs.readFileSync(m.cloud_write.credential_file,'utf8').trim());assert.deepEqual(write.scopes,['memory:read','resume:read','memory:write']);
+ assert.equal(x.core.store.cloudMemory.binding(write).connection_id,m.cloud_write.connection_id);
+ for(const previous of old)assert.deepEqual(x.core.store.db.prepare('SELECT * FROM credentials WHERE credential_id=?').get(previous.credential_id),previous);
+ assert.equal(runIsolatedMaintenance(x.worker,{isolated:true}).cloud_completed,0);
+ await x.maintenance.setState(a.account_id,'disable');runIsolatedMaintenance(x.worker,{isolated:true});assert.throws(()=>x.core.store.authenticate(fs.readFileSync(m.cloud_write.credential_file,'utf8').trim()));
+ assert.equal(JSON.parse(fs.readFileSync(x.worker.web.identity_map_file)).mappings.find(m=>m.account_id===a.account_id)?.cloud_write,undefined);
 });

@@ -1,4 +1,5 @@
 import {IdentityConsole} from './identity-console.mjs';
+import {ConnectionRegistry} from './connections.mjs';
 import {randomBytes,randomUUID,createCipheriv,createDecipheriv,scrypt} from 'node:crypto';
 import {promisify} from 'node:util';
 import {generateSecret,generateURI,verify} from 'otplib';
@@ -41,6 +42,9 @@ export class IdentityRepository {
         account_id TEXT NOT NULL,purpose TEXT NOT NULL,credential_id TEXT NOT NULL UNIQUE,
         agent_instance_id TEXT NOT NULL,credential_file TEXT NOT NULL,checked INTEGER NOT NULL,
         PRIMARY KEY(account_id,purpose));
+      CREATE TABLE IF NOT EXISTS identity_cloud_bindings (
+        account_id TEXT NOT NULL,connection_id TEXT NOT NULL,security_version INTEGER NOT NULL,binding_json TEXT NOT NULL,checked INTEGER NOT NULL,
+        PRIMARY KEY(account_id,connection_id));
       CREATE TABLE IF NOT EXISTS identity_operations (
         operation_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,kind TEXT NOT NULL,state TEXT NOT NULL,
         payload_cipher TEXT,last_error TEXT,created INTEGER NOT NULL,UNIQUE(account_id,kind));
@@ -50,6 +54,7 @@ export class IdentityRepository {
         account_id TEXT NOT NULL,digest TEXT NOT NULL,session_digest TEXT NOT NULL,PRIMARY KEY(account_id,digest));
     `);
     this.console = new IdentityConsole(this);
+    this.connections = new ConnectionRegistry(this);
   }
   seal(value,account,purpose) {
     const iv=randomBytes(12);const cipher=createCipheriv('aes-256-gcm',this.key,iv);

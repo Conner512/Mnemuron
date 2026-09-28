@@ -5,7 +5,7 @@ credentials-file: /etc/cloudflared/__REQUIRED_TUNNEL_ID__.json
 
 ingress:
   - hostname: memory.example.com
-    path: '^/(mcp|\.well-known/oauth-protected-resource(/mcp)?)$'
+    path: '^/(mcp(/generic)?|\.well-known/oauth-protected-resource(/mcp)?)$'
     service: http://127.0.0.1:47832
     originRequest:
       httpHostHeader: memory.example.com
@@ -25,7 +25,7 @@ ingress:
     originRequest:
       httpHostHeader: memory.example.com
   - hostname: memory.example.com
-    path: '^/(login|recover(/(start|complete))?|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|jobs|connections|models|security|audit|storage|appearance|invitations|accounts))?/?|console-api/(me|logout|capabilities|action|security|connections|audit|overview|memories|memory|memory-meta|summaries|summary|jobs|job|projects|storage|export|operation|models|invitations|accounts)|assets/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs))$'
+    path: '^/(login|recover(/(start|complete))?|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|jobs|connections|models|security|audit|storage|appearance|invitations|accounts))?/?|console-api/(me|logout|capabilities|action|security|connections|audit|overview|memories|memory|memory-meta|summaries|summary|jobs|job|projects|storage|export|operation|models|invitations|accounts)|assets/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs|connections\.mjs))$'
     service: http://127.0.0.1:47833
     originRequest:
       httpHostHeader: memory.example.com

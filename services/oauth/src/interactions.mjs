@@ -22,12 +22,14 @@ export async function interactionRequest(request, response, { provider, store, a
   let details;
   try {details=await provider.interactionDetails(request,response);}
   catch(error) {if(error instanceof errors.SessionNotFound)throw new BoundaryError(403,'INTERACTION_EXPIRED');throw error;}
-  if (details.uid !== match[1] || details.params.client_id !== config.chatgpt_client.client_id
-    || !config.chatgpt_client.redirect_uris.includes(details.params.redirect_uri)) {
+  const client=details.params.client_id===config.chatgpt_client.client_id?config.chatgpt_client:accounts.connections?.client(details.params.client_id);
+  const personal=details.params.client_id!==config.chatgpt_client.client_id;
+  if (details.uid !== match[1] || !client || !client.redirect_uris.includes(details.params.redirect_uri)) {
     throw new BoundaryError(403, "INTERACTION_MISMATCH");
   }
   const { uid, prompt, params } = details;
   const enhanced=config.identity_mode==='multi_account_v1';
+  if(personal&&details.session?.accountId&&!accounts.connections.permitsClient(details.params.client_id,details.session.accountId))throw new BoundaryError(403,'CLIENT_OWNER_MISMATCH');
   if(enhanced && details.session?.accountId) {
     const browser=await provider.Session.get(provider.createContext(request,response));
     if(browser.uid!==details.session.uid || browser.accountId!==details.session.accountId)
@@ -38,7 +40,7 @@ export async function interactionRequest(request, response, { provider, store, a
     const field = `<input type="hidden" name="csrf" value="${csrf}">`;
     const abort = `<form method="post" action="/interaction/${uid}/abort">${field}<button type="submit">Cancel</button></form>`;
     if (prompt.name === "login") {
-      if(enhanced)return page(response,`${label('oauthLoginNote','p')}${label('authNote','p')}<form method="post" action="/interaction/${uid}/login">${field}
+      if(enhanced)return page(response,`${label(String(params.scope||'').split(' ').includes('memory:write')?'oauthWriteLoginNote':'oauthLoginNote','p')}${label('authNote','p')}<form method="post" action="/interaction/${uid}/login">${field}
         <label for="username" data-i18n="username">${text('username')}</label><input id="username" name="username" autocomplete="username" maxlength="100" required>
         <label for="password" data-i18n="password">${text('password')}</label><input id="password" type="password" name="password" autocomplete="current-password" maxlength="1024" required>
         <button type="button" data-password-toggle="password" data-i18n="showPassword">${text('showPassword')}</button>
@@ -53,20 +55,23 @@ export async function interactionRequest(request, response, { provider, store, a
     }
     if (prompt.name === "consent") {
       const scopes = String(params.scope || "").split(" ");
+      const writing=scopes.includes('memory:write');
       if(enhanced) {
         const account=accounts.account(details.session?.accountId);
         if(!account||!accounts.eligible(account.subject))throw new BoundaryError(403,'ACCOUNT_DISABLED');
-        const keys={openid:'scopeIdentity',offline_access:'scopeOffline','memory:read':'scopeMemory','project:read':'scopeProject'};
+        const keys={openid:'scopeIdentity',offline_access:'scopeOffline','memory:read':'scopeMemory','project:read':'scopeProject','memory:write':'scopeMemoryWrite'};
         return page(response,`<div class="consent-account">${label('identity','p')}<strong>${escapeHtml(account.username)}</strong></div>
-          ${label('oauthClient','p')}<code>${escapeHtml(params.client_id)}</code><ul>${scopes.filter(s=>keys[s]).map(s=>label(keys[s],'li')).join('')}</ul>${label('consentNote','p')}
-          <form method="post" action="/interaction/${uid}/confirm">${field}<button class="primary" type="submit" data-i18n="allow">${text('allow')}</button></form>${abort.replace('>Cancel<',` data-i18n="cancel">${text('cancel')}<`)}`,params.redirect_uri,true,account);
+          ${label('oauthClient','p')}<code>${escapeHtml(params.client_id)}</code><ul>${scopes.filter(s=>keys[s]).map(s=>label(keys[s],'li')).join('')}</ul>${label(writing?'consentWriteNote':'consentNote','p')}
+          ${writing?label(config.cloud_memory?.allow_submitted_revision_grant&&(!personal||accounts.connections.clientRow(params.client_id)?.allow_submitted_revision_grant)?'consentSubmittedGrant':'consentPrivateOnly','p'):''}
+          <form method="post" action="/interaction/${uid}/confirm">${field}<button class="primary" type="submit" data-i18n="${writing?'allowMemoryWrite':'allow'}">${text(writing?'allowMemoryWrite':'allow')}</button></form>${abort.replace('>Cancel<',` data-i18n="cancel">${text('cancel')}<`)}`,params.redirect_uri,true,account,writing?'allowMemoryWrite':'oauthConsent');
       }
       const labels = { openid: "Identify your Mnemuron account", offline_access: "Keep this connection with revocable, rotating refresh tokens",
-        "memory:read": "Read memories you are authorized to access", "project:read": "Read context from your projects" };
+        "memory:read": "Read memories you are authorized to access", "project:read": "Read context from your projects",'memory:write':'Save, version-correct and retract your authorized memories on your explicit request' };
       const list = scopes.filter((scope) => labels[scope]).map((scope) => `<li>${escapeHtml(labels[scope])}</li>`).join("");
       return page(response, `<h2>Allow ${escapeHtml(config.chatgpt_client.client_id)}?</h2><ul>${list}</ul>
-        <p>This is read-only access to this owner's authorized data, not access restricted to one project. No memory writes, task switching or Resume confirmation.</p>
-        <form method="post" action="/interaction/${uid}/confirm">${field}<button type="submit">Allow read-only access</button></form>${abort}`, params.redirect_uri,config.identity_mode==='multi_account_v1');
+        <p>${writing?'Save your submitted memories and version-correct or retract owned, Web-visible records. No task switching, Resume, scheduling or administration.':"This is read-only access to this owner's authorized data, not access restricted to one project. No memory writes, task switching or Resume confirmation."}</p>
+        ${writing?`<p>${config.cloud_memory?.allow_submitted_revision_grant?'For each new submitted version, you must explicitly choose private or readable by this account\'s authorized cloud readers, not only this connection. Existing records are never granted by this action.':'New submitted versions stay private; this connection receives a metadata-only receipt.'}</p>`:''}
+        <form method="post" action="/interaction/${uid}/confirm">${field}<button type="submit">${writing?'Allow memory read and write':'Allow read-only access'}</button></form>${abort}`, params.redirect_uri,config.identity_mode==='multi_account_v1');
     }
     throw new BoundaryError(400, "UNSUPPORTED_INTERACTION");
   }
@@ -84,6 +89,7 @@ export async function interactionRequest(request, response, { provider, store, a
     store.limit(`login:peer:${request.socket.remoteAddress}`, config.limits.login_attempts_per_account_per_15min*10, 900);
     const subject = await accounts.authenticate(body.get("username"), body.get("password"), body.get("otp"));
     if (!subject) throw new BoundaryError(401, "LOGIN_FAILED");
+    if(personal&&!accounts.connections.permitsClient(params.client_id,subject))throw new BoundaryError(403,'CLIENT_OWNER_MISMATCH');
     // A different authenticated principal must start a fresh interaction. Do not
     // let the provider's automatic account-switch form reuse the old consent.
     if(enhanced && await invalidateBrowserAuthorization(request,response,provider,{nextSubject:subject}))
@@ -95,6 +101,12 @@ export async function interactionRequest(request, response, { provider, store, a
   if (match[2] === "confirm" && prompt.name === "consent") {
     const subject = details.session?.accountId;
     if (!accounts.eligible(subject)) throw new BoundaryError(403, "ACCOUNT_DISABLED");
+    if(personal&&!accounts.connections.permitsClient(params.client_id,subject))throw new BoundaryError(403,'CLIENT_OWNER_MISMATCH');
+    if(enhanced && !personal && String(params.scope||'').split(' ').includes('memory:write')){
+      const a=accounts.account(subject);
+      const binding=store.db.prepare('SELECT 1 FROM identity_cloud_bindings WHERE account_id=? AND security_version=? AND checked=1').get(a.account_id,a.security_version);
+      if(!binding)throw new BoundaryError(403,'CLOUD_WRITE_NOT_ENABLED');
+    }
     let grant = details.grantId ? await provider.Grant.find(details.grantId) : undefined;
     if(grant && (grant.accountId!==subject || grant.clientId!==params.client_id)) throw new BoundaryError(403,'INTERACTION_MISMATCH');
     grant ||= new provider.Grant({ accountId: subject, clientId: params.client_id });
@@ -106,6 +118,7 @@ export async function interactionRequest(request, response, { provider, store, a
     const remaining = grant.exp ? grant.exp - seconds() : config.token_policy.refresh_absolute_ttl_seconds;
     if (remaining <= 0) throw new BoundaryError(400, "GRANT_EXPIRED");
     const grantId = await grant.save(remaining);
+    if(personal)accounts.connections.markAuthorized(params.client_id,subject);
     return provider.interactionFinished(request, response, { consent: { grantId } }, { mergeWithLastSubmission: true });
   }
   throw new BoundaryError(400, "INTERACTION_MISMATCH");

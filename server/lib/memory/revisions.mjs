@@ -68,7 +68,7 @@ export class MemoryRevisions {
     if (previous?.state_hash === stateHash) return previous.revision;
     const revision = (previous?.revision || 0) + 1, contentHash = hash(row.content);
     const events = parse(row.source_event_ids_json, []).map(id=>this.db.prepare('SELECT event_type FROM events WHERE user_id=? AND event_id=?').get(row.user_id,id));
-    const evidence = row.generation_method?.startsWith('explicit-') ? 'explicit_user_assertion'
+    const evidence = row.generation_method==='cloud-tool-submission-v1' ? 'model_submitted' : row.generation_method?.startsWith('explicit-') ? 'explicit_user_assertion'
       : events.length && events.every(event=>event?.event_type==='user_message') ? 'observed_user_statement'
       : events.length && events.every(event=>event?.event_type==='assistant_message') ? 'assistant_suggestion' : 'unverified_inference';
     this.db.prepare('INSERT INTO memory_revisions VALUES (?,?,?,?,?,?,?,?,?,?)').run(row.user_id,row.memory_id,revision,row.content,
@@ -83,8 +83,8 @@ export class MemoryRevisions {
     return revision;
   }
   linkExplicit(row, revision) {
-    const sourceId = 'explicit:' + row.memory_id;
-    this.db.prepare('INSERT OR IGNORE INTO memory_sources VALUES (?,?,?,?,?,?,?,?,?,?)').run(row.user_id,sourceId,'explicit_memory',null,
+    const sourceId = (row.generation_method==='cloud-tool-submission-v1'?'model-submitted:':'explicit:') + row.memory_id;
+    this.db.prepare('INSERT OR IGNORE INTO memory_sources VALUES (?,?,?,?,?,?,?,?,?,?)').run(row.user_id,sourceId,row.generation_method==='cloud-tool-submission-v1'?'model_submitted':'explicit_memory',null,
       hash(row.content),Array.from(row.content).length,'available','caller_submitted',row.created_at,'memory:' + row.memory_id + ':1');
     this.db.prepare('INSERT OR IGNORE INTO memory_source_links VALUES (?,?,?,?,?,?,?,?,?)').run(row.user_id,row.memory_id,revision,sourceId,0,row.content.length,'explicit-v1','$','utf16_code_units');
   }
@@ -126,6 +126,6 @@ export class MemoryRevisions {
         content_length_unit:row.source_kind==='captured_event'?'utf8_json_bytes':'unicode_code_points'};
     });
     return {revision:current.revision,source_version:sourceVersion,content_hash:current.content_hash,evidence_kind:current.evidence_kind,
-      independently_fact_checked:false, sources,next_source_offset:rows.length>limit?offset+limit:null};
+      independently_fact_checked:false,...(current.evidence_kind==='model_submitted'?{capture_mode:'tool_only'}:{}), sources,next_source_offset:rows.length>limit?offset+limit:null};
   }
 }

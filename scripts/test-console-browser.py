@@ -64,9 +64,10 @@ try:
   goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick');page.locator('[data-retry]').click();page.wait_for_timeout(300);check('Worker publishes actual job results',page.locator('body').inner_text().count('succeeded')>0)
   begin('jobs.schedule');pick('[name=type]','summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick');cmd('tick');goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
   page.locator('[data-summary]').first.click();page.locator('#memory-content .body-content').first.wait_for();check('Summary drawer loads source-grounded quotes',len(page.locator('#memory-content .body-content').first.inner_text())>0);page.locator('#memory-dialog [data-close]').click()
-  goto('connections');begin('connections.create');page.locator('[name=label]').fill('Synthetic browser connection');page.locator('[name=agent_id]').fill('browser-test');page.locator('[name=device_id]').fill('desktop-fixture');r=submit();credential=r['credential']['credential_id'];check('Connection creates real owner-bound memory-only key',r['api_key'].startswith('mnm_') and r['credential']['scopes']==['memory:read']);close()
-  page.locator('[data-console-action="connections.rotate"][data-id="'+credential+'"]').click();r=submit();rotated=r['credential']['credential_id'];check('Key rotation creates replacement key',rotated!=credential);close()
-  page.locator('[data-console-action="connections.revoke"][data-id="'+rotated+'"]').click();r=submit();check('Key revocation reaches backend',r['status']=='revoked');close()
+  # Connection-specific lifecycle and secret cleanup run in test-console-connections.mjs.
+  goto('connections');page.locator('[data-connection-new]').click();page.locator('[data-connection-kind="generic_mcp"]').click()
+  check('Logical connection wizard uses resource tokens, not Core-key forms',page.locator('#connection-dialog [name=ttl_days]').count()==1 and page.locator('#connection-dialog [name=agent_id]').count()==0)
+  page.locator('#connection-dialog [data-connection-close]').first.click()
   goto('storage');begin('storage.export')
   with page.expect_download() as download:
    r=submit()

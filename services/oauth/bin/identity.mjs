@@ -4,6 +4,7 @@ import {pathToFileURL} from 'node:url';
 import {AuthStore} from '../src/sqlite-adapter.mjs';
 import {IdentityRepository} from '../src/identity-repository.mjs';
 import {provisionIdentities} from '../src/provisioning.mjs';
+import {queueCloudBinding} from '../src/cloud-provisioning.mjs';
 import {loadAuthConfig} from '../src/config.mjs';
 import {acquireAuthorizationLease} from '../src/process-lease.mjs';
 import {MnemuronStore} from '../../../server/lib/store.mjs';
@@ -22,12 +23,13 @@ provision --core-database /private/core.sqlite3 --credential-directory /private/
 recovery-inspect --account-id ID
 recovery-reset --account-id ID --confirm  (blocked until a recovery proof policy is approved)
 status
+cloud-enable --account-id ID --cloud-read keep_private|allow_submitted_revision --confirm
 Requires identity_mode=multi_account_v1. No production defaults for batch/session policy.
 Stop legacy processes before migrate-owner. provision is a retryable local worker.
 Recovery proof policy is pending; no weaker operator reset is enabled.`);return;
   }
   const [command,...rest]=argv,args=new Map();
-  requireConfig(['invite-issue','invite-list','invite-revoke','migrate-owner','provision','status','recovery-inspect','recovery-reset'].includes(command),'known identity command');
+  requireConfig(['invite-issue','invite-list','invite-revoke','migrate-owner','provision','status','recovery-inspect','recovery-reset','cloud-enable'].includes(command),'known identity command');
   for(let i=0;i<rest.length;i++) {
     const name=rest[i];requireConfig(name.startsWith('--')&&!args.has(name),'unique CLI option');
     args.set(name,['--confirm','--isolated-fixture'].includes(name)?true:rest[++i]);
@@ -37,6 +39,7 @@ Recovery proof policy is pending; no weaker operator reset is enabled.`);return;
     'invite-list':[],'invite-revoke':['--batch-id','--confirm'],
     'migrate-owner':['--legacy-file','--mapping-file','--confirm'],
     provision:['--core-database','--credential-directory','--identity-map','--confirm'],
+    'cloud-enable':['--account-id','--cloud-read','--confirm'],
     status:[],'recovery-inspect':['--account-id'],'recovery-reset':['--account-id','--confirm']
   }[command];
   requireConfig([...args].every(([key,value])=>['--config','--isolated-fixture',...options].includes(key)
@@ -68,6 +71,9 @@ Recovery proof policy is pending; no weaker operator reset is enabled.`);return;
       const file=args.get('--core-database');requireConfig(fs.existsSync(file),'existing Core database');
       const core=new MnemuronStore(file);
       try{result=provisionIdentities(ids,core,{credentialDirectory:args.get('--credential-directory'),identityMapFile:args.get('--identity-map'),consoleOperations:config.identity.console_operations===true});}finally{core.close();}
+    } else if(command==='cloud-enable'){
+      requireConfig(args.has('--confirm')&&['keep_private','allow_submitted_revision'].includes(args.get('--cloud-read')),'explicit bounded cloud policy');
+      result=queueCloudBinding(ids,config,args.get('--account-id'),{allowSubmittedRevisionGrant:args.get('--cloud-read')==='allow_submitted_revision'});
     } else if(command==='recovery-inspect'||command==='recovery-reset') {
       const target=ids.byId(args.get('--account-id'));requireConfig(!!target,'exact recovery account required');
       if(command==='recovery-reset') {

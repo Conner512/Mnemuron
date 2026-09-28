@@ -40,6 +40,13 @@ export function identityMapSnapshot(identities) {
     JOIN identity_bindings b ON a.account_id=b.account_id AND b.purpose='web' AND b.checked=1 WHERE a.binding_ready=1`).all().map(a=>({
       issuer:a.issuer,subject:a.subject,account_id:a.account_id,mnemuron_user_id:a.user_id,security_version:a.security_version,
       enabled:a.status==='active',agent_instance_id:a.agent_instance_id,credential_id:a.credential_id,credential_file:a.credential_file}));
+  for(const m of mappings){
+    const rows=identities.db.prepare('SELECT binding_json FROM identity_cloud_bindings WHERE account_id=? AND security_version=? AND checked=1').all(m.account_id,m.security_version);
+    requireConfig(rows.length<=1,'Phase A supports one operator-registered OAuth client');
+    if(m.enabled&&rows.length===1)m.cloud_write=JSON.parse(rows[0].binding_json);
+    const connections=identities.db.prepare("SELECT binding_json FROM identity_connections WHERE account_id=? AND state='ready' AND binding_version=version AND binding_account_version=? AND binding_json IS NOT NULL").all(m.account_id,m.security_version);
+    if(m.enabled&&connections.length)m.connections=connections.map(r=>JSON.parse(r.binding_json));
+  }
   return {schema_version:'multi-account-identity-v1',unknown_subject_policy:'deny',mappings};
 }
 
