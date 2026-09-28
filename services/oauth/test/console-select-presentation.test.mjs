@@ -10,7 +10,7 @@ test('Select presentation ships through existing assets and preserves strict CSP
  assert.doesNotMatch(html,/selects\.mjs|controls\.css|https?:\/\//);
  const result={writeHead(status,headers){this.headers=headers;},end(){}};
  sendPage(result,{title:'login',auth:true});
- assert.match(result.headers['content-security-policy'],/script-src 'self';/);
+ assert.match(result.headers['content-security-policy'],/script-src 'self' 'sha256-[A-Za-z0-9+/]{43}=';/);
  assert.match(result.headers['content-security-policy'],/style-src 'self';/);
  assert.doesNotMatch(result.headers['content-security-policy'],/unsafe-inline|unsafe-eval/);
 });

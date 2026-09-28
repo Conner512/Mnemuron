@@ -91,7 +91,10 @@ export function claimLane(root,lane) {
       if(error.code!=='EEXIST') throw error;
       let owners;
       try {owners=readdirSync(directory);}catch {return null;}
-      if(!owners.length) {if(Date.now()-statSync(directory).mtimeMs<60000)return null;}
+      if(!owners.length) {
+        try {if(Date.now()-statSync(directory).mtimeMs<60000)return null;}
+        catch(error) {if(error.code==='ENOENT')continue;throw error;}
+      }
       else {
         if(owners.some(name=>!/^\d+-[a-f0-9-]+\.owner$/.test(name) || alive(Number(name.split('-')[0])))) return null;
         for(const name of owners) try {unlinkSync(path.join(directory,name));}catch(error){if(error.code!=='ENOENT')return null;}

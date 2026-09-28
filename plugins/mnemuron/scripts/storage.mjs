@@ -42,6 +42,7 @@ export function loadRuntimeEnv(env = process.env) {
     tls_ca_file: "MNEMURON_TLS_CA_FILE",
     allow_insecure_http: "MNEMURON_ALLOW_INSECURE_HTTP",
     request_timeout_ms: "MNEMURON_REQUEST_TIMEOUT_MS",
+    background_sync: "MNEMURON_BACKGROUND_SYNC",
     device_id: "MNEMURON_DEVICE_ID",
     agent_id: "MNEMURON_AGENT_ID",
     agent_instance_id: "MNEMURON_AGENT_INSTANCE_ID",

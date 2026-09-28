@@ -110,6 +110,8 @@ test("E-06 offline Client B events derive indexed memory and resume through Clie
     app.store.upsertTask(app.store.authenticate(admin.api_key), fixtureTask);
 
     const common = {
+      MNEMURON_CONFIG_PATH: path.join(root, "missing-config.json"),
+      MNEMURON_BACKGROUND_SYNC: "false",
       MNEMURON_MODE: "remote",
       MNEMURON_SERVER_URL: serverUrl,
       MNEMURON_ALLOW_INSECURE_HTTP: "true",

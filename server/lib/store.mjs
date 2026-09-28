@@ -662,6 +662,7 @@ export class MnemuronStore {
       this.vectorIndex=this.runtime.vectorConfigured?new VectorIndex(this,new QdrantStore(this.memoryConfig.vector_store),new Map([[this.embedder.profile.fingerprint,this.embedder]]),{prefix:this.memoryConfig.vector_store.collection_prefix}):null;
       this.handoffPolicy = new HandoffPolicy(this.db, this.runtime);
       this.memoryService = new MemoryService({db:this.db,revisions:this.revisions,
+        conversation:this.memoryConfig.memory?.capture_extraction?.conversation,
         transaction:callback=>this.memoryTransaction(callback),project:row=>this.memoryFromRow(row),audit:event=>this.audit(event)});
       this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false});
       this.consoleService = new ConsoleService(this);
