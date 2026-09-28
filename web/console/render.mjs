@@ -29,7 +29,11 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
 export function serveAsset(request,response,pathname) {
   const file=pathname.match(/^\/assets\/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs)$/)?.[1];
   if(!file||request.method!=='GET')return false;
-  const content=fs.readFileSync(new URL(file,import.meta.url));
+  // Keep one public stylesheet URL: existing ingress rules and CSP remain valid.
+  const content=file==='styles.css'?Buffer.concat([
+    fs.readFileSync(new URL(file,import.meta.url)),Buffer.from('\n'),
+    fs.readFileSync(new URL('layout-polish.css',import.meta.url)),
+  ]):fs.readFileSync(new URL(file,import.meta.url));
   response.writeHead(200,{'content-type':file.endsWith('.css')?'text/css; charset=utf-8':'text/javascript; charset=utf-8','cache-control':'no-cache','x-content-type-options':'nosniff'});response.end(content);return true;
 }
 export function sendPage(response,options,{status=200,redirectUri=''}={}) {
