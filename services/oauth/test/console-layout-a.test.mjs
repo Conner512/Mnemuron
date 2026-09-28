@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import {renderPage,sendPage,serveAsset,pages} from '../../../web/console/render.mjs';
 import {overviewView,appearanceView,icon} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
@@ -70,7 +71,10 @@ test('Layout A: UI additions preserve CSP, no-store and anti-framing headers',()
  const res=response();sendPage(res,{title:'oauthConsent',auth:true,authPurpose:'oauth'},{redirectUri:'https://callback.example.test/exact'});
  assert.equal(res.status,200);assert.equal(res.headers['cache-control'],'no-store');
  assert.equal(res.headers['x-frame-options'],'DENY');assert.equal(res.headers['referrer-policy'],'same-origin');
- assert.equal(res.headers['content-security-policy'],"default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'");
+ const bootstrap=res.body.match(/<script data-appearance-account="[^"]*">([\s\S]*?)<\/script>/);
+ assert.ok(bootstrap);
+ const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
+ assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
 test('Layout A: desktop metric layout no longer collapses at 1280px',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');

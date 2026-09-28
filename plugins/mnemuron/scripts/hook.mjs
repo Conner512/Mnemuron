@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import os from "node:os";
+import {backgroundSyncEnabled, startBackgroundSync} from './background-sync.mjs';
 import {
   flushDeliveryReceiptOutbox,
   flushInjectionEventOutbox,
@@ -31,6 +32,8 @@ import {
   hasUnreturnedMcpResumeDelivery,
   injectionEventPayload,
   loadRuntimeEnv,
+  listDeliveryReceiptOutbox,
+  listInjectionEventOutbox,
   markMcpDeliveryAcknowledgementReported,
   pendingResumeCounts,
   pendingMcpDeliveryAcknowledgements,
@@ -257,6 +260,7 @@ async function main() {
   const payload = await readStdin();
   const runtimeEnv = loadRuntimeEnv();
   const dataDir = resolveDataDir(runtimeEnv);
+  const background = runtimeMode(runtimeEnv) === 'remote' && backgroundSyncEnabled(runtimeEnv);
   if (typeof payload.session_id === "string" && payload.session_id.trim()) {
     authorizeMcpSession(dataDir, payload.session_id, {
       hookEventName: payload.hook_event_name || null,
@@ -288,6 +292,7 @@ async function main() {
             occurredAt: recovered.failed_at,
           });
           if (runtimeMode(runtimeEnv) === "remote") {
+            if (background) { enqueueDeliveryReceipt(dataDir, recovered.resume_id, failed); continue; }
             try {
               await submitDeliveryReceipt(recovered.resume_id, failed, runtimeEnv);
             } catch (error) {
@@ -311,6 +316,7 @@ async function main() {
       : []) {
       const failed = injectionEventPayload(recovered, "failed", recovered.failed_at);
       if (runtimeMode(runtimeEnv) === "remote") {
+        if (background) { enqueueInjectionEvent(dataDir, recovered.resume_id, failed); continue; }
         try {
           await submitInjectionEvent(recovered.resume_id, failed, runtimeEnv);
         } catch (error) {
@@ -330,7 +336,11 @@ async function main() {
     }
   }
   let injectionTransportReady = true;
-  if (runtimeMode(runtimeEnv) === "remote") {
+  if (background) {
+    // Do not claim a new injection across an unresolved prior declaration/receipt.
+    injectionTransportReady = listDeliveryReceiptOutbox(dataDir).length === 0
+      && listInjectionEventOutbox(dataDir).length === 0;
+  } else if (runtimeMode(runtimeEnv) === "remote") {
     try {
       await flushDeliveryReceiptOutbox(runtimeEnv);
     } catch (error) {
@@ -438,7 +448,7 @@ async function main() {
   if (runtimeMode(runtimeEnv) === "remote") {
     enqueueOutbox(dataDir, eventEnvelope(record, runtimeEnv));
     try {
-      const sync=await flushOutbox(runtimeEnv);
+      const sync=background ? {blocked:0,quarantined:0} : await flushOutbox(runtimeEnv);
       if(sync.blocked || sync.quarantined)process.stderr.write('Mnemuron event queued for retry or isolated; inspect sync_state.\n');
     } catch (error) {
       process.stderr.write(`Mnemuron event queued for retry: ${error.message}\n`);
@@ -475,6 +485,7 @@ async function main() {
         },
       );
       if (runtimeMode(runtimeEnv) === "remote") {
+        if (background) { enqueueDeliveryReceipt(dataDir, delivery.resume_id, ack); continue; }
         try {
           await submitDeliveryReceipt(delivery.resume_id, ack, runtimeEnv);
           markMcpDeliveryAcknowledgementReported(dataDir, ack.receipt_event_id);
@@ -488,6 +499,7 @@ async function main() {
     for (const injection of finished) {
       const ack = injectionEventPayload(injection, "acknowledged", injection.delivered_at);
       if (runtimeMode(runtimeEnv) === "remote") {
+        if (background) { enqueueInjectionEvent(dataDir, injection.resume_id, ack); continue; }
         try {
           await submitInjectionEvent(injection.resume_id, ack, runtimeEnv);
         } catch (error) {
@@ -498,6 +510,7 @@ async function main() {
     }
     armPendingResumeDeliveries(dataDir, payload.session_id, payload.turn_id);
   }
+  if (background) startBackgroundSync(runtimeEnv);
   let additionalContext = null;
   if (claimedInjection) {
     additionalContext = claimedInjection.text;

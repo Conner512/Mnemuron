@@ -1,6 +1,14 @@
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
 import {text} from './catalog.mjs';
 import {icon,orbit} from './visuals.mjs';
+// Modules run after parsing: restore only validated, account-scoped colors before
+// the stylesheet can paint. Keep executable text fixed for a narrow CSP hash.
+const appearanceBootstrap=`(()=>{try{const root=document.documentElement,account=document.currentScript.dataset.appearanceAccount;
+const saved=JSON.parse(localStorage.getItem('mnemuron.appearance.v1.'+account)||'{}');
+for(const [key,values] of Object.entries({theme:['a','b','c'],mode:['light','dark']}))if(values.includes(saved?.[key]))root.dataset[key]=saved[key];
+if(['zh-CN','en'].includes(saved?.locale))root.lang=saved.locale;}catch{}})();`;
+const appearanceBootstrapHash=createHash('sha256').update(appearanceBootstrap).digest('base64');
 export const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const pages=['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts'];
 export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pages.find(p=>route===`/app/${p}`)??null;
@@ -24,7 +32,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
     <div class="workspace"><header class="topbar"><div class="breadcrumb">${label('workspace')} <span aria-hidden="true">/</span> <strong>${label(title)}</strong></div><div class="topbar-tools"><a class="top-search" href="/app/memories">${icon('search')}${label('search')}</a>${appearanceControls()}<details class="account-menu"><summary data-i18n-title="accountMenu" title="${text('accountMenu')}"><span class="account-name">${username}</span><span aria-hidden="true">⌄</span></summary><div class="account-menu-panel">${label('identity','small')}<strong>${username}</strong><form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet">${icon('logout')}${label('signOut')}</button></form></div></details></div></header>
     <main id="main" tabindex="-1"><div id="console-root">${body||`<div class="page-heading"><div>${label(title,'h1')}${label('loading','p')}</div></div><div class="card loading-card" role="status">${label('loading')}</div>`}</div></main><footer><span class="footer-mark">Mnemuron</span></footer></div>
     <dialog id="memory-dialog" aria-labelledby="detail-title"><div class="dialog-header">${label('detail','h2').replace('<h2','<h2 id="detail-title"')}<button type="button" class="close-button" data-close data-i18n-aria-label="close" aria-label="${text('close')}">${icon('close')}</button></div><div id="memory-content"></div></dialog>`;
-  return `<!doctype html><html lang="zh-CN" data-theme="a" data-mode="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${escapeHtml(text(title))}</title><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
+  return `<!doctype html><html lang="zh-CN" data-theme="a" data-mode="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
 }
 export function serveAsset(request,response,pathname) {
   const file=pathname.match(/^\/assets\/(styles\.css|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|visuals\.mjs|actions\.mjs)$/)?.[1];
@@ -38,7 +46,7 @@ export function serveAsset(request,response,pathname) {
 }
 export function sendPage(response,options,{status=200,redirectUri=''}={}) {
   response.writeHead(status,{'content-type':'text/html; charset=utf-8','cache-control':'no-store',
-    'content-security-policy':`default-src 'none'; style-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self'; form-action 'self' ${redirectUri}; frame-ancestors 'none'; base-uri 'none'`,
+    'content-security-policy':`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${appearanceBootstrapHash}'; connect-src 'self'; img-src 'self'; form-action 'self' ${redirectUri}; frame-ancestors 'none'; base-uri 'none'`,
     'x-frame-options':'DENY','referrer-policy':'same-origin','x-content-type-options':'nosniff'});
   response.end(renderPage(options));
 }

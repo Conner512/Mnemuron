@@ -36,6 +36,21 @@ export function memoryRuntime(input) {
       if(input.jobs.periods!==undefined && (!Array.isArray(input.jobs.periods) || !input.jobs.periods.length || input.jobs.periods.length>2 || new Set(input.jobs.periods).size!==input.jobs.periods.length || input.jobs.periods.some(p=>!['daily','weekly'].includes(p))))throw new Error('invalid periods');
     }
     for(const key of ['capture_extraction','retrieval'])if(Object.hasOwn(input.memory || {},key) && !object(input.memory[key]))throw new Error('invalid memory section');
+    const conversation=input.memory?.capture_extraction?.conversation;
+    if(conversation!==undefined) {
+      strictObject(conversation,['enabled','user_ids','after','max_chars']);
+      if(typeof conversation.enabled!=='boolean')throw new Error('invalid conversation switch');
+      if(conversation.enabled || conversation.user_ids!==undefined) {
+        if(!Array.isArray(conversation.user_ids) || !conversation.user_ids.length || conversation.user_ids.length>100
+          || conversation.user_ids.some(id=>typeof id!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$/.test(id))
+          || new Set(conversation.user_ids).size!==conversation.user_ids.length)throw new Error('invalid conversation owners');
+      }
+      if(conversation.enabled || conversation.after!==undefined) {
+        if(typeof conversation.after!=='string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(conversation.after)
+          || !Number.isFinite(Date.parse(conversation.after)) || new Date(conversation.after).toISOString()!==conversation.after)throw new Error('invalid activation time');
+      }
+      if(conversation.max_chars!==undefined)integer(conversation.max_chars,8,1000);
+    }
     if(input.memory?.retrieval?.mode!==undefined && !['lexical','hybrid','semantic'].includes(input.memory.retrieval.mode))throw new Error('invalid retrieval');
   }catch{throw new ValidationError('Invalid model, vector or worker configuration.', 'INVALID_MEMORY_CONFIG');}
   for(const [section,key,value] of [[input.memory,'automatic_fact_overwrite',false],[input.memory,'preserve_atomic_records',true],[input.privacy,'include_body_in_logs',false],[input.privacy,'automatic_export',false]]){
