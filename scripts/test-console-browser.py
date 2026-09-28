@@ -48,7 +48,7 @@ try:
    if page.locator('#issued-invitation-codes').count():result['codes']=page.locator('#issued-invitation-codes').inner_text().splitlines()
    return result
   def close():
-   page.locator('#operation-dialog [data-operation-close]').first.click();page.wait_for_timeout(150)
+   page.locator('#operation-dialog [data-operation-close]').first.click();expect(page.locator('#operation-dialog')).not_to_be_visible()
   goto('overview');check('Actual HTTP assets, modules and CSP render overview',page.locator('#console-root h1').count()==1)
   check_selects(page,goto,check,P)
   goto('memories');check('New-memory action is enabled by real capabilities',page.locator('[data-console-action="memory.create"]').is_enabled())

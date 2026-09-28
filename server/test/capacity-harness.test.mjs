@@ -73,7 +73,10 @@ test("quick local harness preserves isolation and quarantines permanent 413 with
       "permanent_413_quarantined_later_valid_event_drained",
     );
     assert.equal(summary.cases.find((item) => item.id === "QUEUE-04").blocker, null);
-    assert.equal(summary.status, "pass");
+    assert.equal(summary.status, "pass", JSON.stringify({
+      stop_reason: summary.stop_reason,
+      cases: summary.cases.filter((item) => item.result !== "pass").map(({id,result,blocker}) => ({id,result,blocker})),
+    }));
     const backup = summary.cases.find((item) => item.id === "RET-03").evidence.backup;
     assert.equal(backup.integrity_check, "ok");
     assert.equal(backup.rate_pages, 100);

@@ -125,7 +125,8 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   modal.addEventListener('submit',async event=>{event.preventDefault();if(!intent||working)return;const fd=new FormData(event.target),action=intent.action;const seq=sequence;working=true;
     const controls=[...event.target.querySelectorAll('button,input,select,textarea')];controls.forEach(c=>c.disabled=true);
     try{let data;if(action==='storage.export')data=await exportFile();else if(action==='storage.import')data=await importFile(fd);else{const p=payload(fd),serialized=JSON.stringify(p);if(lastPayload!==null&&lastPayload!==serialized)opId=crypto.randomUUID();lastPayload=serialized;data=await mutate(action,p,opId);}
-      if(seq!==sequence||!isActive())return;event.target.reset();result(data);if(!data.login_required)await reload();
+      if(seq!==sequence||!isActive())return;event.target.reset();if(!data.login_required)await reload();
+      if(seq!==sequence||!isActive())return;result(data);
     }catch(e){if(seq!==sequence||!isActive())return;const error=content.querySelector('[data-operation-error]');if(error)error.textContent=`${t(e.message)} · ${t('operationId')}: ${opId}`;}
     finally{working=false;controls.forEach(c=>c.disabled=false);}
   });
