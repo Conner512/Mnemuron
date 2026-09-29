@@ -506,4 +506,20 @@ Object.assign(catalog.en,{
   enableAccountNote:'Enabling creates fresh account credentials, not old sessions or keys. The account must sign in and authorize again.'
 });
 
+// Neural console: overview visualisations and shell. Counts only; no invented trends.
+Object.assign(catalog['zh-CN'],{
+ constellationLabel:'记忆星图',constellationTitle:'你的记忆网络',constellationNote:'有效记忆按分类与类型聚合，节点大小对应数量。',
+ constellationEmpty:'还没有记忆。连接一个 Agent，新的记忆会在这里汇聚成网络。',
+ activityLabel:'近 30 天',activityTitle:'记忆写入活动',activityTotal:'新增',peakDay:'单日峰值',noActivity:'最近 30 天没有新增记忆',
+ compositionLabel:'结构',compositionTitle:'类型与生命周期',typesLegend:'记忆类型',lifecycle:'生命周期',categoriesLegend:'分类',
+ flowLabel:'处理管线',shortcutSearch:'搜索记忆',consoleStatus:'控制台会话',sessionSecure:'已验证 · 本账户隔离',
+});
+Object.assign(catalog.en,{
+ constellationLabel:'MEMORY CONSTELLATION',constellationTitle:'Your memory network',constellationNote:'Active memories grouped by category and type. Node size reflects count.',
+ constellationEmpty:'No memories yet. Connect an agent and new memories will gather here.',
+ activityLabel:'LAST 30 DAYS',activityTitle:'Memory activity',activityTotal:'New',peakDay:'Daily peak',noActivity:'No new memories in the last 30 days',
+ compositionLabel:'STRUCTURE',compositionTitle:'Types & lifecycle',typesLegend:'Memory types',lifecycle:'Lifecycle',categoriesLegend:'Categories',
+ flowLabel:'PIPELINE',shortcutSearch:'Search memories',consoleStatus:'Console session',sessionSecure:'Verified · account isolated',
+});
+
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

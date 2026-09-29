@@ -90,3 +90,16 @@ test('Layout A: decorative SVG cannot incorporate caller-supplied markup',()=>{
  assert.doesNotMatch(svg,/<script|<image|https?:\/\//);
  assert.match(svg,/aria-hidden="true"/);
 });
+test('Neural overview: charts render only owner aggregates and escape labels',()=>{
+ const insights={activity:[{day:'2026-09-01',count:2},{day:'2026-09-02',count:0},{day:'bad',count:9},{day:'2026-09-03',count:-1}],
+  types:[{value:'fact',count:3},{value:'<img src=x>',count:1}],statuses:[{value:'active',count:3},{value:'retracted',count:1}],
+  categories:[{value:'technical',count:2},{value:'<script>x</script>',count:1},{value:'empty',count:0}]};
+ const html=view({counts:{memories:4},insights});
+ assert.match(html,/class="constellation"/);assert.match(html,/class="card activity-card"/);assert.match(html,/class="card composition-card"/);
+ assert.match(html,/class="sparkline"/);
+ assert.doesNotMatch(html,/<script>x|<img src=x/);assert.ok(html.includes('&lt;script&gt;x&lt;/script&gt;'));
+ assert.equal((html.match(/<rect class="bar/g)||[]).length,2);
+ assert.doesNotMatch(html,/<canvas|<progress/);
+ const empty=view({counts:{memories:0}});
+ assert.match(empty,/constellation is-empty/);assert.doesNotMatch(empty,/activity-card|composition-card|sparkline/);
+});
