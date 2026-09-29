@@ -31,22 +31,20 @@ test('Select popup state includes keyboard, top-layer positioning and cleanup',(
  for(const key of ['ArrowDown','ArrowUp','Home','End','Enter','Escape','Tab'])assert.ok(js.includes(`'${key}'`));
  assert.match(js,/\.showPopover\(\)/);assert.match(js,/\.hidePopover\(\)/);
  assert.match(js,/visualViewport/);assert.match(js,/selectControls\.delete\(select\)/);
- const css=read('layout-polish.css');assert.equal(declarations(css,'.select-popup').position,'fixed');
+ const css=read('controls.css');assert.equal(declarations(css,'.select-popup').position,'fixed');
  assert.ok(rules(css).some(r=>r.selectors.includes('.select-option[aria-selected="true"]')));
 });
-test('Memory library separates filters from real rows without changing business contracts',()=>{
+test('Library controller keeps account-bound reads and capability-gated creation',()=>{
+ // Rendering contracts are covered by console-workbench; here only the controller wiring.
  const js=read('app.mjs');
- for(const name of ['query','search_mode','category','status'])assert.ok(js.includes(`name="${name}"`));
- assert.match(js,/class="card memory-library"/);assert.match(js,/class="memory-table"/);
- assert.match(js,/data-memory="\$\{esc\(m\.memory_id\)\}"/);
+ assert.match(js,/libraryView\(t,\{data,query,searchMode,category,status/);
  assert.match(js,/canAct\(capabilities,'memory\.create'\)/);
  assert.match(js,/include_history:'true'/);
  assert.match(js,/state\.accepts\(ticket\)/);
 });
-
-test('One existing stylesheet response contains base and polish rules',()=>{
+test('One existing stylesheet response contains base and control rules',()=>{
  const response={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=String(body);}};
  assert.equal(serveAsset({method:'GET'},response,'/assets/styles.css'),true);
- assert.ok(declarations(response.body,':root')['--sidebar-width']);assert.equal(declarations(response.body,'.select-popup').position,'fixed');
- assert.equal(serveAsset({method:'GET'},response,'/assets/layout-polish.css'),false);
+ assert.ok(declarations(response.body,':root')['--rail']);assert.equal(declarations(response.body,'.select-popup').position,'fixed');
+ assert.equal(serveAsset({method:'GET'},response,'/assets/controls.css'),false);
 });

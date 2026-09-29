@@ -522,4 +522,28 @@ Object.assign(catalog.en,{
  flowLabel:'PIPELINE',shortcutSearch:'Search memories',consoleStatus:'Console session',sessionSecure:'Verified · account isolated',
 });
 
+// Workbench UI (memory-centred shell). Later assignments intentionally override older labels.
+Object.assign(catalog['zh-CN'],{
+ navHome:'首页',navLibrary:'记忆库',navSummaries:'摘要',navJobs:'整理',navSettings:'设置',navMore:'更多设置',
+ settingsTitle:'设置',settingsGroupAccount:'连接与账户',settingsGroupSystem:'数据与系统',settingsGroupPlatform:'平台管理',
+ homeTitle:'今天想找回什么？',homeNote:'在你授权保存的记忆里搜索；每条结果都能追溯到来源和版本。',askPlaceholder:'搜索记忆里的事实、决定、项目……',
+ recentStream:'最近写入',pulseTitle:'记忆概况',activityStrip:'近 30 天写入',pipelineTitle:'整理管线',openLibrary:'打开记忆库',
+ libraryHint:'选择一条记忆，在右侧查看正文、来源与修订历史。',filters:'筛选',resultCount:'条结果',closePane:'关闭详情',
+ summaryIndex:'分类索引',summaryList:'派生摘要',auditTimeline:'事件时间线',accountPanel:'账户',displayPrefs:'显示',
+ themeName_a:'石墨',themeName_b:'苔原',themeName_c:'陶土',themeNote_a:'中性灰阶，蓝色强调',themeNote_b:'柔和灰绿，安静专注',themeNote_c:'温暖纸感，陶土强调',
+ authPoint_source:'每条记忆都保留来源与版本',authPoint_readonly:'第三方应用只获得你逐项授权的只读访问',authPoint_isolation:'账户彼此隔离，登录需要密码和动态验证码',
+ appearanceNote:'主题只改变颜色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
+});
+Object.assign(catalog.en,{
+ navHome:'Home',navLibrary:'Library',navSummaries:'Summaries',navJobs:'Organize',navSettings:'Settings',navMore:'More settings',
+ settingsTitle:'Settings',settingsGroupAccount:'Connections & account',settingsGroupSystem:'Data & system',settingsGroupPlatform:'Platform',
+ homeTitle:'What do you want to recall?',homeNote:'Search the memories you chose to keep. Every result traces back to its source and revision.',askPlaceholder:'Search facts, decisions, projects…',
+ recentStream:'Recently saved',pulseTitle:'At a glance',activityStrip:'Saved in the last 30 days',pipelineTitle:'Organizer pipeline',openLibrary:'Open library',
+ libraryHint:'Select a memory to read its content, sources and revision history on the right.',filters:'Filters',resultCount:'results',closePane:'Close details',
+ summaryIndex:'Category index',summaryList:'Derived summaries',auditTimeline:'Event timeline',accountPanel:'Account',displayPrefs:'Display',
+ themeName_a:'Graphite',themeName_b:'Tundra',themeName_c:'Clay',themeNote_a:'Neutral greys, blue accent',themeNote_b:'Soft grey-green, quiet focus',themeNote_c:'Warm paper, clay accent',
+ authPoint_source:'Every memory keeps its source and revision',authPoint_readonly:'Apps get only the read-only access you grant',authPoint_isolation:'Accounts are isolated; sign-in needs a password and a one-time code',
+ appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
+});
+
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

@@ -1,164 +1,153 @@
-// Shared, dependency-free presentation. No API calls, account selection or authorization here.
-// Icons are fixed local paths, never markup from a memory or an upstream response.
+// Pure console views for the memory workbench. No API calls, account selection or
+// authorization here: controllers pass owner-scoped data in and get markup strings out.
 import {html,trusted} from './html.mjs';
-const paths = {
-  brand: '<path d="M5 18.5V6.5l7 6.2 7-6.2v12"/><circle cx="5" cy="5" r="1.7"/><circle cx="19" cy="5" r="1.7"/><circle cx="12" cy="14.4" r="1.7"/><circle cx="5" cy="20" r="1.2"/><circle cx="19" cy="20" r="1.2"/>',
-  overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-  memories: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h5"/>',
-  summaries: '<path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/>',
-  jobs: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  connections: '<path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 1 1-1a4 4 0 1 1 6 6l-4 4a4 4 0 0 1-6 0" transform="translate(1 0)"/>',
-  models: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 1v5m6-5v5M9 18v5m6-5v5M1 9h5m-5 6h5m12-6h5m-5 6h5"/>',
-  security: '<path d="m12 3 8 3v6c0 4-3 7-8 9-5-2-8-5-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/>',
-  audit: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h8M8 18h4"/>',
-  storage: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0"/>',
-  appearance: '<circle cx="12" cy="12" r="9"/><path d="M12 3v18a9 9 0 0 0 0-18Z" fill="currentColor" stroke="none"/>',
-  invitations: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v5m10-5v5M3 11h18M8 15h2m4 0h2"/>',
-  accounts: '<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3m0-17a3 3 0 0 1 0 6m3 5a5 5 0 0 1 3 4v2"/>',
-  search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
-  arrow: '<path d="M4 12h16m-5-5 5 5-5 5"/>',
-  close: '<path d="m6 6 12 12M6 18 18 6"/>',
-  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1 1m12 12 1 1M5 19l1-1M18 6l1-1"/>',
-  moon: '<path d="M20 15a9 9 0 0 1-11-11 9 9 0 1 0 11 11Z"/>',
-  check: '<path d="m5 12 4 4 10-10"/>',
-  logout: '<path d="M9 3H4v18h5m5-14 5 5-5 5M9 12h10"/>',
-  pulse: '<path d="M3 12h4l2.5-6 5 12 2.5-6H21"/>',
-  constellation: '<circle cx="12" cy="12" r="2.2"/><circle cx="4.5" cy="6" r="1.6"/><circle cx="19.5" cy="5.5" r="1.6"/><circle cx="18.5" cy="19" r="1.6"/><circle cx="5" cy="18.5" r="1.6"/><path d="m6 7 4.3 3.6M18.2 6.8l-4.6 3.8M17.3 17.8l-3.6-4.2M6.4 17.4l3.9-4"/>',
-  layers: '<path d="M4 7h16M4 12h10M4 17h6"/>',
-  lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/>',
-};
-export const icon = name => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths[name] || paths.memories}</svg>`;
-const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const label = (t, key, tag = 'span') => `<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
+import {icon as glyph} from './icons.mjs';
 
-// Decorative synapse field for the sign-in story. Fixed geometry; never data.
-const field=[[40,60],[120,30],[210,78],[300,40],[380,96],[70,160],[160,140],[250,176],[340,150],[420,200],[30,250],[120,236],[220,270],[310,248],[400,300],[170,320],[60,330],[280,330]];
-const links=[[0,1],[1,2],[2,3],[3,4],[0,5],[1,6],[2,6],[2,7],[3,8],[4,8],[4,9],[5,6],[6,7],[7,8],[8,9],[5,10],[5,11],[6,11],[7,12],[8,13],[9,13],[9,14],[10,11],[11,12],[12,13],[13,14],[11,15],[12,15],[10,16],[15,16],[12,17],[13,17],[15,17]];
-export const orbit = () => `<div class="memory-orbit synapse-field" aria-hidden="true"><svg viewBox="0 0 440 360" focusable="false">${links.map(([a,b],i)=>`<line class="syn-link${i%5===0?' is-live':''}" x1="${field[a][0]}" y1="${field[a][1]}" x2="${field[b][0]}" y2="${field[b][1]}"/>`).join('')}${field.map(([x,y],i)=>`<circle class="syn-node${i%4===0?' is-hot':''}" cx="${x}" cy="${y}" r="${i%4===0?4.5:2.6}"/>`).join('')}</svg><span class="orbit-caption">MEMORY · CONTEXT · CONNECTION</span></div>`;
-
+export const icon = glyph;
+const svg = name => trusted(glyph(name));
+const i18n = (t, key, tag = 'span') => html`<${trusted(tag)} data-i18n="${key}">${t(key)}</${trusted(tag)}>`;
 const safeCount = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const rowsOf = rows => Array.isArray(rows)
   ? rows.map(r => ({value: String(r?.value ?? ''), count: safeCount(r?.count)})).filter(r => r.value && r.count !== null && r.count > 0)
   : [];
-const pct = (part, total) => total > 0 ? Math.max(0, Math.min(100, part / total * 100)) : 0;
 const fixed = n => Number(n.toFixed(2));
-const i18n = (t, key, tag = 'span') => trusted(label(t, key, tag));
-const glyph = name => trusted(icon(name));
+const preview = value => [...String(value ?? '')].slice(0, 160).join('');
+export const formatDate = value => value ? new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : value).toLocaleString(globalThis.document?.documentElement?.lang || 'zh-CN') : '—';
 
-// Memory constellation: categories on the outer ring, types on the inner ring. Only real aggregates.
-function constellation(insights, t) {
-  const categories = rowsOf(insights?.categories).slice(0, 8), types = rowsOf(insights?.types).slice(0, 6);
-  const cx = 260, cy = 180, max = Math.max(1, ...categories.map(r => r.count), ...types.map(r => r.count));
-  const size = (count, base, span) => fixed(base + Math.sqrt(count / max) * span);
-  const place = (rows, rx, ry, offset) => rows.map((row, i) => {
-    const a = offset + i / rows.length * Math.PI * 2;
-    return {...row, x: fixed(cx + Math.cos(a) * rx), y: fixed(cy + Math.sin(a) * ry)};
-  });
-  const outer = place(categories, 205, 128, -Math.PI / 2);
-  const inner = place(types, 104, 64, -Math.PI / 2 + Math.PI / Math.max(2, types.length));
-  const curve = (p, bend) => `M${cx} ${cy}Q${fixed((cx + p.x) / 2 + (p.y - cy) * bend)} ${fixed((cy + p.y) / 2 - (p.x - cx) * bend)} ${p.x} ${p.y}`;
-  const node = (p, i, kind) => {
-    const r = kind === 'category' ? size(p.count, 5, 13) : size(p.count, 3.5, 8), right = p.x >= cx, name = t(p.value);
-    const caption = kind === 'category'
-      ? html`<text x="${fixed(p.x + (right ? r + 9 : -r - 9))}" y="${fixed(p.y + 4)}" text-anchor="${right ? 'start' : 'end'}"><tspan class="cn-name">${name}</tspan><tspan class="cn-count" dx="6">${p.count}</tspan></text>`
-      : html`<text class="cn-type-label" x="${p.x}" y="${fixed(p.y + r + 13)}" text-anchor="middle">${name}</text>`;
-    return html`<g class="cn-node cn-${kind} hue-${i % 6}"><title>${name} · ${p.count}</title>
-      <circle class="cn-halo" cx="${p.x}" cy="${p.y}" r="${fixed(r + 7)}"/><circle class="cn-core" cx="${p.x}" cy="${p.y}" r="${r}"/>${caption}</g>`;
-  };
-  const empty = !outer.length && !inner.length;
-  const ring = (rx, ry, extra = '') => html`<ellipse class="cn-ring${extra}" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`;
-  const mesh = outer.length > 2 ? outer.map((p, i) => { const n = outer[(i + 1) % outer.length]; return html`<line class="cn-mesh" x1="${p.x}" y1="${p.y}" x2="${n.x}" y2="${n.y}"/>`; }) : [];
-  return html`<figure class="constellation${empty ? ' is-empty' : ''}">
-  <svg viewBox="0 0 520 360" role="img" data-i18n-aria-label="constellationTitle" aria-label="${t('constellationTitle')}" focusable="false">
-    <defs><pattern id="cn-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cn-dot"/></pattern>
-    <radialGradient id="cn-glow"><stop offset="0" class="cn-glow-a"/><stop offset="1" class="cn-glow-b"/></radialGradient></defs>
-    <rect class="cn-grid" x="0" y="0" width="520" height="360" fill="url(#cn-dots)"/><circle cx="${cx}" cy="${cy}" r="150" fill="url(#cn-glow)"/>
-    ${ring(205, 128)}${ring(104, 64, ' inner')}${ring(150, 94, ' faint')}
-    ${outer.map((p, i) => html`<path class="cn-edge${i % 3 === 0 ? ' is-live' : ''}" d="${curve(p, .18)}"/>`)}
-    ${inner.map((p, i) => html`<path class="cn-edge inner${i % 2 ? ' is-live' : ''}" d="${curve(p, -.22)}"/>`)}
-    ${mesh}${inner.map((p, i) => node(p, i + 2, 'type'))}${outer.map((p, i) => node(p, i, 'category'))}
-    <g class="cn-center"><circle class="cn-pulse" cx="${cx}" cy="${cy}" r="22"/><circle class="cn-hub" cx="${cx}" cy="${cy}" r="17"/>
-    <path class="cn-mark" transform="translate(${cx - 12} ${cy - 12})" d="M5 18.5V6.5l7 6.2 7-6.2v12"/></g>
-  </svg>
-  ${empty ? html`<figcaption>${i18n(t, 'constellationEmpty')}</figcaption>`
-    : html`<figcaption class="cn-legend"><span class="cn-key category">${i18n(t, 'categoriesLegend')}</span><span class="cn-key type">${i18n(t, 'typesLegend')}</span></figcaption>`}
-  </figure>`;
+export const typeChip = (t, type = 'fact') => html`<span class="type-chip" data-type="${type}">${t(type)}</span>`;
+export const statusTag = (t, status = 'active') => html`<span class="tag lifecycle-tag" data-status="${status}">${t(status)}</span>`;
+export const emptyState = (t, key = 'empty') => html`<div class="empty">${svg('library')}${i18n(t, key, 'p')}</div>`;
+
+/** A memory in a stream: the whole row opens the detail pane. */
+export function memoryRows(rows = [], t) {
+  if (!rows?.length) return String(emptyState(t));
+  return String(html`<ol class="stream-list">${rows.map(m => html`<li class="memory-row">
+    <button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>
+    <span class="memory-meta">${typeChip(t, m.memory_type || 'fact')}<time>${formatDate(m.created_at)}</time></span></button>${statusTag(t, m.status || 'active')}</li>`)}</ol>`);
 }
 
-const activity = insights => Array.isArray(insights?.activity)
-  ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30)
-  : [];
-
-function sparkline(days) {
-  if (days.length < 2) return '';
-  const max = Math.max(1, ...days.map(d => d.count)), w = 120, h = 30, step = w / (days.length - 1);
-  const line = days.map((d, i) => `${i ? 'L' : 'M'}${fixed(i * step)} ${fixed(h - 2 - d.count / max * (h - 6))}`).join('');
-  return html`<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="${line}L${w} ${h}L0 ${h}Z"/><path class="spark-line" d="${line}"/></svg>`;
+/** Page heading used by every console page. Exactly one H1 per page. */
+export function pageHeading(t, {title, note, actions = ''}) {
+  return String(html`<div class="page-heading"><div>${i18n(t, title, 'h1')}${note ? i18n(t, note, 'p') : ''}</div>${actions ? html`<div class="page-heading-actions">${trusted(actions)}</div>` : ''}</div>`);
 }
 
-function activityChart(days, t) {
+function activityStrip(insights, t) {
+  const days = Array.isArray(insights?.activity) ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30) : [];
   if (!days.length) return '';
-  const total = days.reduce((n, d) => n + d.count, 0), peak = Math.max(0, ...days.map(d => d.count)), max = Math.max(1, peak);
-  const W = 600, H = 170, top = 14, base = 140, slot = W / days.length, bw = fixed(slot * .62);
-  const bars = days.map((d, i) => {
-    const height = d.count ? Math.max(3, d.count / max * (base - top)) : 2;
-    return html`<rect class="bar${d.count ? '' : ' is-zero'}${d.count === peak && peak ? ' is-peak' : ''}" x="${fixed(i * slot + (slot - bw) / 2)}" y="${fixed(base - height)}" width="${bw}" height="${fixed(height)}" rx="2"><title>${d.day} · ${d.count}</title></rect>`;
-  });
-  const tick = i => { const edge = i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle';
-    return html`<text class="axis" x="${fixed(edge === 'start' ? 0 : edge === 'end' ? W : i * slot + slot / 2)}" y="${H - 6}" text-anchor="${edge}">${days[i].day.slice(5)}</text>`; };
-  const grid = [0, .5, 1].map(f => html`<line class="grid-line" x1="0" x2="${W}" y1="${fixed(base - f * (base - top))}" y2="${fixed(base - f * (base - top))}"/>`);
-  return html`<section class="card activity-card">
-  <div class="card-heading"><div><p class="eyebrow">${i18n(t, 'activityLabel')}</p>${i18n(t, 'activityTitle', 'h2')}</div>
-    <dl class="stat-pair"><div><dt>${i18n(t, 'activityTotal')}</dt><dd>${total}</dd></div><div><dt>${i18n(t, 'peakDay')}</dt><dd>${peak}</dd></div></dl></div>
-  ${total ? '' : html`<p class="chart-empty">${i18n(t, 'noActivity')}</p>`}
-  <svg class="activity-chart" viewBox="0 0 ${W} ${H}" role="img" data-i18n-aria-label="activityTitle" aria-label="${t('activityTitle')}" focusable="false">${grid}${bars}${tick(0)}${tick(Math.floor(days.length / 2))}${tick(days.length - 1)}</svg>
-  </section>`;
+  const total = days.reduce((n, d) => n + d.count, 0), max = Math.max(1, ...days.map(d => d.count));
+  const level = n => n === 0 ? 0 : Math.min(4, Math.ceil(n / max * 4));
+  const cells = days.map((d, i) => html`<rect class="cell q${level(d.count)}" x="${i * 10}" y="0" width="8" height="22" rx="2"><title>${d.day} · ${d.count}</title></rect>`);
+  return html`<section class="pulse-block"><div class="pulse-head">${i18n(t, 'activityStrip', 'h3')}<span class="pulse-figure">${total}</span></div>
+    <svg class="activity-strip" viewBox="0 0 ${days.length * 10 - 2} 22" preserveAspectRatio="none" role="img" data-i18n-aria-label="activityStrip" aria-label="${t('activityStrip')}" focusable="false">${cells}</svg>
+    <div class="strip-axis"><span>${days[0].day.slice(5)}</span><span>${days.at(-1).day.slice(5)}</span></div></section>`;
 }
 
-function composition(insights, t) {
-  const types = rowsOf(insights?.types).slice(0, 6), statuses = rowsOf(insights?.statuses);
-  if (!types.length && !statuses.length) return '';
-  const typeMax = Math.max(1, ...types.map(r => r.count)), statusTotal = statuses.reduce((n, r) => n + r.count, 0);
-  let x = 0;
-  const stack = statuses.map(r => { const w = pct(r.count, statusTotal), seg = html`<rect class="seg status-${r.value}" x="${fixed(x)}" y="0" width="${fixed(w)}" height="8"><title>${t(r.value)} · ${r.count}</title></rect>`; x += w; return seg; });
-  const typeRows = types.map((r, i) => html`<li class="hue-${i % 6}"><span class="type-name">${t(r.value)}</span>
-    <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="6" rx="3"/><rect class="fill" width="${fixed(Math.max(2, pct(r.count, typeMax)))}" height="6" rx="3"/></svg>
-    <span class="type-count">${r.count}</span></li>`);
-  const lifecycle = statuses.length ? html`<h3 class="mini-heading">${i18n(t, 'lifecycle')}</h3>
-    <svg class="status-stack" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" data-i18n-aria-label="lifecycle" aria-label="${t('lifecycle')}" focusable="false">${stack}</svg>
-    <ul class="status-legend">${statuses.map(r => html`<li class="status-${r.value}"><i aria-hidden="true"></i>${t(r.value)}<span>${r.count}</span></li>`)}</ul>` : '';
-  return html`<section class="card composition-card">
-  <div class="card-heading"><div><p class="eyebrow">${i18n(t, 'compositionLabel')}</p>${i18n(t, 'compositionTitle', 'h2')}</div><span class="metric-icon">${glyph('layers')}</span></div>
-  <h3 class="mini-heading">${i18n(t, 'typesLegend')}</h3><ul class="type-bars">${typeRows}</ul>${lifecycle}
-  </section>`;
+function typeBreakdown(insights, t) {
+  const types = rowsOf(insights?.types).slice(0, 6);
+  if (!types.length) return '';
+  const max = Math.max(...types.map(r => r.count));
+  return html`<section class="pulse-block">${i18n(t, 'typesLegend', 'h3')}<ul class="breakdown">${types.map(r => html`<li><span class="breakdown-label">${typeChip(t, r.value)}</span>
+    <svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" data-type="${r.value}" width="${fixed(Math.max(3, r.count / max * 100))}" height="4" rx="2"/></svg>
+    <span class="breakdown-count">${r.count}</span></li>`)}</ul></section>`;
 }
 
-export function overviewView(data, {t, memoryRows}) {
-  const l = (key, tag) => label(t, key, tag);
-  // The reference's trends and connected/completed badges were demo data. Never invent them.
-  const count = key => Number.isSafeInteger(data.counts?.[key]) && data.counts[key] >= 0 ? data.counts[key].toLocaleString() : '—';
-  const days = activity(data.insights), charts = String(activityChart(days, t)) + String(composition(data.insights, t));
-  return `<section class="hero neural-hero"><div class="hero-copy"><p class="eyebrow">${l('constellationLabel')}</p><h2>${l('constellationTitle')}</h2>${l('constellationNote','p')}
-  <div class="hero-actions"><a class="button primary" href="/app/memories">${icon('search')}${l('browseMemories')}</a><a class="button ghost" href="/app/connections">${icon('connections')}${l('manageConnections')}</a></div>
-  <p class="hero-footnote">${icon('security')}${l('connectionDescription')}</p></div>${constellation(data.insights, t)}</section>
-  <div class="metrics">${[['memories','memoryCount','memories'],['sources','sourceCount','audit'],['summaries','summaryCount','summaries'],['jobs','jobCount','jobs']].map(([key,title,glyph]) => `<a class="card metric" href="/app/${key==='sources'?'memories?focus=sources':key}" data-metric="${key}"><div class="metric-heading">${l(title)}<span class="metric-icon">${icon(glyph)}</span></div><strong>${count(key)}</strong>${key === 'memories' ? sparkline(days) : ''}${l('ownedRecords','small')}</a>`).join('')}</div>
-  ${charts ? `<div class="columns overview-columns insight-columns">${charts}</div>` : ''}
-  <div class="columns overview-columns"><section class="card recent-card"><div class="card-heading"><div><p class="eyebrow">${l('recentLabel')}</p>${l('recent','h2')}</div><a href="/app/memories">${l('viewAll')} ${icon('arrow')}</a></div><div class="timeline">${memoryRows(data.recent)}</div>${l('inspectMemoryNote','p')}</section>
-  <section class="card processing-card"><div class="card-heading"><div><p class="eyebrow">${l('flowLabel')}</p>${l('memoryProcessing','h2')}</div><span class="metric-icon">${icon('pulse')}</span></div>
-  <div class="pipeline">
-  <a class="processing-stage" href="/app/memories"><span class="stage-icon">${icon('memories')}</span><div>${l('memoryCount')}<small>${l('atomicNote')}</small></div><strong>${count('memories')}</strong></a>
-  <a class="processing-stage" href="/app/summaries"><span class="stage-icon">${icon('summaries')}</span><div>${l('summaryCount')}<small>${l('derivedNote')}</small></div><strong>${count('summaries')}</strong></a>
-  <a class="processing-stage" href="/app/jobs"><span class="stage-icon">${icon('jobs')}</span><div>${l('jobCount')}<small>${l('jobStatusNote')}</small></div><strong>${count('jobs')}</strong></a>
-  </div><div class="privacy-note">${icon('security')}${l('summaryBoundary','p')}</div><a class="text-link" href="/app/jobs">${l('viewJobs')} ${icon('arrow')}</a></section></div>`;
+/** Home: search first, then the recent stream; counts are secondary. Never invents trends. */
+export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t)}) {
+  const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
+  const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}"><strong>${count(key)}</strong>${i18n(t, title)}</a>`;
+  const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
+  return String(html`<form class="ask" action="/app/memories" method="get" role="search">
+    <label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
+    <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}">
+    <kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
+  <div class="home-grid">
+    <section class="stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
+      ${trusted(rows(data.recent || []))}${i18n(t, 'inspectMemoryNote', 'p')}</section>
+    <aside class="pulse" data-i18n-aria-label="pulseTitle" aria-label="${t('pulseTitle')}">
+      <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/jobs')}</div>
+      ${activityStrip(data.insights, t)}${typeBreakdown(data.insights, t)}
+      <section class="pulse-block processing-card">${i18n(t, 'pipelineTitle', 'h3')}<div class="pipeline">
+        ${stage('/app/memories', 'library', 'memoryCount', 'atomicNote', 'memories')}${stage('/app/summaries', 'summaries', 'summaryCount', 'derivedNote', 'summaries')}${stage('/app/jobs', 'jobs', 'jobCount', 'jobStatusNote', 'jobs')}</div>
+        <p class="privacy-note">${svg('security')}<span data-i18n="summaryBoundary">${t('summaryBoundary')}</span></p></section>
+    </aside></div>`);
 }
 
+/** Library: filters, a four-column table, and a pager. The detail opens in the side pane. */
+export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', categories = [], focusSources = false, readOnly = false, pagination = ''}) {
+  const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
+  const rows = data.results || [];
+  const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
+    <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
+    <tbody>${rows.map(m => html`<tr><td><button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></td>
+      <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${t(m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
+    : emptyState(t);
+  return String(html`<form class="toolbar memory-filters" id="search-form" role="search">
+    <label class="query-field"><span class="sr-only" data-i18n="query">${t('query')}</span><span class="query-input">${svg('search')}<input name="query" value="${query}" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"></span></label>
+    <label class="filter-mode">${i18n(t, 'searchMode')}<select name="search_mode">${['lexical', 'hybrid', 'semantic'].map(v => option(v, v, searchMode))}</select></label>
+    <label class="filter-category">${i18n(t, 'category')}<select name="category">${option('', 'allCategories', category)}${categories.map(v => option(v, v, category))}</select></label>
+    <label class="filter-status">${i18n(t, 'status')}<select name="status">${option('', 'allStatuses', status)}${['active', 'superseded', 'retracted'].map(v => option(v, v, status))}</select></label>
+    <div class="filter-actions"><button class="primary filter-submit" type="submit">${svg('search')}${i18n(t, 'search')}</button><button type="button" class="filter-reset quiet" data-reset-filters>${i18n(t, 'resetFilters')}</button></div></form>
+  <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
+    ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
+    <div id="memory-rows">${table}</div>
+    <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section>`);
+}
+
+export function summariesView(t, {data, pagination = ''}) {
+  const cats = (data.categories || []).filter(c => safeCount(c.count) !== null);
+  const max = Math.max(1, ...cats.map(c => c.count));
+  const summaries = data.summaries || [];
+  return String(html`<div class="split">
+  <section class="index-panel">${i18n(t, 'summaryIndex', 'h2')}${cats.length ? html`<ul class="category-index">${cats.map(c => html`<li><a class="category-link" href="/app/memories?category=${encodeURIComponent(c.category)}&amp;status=active"><span>${t(c.category)}</span>
+    <svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${fixed(Math.max(3, c.count / max * 100))}" height="4" rx="2"/></svg><strong>${c.count}</strong></a></li>`)}</ul>` : emptyState(t)}</section>
+  <section class="list-panel">${i18n(t, 'summaryList', 'h2')}${summaries.length ? html`<ol class="summary-list">${summaries.map(s => {
+    const body = html`<span class="summary-title">${t(s.category)}</span><span class="memory-meta"><span>${i18n(t, 'revisions')} ${s.revision}</span><span>${i18n(t, 'sourceCount')} ${s.coverage}</span><code>${s.summary_id}</code></span>`;
+    return html`<li class="summary-row">${s.status === 'current'
+      ? html`<button type="button" class="memory-link" data-summary="${s.summary_id}" data-revision="${s.revision}">${body}</button>`
+      : html`<div class="memory-link">${body}<small>${i18n(t, 'summaryNotCurrent')} · <a href="/app/memories?category=${encodeURIComponent(s.category)}">${i18n(t, 'browseMemories')}</a></small></div>`}${html`<span class="tag">${t(s.status)}</span>`}</li>`;
+  })}</ol>` : emptyState(t)}${trusted(pagination)}</section></div>`);
+}
+
+export function auditView(t, {entries = [], pagination = ''}) {
+  if (!entries.length) return String(emptyState(t));
+  return String(html`<section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>
+    <ol class="timeline">${entries.map(e => html`<li class="timeline-item" data-outcome="${e.outcome || ''}"><span class="timeline-dot" aria-hidden="true"></span>
+      <div><strong>${e.action}</strong><span class="memory-meta"><span class="tag">${e.outcome || '—'}</span><time>${formatDate(e.created)}</time>${e.audit_id ? html`<code>${e.audit_id}</code>` : ''}</span></div></li>`)}</ol>${trusted(pagination)}</section>`);
+}
+
+/** Memory detail for the side pane. `actions` is markup built from fixed action buttons. */
+export function memoryDetailView(t, data, {actions = '', canGoBack = false}) {
+  const m = data.memory || {}, content = String(m.content ?? ''), length = [...content].length;
+  const sources = data.source_manifest?.sources || [];
+  const lifecycle = m.lifecycle || {};
+  const links = [[lifecycle.supersedes_memory_id, 'previousRecord'], [lifecycle.superseded_by_memory_id, 'replacementRecord']].filter(([id]) => id);
+  return String(html`<div class="detail-meta">${typeChip(t, m.memory_type || 'fact')}<span class="tag">${i18n(t, 'revisions')} ${data.revision}</span>${statusTag(t, m.status || 'active')}</div>
+  ${m.status === 'active' && actions ? html`<div class="actions detail-actions">${trusted(actions)}</div>` : ''}
+  <div class="body-content">${content}</div>
+  <p class="detail-range">${i18n(t, 'contentRange')} ${data.content_offset + 1}–${data.content_offset + length} / ${data.content_length} ${data.content_complete ? i18n(t, 'endOfContent') : ''}</p>
+  <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>
+  ${links.length ? html`<div class="lifecycle-links">${links.map(([id, key]) => html`<button type="button" class="quiet" data-memory="${id}">${i18n(t, key)}</button>`)}</div>` : ''}
+  <section class="detail-sources">${i18n(t, 'sources', 'h3')}${sources.length ? html`<ol class="source-list">${sources.map(s => html`<li class="detail-source"><strong>${s.source_kind || s.source_id}</strong><code>${s.source_id}</code>
+    <details><summary>${i18n(t, 'sourceMetadata')}</summary><pre>${JSON.stringify(s, null, 2)}</pre></details></li>`)}</ol>` : emptyState(t)}
+    ${data.next_source_request ? html`<button type="button" data-source-next>${i18n(t, 'nextSources')}</button>` : ''}</section>`);
+}
+
+export function summaryDetailView(t, data, {canGoBack = false}) {
+  const summary = data.results?.[0] || {claims: []};
+  return String(html`<div class="detail-meta"><span class="tag">${t(summary.category)}</span><span class="tag">${i18n(t, 'revisions')} ${summary.revision}</span></div>
+  ${summary.claims?.length ? html`<ol class="claim-list">${summary.claims.map(c => html`<li class="detail-source"><p class="body-content">${c.quote}</p>
+    <button type="button" class="quiet" data-memory="${c.memory_id}" data-revision="${c.revision}">${svg('source')}${i18n(t, 'sources')} · <code>${c.memory_id}</code></button></li>`)}</ol>` : emptyState(t)}
+  ${i18n(t, data.complete ? 'endOfSummary' : 'next', 'p')}
+  <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
+}
+
+/** Appearance: real preference controls, colour only. */
 export function appearanceView(t) {
-  const l = (key, tag) => label(t, key, tag);
-  const pick = (property, value, content, className) => `<button class="${className}" type="button" data-pref="${property}" data-pref-value="${value}" aria-pressed="false" disabled>${content}</button>`;
-  const mini = `<span class="mini-shell" aria-hidden="true"><span class="mini-sidebar"><i></i><i></i><i></i><i></i></span><span class="mini-main"><i class="mini-topbar"></i><i class="mini-hero"></i><span class="mini-metrics"><i></i><i></i><i></i><i></i></span><span class="mini-columns"><i></i><i></i></span></span></span>`;
-  return `<section class="card appearance-card"><div class="card-heading"><div><p class="eyebrow">${l('personalizeLabel')}</p>${l('theme','h2')}</div><span class="tag">${l('fixedLayout')}</span></div>${l('appearanceNote','p')}
-  <div class="theme-options" role="group" data-i18n-aria-label="theme" aria-label="${esc(t('theme'))}">${['a','b','c'].map(theme => pick('theme',theme,`${mini}<span class="theme-option-info"><span><strong>${l(`themeName_${theme}`)}</strong><small>${l(`themeNote_${theme}`)}</small></span><span class="selection-check">${icon('check')}</span></span>`,'theme-option')).join('')}</div></section>
-  <div class="columns preference-columns"><section class="card"><div class="card-heading">${l('mode','h2')}${icon('sun')}</div>${l('modeNote','p')}<div class="segmented" role="group" data-i18n-aria-label="mode" aria-label="${esc(t('mode'))}">${['light','dark'].map(mode => pick('mode',mode,`${icon(mode==='light'?'sun':'moon')}${l(mode)}`,'segment')).join('')}</div></section>
-  <section class="card"><div class="card-heading">${l('language','h2')}<span class="language-mark" aria-hidden="true">文 / A</span></div>${l('languageNote','p')}<div class="segmented" role="group" data-i18n-aria-label="language" aria-label="${esc(t('language'))}">${pick('locale','zh-CN','简体中文','segment')}${pick('locale','en','English','segment')}</div></section></div>
-  <div class="privacy-note appearance-footnote">${icon('security')}${l('appearanceScopeNote','p')}</div>`;
+  const pick = (property, value, content, className) => html`<button class="${className}" type="button" data-pref="${property}" data-pref-value="${value}" aria-pressed="false" disabled>${content}</button>`;
+  const swatch = html`<span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>`;
+  return String(html`<section class="card appearance-card">${i18n(t, 'theme', 'h2')}${i18n(t, 'appearanceNote', 'p')}
+    <div class="theme-options" role="group" data-i18n-aria-label="theme" aria-label="${t('theme')}">${['a', 'b', 'c'].map(theme => pick('theme', theme, html`${swatch}<span class="theme-option-info"><strong data-i18n="themeName_${theme}">${t(`themeName_${theme}`)}</strong><small data-i18n="themeNote_${theme}">${t(`themeNote_${theme}`)}</small></span><span class="selection-check">${svg('check')}</span>`, 'theme-option'))}</div></section>
+  <div class="columns preference-columns"><section class="card">${i18n(t, 'mode', 'h2')}${i18n(t, 'modeNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="mode" aria-label="${t('mode')}">${['light', 'dark'].map(mode => pick('mode', mode, html`${svg(mode === 'light' ? 'sun' : 'moon')}${i18n(t, mode)}`, 'segment'))}</div></section>
+  <section class="card">${i18n(t, 'language', 'h2')}${i18n(t, 'languageNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="language" aria-label="${t('language')}">${pick('locale', 'zh-CN', '简体中文', 'segment')}${pick('locale', 'en', 'English', 'segment')}</div></section></div>
+  <p class="privacy-note">${svg('security')}<span data-i18n="appearanceScopeNote">${t('appearanceScopeNote')}</span></p>`);
 }

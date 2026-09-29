@@ -1,0 +1,77 @@
+/* Anchored select controls. The native element still submits and validates;
+   the popup paints in the top layer and JS only sets numeric placement. */
+.select-shell{display:inline-grid;grid-template-columns:minmax(0,1fr);position:relative;min-width:0;max-width:100%;vertical-align:middle}
+.select-shell>select.select-native{position:absolute!important;inset:0 auto auto 0!important;width:1px!important;min-width:0!important;height:1px!important;min-height:0!important;padding:0!important;margin:0!important;border:0!important;opacity:0;clip-path:inset(50%);overflow:hidden;pointer-events:none}
+button.select-trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-width:0;height:38px;padding:0 11px;border:1px solid var(--muted);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);font-size:13px;font-weight:400;text-align:left}
+button.select-trigger:not(:disabled):hover{background:var(--surface);border-color:var(--text)}
+button.select-trigger[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px var(--soft)}
+button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
+.select-value{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.select-chevron{flex:none;width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg);color:var(--muted)}
+[aria-expanded="true"]>.select-chevron{transform:translateY(2px) rotate(225deg)}
+.select-popup{position:fixed;inset:auto;margin:0;padding:4px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);font:13px/1.5 var(--font-sans);box-shadow:var(--shadow);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;max-width:calc(100vw - 20px)}
+.select-popup::backdrop{background:transparent;pointer-events:none}
+.select-option{display:flex;align-items:center;gap:8px;min-height:32px;padding:6px 8px;border-radius:var(--radius-sm);cursor:pointer;user-select:none}
+.select-option-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.select-option[aria-selected="true"]{color:var(--accent);font-weight:600}
+.select-option.is-active,.select-option:hover:not([aria-disabled="true"]){background:var(--surface-2)}
+.select-option.is-active{outline:1px solid var(--accent);outline-offset:-1px}
+.select-option[aria-disabled="true"]{opacity:.5;cursor:not-allowed}
+.select-check{flex:none;width:14px;text-align:center;visibility:hidden}
+.select-option[aria-selected="true"]>.select-check{visibility:visible}
+.select-group{padding:8px 8px 3px;font-size:11px;font-weight:600;color:var(--muted)}
+.select-swatch{width:10px;height:10px;flex:none;border-radius:3px}
+.select-swatch[data-palette="a"]{background:#2451D6}.select-swatch[data-palette="b"]{background:#2F6E4A}.select-swatch[data-palette="c"]{background:#A4471F}
+.select-shell[data-palette]>.select-trigger::before{content:"";width:9px;height:9px;flex:none;border-radius:3px;background:var(--accent)}
+.select-error{margin-top:5px;color:var(--bad);font-size:12px}
+.select-error[hidden]{display:none}
+/* Compact display preferences in the top bar. */
+.appearance-controls .select-trigger{height:32px;padding:0 8px;gap:6px;border-color:transparent;background:transparent;color:var(--muted);font-size:12.5px}
+.appearance-controls .select-trigger:not(:disabled):hover,.appearance-controls .select-trigger[aria-expanded="true"]{border-color:var(--border);background:var(--surface);color:var(--text);box-shadow:none}
+.appearance-controls .select-shell{max-width:130px}
+@media(forced-colors:active){.select-option[aria-selected="true"],.select-option.is-active{outline:1px solid Highlight}.select-swatch{border:1px solid CanvasText}}
+
+/* Write operations: centred, bounded dialogs with an explicit submit. */
+#operation-dialog,#connection-dialog{inset:0;margin:auto;width:min(640px,calc(100vw - 32px));max-width:none;height:fit-content;max-height:calc(100dvh - 48px);border-radius:14px;box-shadow:var(--shadow);overflow:auto}
+#connection-dialog{width:min(760px,calc(100vw - 32px))}
+#operation-dialog[open],#connection-dialog[open]{animation:rise .18s var(--ease) both}
+#operation-dialog>.dialog-header,#connection-dialog>.dialog-header{padding:14px 20px}
+#operation-content,.connection-content{padding:18px 20px 20px}
+#operation-content form,.connection-content form{display:grid;gap:14px}
+#operation-content label,.connection-content label{display:grid;gap:6px;margin:0}
+#operation-content textarea,.connection-content textarea{min-height:140px;resize:vertical;border-color:var(--muted);line-height:1.7}
+#operation-content .select-shell,.connection-content .select-shell{width:100%}
+.check-field{display:flex!important;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);color:var(--text)!important;font-size:13px;line-height:1.6}
+.check-field input[type=checkbox]{width:16px;height:16px;min-height:0;margin:2px 0 0;flex:none;accent-color:var(--accent)}
+.reauth{display:grid;gap:10px;margin:0;padding:14px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.reauth legend{padding:0 6px;font-size:12px;font-weight:600}
+.reauth p{margin:0;font-size:12px}
+#operation-content form>.actions,.connection-content form>.actions{justify-content:flex-end;padding-top:14px;border-top:1px solid var(--border)}
+#operation-content [data-operation-error]:empty,.connection-content [data-connection-error]:empty{display:none}
+#operation-content [data-operation-error],.connection-content [data-connection-error]{color:var(--bad);font-size:12.5px;margin:0}
+.operation-result{max-height:50vh;overflow:auto;padding:12px;border-radius:var(--radius-sm);background:var(--surface-2);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+
+/* Connections */
+.connection-intro{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:14px}
+.connection-intro p{margin:0 0 4px;color:var(--text)}
+.connection-intro>button{flex:none}
+.connection-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;margin-bottom:var(--gap);background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.connection-stat{display:flex;flex-direction:column;gap:2px;border:0;border-radius:0;padding:14px 16px;font-size:12px;color:var(--muted)}
+.connection-stat strong{font-size:22px;font-weight:620;color:var(--text);font-variant-numeric:tabular-nums}
+.connection-list{padding:0;overflow:hidden}
+.connection-list .toolbar{display:grid;grid-template-columns:minmax(180px,1.4fr) repeat(auto-fit,minmax(130px,1fr));gap:10px;align-items:end;padding:14px;border-bottom:1px solid var(--border)}
+.connection-list .toolbar label{display:grid;gap:5px;margin:0}
+.connection-list .toolbar .select-shell,.connection-list .toolbar input{width:100%}
+.connection-table{min-width:640px}
+.connection-label{display:block;max-width:100%;padding:0;min-height:0;border:0;background:none;color:var(--text);font-weight:600;text-align:left;overflow:hidden;text-overflow:ellipsis}
+.connection-label:not(:disabled):hover{background:none;color:var(--accent)}
+.connection-list .library-footer{border-top:1px solid var(--border)}
+.connection-system summary{font-weight:600;color:var(--text)}
+.connection-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
+.connection-types>.card{padding:14px}
+.connection-types [aria-disabled=true]{opacity:.55}
+.connection-content h3{margin:4px 0 8px}
+.connection-content>section+section{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+.connection-copy-status{font-size:12px;color:var(--good)}
+@media(max-width:960px){.connection-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.connection-intro{flex-direction:column;align-items:flex-start}}
+@keyframes rise{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
