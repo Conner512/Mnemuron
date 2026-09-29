@@ -1,5 +1,6 @@
 // Shared, dependency-free presentation. No API calls, account selection or authorization here.
 // Icons are fixed local paths, never markup from a memory or an upstream response.
+import {html,trusted} from './html.mjs';
 const paths = {
   brand: '<path d="M5 18.5V6.5l7 6.2 7-6.2v12"/><circle cx="5" cy="5" r="1.7"/><circle cx="19" cy="5" r="1.7"/><circle cx="12" cy="14.4" r="1.7"/><circle cx="5" cy="20" r="1.2"/><circle cx="19" cy="20" r="1.2"/>',
   overview: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -36,74 +37,107 @@ const links=[[0,1],[1,2],[2,3],[3,4],[0,5],[1,6],[2,6],[2,7],[3,8],[4,8],[4,9],[
 export const orbit = () => `<div class="memory-orbit synapse-field" aria-hidden="true"><svg viewBox="0 0 440 360" focusable="false">${links.map(([a,b],i)=>`<line class="syn-link${i%5===0?' is-live':''}" x1="${field[a][0]}" y1="${field[a][1]}" x2="${field[b][0]}" y2="${field[b][1]}"/>`).join('')}${field.map(([x,y],i)=>`<circle class="syn-node${i%4===0?' is-hot':''}" cx="${x}" cy="${y}" r="${i%4===0?4.5:2.6}"/>`).join('')}</svg><span class="orbit-caption">MEMORY · CONTEXT · CONNECTION</span></div>`;
 
 const safeCount = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
-const rowsOf = rows => Array.isArray(rows) ? rows.map(r => ({value:String(r?.value ?? ''), count:safeCount(r?.count)})).filter(r => r.value && r.count !== null && r.count > 0) : [];
+const rowsOf = rows => Array.isArray(rows)
+  ? rows.map(r => ({value: String(r?.value ?? ''), count: safeCount(r?.count)})).filter(r => r.value && r.count !== null && r.count > 0)
+  : [];
 const pct = (part, total) => total > 0 ? Math.max(0, Math.min(100, part / total * 100)) : 0;
 const fixed = n => Number(n.toFixed(2));
+const i18n = (t, key, tag = 'span') => trusted(label(t, key, tag));
+const glyph = name => trusted(icon(name));
 
 // Memory constellation: categories on the outer ring, types on the inner ring. Only real aggregates.
 function constellation(insights, t) {
   const categories = rowsOf(insights?.categories).slice(0, 8), types = rowsOf(insights?.types).slice(0, 6);
   const cx = 260, cy = 180, max = Math.max(1, ...categories.map(r => r.count), ...types.map(r => r.count));
   const size = (count, base, span) => fixed(base + Math.sqrt(count / max) * span);
-  const place = (rows, rx, ry, offset) => rows.map((row, i) => { const a = offset + i / rows.length * Math.PI * 2; return {...row, x:fixed(cx + Math.cos(a) * rx), y:fixed(cy + Math.sin(a) * ry)}; });
-  const outer = place(categories, 205, 128, -Math.PI / 2), inner = place(types, 104, 64, -Math.PI / 2 + Math.PI / Math.max(2, types.length));
+  const place = (rows, rx, ry, offset) => rows.map((row, i) => {
+    const a = offset + i / rows.length * Math.PI * 2;
+    return {...row, x: fixed(cx + Math.cos(a) * rx), y: fixed(cy + Math.sin(a) * ry)};
+  });
+  const outer = place(categories, 205, 128, -Math.PI / 2);
+  const inner = place(types, 104, 64, -Math.PI / 2 + Math.PI / Math.max(2, types.length));
   const curve = (p, bend) => `M${cx} ${cy}Q${fixed((cx + p.x) / 2 + (p.y - cy) * bend)} ${fixed((cy + p.y) / 2 - (p.x - cx) * bend)} ${p.x} ${p.y}`;
-  const node = (p, i, kind) => { const r = kind === 'category' ? size(p.count, 5, 13) : size(p.count, 3.5, 8); const right = p.x >= cx;
-    return `<g class="cn-node cn-${kind} hue-${i % 6}"><title>${esc(t(p.value))} · ${p.count}</title><circle class="cn-halo" cx="${p.x}" cy="${p.y}" r="${fixed(r + 7)}"/><circle class="cn-core" cx="${p.x}" cy="${p.y}" r="${r}"/>${kind === 'category' ? `<text x="${fixed(p.x + (right ? r + 9 : -r - 9))}" y="${fixed(p.y + 4)}" text-anchor="${right ? 'start' : 'end'}"><tspan class="cn-name">${esc(t(p.value))}</tspan><tspan class="cn-count" dx="6">${p.count}</tspan></text>` : `<text class="cn-type-label" x="${p.x}" y="${fixed(p.y + r + 13)}" text-anchor="middle">${esc(t(p.value))}</text>`}</g>`; };
+  const node = (p, i, kind) => {
+    const r = kind === 'category' ? size(p.count, 5, 13) : size(p.count, 3.5, 8), right = p.x >= cx, name = t(p.value);
+    const caption = kind === 'category'
+      ? html`<text x="${fixed(p.x + (right ? r + 9 : -r - 9))}" y="${fixed(p.y + 4)}" text-anchor="${right ? 'start' : 'end'}"><tspan class="cn-name">${name}</tspan><tspan class="cn-count" dx="6">${p.count}</tspan></text>`
+      : html`<text class="cn-type-label" x="${p.x}" y="${fixed(p.y + r + 13)}" text-anchor="middle">${name}</text>`;
+    return html`<g class="cn-node cn-${kind} hue-${i % 6}"><title>${name} · ${p.count}</title>
+      <circle class="cn-halo" cx="${p.x}" cy="${p.y}" r="${fixed(r + 7)}"/><circle class="cn-core" cx="${p.x}" cy="${p.y}" r="${r}"/>${caption}</g>`;
+  };
   const empty = !outer.length && !inner.length;
-  const ring = (rx, ry, extra = '') => `<ellipse class="cn-ring${extra}" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`;
-  return `<figure class="constellation${empty ? ' is-empty' : ''}"><svg viewBox="0 0 520 360" role="img" data-i18n-aria-label="constellationTitle" aria-label="${esc(t('constellationTitle'))}" focusable="false">
-  <defs><pattern id="cn-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cn-dot"/></pattern>
-  <radialGradient id="cn-glow"><stop offset="0" class="cn-glow-a"/><stop offset="1" class="cn-glow-b"/></radialGradient></defs>
-  <rect class="cn-grid" x="0" y="0" width="520" height="360" fill="url(#cn-dots)"/><circle cx="${cx}" cy="${cy}" r="150" fill="url(#cn-glow)"/>
-  ${ring(205, 128)}${ring(104, 64, ' inner')}${ring(150, 94, ' faint')}
-  ${outer.map((p, i) => `<path class="cn-edge${i % 3 === 0 ? ' is-live' : ''}" d="${curve(p, .18)}"/>`).join('')}
-  ${inner.map((p, i) => `<path class="cn-edge inner${i % 2 ? ' is-live' : ''}" d="${curve(p, -.22)}"/>`).join('')}
-  ${outer.map((p, i) => { const n = outer[(i + 1) % outer.length]; return outer.length > 2 ? `<line class="cn-mesh" x1="${p.x}" y1="${p.y}" x2="${n.x}" y2="${n.y}"/>` : ''; }).join('')}
-  ${inner.map((p, i) => node(p, i + 2, 'type')).join('')}${outer.map((p, i) => node(p, i, 'category')).join('')}
-  <g class="cn-center"><circle class="cn-pulse" cx="${cx}" cy="${cy}" r="22"/><circle class="cn-hub" cx="${cx}" cy="${cy}" r="17"/><path class="cn-mark" transform="translate(${cx - 12} ${cy - 12})" d="M5 18.5V6.5l7 6.2 7-6.2v12"/></g>
-  </svg>${empty ? `<figcaption>${label(t, 'constellationEmpty')}</figcaption>` : `<figcaption class="cn-legend"><span class="cn-key category">${label(t, 'categoriesLegend')}</span><span class="cn-key type">${label(t, 'typesLegend')}</span></figcaption>`}</figure>`;
+  const ring = (rx, ry, extra = '') => html`<ellipse class="cn-ring${extra}" cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"/>`;
+  const mesh = outer.length > 2 ? outer.map((p, i) => { const n = outer[(i + 1) % outer.length]; return html`<line class="cn-mesh" x1="${p.x}" y1="${p.y}" x2="${n.x}" y2="${n.y}"/>`; }) : [];
+  return html`<figure class="constellation${empty ? ' is-empty' : ''}">
+  <svg viewBox="0 0 520 360" role="img" data-i18n-aria-label="constellationTitle" aria-label="${t('constellationTitle')}" focusable="false">
+    <defs><pattern id="cn-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" class="cn-dot"/></pattern>
+    <radialGradient id="cn-glow"><stop offset="0" class="cn-glow-a"/><stop offset="1" class="cn-glow-b"/></radialGradient></defs>
+    <rect class="cn-grid" x="0" y="0" width="520" height="360" fill="url(#cn-dots)"/><circle cx="${cx}" cy="${cy}" r="150" fill="url(#cn-glow)"/>
+    ${ring(205, 128)}${ring(104, 64, ' inner')}${ring(150, 94, ' faint')}
+    ${outer.map((p, i) => html`<path class="cn-edge${i % 3 === 0 ? ' is-live' : ''}" d="${curve(p, .18)}"/>`)}
+    ${inner.map((p, i) => html`<path class="cn-edge inner${i % 2 ? ' is-live' : ''}" d="${curve(p, -.22)}"/>`)}
+    ${mesh}${inner.map((p, i) => node(p, i + 2, 'type'))}${outer.map((p, i) => node(p, i, 'category'))}
+    <g class="cn-center"><circle class="cn-pulse" cx="${cx}" cy="${cy}" r="22"/><circle class="cn-hub" cx="${cx}" cy="${cy}" r="17"/>
+    <path class="cn-mark" transform="translate(${cx - 12} ${cy - 12})" d="M5 18.5V6.5l7 6.2 7-6.2v12"/></g>
+  </svg>
+  ${empty ? html`<figcaption>${i18n(t, 'constellationEmpty')}</figcaption>`
+    : html`<figcaption class="cn-legend"><span class="cn-key category">${i18n(t, 'categoriesLegend')}</span><span class="cn-key type">${i18n(t, 'typesLegend')}</span></figcaption>`}
+  </figure>`;
 }
 
-function activity(insights) {
-  const days = Array.isArray(insights?.activity) ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30) : [];
-  return days;
-}
+const activity = insights => Array.isArray(insights?.activity)
+  ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30)
+  : [];
+
 function sparkline(days) {
   if (days.length < 2) return '';
   const max = Math.max(1, ...days.map(d => d.count)), w = 120, h = 30, step = w / (days.length - 1);
-  const pts = days.map((d, i) => [fixed(i * step), fixed(h - 2 - d.count / max * (h - 6))]);
-  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join('');
-  return `<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="${line}L${w} ${h}L0 ${h}Z"/><path class="spark-line" d="${line}"/></svg>`;
+  const line = days.map((d, i) => `${i ? 'L' : 'M'}${fixed(i * step)} ${fixed(h - 2 - d.count / max * (h - 6))}`).join('');
+  return html`<svg class="sparkline" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path class="spark-area" d="${line}L${w} ${h}L0 ${h}Z"/><path class="spark-line" d="${line}"/></svg>`;
 }
+
 function activityChart(days, t) {
-  const l = (key, tag) => label(t, key, tag);
   if (!days.length) return '';
   const total = days.reduce((n, d) => n + d.count, 0), peak = Math.max(0, ...days.map(d => d.count)), max = Math.max(1, peak);
   const W = 600, H = 170, top = 14, base = 140, slot = W / days.length, bw = fixed(slot * .62);
-  const bars = days.map((d, i) => { const hgt = d.count ? Math.max(3, d.count / max * (base - top)) : 2; return `<rect class="bar${d.count ? '' : ' is-zero'}${d.count === peak && peak ? ' is-peak' : ''}" x="${fixed(i * slot + (slot - bw) / 2)}" y="${fixed(base - hgt)}" width="${bw}" height="${fixed(hgt)}" rx="2"><title>${esc(d.day)} · ${d.count}</title></rect>`; }).join('');
-  const tick = i => `<text class="axis" x="${fixed(i === 0 ? 0 : i === days.length - 1 ? W : i * slot + slot / 2)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle'}">${esc(days[i].day.slice(5))}</text>`;
-  const grid = [0, .5, 1].map(f => `<line class="grid-line" x1="0" x2="${W}" y1="${fixed(base - f * (base - top))}" y2="${fixed(base - f * (base - top))}"/>`).join('');
-  return `<section class="card activity-card"><div class="card-heading"><div><p class="eyebrow">${l('activityLabel')}</p>${l('activityTitle', 'h2')}</div><dl class="stat-pair"><div><dt>${l('activityTotal')}</dt><dd>${total}</dd></div><div><dt>${l('peakDay')}</dt><dd>${peak}</dd></div></dl></div>
-  ${total ? '' : `<p class="chart-empty">${l('noActivity')}</p>`}<svg class="activity-chart" viewBox="0 0 ${W} ${H}" role="img" data-i18n-aria-label="activityTitle" aria-label="${esc(t('activityTitle'))}" focusable="false">${grid}${bars}${tick(0)}${tick(Math.floor(days.length / 2))}${tick(days.length - 1)}</svg></section>`;
+  const bars = days.map((d, i) => {
+    const height = d.count ? Math.max(3, d.count / max * (base - top)) : 2;
+    return html`<rect class="bar${d.count ? '' : ' is-zero'}${d.count === peak && peak ? ' is-peak' : ''}" x="${fixed(i * slot + (slot - bw) / 2)}" y="${fixed(base - height)}" width="${bw}" height="${fixed(height)}" rx="2"><title>${d.day} · ${d.count}</title></rect>`;
+  });
+  const tick = i => { const edge = i === 0 ? 'start' : i === days.length - 1 ? 'end' : 'middle';
+    return html`<text class="axis" x="${fixed(edge === 'start' ? 0 : edge === 'end' ? W : i * slot + slot / 2)}" y="${H - 6}" text-anchor="${edge}">${days[i].day.slice(5)}</text>`; };
+  const grid = [0, .5, 1].map(f => html`<line class="grid-line" x1="0" x2="${W}" y1="${fixed(base - f * (base - top))}" y2="${fixed(base - f * (base - top))}"/>`);
+  return html`<section class="card activity-card">
+  <div class="card-heading"><div><p class="eyebrow">${i18n(t, 'activityLabel')}</p>${i18n(t, 'activityTitle', 'h2')}</div>
+    <dl class="stat-pair"><div><dt>${i18n(t, 'activityTotal')}</dt><dd>${total}</dd></div><div><dt>${i18n(t, 'peakDay')}</dt><dd>${peak}</dd></div></dl></div>
+  ${total ? '' : html`<p class="chart-empty">${i18n(t, 'noActivity')}</p>`}
+  <svg class="activity-chart" viewBox="0 0 ${W} ${H}" role="img" data-i18n-aria-label="activityTitle" aria-label="${t('activityTitle')}" focusable="false">${grid}${bars}${tick(0)}${tick(Math.floor(days.length / 2))}${tick(days.length - 1)}</svg>
+  </section>`;
 }
+
 function composition(insights, t) {
-  const l = (key, tag) => label(t, key, tag);
   const types = rowsOf(insights?.types).slice(0, 6), statuses = rowsOf(insights?.statuses);
   if (!types.length && !statuses.length) return '';
   const typeMax = Math.max(1, ...types.map(r => r.count)), statusTotal = statuses.reduce((n, r) => n + r.count, 0);
   let x = 0;
-  const stack = statuses.map(r => { const w = pct(r.count, statusTotal), seg = `<rect class="seg status-${esc(r.value)}" x="${fixed(x)}" y="0" width="${fixed(w)}" height="8"><title>${esc(t(r.value))} · ${r.count}</title></rect>`; x += w; return seg; }).join('');
-  return `<section class="card composition-card"><div class="card-heading"><div><p class="eyebrow">${l('compositionLabel')}</p>${l('compositionTitle', 'h2')}</div><span class="metric-icon">${icon('layers')}</span></div>
-  <h3 class="mini-heading">${l('typesLegend')}</h3><ul class="type-bars">${types.map((r, i) => `<li class="hue-${i % 6}"><span class="type-name">${esc(t(r.value))}</span><svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="6" rx="3"/><rect class="fill" width="${fixed(Math.max(2, pct(r.count, typeMax)))}" height="6" rx="3"/></svg><span class="type-count">${r.count}</span></li>`).join('')}</ul>
-  ${statuses.length ? `<h3 class="mini-heading">${l('lifecycle')}</h3><svg class="status-stack" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" data-i18n-aria-label="lifecycle" aria-label="${esc(t('lifecycle'))}" focusable="false">${stack}</svg><ul class="status-legend">${statuses.map(r => `<li class="status-${esc(r.value)}"><i aria-hidden="true"></i>${esc(t(r.value))}<span>${r.count}</span></li>`).join('')}</ul>` : ''}</section>`;
+  const stack = statuses.map(r => { const w = pct(r.count, statusTotal), seg = html`<rect class="seg status-${r.value}" x="${fixed(x)}" y="0" width="${fixed(w)}" height="8"><title>${t(r.value)} · ${r.count}</title></rect>`; x += w; return seg; });
+  const typeRows = types.map((r, i) => html`<li class="hue-${i % 6}"><span class="type-name">${t(r.value)}</span>
+    <svg viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="6" rx="3"/><rect class="fill" width="${fixed(Math.max(2, pct(r.count, typeMax)))}" height="6" rx="3"/></svg>
+    <span class="type-count">${r.count}</span></li>`);
+  const lifecycle = statuses.length ? html`<h3 class="mini-heading">${i18n(t, 'lifecycle')}</h3>
+    <svg class="status-stack" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" data-i18n-aria-label="lifecycle" aria-label="${t('lifecycle')}" focusable="false">${stack}</svg>
+    <ul class="status-legend">${statuses.map(r => html`<li class="status-${r.value}"><i aria-hidden="true"></i>${t(r.value)}<span>${r.count}</span></li>`)}</ul>` : '';
+  return html`<section class="card composition-card">
+  <div class="card-heading"><div><p class="eyebrow">${i18n(t, 'compositionLabel')}</p>${i18n(t, 'compositionTitle', 'h2')}</div><span class="metric-icon">${glyph('layers')}</span></div>
+  <h3 class="mini-heading">${i18n(t, 'typesLegend')}</h3><ul class="type-bars">${typeRows}</ul>${lifecycle}
+  </section>`;
 }
 
 export function overviewView(data, {t, memoryRows}) {
   const l = (key, tag) => label(t, key, tag);
   // The reference's trends and connected/completed badges were demo data. Never invent them.
   const count = key => Number.isSafeInteger(data.counts?.[key]) && data.counts[key] >= 0 ? data.counts[key].toLocaleString() : '—';
-  const days = activity(data.insights), charts = activityChart(days, t) + composition(data.insights, t);
+  const days = activity(data.insights), charts = String(activityChart(days, t)) + String(composition(data.insights, t));
   return `<section class="hero neural-hero"><div class="hero-copy"><p class="eyebrow">${l('constellationLabel')}</p><h2>${l('constellationTitle')}</h2>${l('constellationNote','p')}
   <div class="hero-actions"><a class="button primary" href="/app/memories">${icon('search')}${l('browseMemories')}</a><a class="button ghost" href="/app/connections">${icon('connections')}${l('manageConnections')}</a></div>
   <p class="hero-footnote">${icon('security')}${l('connectionDescription')}</p></div>${constellation(data.insights, t)}</section>

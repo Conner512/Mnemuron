@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {renderPage,sendPage,serveAsset,pages} from '../../../web/console/render.mjs';
 import {overviewView,appearanceView,icon} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
+import {declarations} from './helpers/css.mjs';
 
 const view = (data={}) => overviewView(data,{t:text,memoryRows:()=>'<div class="synthetic-row"></div>'});
 const response = () => ({writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=body;}});
@@ -76,14 +77,14 @@ test('Layout A: UI additions preserve CSP, no-store and anti-framing headers',()
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Layout A: desktop metric layout no longer collapses at 1280px',()=>{
+test('Layout A: desktop metric layout keeps four columns through 1280px',()=>{
+ // Intent-level CSS checks; real rendering geometry is asserted in the browser suite.
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
- assert.match(css,/\.metrics\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
- const start=css.indexOf('@media(max-width:1280px)');
- const block=start===-1?'':css.slice(start,css.indexOf('@media',start+1)===-1?css.length:css.indexOf('@media',start+1));
- assert.doesNotMatch(block,/\.metrics[^}]*grid-template-columns/);
- assert.match(css,/\.auth-brand\{[^}]*background:var\(--surface\)/);
- assert.match(css,/\.auth-form\{[^}]*background:var\(--bg\)/);
+ const metrics=declarations(css,'.metrics');
+ assert.equal(metrics.display,'grid');assert.equal(metrics['grid-template-columns'],'repeat(4,minmax(0,1fr))');
+ for(const width of ['1280px','1100px'])assert.equal(declarations(css,'.metrics',{media:`max-width:${width}`})['grid-template-columns'],undefined,width);
+ assert.equal(declarations(css,'.auth-brand').background,'var(--surface)');
+ assert.equal(declarations(css,'.auth-form').background,'var(--bg)');
 });
 test('Layout A: decorative SVG cannot incorporate caller-supplied markup',()=>{
  const svg=icon('<script>synthetic</script>');
@@ -102,4 +103,10 @@ test('Neural overview: charts render only owner aggregates and escape labels',()
  assert.doesNotMatch(html,/<canvas|<progress/);
  const empty=view({counts:{memories:0}});
  assert.match(empty,/constellation is-empty/);assert.doesNotMatch(empty,/activity-card|composition-card|sparkline/);
+});
+test('html template escapes interpolations, joins arrays and only trusts explicit fragments',async()=>{
+ const {html,trusted}=await import('../../../web/console/html.mjs');
+ const user='<img src=x onerror=alert(1)> & "q"';
+ const out=String(html`<p title="${user}">${user}${[html`<b>${1}</b>`,null,false,undefined,2]}${trusted('<i></i>')}</p>`);
+ assert.equal(out,'<p title="&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;<b>1</b>2<i></i></p>');
 });

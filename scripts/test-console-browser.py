@@ -89,6 +89,13 @@ try:
   for name in ['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts']:
    goto(name)
    check('Functional route '+name,page.locator('#console-root h1').count()==1 and page.locator('#console-root [role=alert]').count()==0)
+  # Rendered geometry, not stylesheet text: restyling may change CSS freely as long as layout holds.
+  for width in [1280,1440,1920]:
+   page.set_viewport_size({'width':width,'height':900});goto('overview')
+   tops=page.eval_on_selector_all('.metrics > .metric','els=>els.map(e=>Math.round(e.getBoundingClientRect().top))')
+   check('Overview keeps four metrics on one row at '+str(width),len(tops)==4 and len(set(tops))==1)
+   check('Overview has no horizontal overflow at '+str(width),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+   check('Sidebar spans the viewport at '+str(width),page.evaluate("Math.round(document.querySelector('.sidebar').getBoundingClientRect().height)===innerHeight"))
   for width in [1280,1440,1920]:
    page.set_viewport_size({'width':width,'height':1080});goto('models')
    for theme in ['a','b','c']:

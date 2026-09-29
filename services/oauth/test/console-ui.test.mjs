@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import {renderPage,routeTitle,pages} from '../../../web/console/render.mjs';
 import {catalog} from '../../../web/console/catalog.mjs';
 import {SessionState} from '../../../web/console/session-state.mjs';
+import {declarations,rules,hasMedia} from './helpers/css.mjs';
 test('UI-00 UI-01 INT-02: fixed geometry and full bilingual palette catalogue',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
- assert.match(css,/--sidebar-width:232px/);assert.match(css,/--topbar-height:72px/);
- assert.match(css,/--radius-card:16px/);assert.match(css,/prefers-reduced-motion/);
- for(const theme of ['a','b','c'])for(const mode of ['light','dark'])assert.ok(css.includes(`[data-theme="${theme}"][data-mode="${mode}"]`));
+ const root=declarations(css,':root');
+ for(const token of ['--sidebar-width','--topbar-height','--radius-card'])assert.match(root[token]||'',/^\d+px$/,token);
+ assert.ok(hasMedia(css,'prefers-reduced-motion:reduce'));
+ assert.equal(declarations(css,'*',{media:'prefers-reduced-motion:reduce'}).animation,'none!important');
+ for(const theme of ['a','b','c'])for(const mode of ['light','dark'])assert.ok(rules(css).some(r=>r.selectors.includes(`[data-theme="${theme}"][data-mode="${mode}"]`)),theme+mode);
  assert.deepEqual(Object.keys(catalog.en).sort(),Object.keys(catalog['zh-CN']).sort());
  for(const [selector,block] of [...css.matchAll(/(\[data-theme[^}]+)\{([^}]+)\}/g)].map(m=>[m[1],m[2]])) {
    assert.ok(!/radius|font-size|padding|width|height|gap/.test(block),selector);
@@ -53,7 +56,7 @@ test('console chrome omits retired status notices without removing navigation or
 });
 test('six palettes keep small body, navigation and action text at 4.5:1 contrast',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
- assert.match(css,/button:not\(\.primary\):not\(:disabled\),input,select\{border-color:var\(--muted\)\}/);
+ assert.ok(rules(css).some(r=>['input','select'].every(s=>r.selectors.includes(s))&&r.declarations['border-color']==='var(--muted)'),'form controls keep a 3:1 muted border');
  const luminance=color=>{
   const v=color.match(/[0-9a-f]{2}/ig).map(x=>parseInt(x,16)/255).map(c=>c<=0.04045?c/12.92:((c+0.055)/1.055)**2.4);
   return v[0]*0.2126+v[1]*0.7152+v[2]*0.0722;

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {renderPage,sendPage,serveAsset} from '../../../web/console/render.mjs';
+import {declarations,rules} from './helpers/css.mjs';
 const read=name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.meta.url),'utf8');
 
 test('Select presentation ships through existing assets and preserves strict CSP',()=>{
@@ -30,8 +31,8 @@ test('Select popup state includes keyboard, top-layer positioning and cleanup',(
  for(const key of ['ArrowDown','ArrowUp','Home','End','Enter','Escape','Tab'])assert.ok(js.includes(`'${key}'`));
  assert.match(js,/\.showPopover\(\)/);assert.match(js,/\.hidePopover\(\)/);
  assert.match(js,/visualViewport/);assert.match(js,/selectControls\.delete\(select\)/);
- const css=read('layout-polish.css');assert.match(css,/\.select-popup\{position:fixed/);
- assert.match(css,/\.select-option\[aria-selected="true"\]/);
+ const css=read('layout-polish.css');assert.equal(declarations(css,'.select-popup').position,'fixed');
+ assert.ok(rules(css).some(r=>r.selectors.includes('.select-option[aria-selected="true"]')));
 });
 test('Memory library separates filters from real rows without changing business contracts',()=>{
  const js=read('app.mjs');
@@ -46,6 +47,6 @@ test('Memory library separates filters from real rows without changing business 
 test('One existing stylesheet response contains base and polish rules',()=>{
  const response={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=String(body);}};
  assert.equal(serveAsset({method:'GET'},response,'/assets/styles.css'),true);
- assert.match(response.body,/--sidebar-width:232px/);assert.match(response.body,/\.select-popup\{position:fixed/);
+ assert.ok(declarations(response.body,':root')['--sidebar-width']);assert.equal(declarations(response.body,'.select-popup').position,'fixed');
  assert.equal(serveAsset({method:'GET'},response,'/assets/layout-polish.css'),false);
 });
