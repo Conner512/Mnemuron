@@ -26,7 +26,8 @@ def check_selects(page, goto, check, previews):
     native = page.locator('[name="search_mode"]')
     expect(trigger).to_be_visible()
     check('Select enhancement retains exactly one native named control', native.count() == 1)
-    check('Preferences and filters share one combobox implementation', page.get_by_role('combobox').count() == 6)
+    # Two display preferences (accent theme, language) plus three library filters; there is no colour-mode select.
+    check('Preferences and filters share one combobox implementation', page.get_by_role('combobox').count() == 5)
     check('Library preserves real column headers', page.locator('.memory-table th').count() == 4)
     page.evaluate('''() => {
       window.selectEvents = {input: 0, change: 0};
