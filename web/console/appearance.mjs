@@ -1,5 +1,5 @@
 import {text} from './catalog.mjs';
-const defaults={theme:'a',mode:'light',locale:'zh-CN'};
+const defaults={theme:'a',mode:'dark',locale:'zh-CN'};
 const valid={theme:['a','b','c'],mode:['light','dark'],locale:['zh-CN','en']};
 const account=document.body.dataset.account || 'signed-out';
 const key=`mnemuron.appearance.v1.${account}`;

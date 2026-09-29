@@ -5,6 +5,7 @@ import {translate as t,syncAppearance} from './appearance.mjs';
 import {overviewView,appearanceView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
+import {pageCode} from './routes.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
@@ -27,9 +28,18 @@ function clear() {
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
+// Status bar: real values only. Link latency is the last console request's round trip.
+const clock=document.getElementById('status-clock'),link=document.getElementById('status-link');
+function tick(){if(clock)clock.textContent=new Date().toLocaleTimeString(document.documentElement.lang,{hour12:false});}
+let lastLink;
+function reportLink(ms){lastLink=ms;if(!link)return;const ok=ms!==null;link.dataset.state=ok?'ok':'bad';link.dataset.i18n=ok?'linkOnline':'linkDegraded';link.textContent=ok?`${t('linkOnline')} · ${ms} ms`:t('linkDegraded');}
+tick();setInterval(tick,1000);
 async function api(view,params={}) {
  const ticket=state.ticket();try {
-   const response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});
+   const started=performance.now();let response;
+   try{response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});}
+   catch(error){if(error.name!=='AbortError')reportLink(null);throw error;}
+   reportLink(response.ok||response.status<500?Math.round(performance.now()-started):null);
    if(response.status===401){clear();location.replace('/login');throw new Error('SESSION_REQUIRED');}
    const data=await response.json();if(!state.accepts(ticket))throw new Error('STALE_ACCOUNT');
    if(!response.ok)throw new Error(data.error_code||'UNAVAILABLE');return data;
@@ -58,13 +68,13 @@ const pagination=data=>`<div class="pagination">${offset?`<button type="button" 
 const policy=(note,items)=>`<section class="card"><div class="policy-box"><span class="tag">${l('blocked')}</span>${l(note,'p')}<div class="actions">${items.map(key=>`<button type="button" disabled title="${esc(t('blocked'))}" data-i18n="${key}">${esc(t(key))}</button>`).join('')}</div></div></section>`;
 
 function heading() {
- if(page==='overview')return pageHeading(t,{title:'homeTitle',note:'homeNote'});
+ if(page==='overview')return pageHeading(t,{title:'overview',note:'heroNote',code:pageCode(page)});
  const pageActions={memories:['memory.create','memory.correct'],summaries:['jobs.schedule'],jobs:['jobs.schedule','jobs.cancel'],models:['models.save'],connections:['oauth.revoke','connections.create'],security:['security.password','security.sessions.revoke_others'],storage:['storage.export','storage.import']};
  const managing=capabilities.operator&&capabilities.management?.[page];
  const interactive=page==='appearance'||(pageActions[page]||[]).some(a=>canAct(capabilities,a));
  const badge=`<span class="tag">${l(managing?'operatorManagement':interactive?'interactive':'readOnly')}</span>`;
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
- return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
+ return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create,code:pageCode(page)});
 }
 
 function render(data) {
@@ -88,7 +98,7 @@ async function load() {
    const data=await api(page,params);
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
-   root.innerHTML=`${pageHeading(t,{title:page==='overview'?'homeTitle':page})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
+   root.innerHTML=`${pageHeading(t,{title:page,code:pageCode(page)})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
 }
 
 // Detail pane: docked beside the list on wide screens, modal on narrow ones.
@@ -152,6 +162,7 @@ window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();
 document.addEventListener('appearancechange',()=>{
  // Language changes translate chrome only; do not replace a form, drawer, user content or a pending request.
  document.title=`Mnemuron · ${t(page)}`;
+ if(lastLink!==undefined)reportLink(lastLink);tick();
 });
 
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{closePane();await load();},isActive:()=>!!state.account});

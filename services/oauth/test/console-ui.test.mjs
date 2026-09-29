@@ -8,7 +8,7 @@ import {declarations,rules,hasMedia} from './helpers/css.mjs';
 test('UI-00 UI-01 INT-02: fixed geometry and full bilingual palette catalogue',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  const root=declarations(css,':root');
- for(const token of ['--rail','--topbar','--radius'])assert.match(root[token]||'',/^\d+px$/,token);
+ for(const token of ['--sidebar','--topbar','--radius'])assert.match(root[token]||'',/^\d+px$/,token);
  assert.ok(hasMedia(css,'prefers-reduced-motion:reduce'));
  assert.equal(declarations(css,'*',{media:'prefers-reduced-motion:reduce'}).animation,'none!important');
  for(const theme of ['a','b','c'])for(const mode of ['light','dark'])assert.ok(rules(css).some(r=>r.selectors.includes(`[data-theme="${theme}"][data-mode="${mode}"]`)),theme+mode);

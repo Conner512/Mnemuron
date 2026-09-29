@@ -45,6 +45,6 @@ test('Library controller keeps account-bound reads and capability-gated creation
 test('One existing stylesheet response contains base and control rules',()=>{
  const response={writeHead(status,headers){this.status=status;this.headers=headers;},end(body){this.body=String(body);}};
  assert.equal(serveAsset({method:'GET'},response,'/assets/styles.css'),true);
- assert.ok(declarations(response.body,':root')['--rail']);assert.equal(declarations(response.body,'.select-popup').position,'fixed');
+ assert.ok(declarations(response.body,':root')['--sidebar']);assert.equal(declarations(response.body,'.select-popup').position,'fixed');
  assert.equal(serveAsset({method:'GET'},response,'/assets/controls.css'),false);
 });

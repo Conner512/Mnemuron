@@ -546,4 +546,20 @@ Object.assign(catalog.en,{
  appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
 });
 
+// HUD skin: status bar, radar and palette names. Status values shown only from real session state.
+Object.assign(catalog['zh-CN'],{
+ statusClock:'本地时间',statusSession:'会话',sessionVerified:'已验证',statusLink:'核心链路',linkPending:'连接中',linkOnline:'在线',linkDegraded:'异常',
+ radarLabel:'记忆雷达',radarTitle:'分类扫描',radarNote:'扇区按有效记忆的分类占比划分，外圈刻度是近 30 天每天的写入量。',radarEmpty:'尚无记忆信号',
+ recentStream:'最近写入',openLibrary:'打开记忆库',pulseTitle:'信号概况',pipelineTitle:'整理管线',activityStrip:'近 30 天写入',
+ themeName_a:'星港青',themeName_b:'极光绿',themeName_c:'火星琥珀',themeNote_a:'冷青色舱内仪表',themeNote_b:'低刺激的绿色读数',themeNote_c:'温暖的琥珀色告警灯',
+ appearanceNote:'主题只改变颜色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
+});
+Object.assign(catalog.en,{
+ statusClock:'Local time',statusSession:'Session',sessionVerified:'Verified',statusLink:'Core link',linkPending:'Connecting',linkOnline:'Online',linkDegraded:'Degraded',
+ radarLabel:'MEMORY RADAR',radarTitle:'Category sweep',radarNote:'Sectors show each category’s share of active memories; rim ticks are daily saves over the last 30 days.',radarEmpty:'No memory signal yet',
+ recentStream:'Recently saved',openLibrary:'Open library',pulseTitle:'Signal overview',pipelineTitle:'Organizer pipeline',activityStrip:'Saved in the last 30 days',
+ themeName_a:'Starport',themeName_b:'Aurora',themeName_c:'Mars',themeNote_a:'Cold cyan cockpit readouts',themeNote_b:'Low-glare green telemetry',themeNote_c:'Warm amber warning lights',
+ appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
+});
+
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

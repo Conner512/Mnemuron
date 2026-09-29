@@ -26,9 +26,9 @@ export function memoryRows(rows = [], t) {
     <span class="memory-meta">${typeChip(t, m.memory_type || 'fact')}<time>${formatDate(m.created_at)}</time></span></button>${statusTag(t, m.status || 'active')}</li>`)}</ol>`);
 }
 
-/** Page heading used by every console page. Exactly one H1 per page. */
-export function pageHeading(t, {title, note, actions = ''}) {
-  return String(html`<div class="page-heading"><div>${i18n(t, title, 'h1')}${note ? i18n(t, note, 'p') : ''}</div>${actions ? html`<div class="page-heading-actions">${trusted(actions)}</div>` : ''}</div>`);
+/** Page heading used by every console page. Exactly one H1 per page; the code is a fixed route label. */
+export function pageHeading(t, {title, note, actions = '', code = ''}) {
+  return String(html`<div class="page-heading"><div>${code ? html`<p class="page-kicker"><span>${code}</span></p>` : ''}${i18n(t, title, 'h1')}${note ? i18n(t, note, 'p') : ''}</div>${actions ? html`<div class="page-heading-actions">${trusted(actions)}</div>` : ''}</div>`);
 }
 
 function activityStrip(insights, t) {
@@ -51,20 +51,54 @@ function typeBreakdown(insights, t) {
     <span class="breakdown-count">${r.count}</span></li>`)}</ul></section>`;
 }
 
-/** Home: search first, then the recent stream; counts are secondary. Never invents trends. */
+const polar = (cx, cy, r, a) => [fixed(cx + Math.cos(a) * r), fixed(cy + Math.sin(a) * r)];
+const arc = (cx, cy, r0, r1, a0, a1) => {
+  const large = a1 - a0 > Math.PI ? 1 : 0, [x0, y0] = polar(cx, cy, r1, a0), [x1, y1] = polar(cx, cy, r1, a1), [x2, y2] = polar(cx, cy, r0, a1), [x3, y3] = polar(cx, cy, r0, a0);
+  return `M${x0} ${y0}A${r1} ${r1} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${large} 0 ${x3} ${y3}Z`;
+};
+
+/** Radar: sectors are real category shares; rim ticks are real daily saves. The sweep is decoration. */
+function radar(insights, t) {
+  const cats = rowsOf(insights?.categories).slice(0, 8), total = cats.reduce((n, c) => n + c.count, 0);
+  const days = Array.isArray(insights?.activity) ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30) : [];
+  const C = 180, top = -Math.PI / 2, gap = cats.length > 1 ? 0.03 : 0, maxDay = Math.max(1, ...days.map(d => d.count));
+  let angle = top;
+  const sectors = cats.map((c, i) => {
+    const span = c.count / total * Math.PI * 2, a0 = angle + gap / 2, a1 = angle + span - gap / 2, mid = angle + span / 2; angle += span;
+    const [bx, by] = polar(C, C, 58 + (1 - c.count / cats[0].count) * 70, mid);
+    return html`<g class="sector hue-${i % 6}"><title>${t(c.value)} · ${c.count}</title><path class="sector-band" d="${arc(C, C, 136, 148, a0, Math.max(a0 + .01, a1))}"/>
+      <line class="sector-ray" x1="${C}" y1="${C}" x2="${polar(C, C, 132, mid)[0]}" y2="${polar(C, C, 132, mid)[1]}"/><circle class="blip" cx="${bx}" cy="${by}" r="${fixed(3 + c.count / cats[0].count * 4)}"/></g>`;
+  });
+  const ticks = days.map((d, i) => { const a = top + i / days.length * Math.PI * 2, [x0, y0] = polar(C, C, 154, a), [x1, y1] = polar(C, C, 156 + d.count / maxDay * 16, a);
+    return html`<line class="tick${d.count ? ' is-on' : ''}" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"><title>${d.day} · ${d.count}</title></line>`; });
+  return html`<figure class="radar${cats.length ? '' : ' is-empty'}"><svg viewBox="0 0 360 360" role="img" data-i18n-aria-label="radarTitle" aria-label="${t('radarTitle')}" focusable="false">
+    <defs><linearGradient id="sweep-fade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" class="sweep-a"/><stop offset="1" class="sweep-b"/></linearGradient></defs>
+    ${[36, 72, 108, 148].map(r => html`<circle class="ring" cx="${C}" cy="${C}" r="${r}"/>`)}
+    <path class="crosshair" d="M${C} 16V344M16 ${C}H344"/>${sectors}${ticks}
+    <g class="sweep"><path d="M${C} ${C}L${C} ${C - 148}A148 148 0 0 1 ${polar(C, C, 148, top + .7)[0]} ${polar(C, C, 148, top + .7)[1]}Z" fill="url(#sweep-fade)"/><line x1="${C}" y1="${C}" x2="${C}" y2="${C - 148}"/></g>
+    <circle class="core" cx="${C}" cy="${C}" r="5"/></svg>
+    ${cats.length ? '' : html`<figcaption class="radar-empty">${i18n(t, 'radarEmpty')}</figcaption>`}</figure>`;
+}
+function radarLegend(insights, t) {
+  const cats = rowsOf(insights?.categories).slice(0, 8), total = cats.reduce((n, c) => n + c.count, 0);
+  if (!cats.length) return '';
+  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i % 6}"><i aria-hidden="true"></i><span>${t(c.value)}</span><strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
+}
+
+/** Overview: radar and search first, then counts, recent stream and pipeline. Never invents trends. */
 export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t)}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
-  const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}"><strong>${count(key)}</strong>${i18n(t, title)}</a>`;
+  const metric = (key, title, href, code) => html`<a class="metric" href="${href}" data-metric="${key}"><span class="metric-code">${code}</span><strong>${count(key)}</strong>${i18n(t, title)}</a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
-  return String(html`<form class="ask" action="/app/memories" method="get" role="search">
-    <label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
-    <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}">
-    <kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
+  return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
+      <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
+        <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
+      ${radarLegend(data.insights, t)}</div>${radar(data.insights, t)}</section>
+  <div class="metrics">${metric('memories', 'memoryCount', '/app/memories', 'M-01')}${metric('sources', 'sourceCount', '/app/memories?focus=sources', 'M-02')}${metric('summaries', 'summaryCount', '/app/summaries', 'M-03')}${metric('jobs', 'jobCount', '/app/jobs', 'M-04')}</div>
   <div class="home-grid">
-    <section class="stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
+    <section class="card stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
       ${trusted(rows(data.recent || []))}${i18n(t, 'inspectMemoryNote', 'p')}</section>
     <aside class="pulse" data-i18n-aria-label="pulseTitle" aria-label="${t('pulseTitle')}">
-      <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/jobs')}</div>
       ${activityStrip(data.insights, t)}${typeBreakdown(data.insights, t)}
       <section class="pulse-block processing-card">${i18n(t, 'pipelineTitle', 'h3')}<div class="pipeline">
         ${stage('/app/memories', 'library', 'memoryCount', 'atomicNote', 'memories')}${stage('/app/summaries', 'summaries', 'summaryCount', 'derivedNote', 'summaries')}${stage('/app/jobs', 'jobs', 'jobCount', 'jobStatusNote', 'jobs')}</div>
