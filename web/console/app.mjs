@@ -28,18 +28,9 @@ function clear() {
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
-// Status bar: real values only. Link latency is the last console request's round trip.
-const clock=document.getElementById('status-clock'),link=document.getElementById('status-link');
-function tick(){if(clock)clock.textContent=new Date().toLocaleTimeString(document.documentElement.lang,{hour12:false});}
-let lastLink;
-function reportLink(ms){lastLink=ms;if(!link)return;const ok=ms!==null;link.dataset.state=ok?'ok':'bad';link.dataset.i18n=ok?'linkOnline':'linkDegraded';link.textContent=ok?`${t('linkOnline')} · ${ms} ms`:t('linkDegraded');}
-tick();setInterval(tick,1000);
 async function api(view,params={}) {
  const ticket=state.ticket();try {
-   const started=performance.now();let response;
-   try{response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});}
-   catch(error){if(error.name!=='AbortError')reportLink(null);throw error;}
-   reportLink(response.ok||response.status<500?Math.round(performance.now()-started):null);
+   const response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});
    if(response.status===401){clear();location.replace('/login');throw new Error('SESSION_REQUIRED');}
    const data=await response.json();if(!state.accepts(ticket))throw new Error('STALE_ACCOUNT');
    if(!response.ok)throw new Error(data.error_code||'UNAVAILABLE');return data;
@@ -162,7 +153,6 @@ window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();
 document.addEventListener('appearancechange',()=>{
  // Language changes translate chrome only; do not replace a form, drawer, user content or a pending request.
  document.title=`Mnemuron · ${t(page)}`;
- if(lastLink!==undefined)reportLink(lastLink);tick();
 });
 
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{closePane();await load();},isActive:()=>!!state.account});

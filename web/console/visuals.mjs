@@ -34,11 +34,11 @@ export function pageHeading(t, {title, note, actions = '', code = ''}) {
 function activityStrip(insights, t) {
   const days = Array.isArray(insights?.activity) ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30) : [];
   if (!days.length) return '';
-  const total = days.reduce((n, d) => n + d.count, 0), max = Math.max(1, ...days.map(d => d.count));
-  const level = n => n === 0 ? 0 : Math.min(4, Math.ceil(n / max * 4));
-  const cells = days.map((d, i) => html`<rect class="cell q${level(d.count)}" x="${i * 10}" y="0" width="8" height="22" rx="2"><title>${d.day} · ${d.count}</title></rect>`);
+  const total = days.reduce((n, d) => n + d.count, 0), max = Math.max(1, ...days.map(d => d.count)), H = 44, step = 10;
+  const bars = days.map((d, i) => { const h = d.count ? Math.max(6, d.count / max * H) : 4;
+    return html`<rect class="bar${d.count ? '' : ' is-zero'}" x="${i * step}" y="${fixed(H - h)}" width="6" height="${fixed(h)}" rx="3"><title>${d.day} · ${d.count}</title></rect>`; });
   return html`<section class="pulse-block"><div class="pulse-head">${i18n(t, 'activityStrip', 'h3')}<span class="pulse-figure">${total}</span></div>
-    <svg class="activity-strip" viewBox="0 0 ${days.length * 10 - 2} 22" preserveAspectRatio="none" role="img" data-i18n-aria-label="activityStrip" aria-label="${t('activityStrip')}" focusable="false">${cells}</svg>
+    <svg class="activity-bars" viewBox="0 0 ${days.length * step - 4} ${H}" preserveAspectRatio="none" role="img" data-i18n-aria-label="activityStrip" aria-label="${t('activityStrip')}" focusable="false">${bars}</svg>
     <div class="strip-axis"><span>${days[0].day.slice(5)}</span><span>${days.at(-1).day.slice(5)}</span></div></section>`;
 }
 
@@ -51,41 +51,24 @@ function typeBreakdown(insights, t) {
     <span class="breakdown-count">${r.count}</span></li>`)}</ul></section>`;
 }
 
-const polar = (cx, cy, r, a) => [fixed(cx + Math.cos(a) * r), fixed(cy + Math.sin(a) * r)];
-const arc = (cx, cy, r0, r1, a0, a1) => {
-  const large = a1 - a0 > Math.PI ? 1 : 0, [x0, y0] = polar(cx, cy, r1, a0), [x1, y1] = polar(cx, cy, r1, a1), [x2, y2] = polar(cx, cy, r0, a1), [x3, y3] = polar(cx, cy, r0, a0);
-  return `M${x0} ${y0}A${r1} ${r1} 0 ${large} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${large} 0 ${x3} ${y3}Z`;
-};
-
-/** Radar: sectors are real category shares; rim ticks are real daily saves. The sweep is decoration. */
-function radar(insights, t) {
-  const cats = rowsOf(insights?.categories).slice(0, 8), total = cats.reduce((n, c) => n + c.count, 0);
-  const days = Array.isArray(insights?.activity) ? insights.activity.filter(d => typeof d?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day) && safeCount(d.count) !== null).slice(-30) : [];
-  const C = 180, top = -Math.PI / 2, gap = cats.length > 1 ? 0.03 : 0, maxDay = Math.max(1, ...days.map(d => d.count));
-  let angle = top;
-  const sectors = cats.map((c, i) => {
-    const span = c.count / total * Math.PI * 2, a0 = angle + gap / 2, a1 = angle + span - gap / 2, mid = angle + span / 2; angle += span;
-    const [bx, by] = polar(C, C, 58 + (1 - c.count / cats[0].count) * 70, mid);
-    return html`<g class="sector hue-${i % 6}"><title>${t(c.value)} · ${c.count}</title><path class="sector-band" d="${arc(C, C, 136, 148, a0, Math.max(a0 + .01, a1))}"/>
-      <line class="sector-ray" x1="${C}" y1="${C}" x2="${polar(C, C, 132, mid)[0]}" y2="${polar(C, C, 132, mid)[1]}"/><circle class="blip" cx="${bx}" cy="${by}" r="${fixed(3 + c.count / cats[0].count * 4)}"/></g>`;
-  });
-  const ticks = days.map((d, i) => { const a = top + i / days.length * Math.PI * 2, [x0, y0] = polar(C, C, 154, a), [x1, y1] = polar(C, C, 156 + d.count / maxDay * 16, a);
-    return html`<line class="tick${d.count ? ' is-on' : ''}" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}"><title>${d.day} · ${d.count}</title></line>`; });
-  return html`<figure class="radar${cats.length ? '' : ' is-empty'}"><svg viewBox="0 0 360 360" role="img" data-i18n-aria-label="radarTitle" aria-label="${t('radarTitle')}" focusable="false">
-    <defs><linearGradient id="sweep-fade" x1="0" y1="0" x2="1" y2="0"><stop offset="0" class="sweep-a"/><stop offset="1" class="sweep-b"/></linearGradient></defs>
-    ${[36, 72, 108, 148].map(r => html`<circle class="ring" cx="${C}" cy="${C}" r="${r}"/>`)}
-    <path class="crosshair" d="M${C} 16V344M16 ${C}H344"/>${sectors}${ticks}
-    <g class="sweep"><path d="M${C} ${C}L${C} ${C - 148}A148 148 0 0 1 ${polar(C, C, 148, top + .7)[0]} ${polar(C, C, 148, top + .7)[1]}Z" fill="url(#sweep-fade)"/><line x1="${C}" y1="${C}" x2="${C}" y2="${C - 148}"/></g>
-    <circle class="core" cx="${C}" cy="${C}" r="5"/></svg>
+/** Distribution ring: each arc is a real category share of active memories; the centre is the total. */
+function distribution(insights, t) {
+  const cats = rowsOf(insights?.categories).slice(0, 6), total = cats.reduce((n, c) => n + c.count, 0);
+  const R = 84, C = 2 * Math.PI * R, gap = cats.length > 1 ? 24 : 0; // round caps add half a stroke at each end
+  let offset = 0;
+  const arcs = cats.map((c, i) => { const len = Math.max(0.1, c.count / total * C - gap), arc = html`<circle class="arc hue-${i}" cx="110" cy="110" r="${R}" stroke-dasharray="${fixed(len)} ${fixed(C - len)}" stroke-dashoffset="${fixed(-offset)}"><title>${t(c.value)} · ${c.count}</title></circle>`; offset += c.count / total * C; return arc; });
+  return html`<figure class="distribution${cats.length ? '' : ' is-empty'}"><svg viewBox="0 0 220 220" role="img" data-i18n-aria-label="radarTitle" aria-label="${t('radarTitle')}" focusable="false">
+    <circle class="ring-track" cx="110" cy="110" r="${R}"/><g class="arcs" transform="rotate(-90 110 110)">${arcs}</g>
+    <text class="ring-total" x="110" y="108" text-anchor="middle">${total}</text><text class="ring-caption" x="110" y="132" text-anchor="middle" data-i18n="activeMemories">${t('activeMemories')}</text></svg>
     ${cats.length ? '' : html`<figcaption class="radar-empty">${i18n(t, 'radarEmpty')}</figcaption>`}</figure>`;
 }
-function radarLegend(insights, t) {
-  const cats = rowsOf(insights?.categories).slice(0, 8), total = cats.reduce((n, c) => n + c.count, 0);
+function distributionLegend(insights, t) {
+  const cats = rowsOf(insights?.categories).slice(0, 6), total = cats.reduce((n, c) => n + c.count, 0);
   if (!cats.length) return '';
-  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i % 6}"><i aria-hidden="true"></i><span>${t(c.value)}</span><strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
+  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i><span>${t(c.value)}</span><strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
 }
 
-/** Overview: radar and search first, then counts, recent stream and pipeline. Never invents trends. */
+/** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
 export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t)}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
   const metric = (key, title, href, code) => html`<a class="metric" href="${href}" data-metric="${key}"><span class="metric-code">${code}</span><strong>${count(key)}</strong>${i18n(t, title)}</a>`;
@@ -93,7 +76,7 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
   return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
       <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
         <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
-      ${radarLegend(data.insights, t)}</div>${radar(data.insights, t)}</section>
+      ${distributionLegend(data.insights, t)}</div>${distribution(data.insights, t)}</section>
   <div class="metrics">${metric('memories', 'memoryCount', '/app/memories', 'M-01')}${metric('sources', 'sourceCount', '/app/memories?focus=sources', 'M-02')}${metric('summaries', 'summaryCount', '/app/summaries', 'M-03')}${metric('jobs', 'jobCount', '/app/jobs', 'M-04')}</div>
   <div class="home-grid">
     <section class="card stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>

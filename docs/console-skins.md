@@ -14,15 +14,18 @@ The server bundles the files listed in `STYLESHEETS` (`web/console/render.mjs`) 
 
 ## Active skin: `liquid`
 
-Liquid glass with a sci-fi setting (`skin-liquid.css`, `data-skin="liquid"`): translucent, refracting glass
-panels (blur + saturation everywhere; an SVG displacement filter where `backdrop-filter: url()` is supported),
-iridescent rims and specular highlights, floating sidebar/top bar, capsule controls, an iridescent nebula
-over a star field with a moving horizon grid, a status bar (local time, session, measured core-link latency) and
-the memory hologram on the overview (sectors and rim ticks from owner-scoped counts only).
+Calm liquid glass (`skin-liquid.css`, `data-skin="liquid"`): one glass material everywhere — backdrop blur and
+saturation, a faint top sheen, a hairline specular rim and a soft shadow — over a still colour field of a few
+large, low-saturation light pools. Floating sidebar and top bar, capsule controls, system numerals, no glow or
+gradient text. Gentle SVG refraction on the sidebar, top bar and metric tiles where `backdrop-filter: url()` is
+supported. The overview shows a distribution ring (category shares of active memories, total in the centre).
 
-Performance: full-screen motion underneath many blurred panels forces a re-blur every frame, so the nebula only
-fades in once; continuous motion is limited to the horizon grid, radar sweep and small highlights.
-`prefers-reduced-motion` stops all animation and `prefers-reduced-transparency` swaps glass for solid surfaces.
+Sign-in pages add the `aurora` layer (`skin-aurora.css`, `data-skin="liquid aurora"`): iridescent nebula,
+star field and horizon grid.
+
+Performance: no continuous full-screen motion underneath the glass, and dialogs avoid backdrop blur, because
+every animated or blurred full-viewport layer forces all glass panels to re-blur each frame.
+`prefers-reduced-motion` stops animation and `prefers-reduced-transparency` swaps glass for solid surfaces.
 
 ## Alternative skin kept: `hud`
 

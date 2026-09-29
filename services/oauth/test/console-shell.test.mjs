@@ -88,19 +88,19 @@ test('Shell: the sidebar keeps three groups and all twelve destinations with rou
   assert.equal((nav.match(/<a href="\/app\//g)||[]).length,12);
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
-  assert.match(html,/id="status-clock"/);assert.match(html,/id="status-link" data-state="pending"/);
-  assert.match(html,/data-skin="liquid"/);assert.match(html,/<filter id="liquid-refraction"/);
+    assert.match(html,/data-skin="liquid"/);assert.doesNotMatch(html,/status-readout/);assert.match(html,/<filter id="liquid-refraction"/);
  }
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  assert.equal(declarations(css,'.pane').position,'fixed');
  assert.ok(rules(css).some(r=>r.selectors.includes('body.pane-open .workspace')),'docked pane reserves space instead of covering the list');
 });
-test('Shell: the HUD radar draws only real category shares and daily counts',()=>{
+test('Shell: the distribution ring draws only real category shares',()=>{
  const html=view({counts:{memories:3},insights:{categories:[{value:'technical',count:3},{value:'<i>x</i>',count:1},{value:'zero',count:0}],activity:[{day:'2026-09-01',count:2},{day:'2026-09-02',count:0}]}});
- assert.equal((html.match(/class="sector /g)||[]).length,2);
- assert.equal((html.match(/<line class="tick/g)||[]).length,2);
+ assert.equal((html.match(/class="arc /g)||[]).length,2);
+ assert.match(html,/<text class="ring-total"[^>]*>4<\/text>/);
+ assert.equal((html.match(/<rect class="bar/g)||[]).length,2);
  assert.doesNotMatch(html,/<i>x<\/i>/);assert.match(html,/75%/);
- assert.match(view({counts:{}}),/radar is-empty/);
+ assert.match(view({counts:{}}),/distribution is-empty/);
 });
 test('Shell: decorative SVG cannot incorporate caller-supplied markup',()=>{
  const svg=icon('<script>synthetic</script>');
@@ -111,10 +111,10 @@ test('Shell: home charts render only owner aggregates and escape labels',()=>{
  const insights={activity:[{day:'2026-09-01',count:2},{day:'2026-09-02',count:0},{day:'bad',count:9},{day:'2026-09-03',count:-1}],
   types:[{value:'fact',count:3},{value:'<img src=x>',count:1}],categories:[{value:'<script>x</script>',count:1}]};
  const html=view({counts:{memories:4},insights});
- assert.match(html,/class="activity-strip"/);assert.match(html,/class="breakdown"/);
- assert.equal((html.match(/<rect class="cell/g)||[]).length,2);
+ assert.match(html,/class="activity-bars"/);assert.match(html,/class="breakdown"/);
+ assert.equal((html.match(/<rect class="bar/g)||[]).length,2);
  assert.doesNotMatch(html,/<img src=x|<script>x/);
- assert.doesNotMatch(view({counts:{memories:0}}),/activity-strip|breakdown/);
+ assert.doesNotMatch(view({counts:{memories:0}}),/activity-bars|breakdown/);
 });
 test('Shell: library and detail keep business hooks and escape memory content',()=>{
  const row={memory_id:'m"1',content:'<b>synthetic</b>',memory_type:'decision',status:'active',category:'technical',created_at:'2026-09-01T00:00:00Z'};
