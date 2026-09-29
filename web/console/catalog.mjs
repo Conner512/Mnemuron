@@ -562,4 +562,8 @@ Object.assign(catalog.en,{
  appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
 });
 
+// Liquid-glass skin palette names (override earlier labels).
+Object.assign(catalog['zh-CN'],{themeName_a:'星云',themeName_b:'极光',themeName_c:'日冕',themeNote_a:'青紫虹彩，深空玻璃',themeNote_b:'青绿极光，安静透明',themeNote_c:'玫瑰色日冕，温暖光晕',radarLabel:'记忆全息图',radarTitle:'分类光谱'});
+Object.assign(catalog.en,{themeName_a:'Nebula',themeName_b:'Aurora',themeName_c:'Corona',themeNote_a:'Cyan-violet iridescence',themeNote_b:'Teal aurora, calm glass',themeNote_c:'Rose corona, warm glow',radarLabel:'MEMORY HOLOGRAM',radarTitle:'Category spectrum'});
+
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

@@ -3,53 +3,53 @@
    see docs/console-skins.md. */
 
 /* Dynamic background: drifting star layers over a perspective grid. CSS only. */
-[data-skin="hud"] body::before,[data-skin="hud"] body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:0}
-[data-skin="hud"][data-mode="dark"] body::before{
+[data-skin~="hud"] body::before,[data-skin~="hud"] body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:0}
+[data-skin~="hud"][data-mode="dark"] body::before{
   background-image:
     radial-gradient(1px 1px at 12% 18%,#ffffffb3 50%,transparent 51%),radial-gradient(1px 1px at 68% 32%,#ffffff99 50%,transparent 51%),
     radial-gradient(1.5px 1.5px at 38% 74%,#ffffffcc 50%,transparent 51%),radial-gradient(1px 1px at 84% 86%,#ffffff80 50%,transparent 51%),
     radial-gradient(1px 1px at 52% 8%,#ffffff99 50%,transparent 51%),radial-gradient(1.5px 1.5px at 92% 52%,#ffffffb3 50%,transparent 51%),
     radial-gradient(1px 1px at 24% 44%,#ffffff66 50%,transparent 51%),radial-gradient(1px 1px at 6% 66%,#ffffff80 50%,transparent 51%);
   background-size:520px 520px;animation:drift 160s linear infinite;opacity:.55}
-[data-skin="hud"] body::after{
+[data-skin~="hud"] body::after{
   background:
     radial-gradient(1200px 600px at 75% -10%,color-mix(in srgb,var(--accent) 12%,transparent),transparent 70%),
     radial-gradient(900px 500px at 0% 110%,color-mix(in srgb,var(--accent) 7%,transparent),transparent 70%),
     linear-gradient(var(--grid-line,transparent) 1px,transparent 1px) 0 0/48px 48px,
     linear-gradient(90deg,var(--grid-line,transparent) 1px,transparent 1px) 0 0/48px 48px;
   -webkit-mask-image:linear-gradient(#000,#0008 60%,transparent);mask-image:linear-gradient(#000,#0008 60%,transparent)}
-[data-skin="hud"][data-mode="dark"]{--grid-line:color-mix(in srgb,var(--accent) 6%,transparent)}
-[data-skin="hud"][data-mode="light"]{--grid-line:color-mix(in srgb,var(--accent) 9%,transparent)}
-[data-skin="hud"] body::before{animation-name:drift}
+[data-skin~="hud"][data-mode="dark"]{--grid-line:color-mix(in srgb,var(--accent) 6%,transparent)}
+[data-skin~="hud"][data-mode="light"]{--grid-line:color-mix(in srgb,var(--accent) 9%,transparent)}
+[data-skin~="hud"] body::before{animation-name:drift}
 
 /* Cut-corner panels with bracket corners. */
-[data-skin="hud"] :is(.card,.metric,.pulse-block,.form-content,.summary-list){
+[data-skin~="hud"] :is(.card,.metric,.pulse-block,.form-content,.summary-list){
   clip-path:polygon(var(--cut) 0,100% 0,100% calc(100% - var(--cut)),calc(100% - var(--cut)) 100%,0 100%,0 var(--cut))}
-[data-skin="hud"] :is(.card,.metric,.pulse-block,.form-content)::before{content:"";position:absolute;top:0;left:0;width:var(--cut);height:var(--cut);pointer-events:none;
+[data-skin~="hud"] :is(.card,.metric,.pulse-block,.form-content)::before{content:"";position:absolute;top:0;left:0;width:var(--cut);height:var(--cut);pointer-events:none;
   background:linear-gradient(135deg,transparent calc(50% - .7px),var(--accent) 50%,transparent calc(50% + .7px))}
-[data-skin="hud"] :is(.card,.metric,.pulse-block,.form-content)::after{content:"";position:absolute;right:-1px;bottom:-1px;width:26px;height:26px;pointer-events:none;
+[data-skin~="hud"] :is(.card,.metric,.pulse-block,.form-content)::after{content:"";position:absolute;right:-1px;bottom:-1px;width:26px;height:26px;pointer-events:none;
   background:linear-gradient(135deg,transparent calc(50% - .7px),var(--line) 50%,transparent calc(50% + .7px)) right bottom/var(--cut) var(--cut) no-repeat,
     linear-gradient(var(--accent),var(--accent)) right calc(var(--cut) + 2px) bottom 0/1px 10px no-repeat,
     linear-gradient(var(--accent),var(--accent)) right 0 bottom calc(var(--cut) + 2px)/10px 1px no-repeat}
-[data-skin="hud"] .metric::before{background:linear-gradient(135deg,transparent calc(50% - .7px),var(--accent) 50%,transparent calc(50% + .7px))}
+[data-skin~="hud"] .metric::before{background:linear-gradient(135deg,transparent calc(50% - .7px),var(--accent) 50%,transparent calc(50% + .7px))}
 
 /* Instrument details: tick rulers under section heads, glowing readouts, a scan line on the top bar. */
-[data-skin="hud"] .section-head{padding-bottom:8px;background:linear-gradient(90deg,var(--line) 1px,transparent 1px) left bottom/8px 4px repeat-x}
-[data-skin="hud"] .radar-panel{background:radial-gradient(420px 320px at 80% 50%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%),color-mix(in srgb,var(--surface) 86%,transparent)}
-[data-skin="hud"][data-mode="dark"] :is(.metric strong,.pulse-figure,.processing-stage strong,.radar-copy h2){text-shadow:0 0 14px var(--glow)}
-[data-skin="hud"][data-mode="dark"] .page-heading h1{text-shadow:0 0 18px var(--glow)}
-[data-skin="hud"] .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:scan 7s var(--ease) infinite;opacity:.8}
-[data-skin="hud"] .sidebar nav a[aria-current] .nav-code{animation:blink 2.4s steps(2) infinite}
-[data-skin="hud"] .brand-mark{animation:pulse-glow 4s ease-in-out infinite}
-[data-skin="hud"] .memory-row{position:relative}
-[data-skin="hud"] .stream-list{counter-reset:row}
-[data-skin="hud"] .stream-list .memory-row::before{counter-increment:row;content:counter(row,decimal-leading-zero);align-self:center;width:26px;margin-left:6px;font-family:var(--font-mono);font-size:10px;color:var(--muted);opacity:.7}
-[data-skin="hud"] .memory-table tbody{counter-reset:row}
-[data-skin="hud"] .loading-card{background:repeating-linear-gradient(0deg,transparent 0 3px,var(--hover) 3px 4px)}
+[data-skin~="hud"] .section-head{padding-bottom:8px;background:linear-gradient(90deg,var(--line) 1px,transparent 1px) left bottom/8px 4px repeat-x}
+[data-skin~="hud"] .radar-panel{background:radial-gradient(420px 320px at 80% 50%,color-mix(in srgb,var(--accent) 10%,transparent),transparent 70%),color-mix(in srgb,var(--surface) 86%,transparent)}
+[data-skin~="hud"][data-mode="dark"] :is(.metric strong,.pulse-figure,.processing-stage strong,.radar-copy h2){text-shadow:0 0 14px var(--glow)}
+[data-skin~="hud"][data-mode="dark"] .page-heading h1{text-shadow:0 0 18px var(--glow)}
+[data-skin~="hud"] .topbar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:scan 7s var(--ease) infinite;opacity:.8}
+[data-skin~="hud"] .sidebar nav a[aria-current] .nav-code{animation:blink 2.4s steps(2) infinite}
+[data-skin~="hud"] .brand-mark{animation:pulse-glow 4s ease-in-out infinite}
+[data-skin~="hud"] .memory-row{position:relative}
+[data-skin~="hud"] .stream-list{counter-reset:row}
+[data-skin~="hud"] .stream-list .memory-row::before{counter-increment:row;content:counter(row,decimal-leading-zero);align-self:center;width:26px;margin-left:6px;font-family:var(--font-mono);font-size:10px;color:var(--muted);opacity:.7}
+[data-skin~="hud"] .memory-table tbody{counter-reset:row}
+[data-skin~="hud"] .loading-card{background:repeating-linear-gradient(0deg,transparent 0 3px,var(--hover) 3px 4px)}
 
 /* Light mode: a white laboratory — same geometry, no stars, fainter glow. */
-[data-skin="hud"][data-mode="light"] body::before{display:none}
-[data-skin="hud"][data-mode="light"] :is(.card,.metric,.pulse-block,.form-content){background:color-mix(in srgb,var(--surface) 94%,transparent)}
+[data-skin~="hud"][data-mode="light"] body::before{display:none}
+[data-skin~="hud"][data-mode="light"] :is(.card,.metric,.pulse-block,.form-content){background:color-mix(in srgb,var(--surface) 94%,transparent)}
 
 @keyframes drift{from{background-position:0 0}to{background-position:-520px 260px}}
 @keyframes scan{0%{background-position:-40% 0}100%{background-position:140% 0}}

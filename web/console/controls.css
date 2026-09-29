@@ -21,7 +21,7 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .select-option[aria-selected="true"]>.select-check{visibility:visible}
 .select-group{padding:8px 8px 3px;font-size:11px;font-weight:600;color:var(--muted)}
 .select-swatch{width:10px;height:10px;flex:none;border-radius:3px}
-.select-swatch[data-palette="a"]{background:#3FD0FF}.select-swatch[data-palette="b"]{background:#45F0B0}.select-swatch[data-palette="c"]{background:#FFB347}
+.select-swatch[data-palette="a"]{background:linear-gradient(135deg,#5EE7FF,#A78BFA)}.select-swatch[data-palette="b"]{background:linear-gradient(135deg,#5FF2D0,#38BDF8)}.select-swatch[data-palette="c"]{background:linear-gradient(135deg,#FF9EC7,#FDBA74)}
 .select-shell[data-palette]>.select-trigger::before{content:"";width:9px;height:9px;flex:none;border-radius:3px;background:var(--accent)}
 .select-error{margin-top:5px;color:var(--bad);font-size:12px}
 .select-error[hidden]{display:none}

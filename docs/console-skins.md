@@ -12,21 +12,29 @@ The console separates structure from decoration:
 The server bundles the files listed in `STYLESHEETS` (`web/console/render.mjs`) into the single
 `/assets/styles.css` response, so CSP and ingress rules are unchanged.
 
-## Active skin: `hud`
+## Active skin: `liquid`
 
-Spacecraft instrument panel: cut-corner panels with bracket corners, tick rulers under section heads,
-drifting star field and grid (dark), a white-laboratory variant (light), route codes (`MN-01` …), a status bar
-with local time, session and measured core-link latency, and a radar on the overview whose sectors and rim
-ticks come from owner-scoped counts only.
+Liquid glass with a sci-fi setting (`skin-liquid.css`, `data-skin="liquid"`): translucent, refracting glass
+panels (blur + saturation everywhere; an SVG displacement filter where `backdrop-filter: url()` is supported),
+iridescent rims and specular highlights, floating sidebar/top bar, capsule controls, an iridescent nebula
+over a star field with a moving horizon grid, a status bar (local time, session, measured core-link latency) and
+the memory hologram on the overview (sectors and rim ticks from owner-scoped counts only).
+
+Performance: full-screen motion underneath many blurred panels forces a re-blur every frame, so the nebula only
+fades in once; continuous motion is limited to the horizon grid, radar sweep and small highlights.
+`prefers-reduced-motion` stops all animation and `prefers-reduced-transparency` swaps glass for solid surfaces.
+
+## Alternative skin kept: `hud`
+
+`skin-hud.css` (spacecraft instrument panel: cut corners, bracket corners, tick rulers, route codes) is kept in
+the repository but not bundled. To use it, set `data-skin="hud"` in `render.mjs` and bundle `skin-hud.css`
+instead of `skin-liquid.css`.
 
 ## Reserved skins (not implemented)
-
-Each would be a new `skin-*.css` plus palette overrides scoped to `[data-skin=…]`:
 
 | Skin | Direction |
 | --- | --- |
 | `neon` | Cyberpunk: black base, magenta/cyan neon, scan lines, subtle glitch on hover, high contrast. |
-| `holo` | Holographic glass: translucent blurred panels, glowing edges, animated node network backdrop. |
 | `crt` | Retro-future terminal: amber or green phosphor, CRT scan lines and curvature vignette, all monospace. |
 
 Switching skins at runtime would add a `skin` preference next to theme/mode/locale in `appearance.mjs`

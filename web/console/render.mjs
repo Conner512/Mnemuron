@@ -66,12 +66,14 @@ function authShell({title,body,authPurpose}) {
   </main>`;
 }
 
+// Liquid-glass refraction: a fixed, local SVG filter used by backdrop-filter where supported.
+const glassDefs='<svg class="glass-defs" width="0" height="0" aria-hidden="true" focusable="false"><filter id="liquid-refraction" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.006 0.011" numOctaves="2" seed="11" result="noise"/><feGaussianBlur in="noise" stdDeviation="3" result="soft"/><feDisplacementMap in="SourceGraphic" in2="soft" scale="34" xChannelSelector="R" yChannelSelector="G"/></filter></svg>';
 export function renderPage({title,body='',auth=false,authPurpose='console',account=null,csrf='',page='overview'}) {
   const inside=auth?authShell({title,body,authPurpose}):consoleShell({title,body,account,csrf,page});
-  return `<!doctype html><html lang="zh-CN" data-skin="hud" data-theme="a" data-mode="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body class="${auth?'is-auth':'is-console'}" data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
+  return `<!doctype html><html lang="zh-CN" data-skin="liquid" data-theme="a" data-mode="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body class="${auth?'is-auth':'is-console'}" data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${glassDefs}${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
 }
 const MODULES=['routes.mjs','appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','visuals.mjs','icons.mjs','html.mjs','actions.mjs','connections.mjs'];
-const STYLESHEETS=['styles.css','controls.css','skin-hud.css'];
+const STYLESHEETS=['styles.css','controls.css','skin-liquid.css'];
 export function serveAsset(request,response,pathname) {
   const file=pathname.match(/^\/assets\/([a-z-]+\.(?:mjs|css))$/)?.[1];
   if(!file||request.method!=='GET'||!(MODULES.includes(file)||file==='styles.css'))return false;

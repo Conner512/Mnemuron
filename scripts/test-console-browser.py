@@ -95,7 +95,7 @@ try:
    tops=page.eval_on_selector_all('.metrics > .metric','els=>els.map(e=>Math.round(e.getBoundingClientRect().top))')
    check('Overview shows four metrics in one row at '+str(width),len(tops)==4 and len(set(tops))==1)
    check('Overview has no horizontal overflow at '+str(width),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
-   check('Sidebar spans the viewport at '+str(width),page.evaluate("Math.round(document.querySelector('.sidebar').getBoundingClientRect().height)===innerHeight"))
+   check('Sidebar spans the viewport at '+str(width),page.evaluate("(()=>{const r=document.querySelector('.sidebar').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.height>=innerHeight-40})()"))
    goto('memories');page.locator('[data-memory]').first.click();page.locator('#memory-content .body-content').wait_for()
    docked=page.evaluate("(()=>{const p=document.querySelector('#memory-dialog').getBoundingClientRect(),w=document.querySelector('.workspace').getBoundingClientRect();return {modal:document.querySelector('#memory-dialog').matches(':modal'),overlap:w.right-p.left}})()")
    check('Detail pane docks beside the list at '+str(width),not docked['modal'] and docked['overlap']<=1 and page.evaluate('document.documentElement.scrollWidth<=innerWidth'))

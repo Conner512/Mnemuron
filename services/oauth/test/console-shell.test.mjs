@@ -89,7 +89,7 @@ test('Shell: the sidebar keeps three groups and all twelve destinations with rou
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
   assert.match(html,/id="status-clock"/);assert.match(html,/id="status-link" data-state="pending"/);
-  assert.match(html,/data-skin="hud"/);
+  assert.match(html,/data-skin="liquid"/);assert.match(html,/<filter id="liquid-refraction"/);
  }
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  assert.equal(declarations(css,'.pane').position,'fixed');
