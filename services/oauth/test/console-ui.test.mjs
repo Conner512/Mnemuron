@@ -11,7 +11,8 @@ test('UI-00 UI-01 INT-02: fixed geometry and full bilingual palette catalogue',(
  for(const token of ['--sidebar','--topbar','--radius'])assert.match(root[token]||'',/^\d+px$/,token);
  assert.ok(hasMedia(css,'prefers-reduced-motion:reduce'));
  assert.equal(declarations(css,'*',{media:'prefers-reduced-motion:reduce'}).animation,'none!important');
- for(const theme of ['a','b','c'])for(const mode of ['light','dark'])assert.ok(rules(css).some(r=>r.selectors.includes(`[data-theme="${theme}"][data-mode="${mode}"]`)),theme+mode);
+ for(const theme of ['a','b','c'])assert.ok(rules(css).some(r=>r.selectors.includes(`[data-theme="${theme}"]`)),theme);
+ assert.doesNotMatch(css,/\[data-mode|\[data-skin/,'one light palette, no decorative skin layers');
  assert.deepEqual(Object.keys(catalog.en).sort(),Object.keys(catalog['zh-CN']).sort());
  for(const [selector,block] of [...css.matchAll(/(\[data-theme[^}]+)\{([^}]+)\}/g)].map(m=>[m[1],m[2]])) {
    assert.ok(!/radius|font-size|padding|width|height|gap/.test(block),selector);
@@ -30,7 +31,7 @@ test('UI-01 INT-04: auth shell loads local assets and keeps transaction form int
 });
 test('appearance controls wait for their local handlers before accepting input',()=>{
  const page=renderPage({title:'login',auth:true});
- assert.equal([...page.matchAll(/<select\b[^>]*data-pref="[^"]+"[^>]*disabled/g)].length,3);
+ assert.equal([...page.matchAll(/<select\b[^>]*data-pref="[^"]+"[^>]*disabled/g)].length,2);
  const script=fs.readFileSync(new URL('../../../web/console/appearance.mjs',import.meta.url),'utf8');
  assert.match(script,/node\.disabled=false/);
 });
@@ -54,20 +55,20 @@ test('console chrome omits retired status notices without removing navigation or
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  assert.doesNotMatch(css,/\.handoff\b/);
 });
-test('six palettes keep small body, navigation and action text at 4.5:1 contrast',()=>{
+test('three accent palettes keep small body, navigation and action text at 4.5:1 contrast',()=>{
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  assert.ok(rules(css).some(r=>['input','select'].every(s=>r.selectors.includes(s))&&r.declarations['border-color']==='var(--muted)'),'form controls keep a 3:1 muted border');
  const luminance=color=>{
   const v=color.match(/[0-9a-f]{2}/ig).map(x=>parseInt(x,16)/255).map(c=>c<=0.04045?c/12.92:((c+0.055)/1.055)**2.4);
   return v[0]*0.2126+v[1]*0.7152+v[2]*0.0722;
  };
- const palettes=[...css.matchAll(/\[data-theme="([abc])"\]\[data-mode="(light|dark)"\]\{([^}]+)\}/g)];
- assert.equal(palettes.length,6);
+ const palettes=[...css.matchAll(/\[data-theme="([abc])"\]\{([^}]+)\}/g)];
+ assert.equal(palettes.length,3);
  for(const palette of palettes){
-  const colors=Object.fromEntries([...palette[3].matchAll(/--([a-z-]+):(#\w+)/g)].map(m=>[m[1],m[2]]));
+  const colors=Object.fromEntries([...palette[2].matchAll(/--([a-z-]+):(#\w+)/g)].map(m=>[m[1],m[2]]));
   for(const [foreground,background] of [['text','surface'],['muted','surface'],['muted','bg'],['accent','soft'],['on-accent','accent']]){
    const a=luminance(colors[foreground]),b=luminance(colors[background]),ratio=(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);
-   assert.ok(ratio>=4.5,`${palette[1]} ${palette[2]} ${foreground}/${background}: ${ratio}`);
+   assert.ok(ratio>=4.5,`${palette[1]} ${foreground}/${background}: ${ratio}`);
   }
  }
 });

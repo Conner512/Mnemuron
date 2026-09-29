@@ -562,14 +562,15 @@ Object.assign(catalog.en,{
  appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
 });
 
-// Liquid-glass skin palette names (override earlier labels).
-Object.assign(catalog['zh-CN'],{themeName_a:'星云',themeName_b:'极光',themeName_c:'日冕',themeNote_a:'青紫虹彩，深空玻璃',themeNote_b:'青绿极光，安静透明',themeNote_c:'玫瑰色日冕，温暖光晕',radarLabel:'记忆全息图',radarTitle:'分类光谱'});
-Object.assign(catalog.en,{themeName_a:'Nebula',themeName_b:'Aurora',themeName_c:'Corona',themeNote_a:'Cyan-violet iridescence',themeNote_b:'Teal aurora, calm glass',themeNote_c:'Rose corona, warm glow',radarLabel:'MEMORY HOLOGRAM',radarTitle:'Category spectrum'});
-
-// Liquid glass (calm): overview distribution and palette names.
+// Ink archive: overview distribution, accent names and registration steps (override earlier labels).
 Object.assign(catalog['zh-CN'],{radarLabel:'记忆分布',radarTitle:'分类构成',radarNote:'圆环按有效记忆的分类占比绘制，中心是有效记忆总数。',radarEmpty:'还没有有效记忆',activeMemories:'有效记忆',
- themeName_a:'冰川',themeName_b:'薄荷',themeName_c:'玫瑰',themeNote_a:'清透的蓝色玻璃',themeNote_b:'柔和的青绿玻璃',themeNote_c:'温暖的玫瑰玻璃'});
+ themeName_a:'朱砂',themeName_b:'黛蓝',themeName_c:'松绿',themeNote_a:'印章红，标记当前与确认',themeNote_b:'沉静的墨蓝',themeNote_c:'内敛的松石绿',
+ appearanceNote:'主题只改变强调色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
+ registrationStepsLabel:'注册步骤',stepInvitation:'验证注册码',stepAccount:'设置账户',stepTotp:'绑定验证器',stepRecovery:'保存恢复码'});
 Object.assign(catalog.en,{radarLabel:'Memory distribution',radarTitle:'Category mix',radarNote:'The ring shows each category’s share of active memories; the centre is the total.',radarEmpty:'No active memories yet',activeMemories:'active',
- themeName_a:'Glacier',themeName_b:'Mint',themeName_c:'Rose',themeNote_a:'Clear blue glass',themeNote_b:'Soft teal glass',themeNote_c:'Warm rose glass'});
+ themeName_a:'Vermilion',themeName_b:'Indigo',themeName_c:'Pine',themeNote_a:'Seal red marks current and confirmed items',themeNote_b:'Quiet ink blue',themeNote_c:'Muted pine green',
+ appearanceNote:'Themes change the accent colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
+ systemLabel:'Personal memory system',authEyebrow:'Connect to your memory',
+ registrationStepsLabel:'Registration steps',stepInvitation:'Invitation',stepAccount:'Account',stepTotp:'Authenticator',stepRecovery:'Recovery codes'});
 
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;

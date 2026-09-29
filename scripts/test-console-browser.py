@@ -103,11 +103,10 @@ try:
   for width in [1280,1440,1920]:
    page.set_viewport_size({'width':width,'height':1080});goto('models')
    for theme in ['a','b','c']:
-    for mode in ['light','dark']:
-     for locale in ['zh-CN','en']:
-      pick('#theme',theme);pick('#mode',mode);pick('#locale',locale)
-      check('Desktop model forms '+str((width,theme,mode,locale)),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
-  page.set_viewport_size({'width':1440,'height':1100});pick('#theme','a');pick('#mode','light');pick('#locale','zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
+    for locale in ['zh-CN','en']:
+     pick('#theme',theme);pick('#locale',locale)
+     check('Desktop model forms '+str((width,theme,locale)),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+  page.set_viewport_size({'width':1440,'height':1100});pick('#theme','a');pick('#locale','zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
   begin('memory.create');page.screenshot(path=str(P/'new-memory-functional.png'),full_page=True);close();goto('models');page.screenshot(path=str(P/'models-functional.png'),full_page=True)
   goto('jobs');page.screenshot(path=str(P/'jobs-functional.png'),full_page=True);goto('invitations');page.screenshot(path=str(P/'invitations-functional.png'),full_page=True)
   check('No browser JavaScript or CSP errors',not errors)

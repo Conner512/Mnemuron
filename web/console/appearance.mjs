@@ -1,6 +1,7 @@
 import {text} from './catalog.mjs';
-const defaults={theme:'a',mode:'dark',locale:'zh-CN'};
-const valid={theme:['a','b','c'],mode:['light','dark'],locale:['zh-CN','en']};
+// The console ships one light palette; `theme` only selects the accent colour.
+const defaults={theme:'a',locale:'zh-CN'};
+const valid={theme:['a','b','c'],locale:['zh-CN','en']};
 const account=document.body.dataset.account || 'signed-out';
 const key=`mnemuron.appearance.v1.${account}`;
 let prefs={...defaults};
@@ -9,7 +10,7 @@ export const translate=key=>text(key,prefs.locale);
 
 // Translate chrome in place: never replace a form, a drawer or user-supplied content.
 export function syncAppearance() {
-  document.documentElement.dataset.theme=prefs.theme;document.documentElement.dataset.mode=prefs.mode;document.documentElement.lang=prefs.locale;
+  document.documentElement.dataset.theme=prefs.theme;document.documentElement.lang=prefs.locale;
   for(const node of document.querySelectorAll('[data-i18n]'))node.textContent=translate(node.dataset.i18n);
   for(const node of document.querySelectorAll('[data-i18n-placeholder]'))node.placeholder=translate(node.dataset.i18nPlaceholder);
   for(const node of document.querySelectorAll('[data-i18n-aria-label]'))node.setAttribute('aria-label',translate(node.dataset.i18nAriaLabel));

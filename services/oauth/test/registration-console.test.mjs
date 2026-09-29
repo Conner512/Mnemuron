@@ -65,7 +65,7 @@ test('REG-MGMT-02: real signup finishes through the durable worker without grant
  writePrivate(f.config.identity.encryption_key_file,randomSecret());await f.start();const ids=f.app.accounts,browser=new Browser(f.config.issuer);
  const [code]=ids.issueInvitations({count:1,ttlMinutes:5,issuer:'synthetic-server'}).codes;
  let page=await browser.request('/login');assert.match(page.text,/href="\/register"/);
- page=await browser.request('/register');assert.match(page.text,/registrationSteps/);
+ page=await browser.request('/register');assert.match(page.text,/class="auth-steps"/);assert.match(page.text,/<li aria-current="step"><span data-i18n="stepInvitation">/);
  let result=await browser.post('/register/reserve',{csrf:csrf(page),code});assert.equal(result.status,303);
  page=await browser.request('/register/account');assert.match(page.text,/registrationCredentials/);
  result=await browser.post('/register/account',{csrf:csrf(page),username:'Synthetic_Full_Signup',password:'Synthetic signup password',password_confirm:'Synthetic signup password'});assert.equal(result.status,303);

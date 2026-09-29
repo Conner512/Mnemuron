@@ -67,14 +67,13 @@ def check_selects(page, goto, check, previews):
     page.on('request', listener)
     choose_select(page, '#locale', 'en')
     choose_select(page, '#theme', 'b')
-    choose_select(page, '#mode', 'dark')
     expect(page.locator('[name="query"]')).to_have_value('Synthetic draft C9800-CL')
     check('Appearance selection neither submits business requests nor resets form drafts', not requests)
     page.remove_listener('request', listener)
     trigger.click(); page.keyboard.press('s'); page.keyboard.press('Enter')
     expect(native).to_have_value('semantic')
     check('Typeahead uses translated option labels', 'Semantic' in trigger.inner_text())
-    choose_select(page, '#locale', 'zh-CN'); choose_select(page, '#theme', 'a'); choose_select(page, '#mode', 'light')
+    choose_select(page, '#locale', 'zh-CN'); choose_select(page, '#theme', 'a')
     choose_select(page, '[name="search_mode"]', 'lexical')
     page.locator('[name="query"]').fill('')
 
@@ -82,21 +81,20 @@ def check_selects(page, goto, check, previews):
     for width in [1280, 1440, 1920]:
         page.set_viewport_size({'width': width, 'height': 1000})
         for theme in ['a', 'b', 'c']:
-            for mode in ['light', 'dark']:
-                for locale in ['zh-CN', 'en']:
-                    choose_select(page, '#theme', theme); choose_select(page, '#mode', mode); choose_select(page, '#locale', locale)
-                    page.locator('[data-select-name="category"]').click()
-                    pop = page.locator('.select-popup:popover-open'); r = pop.bounding_box()
-                    fit = page.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
-                    check('Anchored dropdown / desktop layout ' + str((width, theme, mode, locale)), fit and r['x'] >= 0 and r['x'] + r['width'] <= width + 1 and r['y'] >= 0 and r['y'] + r['height'] <= 1001)
-                    page.keyboard.press('Escape')
+            for locale in ['zh-CN', 'en']:
+                choose_select(page, '#theme', theme); choose_select(page, '#locale', locale)
+                page.locator('[data-select-name="category"]').click()
+                pop = page.locator('.select-popup:popover-open'); r = pop.bounding_box()
+                fit = page.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
+                check('Anchored dropdown / desktop layout ' + str((width, theme, locale)), fit and r['x'] >= 0 and r['x'] + r['width'] <= width + 1 and r['y'] >= 0 and r['y'] + r['height'] <= 1001)
+                page.keyboard.press('Escape')
     page.set_viewport_size({'width': 1440, 'height': 1100})
-    choose_select(page, '#theme', 'a'); choose_select(page, '#mode', 'light'); choose_select(page, '#locale', 'zh-CN')
+    choose_select(page, '#theme', 'a'); choose_select(page, '#locale', 'zh-CN')
     trigger.click(); page.screenshot(path=str(previews / 'memory-search-dropdown.png'), full_page=True); page.keyboard.press('Escape')
     page.locator('[data-select-name="theme"]').click(); page.screenshot(path=str(previews / 'theme-dropdown.png'), full_page=True); page.keyboard.press('Escape')
-    choose_select(page, '#theme', 'b'); choose_select(page, '#mode', 'dark')
-    trigger.click(); page.screenshot(path=str(previews / 'memory-dropdown-dark.png'), full_page=True); page.keyboard.press('Escape')
-    choose_select(page, '#theme', 'a'); choose_select(page, '#mode', 'light')
+    choose_select(page, '#theme', 'b')
+    trigger.click(); page.screenshot(path=str(previews / 'memory-dropdown-indigo.png'), full_page=True); page.keyboard.press('Escape')
+    choose_select(page, '#theme', 'a')
 
     # Synthetic DOM fixture exercises semantics not present in every business form.
     page.evaluate('''() => {

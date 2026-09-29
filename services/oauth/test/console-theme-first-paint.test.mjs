@@ -12,7 +12,7 @@ function bootstrap(html) {
   return {account:match[1],source:match[2],index:match.index};
 }
 function restore(html,records={},unavailable=false) {
-  const boot=bootstrap(html),root={dataset:{theme:'a',mode:'light'},lang:'zh-CN'},reads=[];
+  const boot=bootstrap(html),root={dataset:{theme:'a'},lang:'zh-CN'},reads=[];
   vm.runInNewContext(boot.source,{
     document:{documentElement:root,currentScript:{dataset:{appearanceAccount:boot.account}}},
     localStorage:{getItem(key){reads.push(key);if(unavailable)throw new Error('storage unavailable');return records[key]??null;}},
@@ -32,11 +32,12 @@ test('saved appearance runs before styles, deferred modules and body on every sh
   }
 });
 
-for(const theme of ['a','b','c'])for(const mode of ['light','dark'])for(const locale of ['zh-CN','en'])
-  test(`first paint restores ${theme}/${mode}/${locale} without a body or module fetch`,()=>{
-    const prefs={theme,mode,locale};
+for(const theme of ['a','b','c'])for(const locale of ['zh-CN','en'])
+  test(`first paint restores ${theme}/${locale} without a body or module fetch`,()=>{
+    // A colour mode saved by an earlier release is ignored: the console ships one light palette.
+    const prefs={theme,mode:'dark',locale};
     const {root,reads}=restore(shell(),{[`mnemuron.appearance.v1.${account.account_id}`]:JSON.stringify(prefs)});
-    assert.deepEqual(root,{dataset:{theme,mode},lang:locale});
+    assert.deepEqual(root,{dataset:{theme},lang:locale});
     assert.deepEqual(reads,[`mnemuron.appearance.v1.${account.account_id}`]);
   });
 
@@ -51,16 +52,16 @@ test('first-paint preferences stay isolated by trusted account, including signed
   assert.equal(restore(shell({account:{account_id:'synthetic-theme-new'}}),records).root.dataset.theme,'a');
   const signedOut=restore(shell({auth:true,account:null}),records);
   assert.deepEqual(signedOut.reads,['mnemuron.appearance.v1.signed-out']);
-  assert.deepEqual(signedOut.root.dataset,{theme:'a',mode:'dark'});
+  assert.deepEqual(signedOut.root.dataset,{theme:'a'});
 });
 
 test('unavailable, malformed and untrusted preference values keep safe defaults',()=>{
   const key=`mnemuron.appearance.v1.${account.account_id}`;
   for(const value of ['null','[]','false','42','"c"','{broken',JSON.stringify({theme:'<script>',mode:'auto',locale:'unknown'})])
-    assert.deepEqual(restore(shell(),{[key]:value}).root,{dataset:{theme:'a',mode:'light'},lang:'zh-CN'});
-  assert.deepEqual(restore(shell(),{},true).root,{dataset:{theme:'a',mode:'light'},lang:'zh-CN'});
+    assert.deepEqual(restore(shell(),{[key]:value}).root,{dataset:{theme:'a'},lang:'zh-CN'});
+  assert.deepEqual(restore(shell(),{},true).root,{dataset:{theme:'a'},lang:'zh-CN'});
   assert.deepEqual(restore(shell(),{[key]:JSON.stringify({theme:'c',mode:'invalid',locale:'en'})}).root,
-    {dataset:{theme:'c',mode:'light'},lang:'en'});
+    {dataset:{theme:'c'},lang:'en'});
 });
 
 test('CSP permits only the exact fixed bootstrap and existing same-origin modules',()=>{

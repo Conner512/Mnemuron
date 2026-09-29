@@ -26,9 +26,9 @@ export function memoryRows(rows = [], t) {
     <span class="memory-meta">${typeChip(t, m.memory_type || 'fact')}<time>${formatDate(m.created_at)}</time></span></button>${statusTag(t, m.status || 'active')}</li>`)}</ol>`);
 }
 
-/** Page heading used by every console page. Exactly one H1 per page; the code is a fixed route label. */
-export function pageHeading(t, {title, note, actions = '', code = ''}) {
-  return String(html`<div class="page-heading"><div>${code ? html`<p class="page-kicker"><span>${code}</span></p>` : ''}${i18n(t, title, 'h1')}${note ? i18n(t, note, 'p') : ''}</div>${actions ? html`<div class="page-heading-actions">${trusted(actions)}</div>` : ''}</div>`);
+/** Page heading used by every console page. Exactly one H1 per page. */
+export function pageHeading(t, {title, note, actions = ''}) {
+  return String(html`<div class="page-heading"><div>${i18n(t, title, 'h1')}${note ? i18n(t, note, 'p') : ''}</div>${actions ? html`<div class="page-heading-actions">${trusted(actions)}</div>` : ''}</div>`);
 }
 
 function activityStrip(insights, t) {
@@ -54,7 +54,7 @@ function typeBreakdown(insights, t) {
 /** Distribution ring: each arc is a real category share of active memories; the centre is the total. */
 function distribution(insights, t) {
   const cats = rowsOf(insights?.categories).slice(0, 6), total = cats.reduce((n, c) => n + c.count, 0);
-  const R = 84, C = 2 * Math.PI * R, gap = cats.length > 1 ? 24 : 0; // round caps add half a stroke at each end
+  const R = 84, C = 2 * Math.PI * R, gap = cats.length > 1 ? 3 : 0; // square ends: a hairline of paper between arcs
   let offset = 0;
   const arcs = cats.map((c, i) => { const len = Math.max(0.1, c.count / total * C - gap), arc = html`<circle class="arc hue-${i}" cx="110" cy="110" r="${R}" stroke-dasharray="${fixed(len)} ${fixed(C - len)}" stroke-dashoffset="${fixed(-offset)}"><title>${t(c.value)} · ${c.count}</title></circle>`; offset += c.count / total * C; return arc; });
   return html`<figure class="distribution${cats.length ? '' : ' is-empty'}"><svg viewBox="0 0 220 220" role="img" data-i18n-aria-label="radarTitle" aria-label="${t('radarTitle')}" focusable="false">
@@ -71,13 +71,13 @@ function distributionLegend(insights, t) {
 /** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
 export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t)}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
-  const metric = (key, title, href, code) => html`<a class="metric" href="${href}" data-metric="${key}"><span class="metric-code">${code}</span><strong>${count(key)}</strong>${i18n(t, title)}</a>`;
+  const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}">${i18n(t, title)}<strong>${count(key)}</strong></a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
   return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
       <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
         <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
       ${distributionLegend(data.insights, t)}</div>${distribution(data.insights, t)}</section>
-  <div class="metrics">${metric('memories', 'memoryCount', '/app/memories', 'M-01')}${metric('sources', 'sourceCount', '/app/memories?focus=sources', 'M-02')}${metric('summaries', 'summaryCount', '/app/summaries', 'M-03')}${metric('jobs', 'jobCount', '/app/jobs', 'M-04')}</div>
+  <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/jobs')}</div>
   <div class="home-grid">
     <section class="card stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
       ${trusted(rows(data.recent || []))}${i18n(t, 'inspectMemoryNote', 'p')}</section>
@@ -158,13 +158,12 @@ export function summaryDetailView(t, data, {canGoBack = false}) {
   <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
 }
 
-/** Appearance: real preference controls, colour only. */
+/** Appearance: real preference controls. One light palette; the theme only picks the accent colour. */
 export function appearanceView(t) {
   const pick = (property, value, content, className) => html`<button class="${className}" type="button" data-pref="${property}" data-pref-value="${value}" aria-pressed="false" disabled>${content}</button>`;
   const swatch = html`<span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>`;
   return String(html`<section class="card appearance-card">${i18n(t, 'theme', 'h2')}${i18n(t, 'appearanceNote', 'p')}
     <div class="theme-options" role="group" data-i18n-aria-label="theme" aria-label="${t('theme')}">${['a', 'b', 'c'].map(theme => pick('theme', theme, html`${swatch}<span class="theme-option-info"><strong data-i18n="themeName_${theme}">${t(`themeName_${theme}`)}</strong><small data-i18n="themeNote_${theme}">${t(`themeNote_${theme}`)}</small></span><span class="selection-check">${svg('check')}</span>`, 'theme-option'))}</div></section>
-  <div class="columns preference-columns"><section class="card">${i18n(t, 'mode', 'h2')}${i18n(t, 'modeNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="mode" aria-label="${t('mode')}">${['light', 'dark'].map(mode => pick('mode', mode, html`${svg(mode === 'light' ? 'sun' : 'moon')}${i18n(t, mode)}`, 'segment'))}</div></section>
-  <section class="card">${i18n(t, 'language', 'h2')}${i18n(t, 'languageNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="language" aria-label="${t('language')}">${pick('locale', 'zh-CN', '简体中文', 'segment')}${pick('locale', 'en', 'English', 'segment')}</div></section></div>
+  <section class="card">${i18n(t, 'language', 'h2')}${i18n(t, 'languageNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="language" aria-label="${t('language')}">${pick('locale', 'zh-CN', '简体中文', 'segment')}${pick('locale', 'en', 'English', 'segment')}</div></section>
   <p class="privacy-note">${svg('security')}<span data-i18n="appearanceScopeNote">${t('appearanceScopeNote')}</span></p>`);
 }

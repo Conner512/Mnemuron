@@ -8,7 +8,8 @@ test('console and OAuth login clearly distinguish purpose without changing authe
   const consolePage=await f.browser.request('/login');
   assert.equal(consolePage.status,200);
   assert.match(consolePage.text,/data-i18n="consoleLogin"/);
-  assert.match(consolePage.text,/data-i18n="consoleLoginNote"/);
+  // The console sign-in states its purpose in the title alone; the OAuth sign-in keeps its explanatory notes.
+  assert.doesNotMatch(consolePage.text,/data-i18n="(?:consoleLoginNote|authNote)"/);
   assert.match(consolePage.text,/<form method="post" action="\/login">/);
   const params=new URLSearchParams({client_id:f.config.chatgpt_client.client_id,
     redirect_uri:f.config.chatgpt_client.redirect_uris[0],response_type:'code',scope:'openid offline_access memory:read',

@@ -1,11 +1,13 @@
 import QRCode from 'qrcode';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
+import {icon} from '../../../web/console/icons.mjs';
 import {text} from '../../../web/console/catalog.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
 
 const field=(name,key,{type='text',autocomplete='off',pattern,maxlength=1024,value=''}={})=>`<label for="${name}" data-i18n="${key}">${text(key)}</label><input id="${name}" name="${name}" type="${type}" autocomplete="${autocomplete}" maxlength="${maxlength}"${pattern?` pattern="${pattern}" inputmode="numeric"`:''} value="${escapeHtml(value)}" required>${type==='password'?`<button type="button" data-password-toggle="${name}" data-i18n="showPassword">${text('showPassword')}</button>`:''}`;
 const form=(action,csrf,fields,submit='continue')=>`<form method="post" action="${action}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}">${fields}<button class="primary" type="submit" data-i18n="${submit}">${text(submit)}</button></form>`;
+const steps=current=>`<ol class="auth-steps" data-i18n-aria-label="registrationStepsLabel" aria-label="${text('registrationStepsLabel')}">${['stepInvitation','stepAccount','stepTotp','stepRecovery'].map((key,i)=>`<li${i===current?' aria-current="step"':i<current?' data-done':''}>${label(key)}</li>`).join('')}</ol>`;
 const redirect=(response,to)=>{response.writeHead(303,{location:to,'cache-control':'no-store'});response.end();};
 const names=(config,purpose)=>`${config.isolated?'mnm_fixture_':'__Host-mnm_'}${purpose}`;
 function cookie(request,config,purpose) {
@@ -78,7 +80,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     }
     if(pathname==='/register'&&request.method==='GET') {
       const s=ids.newSession('registration_start',{ttl:600});setCookie(response,config,'registration_start',s.token);
-      return show('register',label('registrationSteps','p')+label('inviteNote','p')+form('/register/reserve',s.csrf,field('code','invitation',{maxlength:43}))+`<div class="form-links"><a href="/login">${label('signIn')}</a></div>`);
+      return show('register',steps(0)+label('inviteNote','p')+form('/register/reserve',s.csrf,field('code','invitation',{maxlength:43}))+`<div class="form-links"><a href="/login">${label('signIn')}</a></div>`);
     }
     if(pathname==='/register/reserve'&&request.method==='POST') {
       const old=submit('registration_start',['code']);store.limit(`registration:peer:${request.socket.remoteAddress}`,30,900);
@@ -87,7 +89,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     }
     const token=cookie(request,config,'registration');const state=ids.registrationState(token);
     if(pathname==='/register/account'&&request.method==='GET'&&state.status==='reserved')
-      return show('register',label('registrationCredentials','p')+form('/register/account',ids.formCsrf(token,'registration'),field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'new-password'})+field('password_confirm','passwordConfirm',{type:'password',autocomplete:'new-password'})));
+      return show('register',steps(1)+label('registrationCredentials','p')+form('/register/account',ids.formCsrf(token,'registration'),field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'new-password'})+field('password_confirm','passwordConfirm',{type:'password',autocomplete:'new-password'})));
     if(pathname==='/register/account'&&request.method==='POST') {
       submit('registration',['username','password','password_confirm']);
       store.limit(`registration:account:${String(body.get('username')||'').toLowerCase()}`,10,900);
@@ -96,7 +98,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     }
     if(pathname==='/register/totp'&&request.method==='GET') {
       const setup=ids.enrollment(token),qr=setup.uri?await QRCode.toString(setup.uri,{type:'svg',errorCorrectionLevel:'M',margin:4}):null;
-      return show('totp',(qr?label('totpNote','p')+`<div class="qr" role="img" aria-label="TOTP QR">${qr}</div><code class="secret" id="totp-secret">${escapeHtml(setup.secret)}</code><button type="button" data-copy="totp-secret" data-i18n="copy">${text('copy')}</button>`:label('alreadyShown','p'))+
+      return show('totp',steps(2)+(qr?label('totpNote','p')+`<div class="totp-setup"><div class="qr" role="img" aria-label="TOTP QR">${qr}</div><div class="totp-key"><code class="secret" id="totp-secret">${escapeHtml(setup.secret)}</code><button type="button" class="copy-button" data-copy="totp-secret">${icon('copy')}${label('copy')}</button></div></div>`:label('alreadyShown','p'))+
         form('/register/totp',ids.formCsrf(token,'registration'),field('otp','otp',{autocomplete:'one-time-code',pattern:'[0-9]{6}',maxlength:6}),'verify'));
     }
     if(pathname==='/register/totp'&&request.method==='POST') {
@@ -106,7 +108,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     if(pathname==='/register/recovery-codes'&&request.method==='GET') {
       const codes=state.recovery_available?ids.takeRecoveryCodes(token):null;
       if(!['provisioning','active'].includes(state.status))throw new BoundaryError(400,'REGISTRATION_UNAVAILABLE');
-      return show('recoveryCodes',(codes?label('recoveryNote','p')+`<ul class="recovery-codes">${codes.map(c=>`<li>${escapeHtml(c)}</li>`).join('')}</ul>`:label('alreadyShown','p'))+form('/register/ack',ids.formCsrf(token,'registration'),'','acknowledge'));
+      return show('recoveryCodes',steps(3)+(codes?`<div class="notice is-warning">${icon('warning')}${label('recoveryNote','p')}</div>`+`<ul class="recovery-codes">${codes.map(c=>`<li>${escapeHtml(c)}</li>`).join('')}</ul>`:label('alreadyShown','p'))+form('/register/ack',ids.formCsrf(token,'registration'),'','acknowledge'));
     }
     if(pathname==='/register/ack'&&request.method==='POST') {
       submit('registration',[]);ids.acknowledgeRecovery(token);redirect(response,'/register/status');return true;
@@ -118,7 +120,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   if(pathname==='/login') {
     if(request.method==='GET') {
       const s=ids.newSession('login',{ttl:600});setCookie(response,config,'login',s.token);
-      return show('consoleLogin',label('consoleLoginNote','p')+label('authNote','p')+form('/login',s.csrf,field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'current-password'})+field('otp','otp',{autocomplete:'one-time-code',pattern:'[0-9]{6}',maxlength:6}),'signIn')+`<div class="form-links"><a href="/register" data-i18n="register">${text('register')}</a><a href="/recover" data-i18n="recover">${text('recover')}</a></div>`);
+      return show('consoleLogin',form('/login',s.csrf,field('username','username',{autocomplete:'username',maxlength:100})+field('password','password',{type:'password',autocomplete:'current-password'})+field('otp','otp',{autocomplete:'one-time-code',pattern:'[0-9]{6}',maxlength:6}),'signIn')+`<div class="form-links"><a href="/register" data-i18n="register">${text('register')}</a><a href="/recover" data-i18n="recover">${text('recover')}</a></div>`);
     }
     if(request.method==='POST') {
       const old=submit('login',['username','password','otp']);
