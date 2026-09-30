@@ -247,7 +247,7 @@ test('HTTP-DEVICES-01: agent keys are revoked only with fresh factors, only for 
  const listed=(await x.get('connections')).body,row=id=>listed.core_connections.find(c=>c.agent_instance_id===id);
  assert.equal(row('synthetic-http-openclaw').console_revocable,true);assert.equal(row('synthetic-http-gateway').managed,true);
  assert.equal(row('synthetic-http-foreign'),undefined);
- assert.deepEqual(listed.system_chatgpt,{configured:true,last_token_at:null});
+ assert.deepEqual(listed.system_chatgpt,{configured:true,last_token_at:null,write_enabled:false});
  const target={agent_instance_id:'synthetic-http-openclaw'};
  assert.notEqual((await x.act('devices.revoke',target)).status,200);
  assert.notEqual((await x.act('devices.revoke',{...target,current_password:'Synthetic password with spaces  ',otp:'000000'})).status,200);

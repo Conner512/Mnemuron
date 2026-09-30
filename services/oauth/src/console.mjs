@@ -195,7 +195,8 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     let core;try{core=await coreFor(account.subject).view('connections',{});}catch{core={connections:[],unavailable:true};}ids.session(token,'console');
     const legacy=grants.filter(g=>g.client_id===config.chatgpt_client.client_id);
     sendJson(response,200,{...result,legacy_connections:legacy.length?[{kind:'legacy_system',label:'Legacy ChatGPT OAuth',grants:legacy,read_only:true,configuration_state:'ready',health:'unknown'}]:[],
-      system_chatgpt:{configured:true,last_token_at:ids.console.lastTokenAt(account.subject,config.chatgpt_client.client_id)},
+      system_chatgpt:{configured:true,last_token_at:ids.console.lastTokenAt(account.subject,config.chatgpt_client.client_id),
+        write_enabled:!!ids.db.prepare('SELECT 1 FROM identity_cloud_bindings WHERE account_id=? AND security_version=? AND checked=1').get(account.account_id,account.security_version)},
       historical_grants:grants.filter(g=>g.client_id!==config.chatgpt_client.client_id&&!ids.connections.clientRow(g.client_id)),
       core_connections:core.connections,system_unavailable:core.unavailable===true,physical_device_verified:false});return true;
   }

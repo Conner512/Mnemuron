@@ -42,4 +42,12 @@ test('C-03: ChatGPT web and agent devices are counted and listed; managed and re
  assert.doesNotMatch(readonly,/data-console-action/);assert.match(readonly,/data-i18n="connReadGranted"/);
  const none=connectionInventory({connections:[],counts:{},core_connections:[]},{});
  assert.deepEqual([none.chatgpt.configured,none.counts.active],[false,0]);assert.doesNotMatch(connectionsView({connections:[],counts:{}},{},{}),/connection-chatgpt/);
+ assert.match(card,/data-i18n="connWriteOff"/);
+ const pending={...data,system_chatgpt:{...data.system_chatgpt,write_enabled:true}};
+ assert.match(connectionsView(pending,caps,{}),/data-i18n="connWritePending"/);
+ const written={...pending,legacy_connections:[{grants:[...data.legacy_connections[0].grants,{grant_id:'grant-3',client_id:'system-client',created:1759216000,expires:1791000000,scopes:['memory:read','memory:write']}]}]};
+ const writeInv=connectionInventory(written,caps);
+ assert.equal(writeInv.chatgpt.write,true);assert.deepEqual(writeInv.counts,{active:3,readonly:1,readwrite:2,pending:0});
+ const writeCard=connectionsView(written,caps,{}).match(/<section class="card connection-chatgpt">[\s\S]*?<\/section>/)[0];
+ assert.match(writeCard,/data-i18n="connReadWrite"/);assert.match(writeCard,/data-i18n="connWriteGranted"/);
 });
