@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {pages,renderPage} from '../../../web/console/render.mjs';
-import {featureMap,featureKey,prototypePages,prototypeView,roadmapCard,pageState} from '../../../web/console/visuals.mjs';
+import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {consoleAllowedActions} from '../src/console-policy.mjs';
@@ -73,12 +73,15 @@ test('Feature map: planned features name their contract and cannot be called yet
 test('Placeholders render every feature and never trigger a request',()=>{
  const caps={operator:true,enabled:true,writable:true,management:{invitations:true,accounts:true,roles:true},connection_management:{enabled:true}};
  for(const page of pages){
-  const html=prototypePages.includes(page)?prototypeView(t,page,{data:{projects:[],models:[]},caps}):roadmapCard(t,page);
+  const html=prototypePages.includes(page)?prototypeView(t,page,{data:{projects:[],models:[],web_policy:{read_all:false,revision:0}},caps}):roadmapCard(t,page);
   const shown=[...html.matchAll(/data-feature="([A-Z]{3}-\d{2})"/g)].map(m=>m[1]);
-  const expected=featureMap[page].filter(f=>prototypePages.includes(page)||f.status!=='live').map(f=>f.id);
+  const expected=(prototypePages.includes(page)?prototypeOrder(page):featureMap[page].filter(f=>f.status!=='live')).map(f=>f.id);
   assert.deepEqual(shown,expected,page);
-  assert.doesNotMatch(html,/data-console-action|data-connection-|<form\b|\son[a-z]+=|https?:\/\//,page);
-  for(const control of html.match(/<(?:button|input|select|textarea)\b[^>]*>/g)||[])assert.match(control,/\sdisabled\b/,`${page}: ${control}`);
+  // Live cards may carry real actions; a placeholder (planned or not offered) never does.
+  const placeholders=prototypePages.includes(page)?(html.match(/<section class="card feature-card" data-status="(?:planned|policy)"[\s\S]*?<\/section>/g)||[]).join(''):html;
+  assert.doesNotMatch(placeholders,/data-console-action|data-connection-|<form\b|\son[a-z]+=|https?:\/\//,page);
+  assert.doesNotMatch(html,/<form\b|\son[a-z]+=|https?:\/\//,page);
+  for(const control of placeholders.match(/<(?:button|input|select|textarea)\b[^>]*>/g)||[])assert.match(control,/\sdisabled\b/,`${page}: ${control}`);
   for(const f of featureMap[page].filter(f=>f.status==='planned'))assert.ok(html.includes(`console-feature-standard.md`)&&html.includes(`${f.id}</summary>`),`${page}: ${f.id} has developer notes`);
  }
  assert.equal(roadmapCard(t,'jobs'),'','a page with nothing planned shows no roadmap');
@@ -108,4 +111,16 @@ test('The development standard lists every feature with its current status and e
 
 test('The ingress example routes every menu page',()=>{
  assert.deepEqual([...ingressGroup('app')].sort(),[...pages].sort());
+});
+
+test('PRV-06: the ChatGPT read scope card shows the real policy and offers only the permitted switch',()=>{
+ const caps={allowed_actions:['memory.web_policy']};
+ const card=(data,c=caps)=>prototypeView(t,'privacy',{data,caps:c}).match(/<section class="card feature-card" data-status="live" data-feature="PRV-06">[\s\S]*?<\/section>/)[0];
+ const off=card({web_policy:{read_all:false,revision:0}});
+ assert.match(off,/data-state="disabled"/);assert.match(off,/data-console-action="memory.web_policy" data-enabled="true"/);assert.match(off,/data-i18n="webPolicyEnable"/);
+ const on=card({web_policy:{read_all:true,revision:3}});
+ assert.match(on,/data-state="enabled"/);assert.match(on,/data-console-action="memory.web_policy" data-enabled="false"/);assert.match(on,/data-i18n="webReadAllOn"/);
+ assert.doesNotMatch(card({web_policy:{read_all:false,revision:0}},{allowed_actions:[]}),/data-console-action/);
+ assert.match(card({}),/data-i18n="unavailable"/);
+ assert.equal(prototypeOrder('privacy')[1].id,'PRV-06','live features come first on prototype pages');
 });

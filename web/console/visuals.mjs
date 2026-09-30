@@ -295,6 +295,7 @@ export const featureMap = {
     {id: 'PRV-04', status: 'planned', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
       ui: {actions: ['pruneNow']}},
     {id: 'PRV-05', status: 'policy'},
+    {id: 'PRV-06', status: 'live', read: ['capabilities'], write: ['memory.web_policy']},
   ],
   security: [
     {id: 'SEC-01', status: 'live', write: ['security.password'], reauth: true},
@@ -399,6 +400,14 @@ function egressSummary(t, data) {
     <tbody>${models.map(m => html`<tr><td>${i18n(t, m.kind)}</td><td>${stateDot(t, m.config?.enabled ? 'enabled' : 'disabled')}</td><td>${yes(m.config?.egress_approved)}</td><td>${yes(m.config?.query_approved)}</td></tr>`)}</tbody></table></div>
     <div class="section-foot"><a href="/app/models">${i18n(t, 'models')} →</a></div>`;
 }
+/** PRV-06: whether ChatGPT reads every non-secret memory or only per-revision grants. */
+function readScope(t, data, caps) {
+  const policy = data.web_policy;
+  if (!policy) return sectionNote(t, 'unavailable');
+  const on = policy.read_all === true, can = Array.isArray(caps.allowed_actions) && caps.allowed_actions.includes('memory.web_policy');
+  return html`<div class="status-line">${stateDot(t, on ? 'enabled' : 'disabled')}${i18n(t, 'webReadAll')}</div>${i18n(t, on ? 'webReadAllOn' : 'webReadAllOff', 'p')}
+    ${can ? html`<div class="actions"><button type="button" data-console-action="memory.web_policy" data-enabled="${on ? 'false' : 'true'}">${i18n(t, on ? 'webPolicyDisable' : 'webPolicyEnable')}</button></div>` : sectionNote(t, 'viewWithoutWrite')}`;
+}
 /** SYS-01: platform switches exactly as the server reports them in its capabilities. */
 function platformSwitches(t, caps) {
   const rows = [['sysConsoleOperations', caps.enabled], ['sysCoreWritable', caps.writable], ['sysInvitations', caps.management?.invitations], ['sysAccounts', caps.management?.accounts],
@@ -414,10 +423,12 @@ function featureProgress(t) {
     <tbody>${Object.entries(featureMap).map(([page, list]) => html`<tr><td><a href="/app/${page}">${i18n(t, page)}</a></td>${statuses.map(s => html`<td class="figure">${count(list, s) || '—'}</td>`)}</tr>`)}</tbody></table></div></section>`;
 }
 
+/** Prototype pages list live features first, then planned ones, then what is deliberately not offered. */
+export const prototypeOrder = page => [...(featureMap[page] || [])].sort((a, b) => ['live', 'planned', 'policy'].indexOf(a.status) - ['live', 'planned', 'policy'].indexOf(b.status));
 /** New menu destinations: one card per feature. Live cards show real data; planned ones a wireframe. */
 export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
-  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'SYS-01': () => platformSwitches(t, caps)};
-  const cards = (featureMap[page] || []).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? '' : ''));
+  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'PRV-06': () => readScope(t, data, caps), 'SYS-01': () => platformSwitches(t, caps)};
+  const cards = prototypeOrder(page).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? '' : ''));
   return String(html`<div class="feature-grid">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
 }
 

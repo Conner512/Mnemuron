@@ -5,8 +5,8 @@ export const CONSOLE_WRITE_SCOPES = Object.freeze([...CONSOLE_READ_SCOPES,'memor
 export const exactScopes = (actual,expected) => Array.isArray(actual) && actual.length===expected.length && new Set(actual).size===actual.length && expected.every(s=>actual.includes(s));
 export const consoleWritable = auth => auth?.agent_id==='mnemuron-console' && exactScopes(auth.scopes,CONSOLE_WRITE_SCOPES);
 export const consoleMemoryWritable = auth => consoleWritable(auth)||(auth?.agent_id==='mnemuron-console'&&exactScopes(auth.scopes,CONSOLE_BASIC_SCOPES));
-export const CONSOLE_MEMORY_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility']);
+export const CONSOLE_MEMORY_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy']);
 export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&CONSOLE_MEMORY_ACTIONS.includes(action));
-export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility',
+export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy',
   'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','vector.schedule',
   'connections.create','connections.rotate','connections.revoke','storage.import']);

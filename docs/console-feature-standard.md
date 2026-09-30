@@ -40,7 +40,7 @@
 | 平台管理 | 账户管理 | `/app/accounts` | `ACC` |
 | 平台管理 | 系统状态 | `/app/system` | `SYS` |
 
-「项目与任务」「接续交接」「隐私与保留」「系统状态」是原型页面：整页由清单生成，每个功能一张卡片。已上线的卡片显示真实数据，规划中的卡片显示线框和开发说明。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
+「项目与任务」「接续交接」「隐私与保留」「系统状态」是原型页面：整页由清单生成，每个功能一张卡片，已上线的排在前面。已上线的卡片显示真实数据，也可以带真实操作；规划中的卡片显示线框和开发说明，不带任何操作。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
 
 ## 3. 状态与流转
 
@@ -172,6 +172,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | PRV-03 | 隐私与保留 | 数据保留策略 | planned | retention | retention.save |
 | PRV-04 | 隐私与保留 | 清理过期数据 | planned | — | retention.prune |
 | PRV-05 | 隐私与保留 | 删除账户与全部数据 | policy | — | — |
+| PRV-06 | 隐私与保留 | ChatGPT 读取范围 | live | capabilities | memory.web_policy |
 | SEC-01 | 账户安全 | 修改密码 | live | — | security.password |
 | SEC-02 | 账户安全 | 更换验证器 | live | — | security.totp.begin, security.totp.complete |
 | SEC-03 | 账户安全 | 轮换恢复码 | live | — | security.recovery_codes |

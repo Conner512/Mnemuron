@@ -93,6 +93,11 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
     try{
       let fields='',data=getData();
       if(action==='memory.create')fields=area('content','content')+select('memory_type','memoryType',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128})+select('sensitivity','sensitivity',['sensitive','internal','public','secret'],'sensitive');
+      else if(action==='memory.web_policy'){
+        // The page read the current policy; its revision guards against a change made in another tab.
+        intent.enable=button.dataset.enabled==='true';intent.revision=(data.web_policy??getCaps().web_policy)?.revision??0;
+        fields=`<p>${l(intent.enable?'webPolicyEnableNote':'webPolicyDisableNote')}</p>`+(intent.enable?`<label class="check-field"><input type="checkbox" name="confirm_web_policy" required>${l('webPolicyConfirm')}</label>`:'');
+      }
       else if(action.startsWith('memory.')){
         const meta=await api('memory',{memory_id:intent.id,metadata:'true'});if(seq!==sequence||!isActive())return;intent.meta=meta;
         if(action==='memory.correct'){
@@ -100,7 +105,7 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
           if(!page.content_complete)throw new Error('EDIT_REQUIRES_COMPLETE_RECORD');fields=area('content','content',page.memory.content)+field('reason','reason',{required:false})+field('topic','topic',{value:meta.topic||'',required:false,max:120});
         } else if(action==='memory.classify')fields=select('category','category',getCaps().taxonomy.categories,meta.category);
         else if(action==='memory.sensitivity')fields=select('sensitivity','sensitivity',['sensitive','internal','public','secret'],meta.sensitivity)+`<p>${l('sensitivityNote')}</p>`;
-        else if(action==='memory.visibility')fields=check('allow','allowChatGPT',meta.web_allowed)+`<p>${l('grantRevisionNote')}</p>`;
+        else if(action==='memory.visibility')fields=check('allow','allowChatGPT',meta.web_allowed)+`<p>${l('grantRevisionNote')}</p>`+(getCaps().web_policy?.read_all?`<p class="policy-box">${l('webPolicyActiveNote')}</p>`:'');
         else fields=field('reason','reason',{required:false})+`<p>${l('retractNote')}</p>`;
       } else if(action==='jobs.schedule'){
         intent.type=button.dataset.type||'classification';const status=await api('jobs');if(seq!==sequence||!isActive())return;const settings=status.settings||{revision:0,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,schedule_enabled:false};
@@ -122,6 +127,7 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   }
   function payload(fd){const a=intent.action,p={};
     if(a==='memory.create'){Object.assign(p,{content:fd.get('content'),memory_type:fd.get('memory_type'),scope:fd.get('scope'),sensitivity:fd.get('sensitivity')});if(fd.get('topic'))p.topic=fd.get('topic');if(p.scope!=='user')p[`${p.scope}_id`]=fd.get('target_id');}
+    else if(a==='memory.web_policy'){p.read_all=intent.enable;p.expected_revision=intent.revision;}
     else if(a.startsWith('memory.')){Object.assign(p,{memory_id:intent.id,revision:intent.meta.revision});if(a==='memory.correct'){p.content=fd.get('content');p.topic=fd.get('topic')||null;p.memory_type=intent.meta.memory_type;}if(fd.get('reason'))p.reason=fd.get('reason');if(a==='memory.classify')p.category=fd.get('category');if(a==='memory.sensitivity')p.sensitivity=fd.get('sensitivity');if(a==='memory.visibility'){p.allow=fd.has('allow');p.state_hash=intent.meta.state_hash;}}
     else if(a==='jobs.schedule')Object.assign(p,{type:fd.get('type'),timezone:fd.get('timezone'),periods:['daily','weekly'],include_open:fd.has('include_open'),schedule_enabled:fd.has('schedule_enabled'),settings_revision:intent.settings_revision});
     else if(a==='jobs.cancel'||a==='jobs.retry')p.job_id=intent.id;

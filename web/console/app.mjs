@@ -85,9 +85,18 @@ function render(data) {
 async function load() {
  const sequence=++requestSequence;
  if(['resume','system'].includes(page)||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
- // Prototype pages read one existing view for their live card; a failure only degrades that card.
+ // Prototype pages read existing views for their live cards; a failure only degrades that card.
  if(page==='tasks'||page==='privacy'){
-   let data;try{data=await api(page==='tasks'?'projects':'models');}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;data={unavailable:true};}
+   const read=async view=>{try{return await api(view);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')throw e;return null;}};
+   let data;
+   try{
+     if(page==='tasks')data=await read('projects')??{unavailable:true};
+     else{
+       const [models,caps]=await Promise.all([read('models'),read('capabilities')]);
+       data={...(models??{unavailable:true}),web_policy:caps?.web_policy};
+       if(caps?.web_policy)capabilities={...capabilities,web_policy:caps.web_policy};
+     }
+   }catch{return;}
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {

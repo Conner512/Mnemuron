@@ -6,16 +6,19 @@ export const WEB_READ_POLICY = 'web-memory-visibility-v1';
 export const isWebReader = auth => auth?.agent_id === 'chatgpt-web';
 
 // Destination comes from the authenticated credential, never from a tool argument or header.
+// Internal/sensitive records need a grant for their current revision, unless the owner switched
+// ChatGPT reads to all records (memory_web_policy.read_all). Secret records are never visible.
 export function webMemorySql(auth, alias='m') {
   if (!isWebReader(auth)) return '1=1';
   return `(EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id AND wp.sensitivity='public')
     OR (COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive') IN ('internal','sensitive')
-      AND EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
+      AND (EXISTS (SELECT 1 FROM memory_web_policy wpol WHERE wpol.user_id=${alias}.user_id AND wpol.read_all=1)
+      OR EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
         ON wr.user_id=wg.user_id AND wr.memory_id=wg.memory_id AND wr.revision=wg.revision AND wr.state_hash=wg.state_hash
         WHERE wg.user_id=${alias}.user_id AND wg.memory_id=${alias}.memory_id
         AND wg.sensitivity=COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive')
         AND wr.content=${alias}.content AND wr.status=${alias}.status
-        AND wr.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=wg.user_id AND memory_id=wg.memory_id))))`;
+        AND wr.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=wg.user_id AND memory_id=wg.memory_id)))))`;
 }
 
 export class WebMemoryVisibility {
@@ -23,6 +26,8 @@ export class WebMemoryVisibility {
     this.store=store;this.db=store.db;
     this.db.exec(`CREATE TABLE IF NOT EXISTS memory_web_grants (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,
       revision INTEGER NOT NULL,state_hash TEXT NOT NULL,sensitivity TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
+      CREATE TABLE IF NOT EXISTS memory_web_policy (user_id TEXT PRIMARY KEY,read_all INTEGER NOT NULL CHECK(read_all IN (0,1)),
+        revision INTEGER NOT NULL,updated_at TEXT NOT NULL);
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_privacy_insert AFTER INSERT ON memory_privacy BEGIN
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_privacy_update AFTER UPDATE ON memory_privacy BEGIN
@@ -31,6 +36,25 @@ export class WebMemoryVisibility {
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_change AFTER UPDATE ON memories BEGIN
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;`);
+  }
+  /** Account-level ChatGPT read scope. Off: explicit per-revision grants only. */
+  policy(auth) {
+    const row=this.db.prepare('SELECT read_all,revision FROM memory_web_policy WHERE user_id=?').get(auth.user_id);
+    return {read_all:row?.read_all===1,revision:row?.revision||0,policy:WEB_READ_POLICY};
+  }
+  setPolicy(auth,{read_all,expected_revision}={}) {
+    if(!consoleMemoryWritable(auth))this.store.requireScope(auth,'admin:tasks');
+    if(typeof read_all!=='boolean'||!Number.isSafeInteger(expected_revision)||expected_revision<0)
+      throw new ValidationError('An explicit read_all choice and the reviewed policy revision are required.');
+    return this.store.memoryTransaction(()=>{
+      const current=this.policy(auth);
+      if(current.revision!==expected_revision)throw new ConflictError('The ChatGPT read policy changed; review it again.','SETTINGS_VERSION_CHANGED');
+      const revision=current.revision+1;
+      this.db.prepare(`INSERT INTO memory_web_policy VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET
+        read_all=excluded.read_all,revision=excluded.revision,updated_at=excluded.updated_at`).run(auth.user_id,read_all?1:0,revision,new Date().toISOString());
+      this.store.audit({auth,action:'memory.web_policy',targetType:'user',targetId:auth.user_id,metadata:{read_all,revision}});
+      return {read_all,revision,policy:WEB_READ_POLICY};
+    });
   }
   visible(auth,id) {
     return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${webMemorySql(auth)}`).get(auth.user_id,id);

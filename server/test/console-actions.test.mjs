@@ -22,7 +22,7 @@ const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create
 test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
   const caps=(await f.get('capabilities',{},basic)).body;
-  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility']);
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy']);
   const m=(await create(f,basic)).body.memory_id;assert.ok(m);
   let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);
@@ -195,4 +195,18 @@ test('CON-15: replay identifies current lifecycle; category counts include curre
  await f.act('memory.retract',{memory_id,revision:meta.revision});
  assert.equal((await f.act('memory.create',payload,f.a,op)).body.current_status,'retracted');
  assert.equal((await f.get('summaries')).body.categories.length,0);
+});
+
+test('CON-BASIC-02: the account ChatGPT read policy is a versioned, idempotent memory action',async t=>{
+  const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
+  assert.deepEqual((await f.get('capabilities',{},basic)).body.web_policy,{read_all:false,revision:0,policy:'web-memory-visibility-v1'});
+  const operation_id=randomUUID(),enable=await f.act('memory.web_policy',{read_all:true,expected_revision:0},basic,operation_id);
+  assert.equal(enable.status,200);assert.equal(enable.body.read_all,true);assert.equal(enable.body.revision,1);
+  const replay=await f.act('memory.web_policy',{read_all:true,expected_revision:0},basic,operation_id);
+  assert.equal(replay.status,200);assert.equal(replay.body.revision,1);
+  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:0},basic)).body.error_code,'SETTINGS_VERSION_CHANGED');
+  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1,memory_id:'x'},basic)).status,400);
+  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1},f.read)).status,403);
+  assert.equal((await f.get('capabilities',{},f.b)).body.web_policy.read_all,false);
+  assert.deepEqual((await f.get('capabilities',{},basic)).body.web_policy,{read_all:true,revision:1,policy:'web-memory-visibility-v1'});
 });
