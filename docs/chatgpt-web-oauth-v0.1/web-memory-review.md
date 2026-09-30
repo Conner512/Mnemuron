@@ -27,6 +27,16 @@ table starts empty. Memory updates/revisions and privacy changes revoke grants.
 Changing a public classification is a separate local operation, not a grant
 revocation. Core local readers keep their original owner/scope behavior.
 
+An owner can instead switch ChatGPT reads to **all** of their records with the
+console action `memory.web_policy` (Privacy & retention → ChatGPT read scope). While
+`memory_web_policy.read_all` is on, every `internal` and `sensitive` record of that
+account is readable, including records added or corrected later, without per-revision
+grants. `secret` and unknown classifications stay invisible, and other accounts are
+unaffected. The switch is versioned (`expected_revision`, conflicts return
+`SETTINGS_VERSION_CHANGED`), idempotent per operation ID and audited as
+`memory.web_policy`. Switching it off restores the explicit-grant rule; existing grants
+are kept.
+
 Filtering occurs before lexical candidate limits, counters and conflict creation,
 and again after awaited vector requests. Details and historical lifecycle records
 apply the same rule. A summary requires **every dependency**, including omitted

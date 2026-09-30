@@ -1,4 +1,5 @@
 import {ValidationError,NotFoundError,ConflictError} from './errors.mjs';
+import {credentialView} from './console/credentials.mjs';
 export const isConsoleReader=auth=>auth.agent_id==='mnemuron-console';
 function pagination(params,maximum=50){
   const offset=Number(params.offset??0),limit=Number(params.limit??25);
@@ -7,6 +8,19 @@ function pagination(params,maximum=50){
 }
 const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{})});
 const jobView=job=>({job_id:job.job_id,job_type:job.job_type,state:job.state,total:job.total,processed:job.processed,attempt_count:job.attempt_count,last_error_code:job.last_error_code,created_at:job.created_at,updated_at:job.updated_at,result_ref:job.result_ref});
+// Owner-scoped aggregates for overview charts. Counts only: no content, IDs or other accounts.
+function overviewInsights(store,user){
+  const db=store.db,since=new Date(Date.now()-29*86400000).toISOString().slice(0,10);
+  const byDay=new Map(db.prepare("SELECT substr(created_at,1,10) day,COUNT(*) n FROM memories WHERE user_id=? AND created_at>=? GROUP BY day").all(user,since).map(r=>[r.day,r.n]));
+  const activity=Array.from({length:30},(_,i)=>{const day=new Date(Date.parse(since)+i*86400000).toISOString().slice(0,10);return {day,count:byDay.get(day)||0};});
+  const group=column=>db.prepare(`SELECT ${column} value,COUNT(*) count FROM memories WHERE user_id=?${column==='memory_type'?" AND status='active'":''} GROUP BY ${column} ORDER BY count DESC,value LIMIT 12`).all(user);
+  const categories=db.prepare(`SELECT COALESCE(o.category,a.category,'uncategorized') value,COUNT(*) count FROM memories m
+    LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
+    LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
+      AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
+    WHERE m.user_id=? AND m.status='active' GROUP BY value ORDER BY count DESC,value`).all(store.consoleService.taxonomy().version,user);
+  return {window_days:30,activity,types:group('memory_type'),statuses:group('status'),categories};
+}
 export async function consoleRead(store,auth,view,params={}) {
   store.requireScope(auth,'console:read');
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
@@ -24,7 +38,8 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'projects':return {projects:db.prepare('SELECT project_id,name FROM projects WHERE user_id=? ORDER BY name LIMIT 200').all(user)};
 
     case 'overview':return {read_only:true,production_ready:false,counts:{memories:count('memories'),sources:count('memory_sources'),summaries:count('memory_summaries'),jobs:count('memory_jobs')},
-      recent:db.prepare('SELECT memory_id,content,memory_type,status,created_at FROM memories WHERE user_id=? ORDER BY created_at DESC,memory_id LIMIT 5').all(user).map(m=>({...m,content:[...m.content].slice(0,160).join('')}))};
+      recent:db.prepare('SELECT memory_id,content,memory_type,status,created_at FROM memories WHERE user_id=? ORDER BY created_at DESC,memory_id LIMIT 5').all(user).map(m=>({...m,content:[...m.content].slice(0,160).join('')})),
+      insights:overviewInsights(store,user)};
     case 'memories': {
       const {offset,limit}=pagination(params),taxonomy=store.consoleService.taxonomy();
       if(params.mode!==undefined&&!['lexical','hybrid','semantic'].includes(params.mode))throw new ValidationError('Invalid retrieval mode.');
@@ -76,7 +91,7 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'jobs':{const {offset,limit}=pagination(params);if(params.job_id)return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};
       const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset);
       return {read_only:true,worker_enabled:store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
-    case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
+    case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user).map(row=>credentialView(row)),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
     case 'audit':{const offset=Number(params.offset||0),limit=Number(params.limit||50);if(!Number.isSafeInteger(offset)||offset<0||offset>1000000||!Number.isSafeInteger(limit)||limit<1||limit>100)throw new ValidationError('Invalid pagination.');
       const rows=db.prepare('SELECT audit_id,action,target_type,target_id,outcome,created_at FROM audit_events WHERE user_id=? ORDER BY created_at DESC,audit_id LIMIT ? OFFSET ?').all(user,limit+1,offset);
       return {read_only:true,entries:rows.slice(0,limit),next_offset:rows.length>limit?offset+limit:null};}

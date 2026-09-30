@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {generate} from 'otplib';
 import {AuthStore} from '../../src/sqlite-adapter.mjs';
 import {IdentityRepository} from '../../src/identity-repository.mjs';
-import {randomSecret,writePrivate,seconds} from '../../../../shared/oauth-common.mjs';
+import {randomSecret,writePrivate} from '../../../../shared/oauth-common.mjs';
+import {previousStepCode} from './totp.mjs';
 import {fixture} from '../fixture.mjs';
 export function identityFixture(t) {
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'mnemuron-identity-test-'));fs.chmodSync(directory,0o700);
@@ -18,7 +18,7 @@ export async function pendingAccount(f,name='Synthetic_A') {
  const session=f.identities.reserveInvitation(code);
  await f.identities.prepareRegistration(session.token,name,'Synthetic password with spaces  ');
  const setup=f.identities.enrollment(session.token);
- await f.identities.verifyEnrollment(session.token,await generate({secret:setup.secret,epoch:seconds()-30}));
+ await f.identities.verifyEnrollment(session.token,await previousStepCode(setup.secret));
  return {session,setup,account:f.identities.registrationState(session.token)};
 }
 export async function consoleFixture(t,{core}={}) {

@@ -8,15 +8,22 @@ import { generate } from "otplib";
 import { createOwner, Accounts } from "../src/accounts.mjs";
 import { AuthStore } from "../src/sqlite-adapter.mjs";
 import { createAuthorizationServer } from "../src/server.mjs";
-import { randomSecret, readPrivate, writePrivate, seconds } from "../../../shared/oauth-common.mjs";
+import { randomSecret, readPrivate, writePrivate } from "../../../shared/oauth-common.mjs";
+import { previousStepCode } from "./helpers/totp.mjs";
 
+// The probe listener closes before the caller binds, so the OS may offer the same port again.
+// Never hand out a port twice in one test process (an issuer and resource on one origin is invalid).
+const issuedPorts = new Set();
 export async function freePort() {
-  const server = net.createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const port = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const server = net.createServer();
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    if (!issuedPorts.has(port)) { issuedPorts.add(port); return port; }
+  }
+  throw new Error("No unused loopback port");
 }
 export async function listen(server, port) { server.listen(port, "127.0.0.1"); await once(server, "listening"); }
 export async function close(server) {
@@ -95,7 +102,7 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
   await createOwner(config.accounts_file, "synthetic-owner", password);
   const seed = readPrivate(config.accounts_file, { json: true }).mfa.secret;
   const enrollmentStore = new AuthStore(config.database_file);
-  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await generate({ secret: seed, epoch: seconds() - 30 }), path.join(directory, "recovery.json")); }
+  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await previousStepCode(seed), path.join(directory, "recovery.json")); }
   finally { enrollmentStore.close(); }
   const subject = readPrivate(config.accounts_file, { json: true }).subject;
   const f = { directory, config, ports, password, seed, subject, secret, introspectionSecret, browser: new Browser(config.issuer), logs: [] };
