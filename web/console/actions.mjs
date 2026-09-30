@@ -23,9 +23,9 @@ const progress=(done,total)=>{const n=Number(done)||0,m=Number(total)||0,w=m>0?M
 
 export function actionPage(page,data,caps,connectionQuery={}) {
   const management=caps.management??{invitations:caps.enabled,accounts:caps.enabled,roles:caps.enabled};
-  if(['invitations','accounts'].includes(page)){
+  if(['invitations','accounts','system'].includes(page)){
     if(!caps.operator)return section(page,note('operatorRequired'));
-    if(!management[page])return section(page,note('managementDisabled'));
+    if(page!=='system'&&!management[page])return section(page,note('managementDisabled'));
   }
   const writable=caps.enabled===true&&caps.writable===true,can=action=>canAct(caps,action);
   const onlyRead=()=>note(caps.enabled?'consoleUpgradeRequired':'viewWithoutWrite');

@@ -14,10 +14,11 @@ export {pages,pageCode};
 export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pages.find(p=>route===`/app/${p}`)??null;
 export const label=(key,tag='span')=>`<${tag} data-i18n="${key}">${escapeHtml(text(key))}</${tag}>`;
 
-// Navigation: three groups and eleven destinations, each an icon + label, no route codes.
-const navGroups=[['workspace',[['overview','home'],['memories','library'],['summaries','summaries'],['jobs','jobs']]],
-  ['settings',[['connections','connections'],['models','models'],['security','security'],['audit','audit'],['storage','storage']]],
-  ['settingsGroupPlatform',[['invitations','invitations'],['accounts','accounts']]]];
+// Navigation: three groups and fifteen destinations, each an icon + label, no route codes.
+// What each destination offers or will offer is listed in the feature map (visuals.mjs).
+const navGroups=[['workspace',[['overview','home'],['memories','library'],['summaries','summaries'],['tasks','tasks'],['resume','resume'],['jobs','jobs']]],
+  ['settings',[['connections','connections'],['models','models'],['privacy','privacy'],['security','security'],['audit','audit'],['storage','storage']]],
+  ['settingsGroupPlatform',[['invitations','invitations'],['accounts','accounts'],['system','system']]]];
 const groupOf=page=>navGroups.find(([,items])=>items.some(([p])=>p===page))?.[0]||'workspace';
 // Logo: a seal inside corner quotes. The quotes cite the source; the seal is the memory kept on record.
 // Quotes follow the text colour, the seal the accent (styles.css). Geometry: docs/console-design.md.
@@ -65,18 +66,21 @@ function authShell({title,body,authPurpose}) {
 
 export function renderPage({title,body='',auth=false,authPurpose='console',account=null,csrf='',page='overview'}) {
   const inside=auth?authShell({title,body,authPurpose}):consoleShell({title,body,account,csrf,page});
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body class="${auth?'is-auth':'is-console'}" data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css?v=${stylesheetVersion}"><link rel="icon" href="/assets/favicon.svg" type="image/svg+xml"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body class="${auth?'is-auth':'is-console'}" data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
 }
 // Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
 // add a module only together with its ingress route, or fold it into an existing one.
 const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','visuals.mjs','actions.mjs','connections.mjs'];
 const STYLESHEETS=['styles.css','controls.css'];
+const stylesheetContent=()=>Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')]));
+// New markup must not reuse a prior release's cached palette; keep the allowlisted path unchanged.
+const stylesheetVersion=createHash('sha256').update(stylesheetContent()).digest('hex').slice(0,16);
 const TYPES={css:'text/css; charset=utf-8',mjs:'text/javascript; charset=utf-8',svg:'image/svg+xml'};
 export function serveAsset(request,response,pathname) {
   const file=pathname.match(/^\/assets\/([a-z-]+\.(?:mjs|css|svg))$/)?.[1];
   if(!file||request.method!=='GET'||!(MODULES.includes(file)||file==='styles.css'||file==='favicon.svg'))return false;
   // Keep one public stylesheet URL: existing ingress rules and CSP remain valid.
-  const content=file==='styles.css'?Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')])):fs.readFileSync(new URL(file,import.meta.url));
+  const content=file==='styles.css'?stylesheetContent():fs.readFileSync(new URL(file,import.meta.url));
   response.writeHead(200,{'content-type':TYPES[file.split('.').pop()],'cache-control':'no-cache','x-content-type-options':'nosniff'});response.end(content);return true;
 }
 export function sendPage(response,options,{status=200,redirectUri=''}={}) {

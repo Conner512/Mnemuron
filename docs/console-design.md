@@ -74,6 +74,11 @@ System fonts only: the CSP allows no external font source, and CJK web fonts are
   hollow square for superseded or in progress, a dash and strike-through for retracted.
 - **Notices and policy boxes**: a 1.5px ink rule on top, no coloured side bars.
 - **Icons**: 24px grid, 1.5px stroke, square caps and mitred joins (`visuals.mjs`).
+- **Feature status**: the same shape language — filled square for live, hollow for planned, half-filled for a
+  partly live page, a dash for features deliberately not offered on the web. Planned features render as dashed
+  cards with a disabled wireframe and collapsed developer notes; nothing in a placeholder can trigger a request.
+  What each page offers or will offer is listed in the feature map; see
+  [console-feature-standard.md](console-feature-standard.md) for the development rules.
 
 All motion stops under `prefers-reduced-motion`.
 

@@ -25,6 +25,16 @@ let browser;
 try{
  const cfg=await read();assert.equal(cfg.fixture,true);
  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});
+ // Model an old browser/edge cache whose palette still requires the removed theme attribute.
+ const cachedContext=await browser.newContext();let staleStyles=0;
+ await cachedContext.route(url=>url.pathname==='/assets/styles.css'&&!url.search,route=>{
+  staleStyles++;
+  return route.fulfill({contentType:'text/css',body:'[data-theme="a"]{--bg:#F5F1E8;--text:#1C1B18;--line:#CFC6B3}body{background:var(--bg)}input{border:1px solid var(--line)}button{background:var(--text);color:var(--bg)}'});
+ });
+ const cachedPage=await cachedContext.newPage();await cachedPage.goto(cfg.url+'/login');await cachedPage.locator('[name=username]').waitFor();
+ const paint=await cachedPage.evaluate(()=>({bg:getComputedStyle(document.body).backgroundColor,border:getComputedStyle(document.querySelector('[name=username]')).borderTopStyle,button:getComputedStyle(document.querySelector('button[type=submit]')).backgroundColor}));
+ check('Login bypasses an obsolete unversioned stylesheet cache',staleStyles===0&&paint.bg==='rgb(245, 241, 232)'&&paint.border==='solid'&&paint.button==='rgb(28, 27, 24)');
+ await cachedPage.screenshot({path:path.join(evidence,'login-versioned-styles.png'),fullPage:true});await cachedContext.close();
  const context=await browser.newContext({viewport:{width:1440,height:1080},permissions:['clipboard-read','clipboard-write']});
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  const page=await context.newPage(),errors=[];let mutations=0;
@@ -39,14 +49,24 @@ try{
  const basic=async(label,profile='readonly')=>{await dialog.locator('[name=label]').fill(label);await pick('#connection-dialog [name=profile]',profile);await dialog.locator('button[type=submit]').click();await proof();};
  const saveSecret=async()=>{const value=await dialog.locator('#connection-secret').inputValue();check('Secret starts masked',await dialog.locator('#connection-secret').getAttribute('type')==='password');check('Secret never appears in persistent appearance storage',!(await page.evaluate(()=>JSON.stringify(localStorage))).includes(value));await dialog.locator('[data-connection-secret-saved]').click();await dialog.locator('[data-connection-refresh]').waitFor();await command('provision-connections');await dialog.locator('[data-connection-refresh]').click();await dialog.locator('[data-connection-refresh]').waitFor();return value;};
  const close=async()=>{await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});check('Closing clears the credential DOM',await page.locator('#connection-secret').count()===0);};
+ const guardShortcut=async(label,locator)=>{
+  const url=page.url(),value=await locator.inputValue(),before=mutations;
+  for(const key of ['Meta+k','Control+k']){
+   await locator.focus();await page.keyboard.press(key);
+   await page.waitForTimeout(200);
+   check(`${label} survives ${key}`,page.url()===url&&await dialog.isVisible()&&await locator.inputValue()===value&&mutations===before);
+  }
+ };
  await goto('connections');check('Real empty logical list retains legacy authorization separately',await page.locator('.connection-table [data-connection-detail]').count()===0&&await page.locator('.connection-system').count()===1);
  await openNew('generic_mcp');check('Readonly profile cannot select a write-time disclosure grant',await dialog.locator('[name=allow_submitted_revision_grant]').isDisabled());await dialog.locator('[name=label]').fill('Synthetic portable reader');await pick('#connection-dialog [name=profile]','memory_readwrite');
+ await guardShortcut('Connection draft',dialog.locator('[name=label]'));
  const beforeAppearance=mutations;
  // Exercise the real preference event handler while the modal owns focus.
  for(const [id,value] of [['locale','en'],['locale','zh-CN']])await page.locator('#'+id).evaluate((select,value)=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));},value);
  check('Language changes preserve draft values without a mutation request',mutations===beforeAppearance&&await dialog.locator('[name=label]').inputValue()==='Synthetic portable reader'&&await dialog.locator('[name=profile]').inputValue()==='memory_readwrite');
  const trigger=dialog.locator('[data-select-name=profile]');await trigger.click();await page.keyboard.press('Escape');check('Escape closes the top-layer selector before the dialog',await dialog.isVisible()&&await page.locator('.select-popup:popover-open').count()===0);
  await dialog.locator('[name=allow_submitted_revision_grant]').check();await dialog.locator('button[type=submit]').click();await proof();await submit();
+ await guardShortcut('Unsaved credential',dialog.locator('#connection-secret'));
  const first=await saveSecret();check('Generic credential is a personal resource token, never a Core key',first.startsWith('mcp_pat_'));check('Server configuration is not fabricated connection success',!(await dialog.innerText()).includes('记忆调用已验证'));await close();
  await page.locator('.connection-table [data-connection-detail]').first().click();await dialog.locator('[data-connection-action=rotate]').click();await proof();await submit();const second=await saveSecret();check('Rotation generates a different actual credential',second!==first);await close();
  await openNew('chatgpt_oauth');await basic('Synthetic browser ChatGPT');await submit();const clientSecret=await saveSecret();check('OAuth Client Secret is distinct from a generic token',!clientSecret.startsWith('mcp_pat_')&&!clientSecret.startsWith('mnm_'));await close();
@@ -70,7 +90,7 @@ try{
   }
  }
  await pick('#locale','en');await goto('memories');check('Language persists through real navigation',await page.locator('html').getAttribute('lang')==='en');await pick('#locale','zh-CN');
- for(const name of ['overview','memories','summaries','jobs','connections','models','security','audit','storage','invitations','accounts']){await goto(name);check('Existing console route '+name,await page.locator('#console-root [role=alert]').count()===0);}
+ for(const name of ['overview','memories','summaries','tasks','resume','jobs','connections','models','privacy','security','audit','storage','invitations','accounts','system']){await goto(name);check('Existing console route '+name,await page.locator('#console-root [role=alert]').count()===0);}
  const operationDialog=page.locator('#operation-dialog');
  const begin=async action=>{await page.locator(`[data-console-action="${action}"]`).first().click();await operationDialog.locator('form').waitFor();};
  const runOperation=async()=>{await operationDialog.locator('button[type=submit]').click();await operationDialog.locator('.operation-result').first().waitFor();return JSON.parse(await operationDialog.locator('.operation-result').last().innerText());};

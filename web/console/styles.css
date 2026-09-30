@@ -309,6 +309,57 @@ body.pane-open .workspace{margin-right:var(--pane)}
 .detail-source pre{margin:6px 0 0;padding:10px;background:var(--bg);border:1px solid var(--border);font-size:11px;color:var(--muted)}
 .claim-list .body-content{font-size:16px;margin-bottom:4px}
 
+/* Feature map: status tags, prototype pages and roadmap lists. Same shape language as lifecycle:
+   filled square = live, hollow = planned, half = partly live, dash = deliberately not offered. */
+.status-tag{color:var(--muted)}
+.status-tag::before{content:"";width:7px;height:7px;flex:none;box-shadow:inset 0 0 0 1.5px currentColor}
+.status-tag[data-status="live"]{color:var(--text)}
+.status-tag[data-status="live"]::before{background:var(--good);box-shadow:none}
+.status-tag[data-status="partial"]{color:var(--text)}
+.status-tag[data-status="partial"]::before{box-shadow:inset 0 0 0 1.5px currentColor,inset 3.5px 0 0 currentColor}
+.status-tag[data-status="planned"]{border-style:dashed}
+.status-tag[data-status="policy"]::before{width:8px;height:1.5px;background:currentColor;box-shadow:none}
+.feature-id{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em;color:var(--muted)}
+.feature-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:var(--gap);align-items:start}
+.feature-grid>.card{margin-top:0}
+.feature-grid>.feature-card[data-status="live"]{grid-column:1/-1}
+.feature-grid+.card{margin-top:var(--gap)}
+.feature-card[data-status="planned"]{border-style:dashed;border-color:var(--line)}
+.feature-card[data-status="policy"]{background:var(--bg)}
+.feature-card>p{margin:0 0 14px;color:var(--muted);font-size:13.5px}
+.blueprint{padding:12px 14px;border:1px dashed var(--line);background:var(--bg)}
+.blueprint table{table-layout:auto}
+.blueprint th{border-bottom-color:var(--line)}
+.blueprint-empty{padding:16px 10px;text-align:center;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}
+.blueprint-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:4px 14px;align-items:end}
+.blueprint-form label{margin:0 0 6px;color:var(--muted);font-weight:500}
+.blueprint-form select{width:100%;min-height:38px}
+.blueprint-form input:disabled,.blueprint-form select:disabled{border-style:dashed;border-color:var(--line);background:var(--surface);cursor:not-allowed}
+.blueprint-form .check-field{align-self:stretch;margin-top:22px}
+.blueprint .actions{margin-top:12px}
+.blueprint-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.blueprint-stats>div{display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-top:1.5px solid var(--line);background:var(--surface);color:var(--muted);font-size:12.5px}
+.blueprint-stats strong{font-family:var(--font-serif);font-size:24px;font-weight:500;line-height:1.2}
+.dev-note{margin:12px 0 0}
+.dev-note>summary{font-family:var(--font-mono);font-size:11px;letter-spacing:.04em}
+.dev-note dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 14px;margin:10px 0 8px;font-size:12.5px}
+.dev-note dt{color:var(--muted)}
+.dev-note dd{display:flex;flex-wrap:wrap;gap:4px 6px;margin:0}
+.dev-note code{padding:0 5px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:11.5px}
+.dev-note p{margin:6px 0 0;color:var(--muted);font-size:12.5px}
+.roadmap>p{margin:0 0 6px;color:var(--muted);font-size:13px}
+.roadmap-list{list-style:none;margin:0;padding:0}
+.roadmap-list>li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 16px;padding:12px 0;border-top:1px solid var(--border)}
+.roadmap-list>li:first-child{border-top:0}
+.roadmap-list strong{font-weight:600}
+.roadmap-list p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.roadmap-list .dev-note{grid-column:1/-1;margin-top:6px}
+.roadmap-meta,.progress-total{display:flex;align-items:center;gap:8px}
+.roadmap-meta{align-self:start}
+.feature-progress .section-head>div{gap:16px}
+.feature-progress>p{margin:0 0 10px;color:var(--muted);font-size:13px}
+.feature-progress td.figure{font-size:14px}
+
 /* Sign-in: brand story on paper, the form on card stock */
 #main.auth-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(420px,560px);max-width:none;min-height:100vh;padding:0;margin:0;container-type:normal}
 .auth-brand{display:flex;flex-direction:column;justify-content:space-between;gap:32px;padding:44px 64px 36px;background:var(--bg)}
@@ -380,7 +431,7 @@ body.pane-open .workspace{margin-right:var(--pane)}
 
 /* Responsive */
 @media(max-width:1180px){.auth-cards{display:none}}
-@media(max-width:1100px){.top-search{display:none}.columns{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:1100px){.top-search{display:none}.columns{grid-template-columns:minmax(0,1fr)}.feature-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:860px){#main.auth-layout{grid-template-columns:minmax(0,1fr)}.auth-brand{display:none}.auth-form{border-left:0;padding:24px 20px}}
 @media(max-width:760px){.shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}.sidebar>.eyebrow,.account-badge{display:none}.sidebar nav{display:flex;flex-wrap:wrap;gap:4px}.nav-group{display:contents}.nav-group h2{display:none}.topbar{position:relative;height:auto;min-height:56px;flex-wrap:wrap;padding:10px 16px}.page-heading{flex-direction:column;align-items:flex-start}}
 @keyframes slide{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}

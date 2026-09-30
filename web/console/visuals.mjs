@@ -31,6 +31,10 @@ const paths = {
   security: '<path d="M12 3.5 5 6.2v5.3c0 4.1 2.9 7.2 7 9 4.1-1.8 7-4.9 7-9V6.2z"/><path d="m9 12 2.2 2.2 3.8-3.8"/>',
   audit: '<path d="M5.5 3.5h13v17h-13z"/><path d="M8.5 3.5v17"/><path d="M11.5 8h4M11.5 11.5h4"/>',
   storage: '<path d="M3.5 4.5h17V9h-17z"/><path d="M5 9v10.5h14V9"/><path d="M10 13h4"/>',
+  tasks: '<path d="M3.5 6h6.5l2 2.5h8.5v11h-17z"/><path d="M8 13h8M8 16h5"/>',
+  resume: '<path d="M4 8.5h14.5M15 5l3.5 3.5L15 12"/><path d="M20 15.5H5.5M9 12l-3.5 3.5L9 19"/>',
+  privacy: '<path d="M3 12s3.2-5.5 9-5.5S21 12 21 12s-3.2 5.5-9 5.5S3 12 3 12z"/><circle cx="12" cy="12" r="2.5"/><path d="M4.5 19.5 19.5 4.5"/>',
+  system: '<rect x="4" y="4.5" width="16" height="6"/><rect x="4" y="13.5" width="16" height="6"/><path d="M7.5 7.5h1M7.5 16.5h1M11.5 7.5h5M11.5 16.5h5"/>',
   invitations: '<path d="M3.5 6.5h17v3.7a1.8 1.8 0 0 0 0 3.6v3.7h-17v-3.7a1.8 1.8 0 0 0 0-3.6z"/><path d="M14.5 8.5v1M14.5 11.5v1M14.5 14.5v1"/>',
   accounts: '<circle cx="9" cy="8.5" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15.5 5.2a3.5 3.5 0 0 1 0 6.6"/><path d="M17.5 14.6A6 6 0 0 1 21 20"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
@@ -97,9 +101,16 @@ function typeBreakdown(insights, t) {
     <span class="breakdown-count">${r.count}</span></li>`)}</ul></section>`;
 }
 
+function distributionCategories(insights) {
+  const categories = rowsOf(insights?.categories);
+  if (categories.length <= 6) return categories;
+  // Keep six colours without losing records or renormalizing a top-N subset to 100%.
+  return [...categories.slice(0, 5), {value: 'otherCategories', count: categories.slice(5).reduce((sum, c) => sum + c.count, 0)}];
+}
+
 /** Distribution ring: each arc is a real category share of active memories; the centre is the total. */
 function distribution(insights, t) {
-  const cats = rowsOf(insights?.categories).slice(0, 6), total = cats.reduce((n, c) => n + c.count, 0);
+  const cats = distributionCategories(insights), total = cats.reduce((n, c) => n + c.count, 0);
   const R = 84, C = 2 * Math.PI * R, gap = cats.length > 1 ? 3 : 0; // square ends: a hairline of paper between arcs
   let offset = 0;
   const arcs = cats.map((c, i) => { const len = Math.max(0.1, c.count / total * C - gap), arc = html`<circle class="arc hue-${i}" cx="110" cy="110" r="${R}" stroke-dasharray="${fixed(len)} ${fixed(C - len)}" stroke-dashoffset="${fixed(-offset)}"><title>${t(c.value)} · ${c.count}</title></circle>`; offset += c.count / total * C; return arc; });
@@ -109,9 +120,9 @@ function distribution(insights, t) {
     ${cats.length ? '' : html`<figcaption class="radar-empty">${i18n(t, 'radarEmpty')}</figcaption>`}</figure>`;
 }
 function distributionLegend(insights, t) {
-  const cats = rowsOf(insights?.categories).slice(0, 6), total = cats.reduce((n, c) => n + c.count, 0);
+  const cats = distributionCategories(insights), total = cats.reduce((n, c) => n + c.count, 0);
   if (!cats.length) return '';
-  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i><span>${t(c.value)}</span><strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
+  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i>${i18n(t, c.value)}<strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
 }
 
 /** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
@@ -200,6 +211,221 @@ export function summaryDetailView(t, data, {canGoBack = false}) {
   return String(html`<div class="detail-meta"><span class="tag">${t(summary.category)}</span><span class="tag">${i18n(t, 'revisions')} ${summary.revision}</span></div>
   ${summary.claims?.length ? html`<ol class="claim-list">${summary.claims.map(c => html`<li class="detail-source"><p class="body-content">${c.quote}</p>
     <button type="button" class="quiet" data-memory="${c.memory_id}" data-revision="${c.revision}">${svg('source')}${i18n(t, 'sources')} · <code>${c.memory_id}</code></button></li>`)}</ol>` : emptyState(t)}
-  ${i18n(t, data.complete ? 'endOfSummary' : 'next', 'p')}
+  ${i18n(t, data.complete ? 'endOfContent' : 'next', 'p')}
   <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
+}
+
+/* Feature map: every menu page lists what it offers today and what is still planned, so the
+ * placeholders, the progress table, the docs and the tests all come from one list.
+ * Field rules and the path from planned to live: docs/console-feature-standard.md.
+ *   status  live: backed by a real endpoint · planned: placeholder only · policy: deliberately not on the web
+ *   read    console-api views it reads · write: console actions it performs
+ *   core    existing Core API a planned feature will wrap · scope: the Core scopes those APIs check
+ *   reauth  a write needs the current password and an unused TOTP · operator: platform operators only
+ *   ui      wireframe of a planned feature: table columns, form fields (type:key), buttons, stat tiles
+ * Titles and notes are catalog keys derived from the ID (featureKey). IDs are never reused. */
+export const featureMap = {
+  overview: [
+    {id: 'OVW-01', status: 'live', read: ['overview']},
+    {id: 'OVW-02', status: 'live', read: ['overview']},
+    {id: 'OVW-03', status: 'planned', read: ['attention']},
+  ],
+  memories: [
+    {id: 'MEM-01', status: 'live', read: ['memories']},
+    {id: 'MEM-02', status: 'live', read: ['memory', 'memory-meta']},
+    {id: 'MEM-03', status: 'live', write: ['memory.create']},
+    {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
+    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity', 'memory.visibility']},
+    {id: 'MEM-06', status: 'planned', write: ['memory.batch_classify', 'memory.batch_retract']},
+    {id: 'MEM-07', status: 'planned', read: ['memory']},
+  ],
+  summaries: [
+    {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},
+    {id: 'SUM-02', status: 'live', write: ['jobs.schedule']},
+    {id: 'SUM-03', status: 'planned', read: ['taxonomy'], write: ['taxonomy.save']},
+  ],
+  tasks: [
+    {id: 'TSK-01', status: 'live', read: ['projects']},
+    {id: 'TSK-02', status: 'planned', read: ['task-branches'], core: ['POST /v1/task-branches/preview'], scope: ['resume:read'],
+      ui: {table: ['taskTitle', 'sourceBranch', 'lastCheckpoint', 'state']}},
+    {id: 'TSK-03', status: 'planned', read: ['project-context'], core: ['POST /v1/project-context/preview'], scope: ['resume:read'],
+      ui: {form: ['select:project'], submit: 'generatePreview'}},
+    {id: 'TSK-04', status: 'planned', read: ['task-checkpoints'], core: ['GET /v1/tasks/{task_id}/checkpoints', 'GET /v1/tasks/{task_id}/canonical-revisions'],
+      scope: ['memory:read', 'task:reconcile:read'], ui: {table: ['checkpoint', 'sources', 'created']}},
+    {id: 'TSK-05', status: 'planned', write: ['projects.bootstrap', 'tasks.bootstrap'], core: ['POST /v1/project-bootstrap/preview', 'POST /v1/task-bootstrap/preview'],
+      scope: ['project:bootstrap:preview', 'project:bootstrap:confirm', 'task:bootstrap:preview', 'task:bootstrap:confirm'], ui: {actions: ['newProject', 'newTask']}},
+    {id: 'TSK-06', status: 'planned', read: ['task-reconciliation'], write: ['tasks.reconcile'],
+      core: ['POST /v1/tasks/{task_id}/reconciliation/run', 'POST /v1/task-reconciliations/{id}/resolve'], scope: ['task:reconcile:read', 'task:reconcile:confirm'],
+      ui: {table: ['taskTitle', 'proposal', 'state'], actions: ['runReconciliation']}},
+  ],
+  resume: [
+    {id: 'RES-01', status: 'planned', read: ['resume-preview'], core: ['POST /v1/resume/preview'], scope: ['resume:read'],
+      ui: {form: ['select:project', 'select:task', 'select:sourceBranch'], submit: 'previewResume'}},
+    {id: 'RES-02', status: 'planned', write: ['resume.confirm'], core: ['POST /v1/resume/{resume_id}/confirm'], scope: ['resume:confirm'],
+      ui: {actions: ['confirmResume']}},
+    {id: 'RES-03', status: 'planned', read: ['resume-deliveries'], core: ['GET /v1/resume/{resume_id}/injection-status', 'GET /v1/resume/{resume_id}/delivery-receipt-status'],
+      scope: ['resume:read'], ui: {table: ['resumeId', 'targetAgent', 'deliveryState', 'completionAck']}},
+    {id: 'RES-04', status: 'planned', read: ['resume-history'], scope: ['resume:read'], ui: {table: ['created', 'taskTitle', 'state']}},
+  ],
+  jobs: [
+    {id: 'JOB-01', status: 'live', read: ['jobs', 'job']},
+    {id: 'JOB-02', status: 'live', write: ['jobs.schedule']},
+    {id: 'JOB-03', status: 'live', write: ['jobs.cancel', 'jobs.retry']},
+  ],
+  connections: [
+    {id: 'CON-01', status: 'live', read: ['connections'], write: ['oauth.revoke']},
+    {id: 'CON-02', status: 'live', read: ['connections'],
+      write: ['connections.create', 'connections.update', 'connections.rotate', 'connections.disable', 'connections.enable', 'connections.revoke']},
+    {id: 'CON-03', status: 'planned', read: ['agent-instances'], write: ['devices.register', 'devices.rotate', 'devices.revoke'],
+      core: ['POST /v1/agent-instances/register', 'POST /v1/agent-instances/{id}/rotate-key', 'POST /v1/agent-instances/{id}/revoke'], scope: ['admin:devices'], reauth: true},
+    {id: 'CON-04', status: 'planned', read: ['capture-status'], core: ['GET /v1/status'], scope: ['memory:read']},
+  ],
+  models: [
+    {id: 'MOD-01', status: 'live', read: ['models'], write: ['models.save', 'models.disable']},
+    {id: 'MOD-02', status: 'live', write: ['models.test']},
+    {id: 'MOD-03', status: 'live', write: ['vector.schedule']},
+    {id: 'MOD-04', status: 'planned', read: ['model-usage']},
+  ],
+  privacy: [
+    {id: 'PRV-01', status: 'live', read: ['models']},
+    {id: 'PRV-02', status: 'planned', read: ['privacy-defaults'], write: ['privacy.defaults'],
+      ui: {form: ['select:defaultSensitivity', 'check:defaultWebVisibility'], submit: 'save'}},
+    {id: 'PRV-03', status: 'planned', read: ['retention'], write: ['retention.save'], core: ['GET /v1/retention', 'PUT /v1/retention'], scope: ['admin:retention'],
+      ui: {form: ['number:eventRetentionDays', 'number:checkpointRetentionDays'], submit: 'save'}},
+    {id: 'PRV-04', status: 'planned', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
+      ui: {actions: ['pruneNow']}},
+    {id: 'PRV-05', status: 'policy'},
+  ],
+  security: [
+    {id: 'SEC-01', status: 'live', write: ['security.password'], reauth: true},
+    {id: 'SEC-02', status: 'live', write: ['security.totp.begin', 'security.totp.complete'], reauth: true},
+    {id: 'SEC-03', status: 'live', write: ['security.recovery_codes'], reauth: true},
+    {id: 'SEC-04', status: 'live', read: ['security'], write: ['security.session.revoke', 'security.sessions.revoke_others']},
+    {id: 'SEC-05', status: 'planned', read: ['login-history']},
+  ],
+  audit: [
+    {id: 'AUD-01', status: 'live', read: ['audit']},
+    {id: 'AUD-02', status: 'planned', read: ['audit']},
+  ],
+  storage: [
+    {id: 'STO-01', status: 'live', read: ['export'], write: ['storage.export']},
+    {id: 'STO-02', status: 'live', write: ['storage.import']},
+    {id: 'STO-03', status: 'live', read: ['storage']},
+    {id: 'STO-04', status: 'policy'},
+  ],
+  invitations: [
+    {id: 'INV-01', status: 'live', read: ['invitations'], operator: true},
+    {id: 'INV-02', status: 'live', write: ['invitations.issue'], reauth: true, operator: true},
+    {id: 'INV-03', status: 'live', write: ['invitations.revoke', 'invitations.revoke_batch'], reauth: true, operator: true},
+  ],
+  accounts: [
+    {id: 'ACC-01', status: 'live', read: ['accounts'], operator: true},
+    {id: 'ACC-02', status: 'live', write: ['accounts.disable', 'accounts.enable'], reauth: true, operator: true},
+    {id: 'ACC-03', status: 'live', write: ['accounts.role'], reauth: true, operator: true},
+    {id: 'ACC-04', status: 'policy'},
+  ],
+  system: [
+    {id: 'SYS-01', status: 'live', read: ['capabilities'], operator: true},
+    {id: 'SYS-02', status: 'planned', read: ['system-health'], core: ['GET /v1/status', 'GET /readyz'], operator: true,
+      ui: {stats: ['svcCore', 'svcWeb', 'svcAuth', 'svcWorker', 'svcVector']}},
+    {id: 'SYS-03', status: 'planned', read: ['system-version'], operator: true, ui: {stats: ['releaseVersion', 'schemaVersion', 'runtimeVersion']}},
+    {id: 'SYS-04', status: 'planned', read: ['backups'], operator: true, ui: {table: ['backupTime', 'backupSize', 'backupVerified']}},
+  ],
+};
+/** Catalog keys for a feature: OVW-01 → featOVW01 (title) and featOVW01Note (description). */
+export const featureKey = id => `feat${id.replace('-', '')}`;
+/** Menu destinations whose content is composed from the feature map. */
+export const prototypePages = ['tasks', 'resume', 'privacy', 'system'];
+/** Page badge: live when nothing is planned, planned when nothing is live, partial otherwise. */
+export function pageState(page) {
+  const states = (featureMap[page] || []).map(f => f.status);
+  return !states.includes('live') ? 'planned' : states.includes('planned') ? 'partial' : 'live';
+}
+
+export const featureStatus = (t, status) => html`<span class="tag status-tag" data-status="${status}">${i18n(t, `featureStatus_${status}`)}</span>`;
+const stateDot = (t, state) => html`<span class="state-dot" data-state="${state}">${i18n(t, state)}</span>`;
+const sectionNote = (t, key) => html`<p class="policy-box">${i18n(t, key)}</p>`;
+
+/** Developer notes on a planned feature: the contract it needs and the standard it follows. */
+function devNote(t, f) {
+  const rows = [['contractRead', (f.read || []).map(view => `console-api/${view}`)], ['contractWrite', f.write || []], ['contractCore', f.core || []], ['contractScope', f.scope || []]]
+    .filter(([, values]) => values.length);
+  const flags = [f.reauth && 'contractReauth', f.operator && 'contractOperator'].filter(Boolean);
+  return html`<details class="dev-note"><summary>${i18n(t, 'devNotes')} · ${f.id}</summary>
+    <dl>${rows.map(([key, values]) => html`<dt>${i18n(t, key)}</dt><dd>${values.map(value => html`<code>${value}</code>`)}</dd>`)}</dl>
+    ${flags.length ? html`<p>${flags.map((key, i) => html`${i ? ' · ' : ''}${i18n(t, key)}`)}</p>` : ''}
+    <p>${i18n(t, 'featureStandard')} <code>docs/console-feature-standard.md</code></p></details>`;
+}
+
+function control(t, spec) {
+  const [type, key] = spec.split(':');
+  if (type === 'check') return html`<label class="check-field"><input type="checkbox" disabled>${i18n(t, key)}</label>`;
+  if (type === 'select') return html`<label>${i18n(t, key)}<select disabled data-native-select><option>—</option></select></label>`;
+  return html`<label>${i18n(t, key)}<input type="${type}" disabled placeholder="—"></label>`;
+}
+/** Wireframe of a planned feature: the tiles, table, fields and buttons it will have, all disabled. */
+function wireframe(t, ui = {}) {
+  const buttons = [...(ui.submit ? [html`<button type="button" class="primary" disabled>${i18n(t, ui.submit)}</button>`] : []),
+    ...(ui.actions || []).map(key => html`<button type="button" disabled>${i18n(t, key)}</button>`)];
+  return html`<div class="blueprint">
+    ${ui.stats ? html`<div class="blueprint-stats">${ui.stats.map(key => html`<div>${i18n(t, key)}<strong>—</strong></div>`)}</div>` : ''}
+    ${ui.table ? html`<div class="table-scroll"><table><thead><tr>${ui.table.map(key => html`<th>${i18n(t, key)}</th>`)}</tr></thead>
+      <tbody><tr><td colspan="${ui.table.length}" class="blueprint-empty">${i18n(t, 'plannedPlaceholder')}</td></tr></tbody></table></div>` : ''}
+    ${ui.form ? html`<div class="blueprint-form">${ui.form.map(spec => control(t, spec))}</div>` : ''}
+    ${buttons.length ? html`<div class="actions">${buttons}</div>` : ''}</div>`;
+}
+
+function featureCard(t, f, body = '') {
+  const key = featureKey(f.id);
+  return html`<section class="card feature-card" data-status="${f.status}" data-feature="${f.id}">
+    <header class="section-head">${i18n(t, key, 'h2')}<div>${featureStatus(t, f.status)}<span class="feature-id">${f.id}</span></div></header>
+    ${i18n(t, `${key}Note`, 'p')}${f.status === 'planned' ? html`${wireframe(t, f.ui)}${devNote(t, f)}` : body}</section>`;
+}
+
+/** TSK-01: the account's projects, name and ID only. */
+function projectList(t, data) {
+  if (data.unavailable) return sectionNote(t, 'unavailable');
+  const rows = Array.isArray(data.projects) ? data.projects : [];
+  if (!rows.length) return emptyState(t, 'noProjects');
+  return html`<div class="table-scroll"><table><thead><tr><th>${i18n(t, 'projectName')}</th><th>${i18n(t, 'projectId')}</th></tr></thead>
+    <tbody>${rows.map(p => html`<tr><td><strong>${p.name || '—'}</strong></td><td><code>${p.project_id}</code></td></tr>`)}</tbody></table></div>`;
+}
+/** PRV-01: which models may receive memory content or search queries. Changes stay on the models page. */
+function egressSummary(t, data) {
+  if (data.unavailable) return sectionNote(t, 'unavailable');
+  const models = Array.isArray(data.models) ? data.models : [];
+  const yes = value => i18n(t, value === true ? 'yes' : 'no');
+  return html`<div class="table-scroll"><table><thead><tr><th>${i18n(t, 'modelKind')}</th><th>${i18n(t, 'state')}</th><th>${i18n(t, 'egressAllowed')}</th><th>${i18n(t, 'queryAllowed')}</th></tr></thead>
+    <tbody>${models.map(m => html`<tr><td>${i18n(t, m.kind)}</td><td>${stateDot(t, m.config?.enabled ? 'enabled' : 'disabled')}</td><td>${yes(m.config?.egress_approved)}</td><td>${yes(m.config?.query_approved)}</td></tr>`)}</tbody></table></div>
+    <div class="section-foot"><a href="/app/models">${i18n(t, 'models')} →</a></div>`;
+}
+/** SYS-01: platform switches exactly as the server reports them in its capabilities. */
+function platformSwitches(t, caps) {
+  const rows = [['sysConsoleOperations', caps.enabled], ['sysCoreWritable', caps.writable], ['sysInvitations', caps.management?.invitations], ['sysAccounts', caps.management?.accounts],
+    ['sysRoles', caps.management?.roles], ['sysConnections', caps.connection_management?.enabled], ['sysRecovery', caps.recovery_configured], ['sysMaintenance', caps.maintenance_enabled]];
+  return html`<dl class="metadata-grid">${rows.map(([key, on]) => html`<dt>${i18n(t, key)}</dt><dd>${stateDot(t, on === true ? 'enabled' : 'disabled')}</dd>`)}</dl>`;
+}
+/** Development progress across the whole feature map, per page. */
+function featureProgress(t) {
+  const statuses = ['live', 'planned', 'policy'], count = (list, status) => list.filter(f => f.status === status).length, all = Object.values(featureMap).flat();
+  return html`<section class="card feature-progress"><header class="section-head">${i18n(t, 'featureProgress', 'h2')}
+    <div>${statuses.map(s => html`<span class="progress-total">${featureStatus(t, s)}<strong class="figure">${count(all, s)}</strong></span>`)}</div></header>${i18n(t, 'featureProgressNote', 'p')}
+    <div class="table-scroll"><table><thead><tr><th>${i18n(t, 'featurePage')}</th>${statuses.map(s => html`<th>${i18n(t, `featureStatus_${s}`)}</th>`)}</tr></thead>
+    <tbody>${Object.entries(featureMap).map(([page, list]) => html`<tr><td><a href="/app/${page}">${i18n(t, page)}</a></td>${statuses.map(s => html`<td class="figure">${count(list, s) || '—'}</td>`)}</tr>`)}</tbody></table></div></section>`;
+}
+
+/** New menu destinations: one card per feature. Live cards show real data; planned ones a wireframe. */
+export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
+  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'SYS-01': () => platformSwitches(t, caps)};
+  const cards = (featureMap[page] || []).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? '' : ''));
+  return String(html`<div class="feature-grid">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
+}
+
+/** Existing pages: their planned and policy features as one compact list under the live content. */
+export function roadmapCard(t, page) {
+  const items = (featureMap[page] || []).filter(f => f.status !== 'live');
+  if (!items.length) return '';
+  return String(html`<section class="card roadmap"><header class="section-head">${i18n(t, 'roadmapTitle', 'h2')}</header>${i18n(t, 'roadmapNote', 'p')}
+    <ol class="roadmap-list">${items.map(f => html`<li data-status="${f.status}" data-feature="${f.id}"><div>${i18n(t, featureKey(f.id), 'strong')}${i18n(t, `${featureKey(f.id)}Note`, 'p')}</div>
+      <div class="roadmap-meta">${featureStatus(t, f.status)}<span class="feature-id">${f.id}</span></div>${f.status === 'planned' ? devNote(t, f) : ''}</li>`)}</ol></section>`);
 }

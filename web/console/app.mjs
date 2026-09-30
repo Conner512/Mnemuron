@@ -2,7 +2,7 @@
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
 import {actionButton,actionPage,mountActions,canAct} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate} from './visuals.mjs';
+import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 
@@ -62,7 +62,8 @@ function heading() {
  const pageActions={memories:['memory.create','memory.correct'],summaries:['jobs.schedule'],jobs:['jobs.schedule','jobs.cancel'],models:['models.save'],connections:['oauth.revoke','connections.create'],security:['security.password','security.sessions.revoke_others'],storage:['storage.export','storage.import']};
  const managing=capabilities.operator&&capabilities.management?.[page];
  const interactive=(pageActions[page]||[]).some(a=>canAct(capabilities,a));
- const badge=`<span class="tag">${l(managing?'operatorManagement':interactive?'interactive':'readOnly')}</span>`;
+ // New destinations are built from the feature map; their badge says how much of the page is live.
+ const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):`<span class="tag">${l(managing?'operatorManagement':interactive?'interactive':'readOnly')}</span>`;
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
  return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
 }
@@ -73,15 +74,22 @@ function render(data) {
  else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data)});
  else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))],pagination:pagination(data)});
+ else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
  else if(page==='models')html=policy('modelsNote',['configure']);
  else if(['invitations','accounts'].includes(page))html=policy('platformNote',[page==='invitations'?'issue':'manage']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
+ if(!prototypePages.includes(page))html+=roadmapCard(t,page);
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
 }
 async function load() {
  const sequence=++requestSequence;
- if(['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ if(['resume','system'].includes(page)||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ // Prototype pages read one existing view for their live card; a failure only degrades that card.
+ if(page==='tasks'||page==='privacy'){
+   let data;try{data=await api(page==='tasks'?'projects':'models');}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;data={unavailable:true};}
+   if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
+ }
  try {
    const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{};
    const data=await api(page,params);
@@ -141,7 +149,9 @@ pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailStack=
 document.addEventListener('keydown',event=>{
  if(event.key==='Escape'&&pane.open&&!document.querySelector('dialog[open]:modal')&&!document.querySelector('.select-popup:popover-open')){closePane();return;}
  const typing=event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]:modal');
- if(!((event.key==='/'&&!typing)||(event.key.toLowerCase?.()==='k'&&(event.metaKey||event.ctrlKey))))return;
+ // A page shortcut must not navigate away from an editor or an unacknowledged credential.
+ if(typing||event.defaultPrevented||event.isComposing||document.querySelector('.select-popup:popover-open'))return;
+ if(!(event.key==='/'||(event.key.toLowerCase?.()==='k'&&(event.metaKey||event.ctrlKey))))return;
  event.preventDefault();const field=document.querySelector('[data-search-input]');
  if(field){field.focus();field.select();}else location.assign('/app/memories');
 });

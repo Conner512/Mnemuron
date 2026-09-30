@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {renderPage,sendPage,serveAsset,pages,routeTitle} from '../../../web/console/render.mjs';
-import {overviewView,icon,libraryView,memoryDetailView,memoryRows} from '../../../web/console/visuals.mjs';
+import {overviewView,icon,libraryView,memoryDetailView,memoryRows,summaryDetailView} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
 import {declarations,rules} from './helpers/css.mjs';
 
@@ -41,7 +41,7 @@ test('Shell: one vermilion palette; no theme picker or appearance page, the lang
 test('Shell: both locales cover shell and view strings without unsafe interpolation',()=>{
  assert.deepEqual(Object.keys(catalog.en).sort(),Object.keys(catalog['zh-CN']).sort());
  for(const locale of ['zh-CN','en']){
-  const t=key=>text(key,locale),html=overviewView({}, {t,memoryRows:()=>''})+libraryView(t,{data:{results:[]}})+pages.map(p=>renderPage({title:p,page:p})).join('');
+  const t=key=>text(key,locale),html=overviewView({}, {t,memoryRows:()=>''})+libraryView(t,{data:{results:[]}})+summaryDetailView(t,{results:[{category:'technical',revision:1,claims:[]}],complete:true},{})+pages.map(p=>renderPage({title:p,page:p})).join('');
   for(const [,key] of html.matchAll(/data-i18n="([^"]+)"/g))assert.ok(Object.hasOwn(catalog[locale],key),key);
  }
  assert.doesNotMatch(overviewView({},{t:()=>'<script>x</script>'}),/<script>/);
@@ -73,13 +73,23 @@ test('Shell: assets remain on a fixed same-origin allowlist',()=>{
   assert.equal(serveAsset({method:'GET'},response(),route),false);
  assert.equal(serveAsset({method:'POST'},response(),'/assets/visuals.mjs'),false);
 });
+test('Shell: every page versions the combined stylesheet by its actual content',()=>{
+ const asset=response();assert.equal(serveAsset({method:'GET'},asset,'/assets/styles.css'),true);
+ const version=createHash('sha256').update(asset.body).digest('hex').slice(0,16);
+ for(const options of [{title:'login',auth:true},{title:'register',auth:true},{title:'oauthLogin',auth:true,authPurpose:'oauth'},...pages.map(page=>({title:page,page}))]){
+  const html=renderPage(options),href=html.match(/<link rel="stylesheet" href="([^"]+)"/)[1];
+  assert.equal(href,`/assets/styles.css?v=${version}`);
+  assert.equal(new URL(href,'https://console.example.test').pathname,'/assets/styles.css');
+ }
+});
 test('Shell: every asset the browser loads is routed by the console ingress',()=>{
  // Behind the tunnel only allowlisted asset paths reach the service; any other module breaks the module graph.
  const yml=fs.readFileSync(new URL('../../../docs/console-ingress.example.yml',import.meta.url),'utf8');
  const allowed=new Set(yml.match(/assets\/\(([^)]+)\)/)[1].split('|').map(name=>name.replaceAll('\\.','.')));
  const source=name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.meta.url),'utf8');
  const pagesHtml=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}})+renderPage({title:'login',auth:true});
- const entries=[...new Set([...pagesHtml.matchAll(/(?:src|href)="\/assets\/([a-z-]+\.(?:mjs|css|svg))"/g)].map(match=>match[1]))];
+ const entries=[...new Set([...pagesHtml.matchAll(/(?:src|href)="\/assets\/([a-z-]+\.(?:mjs|css|svg))(?:\?[^"<>]*)?"/g)].map(match=>match[1]))];
+ assert.ok(entries.includes('styles.css'));
  const loaded=new Set(),queue=entries.filter(name=>name.endsWith('.mjs'));
  while(queue.length){
   const name=queue.pop();if(loaded.has(name))continue;loaded.add(name);
@@ -114,14 +124,14 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar keeps three groups and all eleven destinations as icon links',()=>{
+test('Shell: the sidebar keeps three groups and all fifteen destinations as icon links',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
   assert.equal((nav.match(/class="nav-group"/g)||[]).length,3);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,11);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,11);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,15);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,15);
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
@@ -138,6 +148,22 @@ test('Shell: the distribution ring draws only real category shares',()=>{
  assert.equal((html.match(/<rect class="bar/g)||[]).length,2);
  assert.doesNotMatch(html,/<i>x<\/i>/);assert.match(html,/75%/);
  assert.match(view({counts:{}}),/distribution is-empty/);
+});
+test('Shell: distribution includes every category in its total and folds overflow into Other',()=>{
+ for(const size of [6,7,13,64]){
+  const categories=Array.from({length:size},(_,i)=>({value:`synthetic-${i}`,count:i+1}));
+  const total=categories.reduce((sum,c)=>sum+c.count,0);
+  for(const locale of ['zh-CN','en']){
+   const html=overviewView({insights:{categories}},{t:key=>text(key,locale)});
+   assert.match(html,new RegExp(`<text class="ring-total"[^>]*>${total}</text>`));
+   assert.equal((html.match(/class="arc /g)||[]).length,6);
+   if(size>6){
+    const other=categories.slice(5).reduce((sum,c)=>sum+c.count,0);
+    assert.match(html,new RegExp(`<strong>${other}</strong><small>${Math.round(other/total*100)}%</small>`));
+    assert.ok(html.includes(text('otherCategories',locale)));
+   }
+  }
+ }
 });
 test('Shell: decorative SVG cannot incorporate caller-supplied markup',()=>{
  const svg=icon('<script>synthetic</script>');

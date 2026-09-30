@@ -17,7 +17,7 @@ function overviewInsights(store,user){
     LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
     LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
       AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
-    WHERE m.user_id=? AND m.status='active' GROUP BY value ORDER BY count DESC,value LIMIT 12`).all(store.consoleService.taxonomy().version,user);
+    WHERE m.user_id=? AND m.status='active' GROUP BY value ORDER BY count DESC,value`).all(store.consoleService.taxonomy().version,user);
   return {window_days:30,activity,types:group('memory_type'),statuses:group('status'),categories};
 }
 export async function consoleRead(store,auth,view,params={}) {
