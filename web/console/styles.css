@@ -124,7 +124,9 @@ details{margin:8px 0}summary{cursor:pointer;color:var(--muted);font-size:13px}
 .sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:26px 16px 16px;border-right:1px solid var(--border);background:var(--bg);overflow:auto;scrollbar-width:thin;z-index:5}
 .brand{display:flex;align-items:center;gap:12px;color:var(--text);font-family:var(--font-serif);font-weight:600;font-size:21px;letter-spacing:-.01em}
 .brand:hover{color:var(--text);text-decoration:none}
-.brand-mark{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:var(--radius-sm);background:var(--accent);color:var(--on-accent);font-family:var(--font-serif);font-size:22px;font-weight:600;line-height:1}
+.brand-mark{display:block;width:34px;height:34px;flex:none;color:var(--text)}
+.brand-mark .logo{display:block;width:100%;height:100%}
+.logo-seal{fill:var(--accent)}
 .sidebar>.brand{margin:0 10px}
 .sidebar>.eyebrow{margin:2px 0 0 56px;font-family:var(--font-sans);font-size:11.5px;letter-spacing:0;color:var(--muted)}
 .sidebar nav{margin-top:24px}

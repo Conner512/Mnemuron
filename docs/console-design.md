@@ -14,10 +14,23 @@ The server bundles the files listed in `STYLESHEETS` (`web/console/render.mjs`) 
 `/assets/styles.css` response, so CSP and ingress rules are unchanged. There are no decorative skin layers.
 
 Browsers may load only the asset paths the public ingress allows (see
-[`console-ingress.example.yml`](console-ingress.example.yml)): `styles.css` and seven modules. A new browser module
+[`console-ingress.example.yml`](console-ingress.example.yml)): `styles.css`, `favicon.svg` and seven modules. A new browser module
 must either be folded into an existing one or ship together with a matching ingress route; otherwise the
 module graph fails behind the tunnel and pages stay on "Loading". A test walks the browser import graph and
 checks it against that allowlist.
+
+## Logo
+
+A seal inside a pair of corner quotes 「■」: the quotes cite the source, the seal is the memory kept on record.
+It carries the product's core promise — every memory keeps its provenance — and reuses the accent's meaning of
+"current, confirmed".
+
+- 48×48 grid. Quotes: `M5 19V5h14` and `M43 29v14H29`, square caps, mitred corners. Seal: an 18×18 square at 15,15.
+- Quote stroke 4 at display sizes, 4.5 in the 34px sidebar/sign-in mark, 5–6 at 32px and below.
+- Colours: quotes follow the text colour (`--text`; paper on dark backgrounds), the seal follows `--accent`.
+  The wordmark is set in the serif face next to the mark.
+- `web/console/favicon.svg` uses a fixed vermilion seal and switches its quotes to paper colour under
+  `prefers-color-scheme: dark`. It is served at `/assets/favicon.svg`, so the page CSP stays `img-src 'self'`.
 
 ## Tokens
 

@@ -76,7 +76,7 @@ test('Shell: every asset the browser loads is routed by the console ingress',()=
  const allowed=new Set(yml.match(/assets\/\(([^)]+)\)/)[1].split('|').map(name=>name.replaceAll('\\.','.')));
  const source=name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.meta.url),'utf8');
  const pagesHtml=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}})+renderPage({title:'login',auth:true});
- const entries=[...new Set([...pagesHtml.matchAll(/(?:src|href)="\/assets\/([a-z-]+\.(?:mjs|css))"/g)].map(match=>match[1]))];
+ const entries=[...new Set([...pagesHtml.matchAll(/(?:src|href)="\/assets\/([a-z-]+\.(?:mjs|css|svg))"/g)].map(match=>match[1]))];
  const loaded=new Set(),queue=entries.filter(name=>name.endsWith('.mjs'));
  while(queue.length){
   const name=queue.pop();if(loaded.has(name))continue;loaded.add(name);
@@ -87,6 +87,20 @@ test('Shell: every asset the browser loads is routed by the console ingress',()=
   assert.ok(allowed.has(name),`${name} is loaded by the browser but not routed by the console ingress`);
   assert.equal(serveAsset({method:'GET'},response(),`/assets/${name}`),true,name);
  }
+});
+test('Shell: the quoted-seal logo is inline and the favicon is a same-origin SVG',()=>{
+ const consolePage=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}});
+ const auth=renderPage({title:'login',auth:true}),oauth=renderPage({title:'oauthLogin',auth:true,authPurpose:'oauth'});
+ for(const html of [consolePage,auth,oauth]){
+  assert.match(html,/<span class="brand-mark" aria-hidden="true"><svg class="logo" viewBox="0 0 48 48"[^>]*><path class="logo-quotes" d="M5 19V5h14M43 29v14H29"[^>]*\/><rect class="logo-seal" x="15" y="15" width="18" height="18"\/><\/svg><\/span>/);
+  assert.match(html,/<link rel="icon" href="\/assets\/favicon.svg" type="image\/svg\+xml">/);
+ }
+ const res=response();
+ assert.equal(serveAsset({method:'GET'},res,'/assets/favicon.svg'),true);
+ assert.equal(res.headers['content-type'],'image/svg+xml');
+ assert.match(String(res.body),/^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="0 0 48 48">/);
+ assert.doesNotMatch(String(res.body),/<script|href=|https?:\/\/(?!www\.w3\.org)/);
+ assert.equal(serveAsset({method:'GET'},response(),'/assets/logo.svg'),false);
 });
 test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const res=response();sendPage(res,{title:'oauthConsent',auth:true,authPurpose:'oauth'},{redirectUri:'https://callback.example.test/exact'});
