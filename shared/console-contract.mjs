@@ -6,7 +6,9 @@ export const exactScopes = (actual,expected) => Array.isArray(actual) && actual.
 export const consoleWritable = auth => auth?.agent_id==='mnemuron-console' && exactScopes(auth.scopes,CONSOLE_WRITE_SCOPES);
 export const consoleMemoryWritable = auth => consoleWritable(auth)||(auth?.agent_id==='mnemuron-console'&&exactScopes(auth.scopes,CONSOLE_BASIC_SCOPES));
 export const CONSOLE_MEMORY_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy']);
-export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&CONSOLE_MEMORY_ACTIONS.includes(action));
+// Basic console credentials may also revoke their own agents' keys; the BFF requires fresh factors first.
+export const CONSOLE_SELF_SERVICE_ACTIONS = Object.freeze(['devices.revoke']);
+export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&(CONSOLE_MEMORY_ACTIONS.includes(action)||CONSOLE_SELF_SERVICE_ACTIONS.includes(action)));
 export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy',
   'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','vector.schedule',
-  'connections.create','connections.rotate','connections.revoke','storage.import']);
+  'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke']);

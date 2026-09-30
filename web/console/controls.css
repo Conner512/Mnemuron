@@ -68,6 +68,22 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .connection-label:not(:disabled):hover{background:none;color:var(--accent)}
 .connection-list .library-footer{padding-top:12px}
 .connection-system summary{font-weight:600;color:var(--text)}
+/* Connections: ChatGPT web, agents and devices, system keys. */
+.connection-chatgpt .section-head .state-dot{font-size:13px}
+.connection-chatgpt>p,.connection-devices>p,.connection-list>p{margin:0 0 12px;color:var(--muted);font-size:13.5px}
+.connection-chatgpt .metadata-grid{margin-bottom:8px}
+.connection-chatgpt dd a{text-decoration:underline;text-underline-offset:3px}
+.connection-grants{margin:4px 0 0}
+.connection-grants table{min-width:560px}
+.connection-grants code{margin-right:4px}
+.connection-devices td small{display:block;margin-top:2px;color:var(--muted);font-size:12px}
+.connection-devices .actions{flex-wrap:nowrap}
+.connection-list>.section-head{margin-top:2px}
+.connection-system h3{margin:16px 0 4px;font-size:14px}
+.connection-credentials{list-style:none;margin:6px 0 12px;padding:0}
+.connection-credentials li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--border);font-size:13px}
+.connection-credentials small{display:block;color:var(--muted);font-size:12px}
+.connection-credentials li>span:last-child{color:var(--muted);white-space:nowrap}
 .connection-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
 .connection-types>.card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:14px;white-space:normal;text-align:left;border-color:var(--line)}
 .connection-types>button.card:not(:disabled):hover{border-color:var(--text);background:var(--hover)}

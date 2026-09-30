@@ -1,4 +1,5 @@
 import {ValidationError,NotFoundError,ConflictError} from './errors.mjs';
+import {credentialView} from './console/credentials.mjs';
 export const isConsoleReader=auth=>auth.agent_id==='mnemuron-console';
 function pagination(params,maximum=50){
   const offset=Number(params.offset??0),limit=Number(params.limit??25);
@@ -90,7 +91,7 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'jobs':{const {offset,limit}=pagination(params);if(params.job_id)return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};
       const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset);
       return {read_only:true,worker_enabled:store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
-    case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
+    case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user).map(row=>credentialView(row)),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
     case 'audit':{const offset=Number(params.offset||0),limit=Number(params.limit||50);if(!Number.isSafeInteger(offset)||offset<0||offset>1000000||!Number.isSafeInteger(limit)||limit<1||limit>100)throw new ValidationError('Invalid pagination.');
       const rows=db.prepare('SELECT audit_id,action,target_type,target_id,outcome,created_at FROM audit_events WHERE user_id=? ORDER BY created_at DESC,audit_id LIMIT ? OFFSET ?').all(user,limit+1,offset);
       return {read_only:true,entries:rows.slice(0,limit),next_offset:rows.length>limit?offset+limit:null};}

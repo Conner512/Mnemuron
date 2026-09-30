@@ -7,22 +7,66 @@ const field=(name,key,value='',extra='')=>`<label>${l(key)}<input name="${name}"
 const pair=(key,value)=>`<dt>${l(key)}</dt><dd>${esc(value??'—')}</dd>`;
 const enabled=c=>c.allowed_actions?.includes('connections.create')===true;
 const kindKeys={chatgpt_oauth:'connChatGPT',generic_mcp:'connGeneric',agent_placeholder:'connAgent'};
+// Keys the platform manages (console, ChatGPT web gateway) are listed but never revoked here.
+const MANAGED=['mnemuron-console','chatgpt-web'];
+const agentKeys={chatgpt:'agent_chatgpt',openclaw:'agent_openclaw',hermes:'agent_hermes',mnemuron:'agent_mnemuron','mnemuron-console':'agent_console','chatgpt-web':'agent_chatgpt_web'};
+const agentName=c=>agentKeys[c.agent_id]?l(agentKeys[c.agent_id]):`<span>${esc(c.agent_id)}</span>`;
+// OAuth times are epoch seconds, Core times ISO strings.
+const ms=v=>v==null||v===''?0:typeof v==='number'?(v<1e12?v*1000:v):Date.parse(v)||0;
+const when=v=>{const n=ms(v);return n?new Date(n).toLocaleString(document.documentElement.lang):'—';};
+const writes=c=>c.scopes.some(s=>s==='memory:write'||s==='capture:write');
+const valuePair=(key,valueKey)=>`<dt>${l(key)}</dt><dd>${l(valueKey)}</dd>`;
+const credential=c=>{const state=c.state||(c.revoked_at?'revoked':'active'),managed=c.managed??MANAGED.includes(c.agent_id);
+  return {...c,scopes:Array.isArray(c.scopes)?c.scopes:[],state,managed,console_revocable:c.console_revocable??(state==='active'&&!managed)};};
+
+/** One inventory for every kind of connection, so the counts match what the page lists. */
+export function connectionInventory(data,caps={}){
+ const grants=(data.legacy_connections||[]).flatMap(c=>c.grants||[]),creds=(data.core_connections||[]).map(credential);
+ const firsts=grants.map(g=>ms(g.created)).filter(Boolean);
+ // Last sign of use: the gateway key's last Core call or the last token ChatGPT obtained.
+ const last=Math.max(0,...creds.filter(c=>c.agent_id==='chatgpt-web'&&c.state==='active').map(c=>ms(c.last_used_at)),ms(data.system_chatgpt?.last_token_at));
+ const chatgpt={configured:data.system_chatgpt?.configured===true||grants.length>0,authorized:grants.length>0,grants,first:firsts.length?Math.min(...firsts):0,last,read_all:caps.web_policy?.read_all===true};
+ const devices=creds.filter(c=>c.state==='active'&&!c.managed),managed=creds.filter(c=>c.state==='active'&&c.managed),history=creds.filter(c=>c.state!=='active');
+ const r=data.counts||{},web=chatgpt.authorized?1:0;
+ return {chatgpt,devices,managed,history,counts:{active:web+(r.active||0)+devices.length,readonly:web+(r.readonly||0)+devices.filter(c=>!writes(c)).length,
+   readwrite:(r.memory_readwrite||0)+devices.filter(writes).length,pending:r.pending||0}};
+}
+function chatgptCard(c,caps){
+ if(!c.configured)return '';
+ const revoke=caps.allowed_actions?.includes('oauth.revoke');
+ const rows=c.grants.map(g=>`<tr><td>${esc(when(g.created))}</td><td>${esc(when(g.expires))}</td><td>${(g.scopes||[]).filter(s=>s!=='openid').map(s=>`<code>${esc(s)}</code>`).join(' ')||'—'}</td>
+   <td>${revoke?`<button type="button" data-console-action="oauth.revoke" data-id="${esc(g.grant_id)}">${l('connRevokeGrant')}</button>`:''}</td></tr>`).join('');
+ return `<section class="card connection-chatgpt"><header class="section-head"><h2>${l('connChatGPTWeb')}</h2><span class="state-dot" data-state="${c.authorized?'enabled':'disabled'}">${l(c.authorized?'connAuthorized':'connNotAuthorized')}</span></header>
+ ${l('connChatGPTWebNote','p')}<dl class="metadata-grid">${valuePair('access','readOnly')}<dt>${l('connReadScope')}</dt><dd>${l(c.read_all?'connReadAll':'connReadGranted')} · <a href="/app/privacy">${l('connAdjust')}</a></dd>
+ <dt>${l('connGrantsLabel')}</dt><dd>${esc(c.grants.length)}</dd>${pair('connFirstAuthorized',c.first?when(c.first):null)}${pair('connLastActivity',c.last?when(c.last):null)}</dl>
+ ${rows?`<details class="connection-grants"><summary>${l('connGrantList')}</summary><div class="table-scroll"><table><thead><tr>${['connAuthorizedAt','expires','scope','actions'].map(k=>`<th>${l(k)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></details>`:''}</section>`;
+}
+function devicesCard(devices,caps){
+ const revoke=caps.allowed_actions?.includes('devices.revoke');
+ const rows=devices.map(c=>`<tr><td><strong>${agentName(c)}</strong><small>${esc([c.label,c.device_id].filter(Boolean).join(' · '))}</small></td><td>${l(writes(c)?'connReadWrite':'readOnly')}</td><td>${esc(when(c.last_used_at))}</td><td>${esc(when(c.created_at))}</td>
+   <td><div class="actions"><button type="button" class="quiet" data-inspect="core_connections" data-id="${esc(c.credential_id)}">${l('inspectDetails')}</button>${revoke&&c.console_revocable?`<button type="button" data-console-action="devices.revoke" data-id="${esc(c.agent_instance_id)}">${l('connRevokeDevice')}</button>`:''}</div></td></tr>`).join('');
+ return `<section class="card connection-devices"><header class="section-head"><h2>${l('connDevices')}</h2></header>${l('connDevicesNote','p')}
+ <div class="table-scroll"><table class="connection-table"><thead><tr>${['connAgentColumn','access','lastUsed','created','actions'].map(k=>`<th>${l(k)}</th>`).join('')}</tr></thead><tbody>${rows||`<tr><td colspan="5"><div class="empty">${l('connNoDevices')}</div></td></tr>`}</tbody></table></div></section>`;
+}
+function systemDetails(data,inv){
+ const list=rows=>rows.length?`<ul class="connection-credentials">${rows.map(c=>`<li><span>${agentName(c)}<small>${esc(c.label||'')}</small></span><span>${l(c.state==='active'?'lastUsed':c.state==='expired'?'connExpired':'connState_revoked')} ${esc(when(c.state==='active'?c.last_used_at:c.revoked_at||c.expires_at))}</span></li>`).join('')}</ul>`:l('empty','p');
+ return `<details class="card connection-system"><summary>${l('connSystem')}</summary>${l('connSystemNote','p')}${data.system_unavailable?l('unavailable','p'):''}
+ <h3>${l('connManaged')}</h3>${l('connManagedNote','p')}${list(inv.managed)}<h3>${l('connHistoryCreds')}</h3>${list(inv.history)}
+ ${(data.historical_grants||[]).length?`<h3>${l('connUnmatchedHistory')}</h3><p>${l('connUnmatchedNote')}</p>${data.historical_grants.map(g=>`<code>${esc(g.client_id)}</code>`).join(' ')}`:''}</details>`;
+}
 export function connectionsView(data,caps,q={}){
- const counts=data.counts||{};
- const stats=[['active','connActive'],['readonly','readOnly'],['memory_readwrite','connReadWrite'],['pending','connPending']].map(([key,label])=>`<article class="card connection-stat">${l(label)}<strong>${esc(counts[key]??'—')}</strong></article>`).join('');
+ const inv=connectionInventory(data,caps);
+ const stats=[['active','connActive'],['readonly','readOnly'],['readwrite','connReadWrite'],['pending','connPending']].map(([key,label])=>`<article class="card connection-stat">${l(label)}<strong>${esc(inv.counts[key])}</strong></article>`).join('');
  const rows=(data.connections||[]).map(c=>`<tr><td><button type="button" class="connection-label" title="${esc(c.label)}" data-connection-detail="${esc(c.connection_id)}">${esc(c.label)}</button><small>${l(kindKeys[c.kind]||'connSystem')}</small></td><td>${l(c.profile==='memory_readwrite'?'connReadWrite':'readOnly')}</td><td>${l(c.expired?'connExpired':c.provisioning?'connPending':`connState_${c.configuration_state}`)}<small>${l(`connHealth_${c.health||'unknown'}`)}</small></td><td>${esc(date(c.last_successful_tool_at))}</td><td><button type="button" data-connection-detail="${esc(c.connection_id)}">${l('connConfigure')}</button></td></tr>`).join('');
  return `<section class="connection-intro"><div>${l('connIntro','p')}${l('connHealthNote','small')}</div>${enabled(caps)?`<button type="button" class="primary" data-connection-new>${l('addConnection')}</button>`:`<p class="policy-box">${l('connPolicy')}</p>`}</section>
- <div class="connection-stats">${stats}</div><section class="card connection-list"><form id="connection-filters" class="toolbar">
+ <div class="connection-stats">${stats}</div>${chatgptCard(inv.chatgpt,caps)}${devicesCard(inv.devices,caps)}
+ <section class="card connection-list"><header class="section-head"><h2>${l('connPersonal')}</h2></header>${l('connPersonalNote','p')}<form id="connection-filters" class="toolbar">
  ${field('search','connSearch',q.search||'','maxlength="120" autocomplete="off"')}${choices('kind','connType',[['','connAll'],['chatgpt_oauth','connChatGPT'],['generic_mcp','connGeneric']],q.kind)}
  ${choices('profile','access',[['','connAll'],['readonly','readOnly'],['memory_readwrite','connReadWrite']],q.profile)}${choices('state','state',[['','connAll'],['draft','connState_draft'],['ready','connState_ready'],['disabled','connState_disabled'],['revoked','connState_revoked']],q.state)}
  ${choices('section','connSection',[['active','connCurrent'],['history','connHistory']],q.section||'active')}<button type="submit">${l('refresh')}</button><button type="button" data-connection-reset>${l('resetFilters')}</button></form>
  <div class="table-scroll"><table class="connection-table"><thead><tr>${['label','access','state','lastUsed','actions'].map(k=>`<th>${l(k)}</th>`).join('')}</tr></thead><tbody>${rows||`<tr><td colspan="5"><div class="empty">${l('connEmpty')}</div></td></tr>`}</tbody></table></div><div class="library-footer"><p>${l('connFilteredCount')}: ${esc(data.total??'—')}</p><div class="pagination">${data.offset?`<button type="button" data-connection-page="${Math.max(0,data.offset-(data.limit||20))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-connection-page="${data.next_offset}">${l('next')}</button>`:''}</div></div></section>
- <details class="card connection-system"><summary>${l('connSystem')}</summary><p>${l('connSystemNote')}</p>${data.system_unavailable?l('unavailable','p'):''}
- ${(data.legacy_connections||[]).map(c=>`<section><h3>${l('connLegacy')}</h3><p>${l('connLegacyNote')}</p>${(c.grants||[]).map(g=>`<dl class="metadata-grid">${pair('oauthClient',g.client_id)}${pair('expires',date(g.expires))}</dl>${caps.allowed_actions?.includes('oauth.revoke')?`<button type="button" data-console-action="oauth.revoke" data-id="${esc(g.grant_id)}">${l('connRevokeGrant')}</button>`:''}`).join('')}</section>`).join('')}
- ${(data.core_connections||[]).map(c=>`<details><summary>${esc(c.label||c.agent_id)}</summary><dl class="metadata-grid">${pair('agentId',c.agent_id)}${pair('operationId',c.credential_id)}</dl></details>`).join('')}
- ${(data.historical_grants||[]).length?`<details><summary>${l('connUnmatchedHistory')}</summary><p>${l('connUnmatchedNote')}</p>${data.historical_grants.map(g=>`<code>${esc(g.client_id)}</code>`).join('')}</details>`:''}</details>`;
+ ${systemDetails(data,inv)}`;
 }
-
 export function mountConnections({api,mutate,getCaps,reload,isActive}){
  const dialog=document.createElement('dialog');dialog.id='connection-dialog';dialog.className='connection-dialog';dialog.setAttribute('aria-labelledby','connection-title');
  dialog.innerHTML=`<div class="dialog-header"><h2 id="connection-title">${l('addConnection')}</h2><button type="button" data-connection-close data-i18n-aria-label="close" aria-label="${esc(t('close'))}">×</button></div><div class="connection-content"></div>`;document.body.append(dialog);

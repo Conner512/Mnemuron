@@ -239,3 +239,27 @@ test('HTTP-MGMT-03: scoped disable/enable preserves ownership and recreates only
    assert.ok(auth.scopes.every(s=>!s.endsWith(':write')&&!s.endsWith(':organize')));
  }
 });
+test('HTTP-DEVICES-01: agent keys are revoked only with fresh factors, only for the owner, never for managed keys',async t=>{
+ const x=await setup(t,{basic:{memory:true,security:true,oauth:true}});
+ assert.ok((await x.get('capabilities')).body.allowed_actions.includes('devices.revoke'));
+ const issue=(owner,agentId,instance,scopes=['memory:read','capture:write'])=>x.core.store.issueCredential({userId:owner.record.user_id,deviceId:'synthetic-device',agentId,agentInstanceId:instance,scopes});
+ const laptop=issue(x.a,'openclaw','synthetic-http-openclaw'),gateway=issue(x.a,'chatgpt-web','synthetic-http-gateway',['memory:read','resume:read']),foreign=issue(x.b,'hermes','synthetic-http-foreign');
+ const listed=(await x.get('connections')).body,row=id=>listed.core_connections.find(c=>c.agent_instance_id===id);
+ assert.equal(row('synthetic-http-openclaw').console_revocable,true);assert.equal(row('synthetic-http-gateway').managed,true);
+ assert.equal(row('synthetic-http-foreign'),undefined);
+ assert.deepEqual(listed.system_chatgpt,{configured:true,last_token_at:null});
+ const target={agent_instance_id:'synthetic-http-openclaw'};
+ assert.notEqual((await x.act('devices.revoke',target)).status,200);
+ assert.notEqual((await x.act('devices.revoke',{...target,current_password:'Synthetic password with spaces  ',otp:'000000'})).status,200);
+ assert.equal((await x.act('devices.revoke',{...target,...await x.proof(),note:'extra'})).status,400);
+ assert.ok(x.core.store.authenticate(laptop.api_key),'failed attempts never reach Core');
+ const revoked=await x.act('devices.revoke',{...target,...await x.proof()});
+ assert.equal(revoked.status,200,JSON.stringify(revoked.body));assert.equal(revoked.body.status,'revoked');
+ assert.throws(()=>x.core.store.authenticate(laptop.api_key));
+ const managed=await x.act('devices.revoke',{agent_instance_id:'synthetic-http-gateway',...await x.proof(x.a,30)});
+ assert.equal(managed.status,409);assert.equal(managed.body.error_code,'MANAGED_CONNECTION');assert.ok(x.core.store.authenticate(gateway.api_key));
+ const cross=await x.act('devices.revoke',{agent_instance_id:'synthetic-http-foreign',...await x.proof(x.b)},x.b);
+ assert.equal(cross.status,200,'B revokes its own device');
+ assert.equal((await x.act('devices.revoke',{agent_instance_id:'synthetic-http-gateway',...await x.proof(x.b,30)},x.b)).body.error_code,'CREDENTIAL_NOT_FOUND');
+ assert.ok(x.core.store.authenticate(gateway.api_key),'another account cannot reach A keys');assert.throws(()=>x.core.store.authenticate(foreign.api_key));
+});

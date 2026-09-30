@@ -22,7 +22,7 @@ const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create
 test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
   const caps=(await f.get('capabilities',{},basic)).body;
-  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy']);
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy','devices.revoke']);
   const m=(await create(f,basic)).body.memory_id;assert.ok(m);
   let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);
@@ -209,4 +209,29 @@ test('CON-BASIC-02: the account ChatGPT read policy is a versioned, idempotent m
   assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1},f.read)).status,403);
   assert.equal((await f.get('capabilities',{},f.b)).body.web_policy.read_all,false);
   assert.deepEqual((await f.get('capabilities',{},basic)).body.web_policy,{read_all:true,revision:1,policy:'web-memory-visibility-v1'});
+});
+
+test('CON-DEVICES-01: owners revoke their own agent keys from the console; managed, admin and foreign keys are refused',async t=>{
+  const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
+  const agent=(user,agentId,instance,scopes=['memory:read','capture:write'])=>f.store.issueCredential({userId:user,deviceId:'synthetic-device',agentId,agentInstanceId:instance,scopes});
+  const laptop=agent(f.a.auth.user_id,'openclaw','synthetic-openclaw'),gateway=agent(f.a.auth.user_id,'chatgpt-web','synthetic-gateway',['memory:read','resume:read']);
+  agent(f.a.auth.user_id,'mnemuron','synthetic-admin',['memory:read','admin:devices']);const foreign=agent(f.b.auth.user_id,'hermes','synthetic-foreign');
+  const view=(await f.get('connections',{},basic)).body.connections;
+  const row=id=>view.find(c=>c.agent_instance_id===id);
+  assert.deepEqual([row('synthetic-openclaw').state,row('synthetic-openclaw').managed,row('synthetic-openclaw').console_revocable],['active',false,true]);
+  assert.deepEqual(row('synthetic-openclaw').scopes,['memory:read','capture:write']);
+  for(const id of ['synthetic-gateway','synthetic-admin','synthetic-basic'])assert.deepEqual([row(id).managed,row(id).console_revocable],[true,false],id);
+  assert.ok(!view.some(c=>'key_hash' in c||'api_key' in c));
+  for(const id of ['synthetic-gateway','synthetic-admin'])assert.equal((await f.act('devices.revoke',{agent_instance_id:id},basic)).body.error_code,'MANAGED_CONNECTION',id);
+  assert.equal((await f.act('devices.revoke',{agent_instance_id:'synthetic-foreign'},basic)).body.error_code,'CREDENTIAL_NOT_FOUND');
+  assert.equal((await f.act('devices.revoke',{agent_instance_id:'synthetic-openclaw',extra:true},basic)).status,400);
+  assert.equal((await f.act('devices.revoke',{agent_instance_id:'synthetic-openclaw'},f.read)).status,403);
+  const revoked=await f.act('devices.revoke',{agent_instance_id:'synthetic-openclaw'},basic);
+  assert.equal(revoked.status,200);assert.equal(revoked.body.status,'revoked');assert.equal(revoked.body.revoked_credentials,1);
+  assert.throws(()=>f.store.authenticate(laptop.api_key));
+  assert.ok(f.store.authenticate(gateway.api_key));assert.ok(f.store.authenticate(foreign.api_key));
+  assert.equal((await f.get('connections',{},basic)).body.connections.find(c=>c.agent_instance_id==='synthetic-openclaw').state,'revoked');
+  assert.equal((await f.act('devices.revoke',{agent_instance_id:'synthetic-openclaw'},basic)).body.error_code,'CREDENTIAL_NOT_FOUND');
+  const audit=f.store.db.prepare("SELECT target_id,metadata_json FROM audit_events WHERE action='agent_instance.revoke' AND user_id=?").all(f.a.auth.user_id);
+  assert.deepEqual(audit.map(a=>[a.target_id,JSON.parse(a.metadata_json)]),[['synthetic-openclaw',{revoked_credentials:1,source:'console'}]]);
 });

@@ -165,6 +165,12 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     if(action.startsWith('connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
+    else if(action==='devices.revoke'){
+      // Revoking an agent key is a security change: fresh factors here, then only the target goes to Core.
+      if(Object.keys(payload).some(key=>!['agent_instance_id','current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      await ids.console.reauthenticate(account.account_id,session,payload);
+      result=await coreFor(account.subject).action({action,operation_id,payload:{agent_instance_id:payload.agent_instance_id}});
+    }
     else result=await coreFor(account.subject).action({action,operation_id,payload});
     if(result.login_required){await invalidateAuthorization();setCookie(response,config,'console','',0);}
     else ids.session(token,'console');
@@ -189,6 +195,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     let core;try{core=await coreFor(account.subject).view('connections',{});}catch{core={connections:[],unavailable:true};}ids.session(token,'console');
     const legacy=grants.filter(g=>g.client_id===config.chatgpt_client.client_id);
     sendJson(response,200,{...result,legacy_connections:legacy.length?[{kind:'legacy_system',label:'Legacy ChatGPT OAuth',grants:legacy,read_only:true,configuration_state:'ready',health:'unknown'}]:[],
+      system_chatgpt:{configured:true,last_token_at:ids.console.lastTokenAt(account.subject,config.chatgpt_client.client_id)},
       historical_grants:grants.filter(g=>g.client_id!==config.chatgpt_client.client_id&&!ids.connections.clientRow(g.client_id)),
       core_connections:core.connections,system_unavailable:core.unavailable===true,physical_device_verified:false});return true;
   }

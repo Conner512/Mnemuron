@@ -276,9 +276,10 @@ export const featureMap = {
     {id: 'CON-01', status: 'live', read: ['connections'], write: ['oauth.revoke']},
     {id: 'CON-02', status: 'live', read: ['connections'],
       write: ['connections.create', 'connections.update', 'connections.rotate', 'connections.disable', 'connections.enable', 'connections.revoke']},
-    {id: 'CON-03', status: 'planned', read: ['agent-instances'], write: ['devices.register', 'devices.rotate', 'devices.revoke'],
-      core: ['POST /v1/agent-instances/register', 'POST /v1/agent-instances/{id}/rotate-key', 'POST /v1/agent-instances/{id}/revoke'], scope: ['admin:devices'], reauth: true},
+    {id: 'CON-03', status: 'live', read: ['connections'], write: ['devices.revoke'], reauth: true},
     {id: 'CON-04', status: 'planned', read: ['capture-status'], core: ['GET /v1/status'], scope: ['memory:read']},
+    {id: 'CON-05', status: 'planned', write: ['devices.register', 'devices.rotate'], core: ['POST /v1/agent-instances/register', 'POST /v1/agent-instances/{id}/rotate-key'],
+      scope: ['admin:devices'], reauth: true},
   ],
   models: [
     {id: 'MOD-01', status: 'live', read: ['models'], write: ['models.save', 'models.disable']},

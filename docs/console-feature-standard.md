@@ -159,10 +159,11 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | JOB-01 | 整理任务 | 任务队列与执行状态 | live | jobs, job | — |
 | JOB-02 | 整理任务 | 创建与定期计划 | live | — | jobs.schedule |
 | JOB-03 | 整理任务 | 取消与重试 | live | — | jobs.cancel, jobs.retry |
-| CON-01 | 连接管理 | 应用授权 | live | connections | oauth.revoke |
+| CON-01 | 连接管理 | ChatGPT 网页版与应用授权 | live | connections | oauth.revoke |
 | CON-02 | 连接管理 | 个人连接 | live | connections | connections.create, connections.update, connections.rotate, connections.disable, connections.enable, connections.revoke |
-| CON-03 | 连接管理 | Agent 实例与设备 | planned | agent-instances | devices.register, devices.rotate, devices.revoke |
+| CON-03 | 连接管理 | Agent 实例与设备 | live | connections | devices.revoke |
 | CON-04 | 连接管理 | 捕获健康度 | planned | capture-status | — |
+| CON-05 | 连接管理 | 登记与轮换 Agent 密钥 | planned | — | devices.register, devices.rotate |
 | MOD-01 | 模型配置 | 整理模型与向量模型 | live | models | models.save, models.disable |
 | MOD-02 | 模型配置 | 连通性测试 | live | — | models.test |
 | MOD-03 | 模型配置 | 个人向量索引 | live | — | vector.schedule |

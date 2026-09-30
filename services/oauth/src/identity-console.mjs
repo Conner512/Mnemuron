@@ -29,7 +29,18 @@ export class IdentityConsole {
     FROM identity_accounts a LEFT JOIN identity_console_roles r ON r.account_id=a.account_id ORDER BY a.created DESC LIMIT 500`).all();}
   invitations(actor){this.requireOperator(actor);return this.db.prepare('SELECT invitation_id,batch_id,issuer,created,expires,state FROM identity_invitations ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(r=>({...r,effective_state:['issued','reserved'].includes(r.state)&&r.expires<=seconds()?'expired':r.state}));}
   sessions(account,current){return this.db.prepare("SELECT digest,purpose,created,expires FROM identity_sessions WHERE account_id=? AND purpose='console' AND expires>? ORDER BY created DESC").all(account,seconds()).map(r=>({session_id:r.digest,purpose:r.purpose,created:r.created,expires:r.expires,current:r.digest===current}));}
-  grants(subject){return this.db.prepare("SELECT id,payload,expires FROM oauth_records WHERE model='Grant' AND json_extract(payload,'$.accountId')=? AND expires>?").all(subject,seconds()).map(r=>({grant_id:r.id,client_id:JSON.parse(r.payload).clientId,expires:r.expires}));}
+  grants(subject){return this.db.prepare("SELECT id,payload,expires FROM oauth_records WHERE model='Grant' AND json_extract(payload,'$.accountId')=? AND expires>?").all(subject,seconds()).map(r=>{const p=JSON.parse(r.payload);
+    const scopes=[String(p.openid?.scope||''),...Object.values(p.resources||{}).map(String)].flatMap(s=>s.split(' ')).filter(Boolean);
+    return {grant_id:r.id,client_id:p.clientId,expires:r.expires,created:Number.isSafeInteger(p.iat)?p.iat:null,scopes:[...new Set(scopes)]};});}
+  /** Last token issued to a client for this subject: the latest sign of ChatGPT using its authorization. */
+  lastTokenAt(subject,clientId){return this.db.prepare("SELECT MAX(json_extract(payload,'$.iat')) at FROM oauth_records WHERE model IN ('AccessToken','RefreshToken') AND json_extract(payload,'$.accountId')=? AND json_extract(payload,'$.clientId')=?").get(subject,clientId)?.at??null;}
+  /** Fresh password and authenticator code for a console action that the Core then executes. */
+  async reauthenticate(account,session,p){
+    const verified=await this.proof(account,p);
+    const current=this.db.prepare("SELECT * FROM identity_sessions WHERE digest=? AND account_id=? AND purpose='console' AND expires>?").get(session.digest,account,seconds());
+    if(!current||current.security_version!==verified.security_version)fail('SESSION_REQUIRED',401);
+    return verified;
+  }
   requestHash(account,operation,action,p){return createHmac('sha256',this.ids.key).update(JSON.stringify(['console-intent-v1',account,operation,action,fingerprint(p)])).digest('hex');}
   previous(account,operation,action,p){identifier(operation);const row=this.db.prepare('SELECT * FROM identity_console_operations WHERE account_id=? AND operation_id=?').get(account,operation);if(!row)return null;
     if(row.action!==action||row.request_hash!==this.requestHash(account,operation,action,p))fail('IDEMPOTENCY_CONFLICT',409);

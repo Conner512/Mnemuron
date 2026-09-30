@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {ConsoleState,object,id,number,fingerprint} from './state.mjs';
 import {ConsoleModels} from './models.mjs';
+import {credentialView} from './credentials.mjs';
 import {consoleActionWritable,CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {AuthorizationError,ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
 import {MemoryWorker,scheduleLibrary} from '../memory-jobs/worker.mjs';
@@ -43,6 +44,14 @@ export class ConsoleService {
     if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);return {status:'classified',...store.derivedMemory.setCategory(auth,p.memory_id,p.category,this.taxonomy())};}
     if(action==='memory.visibility'){object(p,['memory_id','revision','state_hash','allow']);this.memory(auth,p.memory_id,p.revision);return {status:'updated',...store.webVisibility.set(auth,p.memory_id,p)};}
     if(action==='memory.web_policy'){object(p,['read_all','expected_revision']);return {status:'updated',...store.webVisibility.setPolicy(auth,p)};}
+    if(action==='devices.revoke'){object(p,['agent_instance_id']);id(p.agent_instance_id);
+      // Same effect as the admin revoke of an agent instance, limited to the owner's own unmanaged keys.
+      const rows=this.db.prepare('SELECT * FROM credentials WHERE user_id=? AND agent_instance_id=? AND revoked_at IS NULL').all(auth.user_id,p.agent_instance_id).map(row=>credentialView(row));
+      if(!rows.length)throw new NotFoundError('Active agent credential not found.','CREDENTIAL_NOT_FOUND');
+      if(rows.some(row=>row.managed))throw new ConflictError('Platform-managed and admin keys are revoked by an operator, not from the console.','MANAGED_CONNECTION');
+      const revokedAt=new Date().toISOString(),result=this.db.prepare('UPDATE credentials SET revoked_at=? WHERE user_id=? AND agent_instance_id=? AND revoked_at IS NULL').run(revokedAt,auth.user_id,p.agent_instance_id);
+      store.audit({auth,action:'agent_instance.revoke',targetType:'agent_instance',targetId:p.agent_instance_id,metadata:{revoked_credentials:result.changes,source:'console'}});
+      return {status:'revoked',agent_instance_id:p.agent_instance_id,revoked_at:revokedAt,revoked_credentials:result.changes};}
     if(action==='jobs.schedule'){
       object(p,['type','timezone','periods','include_open','schedule_enabled','settings_revision']);
       if(!['classification','summary'].includes(p.type)||typeof p.timezone!=='string'||(p.include_open!==undefined&&typeof p.include_open!=='boolean'))throw new ValidationError('Invalid scheduling request.');
