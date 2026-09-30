@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {generate} from 'otplib';
 import {fixture,Browser} from './fixture.mjs';
-import {writePrivate,randomSecret,seconds} from '../../../shared/oauth-common.mjs';
+import {writePrivate,randomSecret} from '../../../shared/oauth-common.mjs';
+import {previousStepCode} from './helpers/totp.mjs';
 import {memoryFixture} from '../../../server/test/helpers/core-memory-fixture.mjs';
 import {provisionIdentities} from '../src/provisioning.mjs';
 const csrf=page=>page.text.match(/name="csrf" value="([^"]+)"/)?.[1];
@@ -27,7 +28,7 @@ test('MFA-01..06, UI-05..06: real registration routes require invitation, CSRF a
  result=await browser.post('/register/account',{csrf:csrf(page),username:'Synthetic_Registration',password:'Synthetic password with spaces  ',password_confirm:'Synthetic password with spaces  '});assert.equal(result.status,303);
  page=await browser.request(result.headers.get('location'));assert.match(page.text,/<svg/);assert.ok(!page.text.includes('chart.googleapis'));
  const seed=page.text.match(/id="totp-secret">([^<]+)</)[1];
- result=await browser.post('/register/totp',{csrf:csrf(page),otp:await generate({secret:seed,epoch:seconds()-30})});assert.equal(result.status,303);
+ result=await browser.post('/register/totp',{csrf:csrf(page),otp:await previousStepCode(seed)});assert.equal(result.status,303);
  page=await browser.request(result.headers.get('location'));assert.match(page.text,/recovery-codes/);
  result=await browser.post('/register/ack',{csrf:csrf(page)});assert.equal(result.status,303);
  assert.equal((await browser.request('/console-api/me')).status,401);
@@ -71,7 +72,7 @@ test('REG-MGMT-02: real signup finishes through the durable worker without grant
  result=await browser.post('/register/account',{csrf:csrf(page),username:'Synthetic_Full_Signup',password:'Synthetic signup password',password_confirm:'Synthetic signup password'});assert.equal(result.status,303);
  page=await browser.request('/register/totp');const secret=page.text.match(/id="totp-secret">([^<]+)</)[1];
  assert.match(page.text,/<svg/);assert.equal((await browser.request('/console-api/me')).status,401);
- result=await browser.post('/register/totp',{csrf:csrf(page),otp:await generate({secret,epoch:seconds()-30})});assert.equal(result.status,303);
+ result=await browser.post('/register/totp',{csrf:csrf(page),otp:await previousStepCode(secret)});assert.equal(result.status,303);
  page=await browser.request('/register/recovery-codes');assert.match(page.text,/recovery-codes/);
  result=await browser.post('/register/ack',{csrf:csrf(page)});assert.equal(result.status,303);
  // Exercise the actual periodic worker, not a test call to provisionIdentities.

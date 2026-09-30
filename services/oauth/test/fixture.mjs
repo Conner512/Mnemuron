@@ -8,7 +8,8 @@ import { generate } from "otplib";
 import { createOwner, Accounts } from "../src/accounts.mjs";
 import { AuthStore } from "../src/sqlite-adapter.mjs";
 import { createAuthorizationServer } from "../src/server.mjs";
-import { randomSecret, readPrivate, writePrivate, seconds } from "../../../shared/oauth-common.mjs";
+import { randomSecret, readPrivate, writePrivate } from "../../../shared/oauth-common.mjs";
+import { previousStepCode } from "./helpers/totp.mjs";
 
 export async function freePort() {
   const server = net.createServer();
@@ -95,7 +96,7 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
   await createOwner(config.accounts_file, "synthetic-owner", password);
   const seed = readPrivate(config.accounts_file, { json: true }).mfa.secret;
   const enrollmentStore = new AuthStore(config.database_file);
-  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await generate({ secret: seed, epoch: seconds() - 30 }), path.join(directory, "recovery.json")); }
+  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await previousStepCode(seed), path.join(directory, "recovery.json")); }
   finally { enrollmentStore.close(); }
   const subject = readPrivate(config.accounts_file, { json: true }).subject;
   const f = { directory, config, ports, password, seed, subject, secret, introspectionSecret, browser: new Browser(config.issuer), logs: [] };

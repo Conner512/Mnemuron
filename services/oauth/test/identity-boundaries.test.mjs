@@ -5,6 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {generate} from 'otplib';
 import {identityFixture} from './helpers/identity-fixture.mjs';
+import {previousStepCode} from './helpers/totp.mjs';
 import {seconds,secretHash} from '../../../shared/oauth-common.mjs';
 import {fixture} from './fixture.mjs';
 import {createAuthorizationServer} from '../src/server.mjs';
@@ -59,7 +60,7 @@ test('INV-08/14: enrollment preflight reads reservation and account in one trans
  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_invitations WHERE state='consumed'").get().n,1);
 });
 test('INV-10/11: commit rechecks expiry and an abandoned unverified reservation can be reclaimed without inheriting identity',async t=>{
- const f=identityFixture(t),p=await prepared(f),otp=await generate({secret:p.setup.secret,epoch:seconds()-30});
+ const f=identityFixture(t),p=await prepared(f),otp=await previousStepCode(p.setup.secret);
  const pending=f.identities.verifyEnrollment(p.session.token,otp);
  f.store.db.prepare("UPDATE identity_invitations SET reserved_until=? WHERE digest=?").run(seconds()-1,secretHash(p.issued.codes[0]));
  await assert.rejects(pending);
@@ -76,7 +77,7 @@ test('MFA-04..06/10: local enrollment display is one-time and pending accounts c
  assert.equal(f.identities.enrollment(a.session.token).already_shown,true);
  for(const token of ['000000',await generate({secret:a.setup.secret,epoch:seconds()-120}),await generate({secret:b.setup.secret})])
    await assert.rejects(()=>f.identities.verifyEnrollment(a.session.token,token));
- const result=await f.identities.verifyEnrollment(a.session.token,await generate({secret:a.setup.secret,epoch:seconds()-30}));
+ const result=await f.identities.verifyEnrollment(a.session.token,await previousStepCode(a.setup.secret));
  assert.equal(result.status,'provisioning');assert.throws(()=>f.identities.enrollment(a.session.token));
  assert.equal(f.identities.account(b.setup.subject).mfa_verified,0);
 });
@@ -86,7 +87,7 @@ test('INV-13/15 MFA-12: duplicate normalized username, disabled role input, revo
  await assert.rejects(()=>f.identities.prepareRegistration(b.token,'synthetic_a','Synthetic password with spaces  '));
  await assert.rejects(()=>f.identities.prepareRegistration(b.token,'模拟用户','Synthetic password with spaces  '));
  await assert.rejects(()=>f.identities.prepareRegistration(b.token,'Synthetic_B','too short'));
- await f.identities.verifyEnrollment(a.session.token,await generate({secret:a.setup.secret,epoch:seconds()-30}));
+ await f.identities.verifyEnrollment(a.session.token,await previousStepCode(a.setup.secret));
  assert.equal(f.identities.revokeBatch(a.issued.batch_id),0);
  assert.equal(f.identities.revokeBatch(issue.batch_id),2);
  assert.throws(()=>f.identities.reserveInvitation(issue.codes[1]));
