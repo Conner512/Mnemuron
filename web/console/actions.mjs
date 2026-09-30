@@ -1,6 +1,6 @@
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
-import {icon} from './icons.mjs';
+import {icon} from './visuals.mjs';
 
 // Settings and operations pages. Views are markup only; every write goes through
 // mountActions below (explicit dialog, fresh operation ID, server-side authorization).

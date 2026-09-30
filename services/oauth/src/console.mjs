@@ -1,7 +1,7 @@
 import QRCode from 'qrcode';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
-import {icon} from '../../../web/console/icons.mjs';
+import {icon} from '../../../web/console/visuals.mjs';
 import {text} from '../../../web/console/catalog.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
 

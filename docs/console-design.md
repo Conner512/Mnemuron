@@ -8,10 +8,16 @@ content, provenance and permission boundaries carry the page.
 
 - `web/console/styles.css`: design tokens, layout and components.
 - `web/console/controls.css`: native-select enhancement, write dialogs and connections.
-- `web/console/icons.mjs`: the fixed local icon set.
+- `web/console/visuals.mjs`: page views, the escaping `html` template tag and the fixed local icon set.
 
 The server bundles the files listed in `STYLESHEETS` (`web/console/render.mjs`) into the single
 `/assets/styles.css` response, so CSP and ingress rules are unchanged. There are no decorative skin layers.
+
+Browsers may load only the asset paths the public ingress allows (see
+[`console-ingress.example.yml`](console-ingress.example.yml)): `styles.css` and seven modules. A new browser module
+must either be folded into an existing one or ship together with a matching ingress route; otherwise the
+module graph fails behind the tunnel and pages stay on "Loading". A test walks the browser import graph and
+checks it against that allowlist.
 
 ## Tokens
 
@@ -53,7 +59,7 @@ System fonts only: the CSP allows no external font source, and CJK web fonts are
 - **Status**: shape and words carry the meaning, colour only supports it — filled square for active,
   hollow square for superseded or in progress, a dash and strike-through for retracted.
 - **Notices and policy boxes**: a 1.5px ink rule on top, no coloured side bars.
-- **Icons**: 24px grid, 1.5px stroke, square caps and mitred joins (`icons.mjs`).
+- **Icons**: 24px grid, 1.5px stroke, square caps and mitred joins (`visuals.mjs`).
 
 All motion stops under `prefers-reduced-motion`.
 

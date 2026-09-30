@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
 import {text} from './catalog.mjs';
-import {icon} from './icons.mjs';
+import {icon} from './visuals.mjs';
 // Modules run after parsing: restore only validated, account-scoped preferences before
 // the stylesheet can paint. Keep executable text fixed for a narrow CSP hash.
 const appearanceBootstrap=`(()=>{try{const root=document.documentElement,account=document.currentScript.dataset.appearanceAccount;
@@ -67,7 +67,9 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
   const inside=auth?authShell({title,body,authPurpose}):consoleShell({title,body,account,csrf,page});
   return `<!doctype html><html lang="zh-CN" data-theme="a"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Mnemuron · ${escapeHtml(text(title))}</title><script data-appearance-account="${escapeHtml(account?.account_id||'signed-out')}">${appearanceBootstrap}</script><link rel="stylesheet" href="/assets/styles.css"><script type="module" src="/assets/appearance.mjs"></script>${auth?'':'<script type="module" src="/assets/app.mjs"></script>'}</head><body class="${auth?'is-auth':'is-console'}" data-account="${escapeHtml(account?.account_id||'')}" data-page="${escapeHtml(page)}" data-title="${escapeHtml(title)}" data-csrf="${escapeHtml(csrf)}"><a class="skip-link" href="#main" data-i18n="continue">${text('continue')}</a>${inside}<p id="live-status" class="sr-only" role="status" aria-live="polite"></p></body></html>`;
 }
-const MODULES=['routes.mjs','appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','visuals.mjs','icons.mjs','html.mjs','actions.mjs','connections.mjs'];
+// Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
+// add a module only together with its ingress route, or fold it into an existing one.
+const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','visuals.mjs','actions.mjs','connections.mjs'];
 const STYLESHEETS=['styles.css','controls.css'];
 export function serveAsset(request,response,pathname) {
   const file=pathname.match(/^\/assets\/([a-z-]+\.(?:mjs|css))$/)?.[1];

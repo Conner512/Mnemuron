@@ -70,6 +70,24 @@ test('Shell: assets remain on a fixed same-origin allowlist',()=>{
   assert.equal(serveAsset({method:'GET'},response(),route),false);
  assert.equal(serveAsset({method:'POST'},response(),'/assets/visuals.mjs'),false);
 });
+test('Shell: every asset the browser loads is routed by the console ingress',()=>{
+ // Behind the tunnel only allowlisted asset paths reach the service; any other module breaks the module graph.
+ const yml=fs.readFileSync(new URL('../../../docs/console-ingress.example.yml',import.meta.url),'utf8');
+ const allowed=new Set(yml.match(/assets\/\(([^)]+)\)/)[1].split('|').map(name=>name.replaceAll('\\.','.')));
+ const source=name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.meta.url),'utf8');
+ const pagesHtml=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}})+renderPage({title:'login',auth:true});
+ const entries=[...new Set([...pagesHtml.matchAll(/(?:src|href)="\/assets\/([a-z-]+\.(?:mjs|css))"/g)].map(match=>match[1]))];
+ const loaded=new Set(),queue=entries.filter(name=>name.endsWith('.mjs'));
+ while(queue.length){
+  const name=queue.pop();if(loaded.has(name))continue;loaded.add(name);
+  for(const [,dependency] of source(name).matchAll(/(?:from|import)\s*\(?\s*['"]\.\/([a-z-]+\.mjs)['"]/g))queue.push(dependency);
+ }
+ assert.ok(loaded.has('app.mjs')&&loaded.has('visuals.mjs')&&loaded.has('actions.mjs'));
+ for(const name of new Set([...entries,...loaded])){
+  assert.ok(allowed.has(name),`${name} is loaded by the browser but not routed by the console ingress`);
+  assert.equal(serveAsset({method:'GET'},response(),`/assets/${name}`),true,name);
+ }
+});
 test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const res=response();sendPage(res,{title:'oauthConsent',auth:true,authPurpose:'oauth'},{redirectUri:'https://callback.example.test/exact'});
  assert.equal(res.status,200);assert.equal(res.headers['cache-control'],'no-store');
@@ -131,7 +149,7 @@ test('Shell: library and detail keep business hooks and escape memory content',(
  assert.match(memoryRows([row],text),/data-memory="m&quot;1"/);
 });
 test('html template escapes interpolations, joins arrays and only trusts explicit fragments',async()=>{
- const {html,trusted}=await import('../../../web/console/html.mjs');
+ const {html,trusted}=await import('../../../web/console/visuals.mjs');
  const user='<img src=x onerror=alert(1)> & "q"';
  const out=String(html`<p title="${user}">${user}${[html`<b>${1}</b>`,null,false,undefined,2]}${trusted('<i></i>')}</p>`);
  assert.equal(out,'<p title="&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;<b>1</b>2<i></i></p>');
