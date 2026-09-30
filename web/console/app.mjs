@@ -2,7 +2,7 @@
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
 import {actionButton,actionPage,mountActions,canAct} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {overviewView,appearanceView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate} from './visuals.mjs';
+import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 
@@ -61,7 +61,7 @@ function heading() {
  if(page==='overview')return pageHeading(t,{title:'overview',note:'heroNote'});
  const pageActions={memories:['memory.create','memory.correct'],summaries:['jobs.schedule'],jobs:['jobs.schedule','jobs.cancel'],models:['models.save'],connections:['oauth.revoke','connections.create'],security:['security.password','security.sessions.revoke_others'],storage:['storage.export','storage.import']};
  const managing=capabilities.operator&&capabilities.management?.[page];
- const interactive=page==='appearance'||(pageActions[page]||[]).some(a=>canAct(capabilities,a));
+ const interactive=(pageActions[page]||[]).some(a=>canAct(capabilities,a));
  const badge=`<span class="tag">${l(managing?'operatorManagement':interactive?'interactive':'readOnly')}</span>`;
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
  return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
@@ -73,7 +73,6 @@ function render(data) {
  else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data)});
  else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))],pagination:pagination(data)});
- else if(page==='appearance')html=appearanceView(t);
  else if(page==='models')html=policy('modelsNote',['configure']);
  else if(['invitations','accounts'].includes(page))html=policy('platformNote',[page==='invitations'?'issue':'manage']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
@@ -82,7 +81,7 @@ function render(data) {
 }
 async function load() {
  const sequence=++requestSequence;
- if(page==='appearance'||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ if(['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
  try {
    const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{};
    const data=await api(page,params);

@@ -31,7 +31,6 @@ const paths = {
   security: '<path d="M12 3.5 5 6.2v5.3c0 4.1 2.9 7.2 7 9 4.1-1.8 7-4.9 7-9V6.2z"/><path d="m9 12 2.2 2.2 3.8-3.8"/>',
   audit: '<path d="M5.5 3.5h13v17h-13z"/><path d="M8.5 3.5v17"/><path d="M11.5 8h4M11.5 11.5h4"/>',
   storage: '<path d="M3.5 4.5h17V9h-17z"/><path d="M5 9v10.5h14V9"/><path d="M10 13h4"/>',
-  appearance: '<circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/>',
   invitations: '<path d="M3.5 6.5h17v3.7a1.8 1.8 0 0 0 0 3.6v3.7h-17v-3.7a1.8 1.8 0 0 0 0-3.6z"/><path d="M14.5 8.5v1M14.5 11.5v1M14.5 14.5v1"/>',
   accounts: '<circle cx="9" cy="8.5" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15.5 5.2a3.5 3.5 0 0 1 0 6.6"/><path d="M17.5 14.6A6 6 0 0 1 21 20"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
@@ -203,14 +202,4 @@ export function summaryDetailView(t, data, {canGoBack = false}) {
     <button type="button" class="quiet" data-memory="${c.memory_id}" data-revision="${c.revision}">${svg('source')}${i18n(t, 'sources')} · <code>${c.memory_id}</code></button></li>`)}</ol>` : emptyState(t)}
   ${i18n(t, data.complete ? 'endOfSummary' : 'next', 'p')}
   <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
-}
-
-/** Appearance: real preference controls. One light palette; the theme only picks the accent colour. */
-export function appearanceView(t) {
-  const pick = (property, value, content, className) => html`<button class="${className}" type="button" data-pref="${property}" data-pref-value="${value}" aria-pressed="false" disabled>${content}</button>`;
-  const swatch = html`<span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>`;
-  return String(html`<section class="card appearance-card">${i18n(t, 'theme', 'h2')}${i18n(t, 'appearanceNote', 'p')}
-    <div class="theme-options" role="group" data-i18n-aria-label="theme" aria-label="${t('theme')}">${['a', 'b', 'c'].map(theme => pick('theme', theme, html`${swatch}<span class="theme-option-info"><strong data-i18n="themeName_${theme}">${t(`themeName_${theme}`)}</strong><small data-i18n="themeNote_${theme}">${t(`themeNote_${theme}`)}</small></span><span class="selection-check">${svg('check')}</span>`, 'theme-option'))}</div></section>
-  <section class="card">${i18n(t, 'language', 'h2')}${i18n(t, 'languageNote', 'p')}<div class="segmented" role="group" data-i18n-aria-label="language" aria-label="${t('language')}">${pick('locale', 'zh-CN', '简体中文', 'segment')}${pick('locale', 'en', 'English', 'segment')}</div></section>
-  <p class="privacy-note">${svg('security')}<span data-i18n="appearanceScopeNote">${t('appearanceScopeNote')}</span></p>`);
 }

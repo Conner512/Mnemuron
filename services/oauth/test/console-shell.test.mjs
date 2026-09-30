@@ -3,8 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
-import {renderPage,sendPage,serveAsset,pages} from '../../../web/console/render.mjs';
-import {overviewView,appearanceView,icon,libraryView,memoryDetailView,memoryRows} from '../../../web/console/visuals.mjs';
+import {renderPage,sendPage,serveAsset,pages,routeTitle} from '../../../web/console/render.mjs';
+import {overviewView,icon,libraryView,memoryDetailView,memoryRows} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
 import {declarations,rules} from './helpers/css.mjs';
 
@@ -26,21 +26,24 @@ test('Shell: unavailable and invalid metric data never becomes a zero or HTML',(
  assert.doesNotMatch(html,/<img|onerror|<strong>0<\/strong>/);
  const zero=view({counts:{memories:0}});assert.ok(zero.includes('<strong>0</strong>'));
 });
-test('Shell: appearance offers three accent themes and language controls, no dark mode',()=>{
- const html=appearanceView(text);
- assert.equal((html.match(/class="theme-option"/g)||[]).length,3);
- assert.equal((html.match(/aria-pressed="false" disabled/g)||[]).length,5);
- for(const value of ['a','b','c','zh-CN','en'])assert.ok(html.includes(`data-pref-value="${value}"`));
- assert.doesNotMatch(html,/data-pref="mode"|<form|https?:\/\//);
+test('Shell: one vermilion palette; no theme picker or appearance page, the language switch stays',()=>{
+ assert.equal(pages.includes('appearance'),false);assert.equal(routeTitle('/app/appearance'),null);
+ const consolePage=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}});
+ for(const html of [consolePage,renderPage({title:'login',auth:true})]){
+  assert.doesNotMatch(html,/data-theme|id="theme"|data-pref="(?:theme|mode)"|\/app\/appearance/);
+  assert.match(html,/<div class="language-control"><label class="sr-only" for="locale"[^>]*>[^<]*<\/label><select id="locale" data-pref="locale" disabled>/);
+ }
+ const css=['styles.css','controls.css'].map(name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.meta.url),'utf8')).join('\n');
+ assert.doesNotMatch(css,/data-theme|data-palette|theme-option|swatch/);
+ for(const locale of ['zh-CN','en'])for(const key of ['appearance','pageNote_appearance','appearanceNote','theme','themeName_a','themeName_b','themeName_c','displayPrefs'])
+  assert.equal(Object.hasOwn(catalog[locale],key),false,`${locale}.${key}`);
 });
 test('Shell: both locales cover shell and view strings without unsafe interpolation',()=>{
  assert.deepEqual(Object.keys(catalog.en).sort(),Object.keys(catalog['zh-CN']).sort());
  for(const locale of ['zh-CN','en']){
-  const t=key=>text(key,locale),html=appearanceView(t)+overviewView({}, {t,memoryRows:()=>''})+libraryView(t,{data:{results:[]}})+pages.map(p=>renderPage({title:p,page:p})).join('');
+  const t=key=>text(key,locale),html=overviewView({}, {t,memoryRows:()=>''})+libraryView(t,{data:{results:[]}})+pages.map(p=>renderPage({title:p,page:p})).join('');
   for(const [,key] of html.matchAll(/data-i18n="([^"]+)"/g))assert.ok(Object.hasOwn(catalog[locale],key),key);
  }
- assert.ok(appearanceView(()=>'<script>synthetic</script>').includes('&lt;script&gt;'));
- assert.doesNotMatch(appearanceView(()=>'<script>synthetic</script>'),/<script>/);
  assert.doesNotMatch(overviewView({},{t:()=>'<script>x</script>'}),/<script>/);
 });
 test('Shell: auth has one H1 and retains the exact trusted form and OAuth purpose',()=>{
@@ -111,14 +114,14 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar keeps three groups and all twelve destinations as icon links',()=>{
+test('Shell: the sidebar keeps three groups and all eleven destinations as icon links',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
   assert.equal((nav.match(/class="nav-group"/g)||[]).length,3);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,12);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,12);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,11);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,11);
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);

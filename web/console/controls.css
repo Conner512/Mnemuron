@@ -20,16 +20,13 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .select-check{flex:none;width:14px;text-align:center;visibility:hidden}
 .select-option[aria-selected="true"]>.select-check{visibility:visible}
 .select-group{padding:8px 10px 3px;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
-.select-swatch{width:10px;height:10px;flex:none}
-.select-swatch[data-palette="a"]{background:#AE3F2C}.select-swatch[data-palette="b"]{background:#2E4A7A}.select-swatch[data-palette="c"]{background:#2F6B57}
-.select-shell[data-palette]>.select-trigger::before{content:"";width:9px;height:9px;flex:none;background:var(--accent)}
 .select-error{margin-top:5px;color:var(--bad);font-size:12px}
 .select-error[hidden]{display:none}
-/* Compact display preferences in the top bar and on sign-in pages. */
-.appearance-controls .select-trigger{height:34px;padding:0 8px;gap:6px;border-color:transparent;background:transparent;color:var(--muted);font-size:13px}
-.appearance-controls .select-trigger:not(:disabled):hover,.appearance-controls .select-trigger[aria-expanded="true"]{border-color:var(--line);background:var(--surface);color:var(--text);box-shadow:none}
-.appearance-controls .select-shell{max-width:130px}
-@media(forced-colors:active){.select-option[aria-selected="true"],.select-option.is-active{outline:1px solid Highlight}.select-swatch{border:1px solid CanvasText}}
+/* Compact language switch in the top bar and on sign-in pages. */
+.language-control .select-trigger{height:34px;padding:0 8px;gap:6px;border-color:transparent;background:transparent;color:var(--muted);font-size:13px}
+.language-control .select-trigger:not(:disabled):hover,.language-control .select-trigger[aria-expanded="true"]{border-color:var(--line);background:var(--surface);color:var(--text);box-shadow:none}
+.language-control .select-shell{max-width:130px}
+@media(forced-colors:active){.select-option[aria-selected="true"],.select-option.is-active{outline:1px solid Highlight}}
 
 /* Write operations: centred, bounded dialogs with an explicit submit. */
 #operation-dialog,#connection-dialog{inset:0;margin:auto;width:min(640px,calc(100vw - 32px));max-width:none;height:fit-content;max-height:calc(100dvh - 48px);border:1px solid var(--text);border-radius:var(--radius-sm);box-shadow:var(--shadow);overflow:auto}

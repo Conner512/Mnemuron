@@ -1,7 +1,7 @@
 import {text} from './catalog.mjs';
-// The console ships one light palette; `theme` only selects the accent colour.
-const defaults={theme:'a',locale:'zh-CN'};
-const valid={theme:['a','b','c'],locale:['zh-CN','en']};
+// The console ships one palette; the interface language is the only stored preference.
+const defaults={locale:'zh-CN'};
+const valid={locale:['zh-CN','en']};
 const account=document.body.dataset.account || 'signed-out';
 const key=`mnemuron.appearance.v1.${account}`;
 let prefs={...defaults};
@@ -10,16 +10,12 @@ export const translate=key=>text(key,prefs.locale);
 
 // Translate chrome in place: never replace a form, a drawer or user-supplied content.
 export function syncAppearance() {
-  document.documentElement.dataset.theme=prefs.theme;document.documentElement.lang=prefs.locale;
+  document.documentElement.lang=prefs.locale;
   for(const node of document.querySelectorAll('[data-i18n]'))node.textContent=translate(node.dataset.i18n);
   for(const node of document.querySelectorAll('[data-i18n-placeholder]'))node.placeholder=translate(node.dataset.i18nPlaceholder);
   for(const node of document.querySelectorAll('[data-i18n-aria-label]'))node.setAttribute('aria-label',translate(node.dataset.i18nAriaLabel));
   for(const node of document.querySelectorAll('[data-i18n-title]'))node.title=translate(node.dataset.i18nTitle);
-  for(const node of document.querySelectorAll('[data-pref]')) {
-    if(node.dataset.prefValue!==undefined)node.setAttribute('aria-pressed',String(node.dataset.prefValue===prefs[node.dataset.pref]));
-    else node.value=prefs[node.dataset.pref];
-    node.disabled=false;
-  }
+  for(const node of document.querySelectorAll('[data-pref]')){node.value=prefs[node.dataset.pref];node.disabled=false;}
   if(document.body.dataset.title)document.title=`Mnemuron · ${translate(document.body.dataset.title)}`;
   syncSelectControls();
 }
@@ -65,7 +61,6 @@ function syncSelect(record) {
   const description=[select.getAttribute('aria-describedby'),!record.error.hidden?record.error.id:''].filter(Boolean).join(' ');
   if(description)put(button,'aria-describedby',description);else button.removeAttribute('aria-describedby');
   put(button,'aria-invalid',!record.error.hidden);
-  if(select.dataset.pref==='theme')put(record.shell,'data-palette',select.value);
   if(openSelect===record){
     if(button.disabled){closeSelect();return;}
     renderOptions(record);
@@ -86,9 +81,6 @@ function renderOptions(record) {
     row.setAttribute('role','option');row.setAttribute('aria-selected',String(index===record.select.selectedIndex));
     row.setAttribute('aria-disabled',String(!!unavailable(option)));
     const text=document.createElement('span');text.className='select-option-text';text.textContent=option.label;
-    if(record.select.dataset.pref==='theme'){
-      const swatch=document.createElement('span');swatch.className='select-swatch';swatch.dataset.palette=option.value;swatch.setAttribute('aria-hidden','true');row.append(swatch);
-    }
     const check=document.createElement('span');check.className='select-check';check.textContent='✓';check.setAttribute('aria-hidden','true');
     row.append(text,check);fragment.append(row);
   }
@@ -195,7 +187,7 @@ export function syncSelectControls() {
     const popup=document.createElement('div');popup.className='select-popup';popup.id=`mnm-select-list-${++selectCounter}`;popup.setAttribute('role','listbox');popup.setAttribute('popover','manual');
     const error=document.createElement('span');error.className='select-error';error.id=`${popup.id}-error`;error.hidden=true;
     button.setAttribute('aria-controls',popup.id);
-    const record={select,shell,button,value,popup,error,active:-1,signature:null,compact:!!select.closest('.appearance-controls'),buffer:'',typedAt:0};
+    const record={select,shell,button,value,popup,error,active:-1,signature:null,compact:!!select.closest('.language-control'),buffer:'',typedAt:0};
     // Remain in the original label/form/dialog; top-layer paint avoids clipping
     // without moving a field outside its modal or changing its form ownership.
     select.before(shell);shell.append(select,button,popup,error);
@@ -229,13 +221,8 @@ if(supportsPopover){
 }
 
 syncAppearance();
-document.addEventListener('change',event=>{
-  const property=event.target.dataset.pref;
-  if(event.target.dataset.prefValue===undefined)setPreference(property,event.target.value);
-});
+document.addEventListener('change',event=>setPreference(event.target.dataset.pref,event.target.value));
 document.addEventListener('click',async event=>{
-  const choice=event.target.closest('button[data-pref-value]');
-  if(choice&&!choice.disabled){setPreference(choice.dataset.pref,choice.dataset.prefValue);return;}
   const button=event.target.closest('[data-password-toggle],[data-copy]');if(!button)return;
   if(button.dataset.passwordToggle) {
     const field=document.getElementById(button.dataset.passwordToggle);if(!field)return;

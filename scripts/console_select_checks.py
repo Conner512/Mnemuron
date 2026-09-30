@@ -26,8 +26,8 @@ def check_selects(page, goto, check, previews):
     native = page.locator('[name="search_mode"]')
     expect(trigger).to_be_visible()
     check('Select enhancement retains exactly one native named control', native.count() == 1)
-    # Two display preferences (accent theme, language) plus three library filters; there is no colour-mode select.
-    check('Preferences and filters share one combobox implementation', page.get_by_role('combobox').count() == 5)
+    # The language switch plus three library filters; there is no theme or colour-mode select.
+    check('Preferences and filters share one combobox implementation', page.get_by_role('combobox').count() == 4)
     check('Library preserves real column headers', page.locator('.memory-table th').count() == 4)
     page.evaluate('''() => {
       window.selectEvents = {input: 0, change: 0};
@@ -56,7 +56,7 @@ def check_selects(page, goto, check, previews):
     expect(native).to_have_value('semantic')
     check('Outside click dismisses without committing a preview', page.locator('.select-popup:popover-open').count() == 0)
     choose_select(page, '[name="search_mode"]', 'lexical')
-    trigger.click(); page.locator('[data-select-name="theme"]').click()
+    trigger.click(); page.locator('[data-select-name="locale"]').click()
     check('Only one select popup can be open', page.locator('.select-popup:popover-open').count() == 1)
     page.keyboard.press('Escape')
     page.locator('.account-menu summary').click(); trigger.click()
@@ -67,35 +67,30 @@ def check_selects(page, goto, check, previews):
     listener = lambda request: requests.append(request.url) if '/console-api/' in request.url else None
     page.on('request', listener)
     choose_select(page, '#locale', 'en')
-    choose_select(page, '#theme', 'b')
     expect(page.locator('[name="query"]')).to_have_value('Synthetic draft C9800-CL')
-    check('Appearance selection neither submits business requests nor resets form drafts', not requests)
+    check('Language selection neither submits business requests nor resets form drafts', not requests)
     page.remove_listener('request', listener)
     trigger.click(); page.keyboard.press('s'); page.keyboard.press('Enter')
     expect(native).to_have_value('semantic')
     check('Typeahead uses translated option labels', 'Semantic' in trigger.inner_text())
-    choose_select(page, '#locale', 'zh-CN'); choose_select(page, '#theme', 'a')
+    choose_select(page, '#locale', 'zh-CN')
     choose_select(page, '[name="search_mode"]', 'lexical')
     page.locator('[name="query"]').fill('')
 
-    # Layout and open-popup geometry, including English labels and all palettes.
+    # Layout and open-popup geometry, including English labels.
     for width in [1280, 1440, 1920]:
         page.set_viewport_size({'width': width, 'height': 1000})
-        for theme in ['a', 'b', 'c']:
-            for locale in ['zh-CN', 'en']:
-                choose_select(page, '#theme', theme); choose_select(page, '#locale', locale)
-                page.locator('[data-select-name="category"]').click()
-                pop = page.locator('.select-popup:popover-open'); r = pop.bounding_box()
-                fit = page.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
-                check('Anchored dropdown / desktop layout ' + str((width, theme, locale)), fit and r['x'] >= 0 and r['x'] + r['width'] <= width + 1 and r['y'] >= 0 and r['y'] + r['height'] <= 1001)
-                page.keyboard.press('Escape')
+        for locale in ['zh-CN', 'en']:
+            choose_select(page, '#locale', locale)
+            page.locator('[data-select-name="category"]').click()
+            pop = page.locator('.select-popup:popover-open'); r = pop.bounding_box()
+            fit = page.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
+            check('Anchored dropdown / desktop layout ' + str((width, locale)), fit and r['x'] >= 0 and r['x'] + r['width'] <= width + 1 and r['y'] >= 0 and r['y'] + r['height'] <= 1001)
+            page.keyboard.press('Escape')
     page.set_viewport_size({'width': 1440, 'height': 1100})
-    choose_select(page, '#theme', 'a'); choose_select(page, '#locale', 'zh-CN')
+    choose_select(page, '#locale', 'zh-CN')
     trigger.click(); page.screenshot(path=str(previews / 'memory-search-dropdown.png'), full_page=True); page.keyboard.press('Escape')
-    page.locator('[data-select-name="theme"]').click(); page.screenshot(path=str(previews / 'theme-dropdown.png'), full_page=True); page.keyboard.press('Escape')
-    choose_select(page, '#theme', 'b')
-    trigger.click(); page.screenshot(path=str(previews / 'memory-dropdown-indigo.png'), full_page=True); page.keyboard.press('Escape')
-    choose_select(page, '#theme', 'a')
+    page.locator('[data-select-name="locale"]').click(); page.screenshot(path=str(previews / 'language-dropdown.png'), full_page=True); page.keyboard.press('Escape')
 
     # Synthetic DOM fixture exercises semantics not present in every business form.
     page.evaluate('''() => {

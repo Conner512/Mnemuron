@@ -86,7 +86,7 @@ try:
   check('New web registration activates through configured provisioning',rp.locator('code').inner_text()=='active');registration.close()
   # B uses the real sign-in form, not an A session or an identity selector.
   bctx=browser.new_context();bp=bctx.new_page();bp.goto(url+'/login');bp.locator('[name=username]').fill(cfg['accounts'][1]['username']);bp.locator('[name=password]').fill(cfg['password']);bp.locator('[name=otp]').fill(cmd('otp',owner=1)['otp']);bp.locator('button[type=submit]').click();bp.wait_for_url('**/app');bp.goto(url+'/app/memories');bp.locator('[data-memory]').first.wait_for();check('Real username/password/TOTP login isolates B content','Synthetic private B sentinel' in bp.inner_text('body') and '蓝色纸船' not in bp.inner_text('body'));bp.goto(url+'/app/invitations');bp.wait_for_timeout(200);check('Member sees no operator invitation controls',bp.locator('[data-console-action="invitations.issue"]').count()==0);bctx.close()
-  for name in ['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts']:
+  for name in ['overview','memories','summaries','jobs','connections','models','security','audit','storage','invitations','accounts']:
    goto(name)
    check('Functional route '+name,page.locator('#console-root h1').count()==1 and page.locator('#console-root [role=alert]').count()==0)
   # Rendered geometry, not stylesheet text: restyling may change CSS freely as long as layout holds.
@@ -102,11 +102,10 @@ try:
    page.keyboard.press('Escape');expect(page.locator('#memory-dialog')).not_to_be_visible()
   for width in [1280,1440,1920]:
    page.set_viewport_size({'width':width,'height':1080});goto('models')
-   for theme in ['a','b','c']:
-    for locale in ['zh-CN','en']:
-     pick('#theme',theme);pick('#locale',locale)
-     check('Desktop model forms '+str((width,theme,locale)),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
-  page.set_viewport_size({'width':1440,'height':1100});pick('#theme','a');pick('#locale','zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
+   for locale in ['zh-CN','en']:
+    pick('#locale',locale)
+    check('Desktop model forms '+str((width,locale)),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+  page.set_viewport_size({'width':1440,'height':1100});pick('#locale','zh-CN');goto('memories');page.screenshot(path=str(P/'memories-functional.png'),full_page=True)
   begin('memory.create');page.screenshot(path=str(P/'new-memory-functional.png'),full_page=True);close();goto('models');page.screenshot(path=str(P/'models-functional.png'),full_page=True)
   goto('jobs');page.screenshot(path=str(P/'jobs-functional.png'),full_page=True);goto('invitations');page.screenshot(path=str(P/'invitations-functional.png'),full_page=True)
   check('No browser JavaScript or CSP errors',not errors)

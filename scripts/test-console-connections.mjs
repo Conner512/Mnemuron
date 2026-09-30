@@ -43,8 +43,8 @@ try{
  await openNew('generic_mcp');check('Readonly profile cannot select a write-time disclosure grant',await dialog.locator('[name=allow_submitted_revision_grant]').isDisabled());await dialog.locator('[name=label]').fill('Synthetic portable reader');await pick('#connection-dialog [name=profile]','memory_readwrite');
  const beforeAppearance=mutations;
  // Exercise the real preference event handler while the modal owns focus.
- for(const [id,value] of [['theme','c'],['locale','en'],['locale','zh-CN']])await page.locator('#'+id).evaluate((select,value)=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));},value);
- check('Appearance changes preserve draft values without a mutation request',mutations===beforeAppearance&&await dialog.locator('[name=label]').inputValue()==='Synthetic portable reader'&&await dialog.locator('[name=profile]').inputValue()==='memory_readwrite');
+ for(const [id,value] of [['locale','en'],['locale','zh-CN']])await page.locator('#'+id).evaluate((select,value)=>{select.value=value;select.dispatchEvent(new Event('change',{bubbles:true}));},value);
+ check('Language changes preserve draft values without a mutation request',mutations===beforeAppearance&&await dialog.locator('[name=label]').inputValue()==='Synthetic portable reader'&&await dialog.locator('[name=profile]').inputValue()==='memory_readwrite');
  const trigger=dialog.locator('[data-select-name=profile]');await trigger.click();await page.keyboard.press('Escape');check('Escape closes the top-layer selector before the dialog',await dialog.isVisible()&&await page.locator('.select-popup:popover-open').count()===0);
  await dialog.locator('[name=allow_submitted_revision_grant]').check();await dialog.locator('button[type=submit]').click();await proof();await submit();
  const first=await saveSecret();check('Generic credential is a personal resource token, never a Core key',first.startsWith('mcp_pat_'));check('Server configuration is not fabricated connection success',!(await dialog.innerText()).includes('记忆调用已验证'));await close();
@@ -62,15 +62,15 @@ try{
  const bContext=await browser.newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await bp.goto(cfg.url+'/app/connections');await bp.locator('[data-connection-new]').waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
  for(const width of [1280,1440,1920]){
   await page.setViewportSize({width,height:1080});
-  for(const theme of ['a','b','c'])for(const mode of ['light','dark'])for(const locale of ['zh-CN','en']){
-   await pick('#theme',theme);await pick('#mode',mode);await pick('#locale',locale);await openNew('generic_mcp');await dialog.locator('[name=label]').fill('Synthetic long connection label / 合成名称 / '+'.'.repeat(24));
-   check(`Desktop ${width}/${theme}/${mode}/${locale}`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)&&await dialog.locator('[name=label]').inputValue().then(s=>s.startsWith('Synthetic')));
-   if(width===1440)await page.screenshot({path:path.join(evidence,`wizard-${theme}-${mode}-${locale}.png`),fullPage:true});
+  for(const locale of ['zh-CN','en']){
+   await pick('#locale',locale);await openNew('generic_mcp');await dialog.locator('[name=label]').fill('Synthetic long connection label / 合成名称 / '+'.'.repeat(24));
+   check(`Desktop ${width}/${locale}`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)&&await dialog.locator('[name=label]').inputValue().then(s=>s.startsWith('Synthetic')));
+   if(width===1440)await page.screenshot({path:path.join(evidence,`wizard-${locale}.png`),fullPage:true});
    await close();
   }
  }
- await pick('#theme','c');await pick('#mode','light');await pick('#locale','zh-CN');await goto('memories');check('Theme persists through real navigation',await page.locator('html').getAttribute('data-theme')==='c');
- for(const name of ['overview','memories','summaries','jobs','connections','models','security','audit','storage','appearance','invitations','accounts']){await goto(name);check('Existing console route '+name,await page.locator('#console-root [role=alert]').count()===0);}
+ await pick('#locale','en');await goto('memories');check('Language persists through real navigation',await page.locator('html').getAttribute('lang')==='en');await pick('#locale','zh-CN');
+ for(const name of ['overview','memories','summaries','jobs','connections','models','security','audit','storage','invitations','accounts']){await goto(name);check('Existing console route '+name,await page.locator('#console-root [role=alert]').count()===0);}
  const operationDialog=page.locator('#operation-dialog');
  const begin=async action=>{await page.locator(`[data-console-action="${action}"]`).first().click();await operationDialog.locator('form').waitFor();};
  const runOperation=async()=>{await operationDialog.locator('button[type=submit]').click();await operationDialog.locator('.operation-result').first().waitFor();return JSON.parse(await operationDialog.locator('.operation-result').last().innerText());};

@@ -7,8 +7,8 @@ const read=name=>fs.readFileSync(new URL(`../../../web/console/${name}`,import.m
 
 test('Select presentation ships through existing assets and preserves strict CSP',()=>{
  const html=renderPage({title:'memories',page:'memories',account:{account_id:'synthetic-owner',username:'synthetic'}});
- for(const id of ['theme','locale'])assert.match(html,new RegExp(`<select id="${id}"[^>]*disabled`));
- assert.doesNotMatch(html,/<select id="mode"/);
+ assert.match(html,/<select id="locale"[^>]*disabled/);
+ assert.doesNotMatch(html,/<select id="(?:theme|mode)"/);
  assert.doesNotMatch(html,/selects\.mjs|controls\.css|https?:\/\//);
  const result={writeHead(status,headers){this.headers=headers;},end(){}};
  sendPage(result,{title:'login',auth:true});

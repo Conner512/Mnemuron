@@ -34,8 +34,8 @@ It carries the product's core promise — every memory keeps its provenance — 
 
 ## Tokens
 
-Theme blocks (`[data-theme="a|b|c"]`) contain colours only; geometry lives in `:root`. The three themes
-share one light palette and differ only in the accent:
+All tokens live in `:root`. There is one light palette with a single vermilion accent and no theme
+switching:
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -46,13 +46,14 @@ share one light palette and differ only in the accent:
 | `--border` / `--line` | `#DCD4C3` / `#CFC6B3` | Hairline rules / quiet outlines |
 | `--muted` | `#5F5A50` | Secondary text, icons, form-control borders |
 | `--text` | `#1C1B18` ink | Body text, primary buttons, strong rules |
-| `--accent` | a `#AE3F2C` vermilion · b `#2E4A7A` indigo · c `#2F6B57` pine | Current marker, confirmations |
+| `--accent` | `#AE3F2C` vermilion | Current marker, confirmations |
 | `--good` / `--warn` / `--bad` | `#3B6B4F` / `#8A5A12` / `#9B2C1F` | Verified / in progress / danger |
 
 Geometry: `--radius` 2px everywhere, 36–38px controls, 1px hairlines with a 1.5px ink rule above
 section headings, table heads and stat tiles. No gradients, glow, blur or glass.
 
-There is no dark mode for now; the appearance page offers the accent and the interface language.
+There is no dark mode and no appearance page. The only display preference is the interface language: a
+compact select in the top bar and on the sign-in pages, saved per account in the browser.
 
 ## Type
 

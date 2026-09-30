@@ -1,7 +1,7 @@
 export const catalog={
  'zh-CN':{
   consoleLogin:'登录管理控制台',consoleLoginNote:'管理自己的记忆和连接。此登录不会自动向 ChatGPT 授权。',oauthLogin:'连接 ChatGPT',oauthLoginNote:'先验证你的 Mnemuron 账户，再明确允许只读访问。这不会登录管理控制台。',oauthConsent:'允许 ChatGPT 只读访问',oauthRestartHelp:'此链接只用于本次授权，并非固定的集成页面。请关闭此页，回到 ChatGPT 重新发起连接。',oauthRetry:'重试本次授权',
-  overview:'概览',memories:'记忆库',summaries:'分类与摘要',jobs:'整理任务',connections:'连接管理',models:'模型配置',security:'账户安全',audit:'审计记录',storage:'存储与备份',appearance:'外观设置',invitations:'注册码管理',accounts:'账户管理',
+  overview:'概览',memories:'记忆库',summaries:'分类与摘要',jobs:'整理任务',connections:'连接管理',models:'模型配置',security:'账户安全',audit:'审计记录',storage:'存储与备份',invitations:'注册码管理',accounts:'账户管理',
   workspace:'我的空间',settings:'连接与设置',platform:'平台管理 · 权限待定',brandNote:'个人记忆，持续连接。',hero:'你的记忆，井然有序。',heroNote:'保留每条信息的来源，让上下文在会话间延续。',
   login:'登录 Mnemuron',register:'创建你的账户',recover:'账户恢复',username:'用户名',password:'密码',otp:'动态验证码',invitation:'一次性注册码',continue:'继续',signIn:'登录',signOut:'退出当前会话',cancel:'取消',allow:'允许只读访问',
   scopeMemoryWrite:'按你的明确要求保存、版本化修订或撤回记忆',allowMemoryWrite:'允许记忆读写',consentWriteNote:'仅可保存你提交的记忆，以及修订或撤回属于你且网页可见的记忆。不切换任务、不确认 Resume、不调度模型或执行管理操作。',consentSubmittedGrant:'每次提交新版本时须明确选择保持私有，或允许本账户具有读取权限的云端连接读取该版本（不限当前连接）。不会开放旧记录。',consentPrivateOnly:'本次提交的新版本保持私有，云端仅获得不含正文的保存回执。',
@@ -9,7 +9,7 @@ export const catalog={
   recoveryCodes:'保存恢复码',recoveryNote:'这些恢复码仅显示一次。请离线保存，不要上传或分享。',acknowledge:'我已保存恢复码',pending:'正在等待安全绑定',pendingNote:'MFA 已验证。核心身份供应与恢复码确认全部完成后才能登录。',registered:'注册完成，请正常登录',
   blocked:'策略待确认',blockedNote:'此操作尚未获准。页面展示不代表操作已开放。',unavailable:'暂不可用',retry:'重试',loading:'正在加载…',empty:'目前没有可显示的记录',noConnection:'尚无已授权连接',authenticated:'已验证账户',restartAuthorization:'账户或授权会话已变化。请返回请求连接的应用，重新发起授权。',
   search:'搜索记忆',query:'搜索内容',readOnly:'只读',memoryCount:'原子记忆',sourceCount:'来源记录',summaryCount:'摘要',jobCount:'整理任务',recent:'最近的记忆',viewAll:'查看全部',detail:'记忆详情',sources:'来源',revisions:'版本',next:'下一页',previous:'上一页',close:'关闭',complete:'内容已完整读取',changed:'来源或版本已变化，请重新读取。',
-  appearanceNote:'配色不改变布局、功能或权限。偏好按账户分别保存。',theme:'颜色主题',mode:'明暗模式',language:'语言',light:'浅色',dark:'深色',a:'Neural Indigo',b:'Signal Teal',c:'Paper Amber',
+  language:'语言',
   securityNote:'登录需要密码与动态验证码。恢复证明组合尚待确认，不启用弱恢复。',modelsNote:'模型资源与费用策略待确认。不显示密钥或其他账户配置。',storageNote:'只展示本人记录的统计。整库备份、恢复与下载不在网页权限内。',platformNote:'当前账户没有平台管理授权。此页不返回其他账户的身份或统计。',
   error:'请求未完成',errorNote:'请返回并重试。未授权、过期或依赖故障不会跳过安全校验。',identity:'当前账户',state:'状态',created:'创建时间',scope:'范围',status:'状态',consent:'授权连接',consentNote:'仅允许读取你授权的记忆和项目。不会写入记忆、切换任务或确认 Resume。',
   policy:'权限边界',pendingPolicies:'未批准操作保持关闭',noDemo:'所有数据来自当前账户；不可用时不会显示演示数据。',newMemory:'新建记忆',organize:'手动整理',export:'导出记忆',restore:'整库恢复',configure:'修改配置',issue:'网页签发',manage:'角色管理',revoke:'撤销授权',
@@ -17,7 +17,7 @@ export const catalog={
  },
  en:{
   consoleLogin:'Sign in to the console',consoleLoginNote:'Manage your memories and connections. This sign-in does not authorize ChatGPT.',oauthLogin:'Connect ChatGPT',oauthLoginNote:'Verify your Mnemuron account, then explicitly allow read-only access. This does not sign you in to the console.',oauthConsent:'Allow ChatGPT read-only access',oauthRestartHelp:'This link belongs to one authorization request, not a permanent integration page. Close this page and start a new connection from ChatGPT.',oauthRetry:'Retry this authorization',
-  overview:'Overview',memories:'Memory library',summaries:'Categories & summaries',jobs:'Organizer jobs',connections:'Connections',models:'Model settings',security:'Account security',audit:'Audit log',storage:'Storage & backup',appearance:'Appearance',invitations:'Registration codes',accounts:'Accounts',
+  overview:'Overview',memories:'Memory library',summaries:'Categories & summaries',jobs:'Organizer jobs',connections:'Connections',models:'Model settings',security:'Account security',audit:'Audit log',storage:'Storage & backup',invitations:'Registration codes',accounts:'Accounts',
   workspace:'My workspace',settings:'Connections & settings',platform:'Platform · policy pending',brandNote:'Personal memory. Lasting context.',hero:'Your memory, thoughtfully organized.',heroNote:'Keep the provenance of every detail. Carry context across conversations.',
   login:'Sign in to Mnemuron',register:'Create your account',recover:'Account recovery',username:'Username',password:'Password',otp:'Authenticator code',invitation:'One-time registration code',continue:'Continue',signIn:'Sign in',signOut:'Sign out of this session',cancel:'Cancel',allow:'Allow read-only access',
   scopeMemoryWrite:'Save, version-correct or retract memories on your explicit request',allowMemoryWrite:'Allow memory read and write',consentWriteNote:'Save submitted memories; correct or retract only your owned, Web-visible memories. No task switching, Resume, model scheduling or administration.',consentSubmittedGrant:'Explicitly choose private or readable for each newly submitted version. Readable means accessible to this account\'s authorized cloud readers, not only this connection. Existing records are never granted.',consentPrivateOnly:'New submitted versions remain private. The cloud receives a metadata-only receipt without the body.',
@@ -25,7 +25,7 @@ export const catalog={
   recoveryCodes:'Save your recovery codes',recoveryNote:'These codes are shown once. Store them offline. Do not upload or share them.',acknowledge:'I have saved my recovery codes',pending:'Waiting for secure identity binding',pendingNote:'MFA is verified. Login requires completed Core provisioning and recovery-code acknowledgement.',registered:'Registration complete. Please sign in.',
   blocked:'Policy pending',blockedNote:'This operation has not been approved. Visibility does not grant permission.',unavailable:'Currently unavailable',retry:'Retry',loading:'Loading…',empty:'No records to display yet',noConnection:'No authorized connection yet',authenticated:'Verified account',restartAuthorization:'The account or authorization session changed. Return to the requesting application and start a new authorization.',
   search:'Search memories',query:'Search query',readOnly:'Read-only',memoryCount:'Atomic memories',sourceCount:'Source records',summaryCount:'Summaries',jobCount:'Organizer jobs',recent:'Recent memories',viewAll:'View all',detail:'Memory detail',sources:'Sources',revisions:'Revision',next:'Next page',previous:'Previous page',close:'Close',complete:'Complete content returned',changed:'The source or revision changed. Read it again.',
-  appearanceNote:'Colors never change layout, capabilities or permissions. Preferences are stored per account.',theme:'Color theme',mode:'Color mode',language:'Language',light:'Light',dark:'Dark',a:'Neural Indigo',b:'Signal Teal',c:'Paper Amber',
+  language:'Language',
   securityNote:'Sign-in requires a password and authenticator code. Recovery proof policy is pending; no weaker recovery is enabled.',modelsNote:'Model resources and cost policy are pending. Keys and other accounts’ configuration are never shown.',storageNote:'Only your record totals are shown. Whole-database backup, restore and download are not web capabilities.',platformNote:'This account has no platform management grant. This page returns no other account identities or statistics.',
   error:'Request not completed',errorNote:'Go back and try again. Authorization, expiry and dependency checks are never bypassed.',identity:'Current account',state:'State',created:'Created',scope:'Scope',status:'Status',consent:'Authorize connection',consentNote:'Read only memories and projects you authorize. No memory writes, task switching or Resume confirmation.',
   policy:'Permission boundary',pendingPolicies:'Unapproved operations stay disabled',noDemo:'All data belongs to the current account. No demo fallback when unavailable.',newMemory:'New memory',organize:'Run organizer',export:'Export memories',restore:'Restore database',configure:'Change settings',issue:'Issue in browser',manage:'Manage roles',revoke:'Revoke grant',
@@ -62,17 +62,13 @@ Object.assign(catalog['zh-CN'], {
   manageConnections:'管理我的连接', browseMemories:'浏览记忆', ownedRecords:'仅当前账户', recentLabel:'近期记忆', processingLabel:'整理概况',
   memoryProcessing:'记忆整理', atomicNote:'保留原文与版本', derivedNote:'来源关联的派生视图', jobStatusNote:'进入任务页查看执行状态',
   summaryBoundary:'摘要是派生视图，不覆盖原文。遗漏与待核实信息保留在来源中。', viewJobs:'查看整理任务', inspectMemoryNote:'点开任意记忆，查看正文、来源与修订历史。',
-  personalizeLabel:'个性化工作空间', fixedLayout:'A · 统一布局', themeName_a:'神经靛蓝', themeName_b:'信号青绿', themeName_c:'纸感琥珀',
-  themeNote_a:'柔和靛蓝，清晰专注', themeNote_b:'自然青绿，沉稳明快', themeNote_c:'温暖琥珀，舒适阅读',
-  modeNote:'选择适合当前环境的明暗模式。', languageNote:'仅切换界面语言，记忆正文保持原样。',
-  appearanceScopeNote:'外观偏好独立保存于当前账户。切换不会改变数据、访问权限或正在填写的内容。',
   authHeadlineFirst:'记住重要的。', authHeadlineSecond:'只属于你的。', authDescription:'用一个独立空间连接你的记忆，让每次对话从理解开始。',
   authEyebrow:'连接到你的记忆空间', accountMenu:'当前账户与退出', authFooter:'Mnemuron · 个人记忆，持续上下文',
   pageNote_memories:'搜索、查看并追溯属于你的每一条记忆。', pageNote_summaries:'分类整理与来源关联的摘要，始终与原始记忆分开。',
   pageNote_jobs:'查看整理任务的进度、结果与需要处理的问题。', pageNote_connections:'在同一处查看你的应用授权和 Agent 连接。',
   pageNote_models:'查看模型配置边界与外发政策。密钥不会在页面回显。', pageNote_security:'管理你的身份、验证器与账户访问。',
   pageNote_audit:'仅查看当前账户的访问与安全事件。', pageNote_storage:'了解个人记录与存储边界。个人数据不等于整库备份。',
-  pageNote_appearance:'一种布局，多种心境。让你的记忆空间更适合你。', pageNote_invitations:'查看注册准入规则。签发能力由明确的运维权限控制。',
+  pageNote_invitations:'查看注册准入规则。签发能力由明确的运维权限控制。',
   pageNote_accounts:'账户管理与个人记忆读取相互独立。',
 });
 Object.assign(catalog.en, {
@@ -88,17 +84,13 @@ Object.assign(catalog.en, {
   manageConnections:'Manage my connections', browseMemories:'Browse memories', ownedRecords:'This account only', recentLabel:'RECENT MEMORIES', processingLabel:'PROCESSING',
   memoryProcessing:'Memory organization', atomicNote:'Originals and revisions retained', derivedNote:'Source-linked derived views', jobStatusNote:'Open jobs for execution status',
   summaryBoundary:'Summaries are derived views, not replacements for originals. Check sources for omissions and uncertainty.', viewJobs:'View organizer jobs', inspectMemoryNote:'Open a memory to inspect its content, provenance and revision history.',
-  personalizeLabel:'PERSONALIZE YOUR WORKSPACE', fixedLayout:'A · Unified layout', themeName_a:'Neural Indigo', themeName_b:'Signal Teal', themeName_c:'Paper Amber',
-  themeNote_a:'Soft indigo. Clear focus.', themeNote_b:'Natural teal. Quiet clarity.', themeNote_c:'Warm amber. Thoughtful reading.',
-  modeNote:'Choose the appearance that suits your environment.', languageNote:'Translate the interface, never your original memories.',
-  appearanceScopeNote:'Appearance preferences belong to this account. Switching never changes data, access permissions or your current form.',
   authHeadlineFirst:'Remember what matters.', authHeadlineSecond:'Keep it yours.', authDescription:'An independent space for your memories. Start every conversation with context.',
   authEyebrow:'CONNECT TO YOUR MEMORY', accountMenu:'Current account and sign out', authFooter:'Mnemuron · Personal memory, continuous context',
   pageNote_memories:'Search, inspect and trace every memory in your own space.', pageNote_summaries:'Source-linked categories and summaries, kept separate from original memories.',
   pageNote_jobs:'Inspect organizer progress, results and items that need attention.', pageNote_connections:'Review your application grants and Agent connections in one place.',
   pageNote_models:'Review model boundaries and egress policy. Secret keys are never displayed.', pageNote_security:'Your identity, authenticator and account access.',
   pageNote_audit:'Access and security events for the current account only.', pageNote_storage:'Understand your record totals. Personal data is not a whole-database backup.',
-  pageNote_appearance:'One layout, a different mood. Make this memory space yours.', pageNote_invitations:'Review registration rules. Issuance requires explicit operator permission.',
+  pageNote_invitations:'Review registration rules. Issuance requires explicit operator permission.',
   pageNote_accounts:'Account administration does not grant access to personal memories.',
 });
 
@@ -529,10 +521,8 @@ Object.assign(catalog['zh-CN'],{
  homeTitle:'今天想找回什么？',homeNote:'在你授权保存的记忆里搜索；每条结果都能追溯到来源和版本。',askPlaceholder:'搜索记忆里的事实、决定、项目……',
  recentStream:'最近写入',pulseTitle:'记忆概况',activityStrip:'近 30 天写入',pipelineTitle:'整理管线',openLibrary:'打开记忆库',
  libraryHint:'选择一条记忆，在右侧查看正文、来源与修订历史。',filters:'筛选',resultCount:'条结果',closePane:'关闭详情',
- summaryIndex:'分类索引',summaryList:'派生摘要',auditTimeline:'事件时间线',accountPanel:'账户',displayPrefs:'显示',
- themeName_a:'石墨',themeName_b:'苔原',themeName_c:'陶土',themeNote_a:'中性灰阶，蓝色强调',themeNote_b:'柔和灰绿，安静专注',themeNote_c:'温暖纸感，陶土强调',
+ summaryIndex:'分类索引',summaryList:'派生摘要',auditTimeline:'事件时间线',accountPanel:'账户',
  authPoint_source:'每条记忆都保留来源与版本',authPoint_readonly:'第三方应用只获得你逐项授权的只读访问',authPoint_isolation:'账户彼此隔离，登录需要密码和动态验证码',
- appearanceNote:'主题只改变颜色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
 });
 Object.assign(catalog.en,{
  navHome:'Home',navLibrary:'Library',navSummaries:'Summaries',navJobs:'Organize',navSettings:'Settings',navMore:'More settings',
@@ -540,36 +530,26 @@ Object.assign(catalog.en,{
  homeTitle:'What do you want to recall?',homeNote:'Search the memories you chose to keep. Every result traces back to its source and revision.',askPlaceholder:'Search facts, decisions, projects…',
  recentStream:'Recently saved',pulseTitle:'At a glance',activityStrip:'Saved in the last 30 days',pipelineTitle:'Organizer pipeline',openLibrary:'Open library',
  libraryHint:'Select a memory to read its content, sources and revision history on the right.',filters:'Filters',resultCount:'results',closePane:'Close details',
- summaryIndex:'Category index',summaryList:'Derived summaries',auditTimeline:'Event timeline',accountPanel:'Account',displayPrefs:'Display',
- themeName_a:'Graphite',themeName_b:'Tundra',themeName_c:'Clay',themeNote_a:'Neutral greys, blue accent',themeNote_b:'Soft grey-green, quiet focus',themeNote_c:'Warm paper, clay accent',
+ summaryIndex:'Category index',summaryList:'Derived summaries',auditTimeline:'Event timeline',accountPanel:'Account',
  authPoint_source:'Every memory keeps its source and revision',authPoint_readonly:'Apps get only the read-only access you grant',authPoint_isolation:'Accounts are isolated; sign-in needs a password and a one-time code',
- appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
 });
 
-// HUD skin: status bar, radar and palette names. Status values shown only from real session state.
+// HUD skin: status bar and radar. Status values shown only from real session state.
 Object.assign(catalog['zh-CN'],{
  statusClock:'本地时间',statusSession:'会话',sessionVerified:'已验证',statusLink:'核心链路',linkPending:'连接中',linkOnline:'在线',linkDegraded:'异常',
  radarLabel:'记忆雷达',radarTitle:'分类扫描',radarNote:'扇区按有效记忆的分类占比划分，外圈刻度是近 30 天每天的写入量。',radarEmpty:'尚无记忆信号',
  recentStream:'最近写入',openLibrary:'打开记忆库',pulseTitle:'信号概况',pipelineTitle:'整理管线',activityStrip:'近 30 天写入',
- themeName_a:'星港青',themeName_b:'极光绿',themeName_c:'火星琥珀',themeNote_a:'冷青色舱内仪表',themeNote_b:'低刺激的绿色读数',themeNote_c:'温暖的琥珀色告警灯',
- appearanceNote:'主题只改变颜色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
 });
 Object.assign(catalog.en,{
  statusClock:'Local time',statusSession:'Session',sessionVerified:'Verified',statusLink:'Core link',linkPending:'Connecting',linkOnline:'Online',linkDegraded:'Degraded',
  radarLabel:'MEMORY RADAR',radarTitle:'Category sweep',radarNote:'Sectors show each category’s share of active memories; rim ticks are daily saves over the last 30 days.',radarEmpty:'No memory signal yet',
  recentStream:'Recently saved',openLibrary:'Open library',pulseTitle:'Signal overview',pipelineTitle:'Organizer pipeline',activityStrip:'Saved in the last 30 days',
- themeName_a:'Starport',themeName_b:'Aurora',themeName_c:'Mars',themeNote_a:'Cold cyan cockpit readouts',themeNote_b:'Low-glare green telemetry',themeNote_c:'Warm amber warning lights',
- appearanceNote:'Themes change colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
 });
 
-// Ink archive: overview distribution, accent names and registration steps (override earlier labels).
+// Ink archive: overview distribution and registration steps (override earlier labels).
 Object.assign(catalog['zh-CN'],{radarLabel:'记忆分布',radarTitle:'分类构成',radarNote:'圆环按有效记忆的分类占比绘制，中心是有效记忆总数。',radarEmpty:'还没有有效记忆',activeMemories:'有效记忆',
- themeName_a:'朱砂',themeName_b:'黛蓝',themeName_c:'松绿',themeNote_a:'印章红，标记当前与确认',themeNote_b:'沉静的墨蓝',themeNote_c:'内敛的松石绿',
- appearanceNote:'主题只改变强调色，不改变布局、功能或权限。偏好按账户保存在本机浏览器。',
  registrationStepsLabel:'注册步骤',stepInvitation:'验证注册码',stepAccount:'设置账户',stepTotp:'绑定验证器',stepRecovery:'保存恢复码'});
 Object.assign(catalog.en,{radarLabel:'Memory distribution',radarTitle:'Category mix',radarNote:'The ring shows each category’s share of active memories; the centre is the total.',radarEmpty:'No active memories yet',activeMemories:'active',
- themeName_a:'Vermilion',themeName_b:'Indigo',themeName_c:'Pine',themeNote_a:'Seal red marks current and confirmed items',themeNote_b:'Quiet ink blue',themeNote_c:'Muted pine green',
- appearanceNote:'Themes change the accent colour only, never layout, capabilities or permissions. Preferences are kept per account in this browser.',
  systemLabel:'Personal memory system',authEyebrow:'Connect to your memory',
  registrationStepsLabel:'Registration steps',stepInvitation:'Invitation',stepAccount:'Account',stepTotp:'Authenticator',stepRecovery:'Recovery codes'});
 
