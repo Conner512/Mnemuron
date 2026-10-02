@@ -2787,7 +2787,7 @@ export class MnemuronStore {
     }
     const retentionDays = parseRetention(
       input.raw_retention_days,
-      this.getRetention().raw_retention_days,
+      this.consoleService.features.retention(auth.user_id).raw_retention_days,
     );
     const receivedAt = nowIso();
     const insert = this.db.prepare(`
@@ -3307,6 +3307,7 @@ export class MnemuronStore {
       `).run(replacementId, reason, asJson(actor), timestamp, auth.user_id, memoryId);
       const replacement = this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(replacementId);
       const revision = this.revisions.record(replacement,"explicit_correction");
+      this.webVisibility.inheritPrivate(auth.user_id,memoryId,replacementId);
       this.revisions.linkExplicit(replacement,revision);
       this.revisions.record(this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(memoryId),"superseded");
       this.audit({
@@ -4903,12 +4904,12 @@ export class MnemuronStore {
     };
   }
 
-  pruneExpired(auth = null, {batchSize = 1000} = {}) {
+  pruneExpired(auth = null, {batchSize = 1000,recordMaintenance = true} = {}) {
     if (auth) this.requireScope(auth, "admin:retention");
     if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 1000) throw new ValidationError('Maintenance batch must be 1..1000.');
     const timestamp = nowIso();
     const started=Date.now();
-    const record=value=>this.db.prepare("INSERT INTO settings(key,value_json,updated_at) VALUES('last_retention_maintenance',?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").run(asJson(value),nowIso());
+    const record=value=>recordMaintenance&&this.db.prepare("INSERT INTO settings(key,value_json,updated_at) VALUES('last_retention_maintenance',?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json,updated_at=excluded.updated_at").run(asJson(value),nowIso());
     try {
       return this.memoryTransaction(()=>{
         const result=this.db.prepare(`UPDATE events SET content=NULL,raw_payload_json=NULL,expired_at=? WHERE event_id IN (

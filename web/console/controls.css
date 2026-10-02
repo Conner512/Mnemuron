@@ -31,6 +31,10 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 /* Write operations: centred, bounded dialogs with an explicit submit. */
 #operation-dialog,#connection-dialog{inset:0;margin:auto;width:min(640px,calc(100vw - 32px));max-width:none;height:fit-content;max-height:calc(100dvh - 48px);border:1px solid var(--text);border-radius:var(--radius-sm);box-shadow:var(--shadow);overflow:auto}
 #connection-dialog{width:min(760px,calc(100vw - 32px))}
+#feature-dialog{inset:0;margin:auto;width:min(1000px,calc(100vw - 32px));height:fit-content;max-height:calc(100dvh - 48px);overflow:auto;border:1px solid var(--text);border-radius:var(--radius-sm);background:var(--surface);color:var(--text)}
+#feature-dialog>.dialog-header,[data-feature-content]{padding:18px 22px}
+#feature-dialog .body-content{white-space:pre-wrap;overflow-wrap:anywhere}
+#feature-dialog .columns>section{min-width:0}
 #operation-dialog[open],#connection-dialog[open]{animation:rise .18s var(--ease) both}
 #operation-dialog>.dialog-header,#connection-dialog>.dialog-header{padding:14px 22px}
 #operation-content,.connection-content{padding:20px 22px 22px}
@@ -47,6 +51,7 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .reauth legend{padding:0 6px;font-size:12.5px;font-weight:600}
 .reauth p{margin:0;font-size:12.5px}
 #operation-content form>.actions,.connection-content form>.actions{justify-content:flex-end;padding-top:14px;border-top:1px solid var(--border)}
+.connection-content form>.connection-form-actions>[data-connection-back]{margin-inline-end:auto;flex:0 0 auto;width:auto}
 #operation-content [data-operation-error]:empty,.connection-content [data-connection-error]:empty{display:none}
 #operation-content [data-operation-error],.connection-content [data-connection-error]{color:var(--bad);font-size:13px;margin:0}
 .operation-result{max-height:50vh;overflow:auto;padding:12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -84,6 +89,25 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .connection-credentials li{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-top:1px solid var(--border);font-size:13px}
 .connection-credentials small{display:block;color:var(--muted);font-size:12px}
 .connection-credentials li>span:last-child{color:var(--muted);white-space:nowrap}
+/* ChatGPT plugin form: field label, value and copy button per row. */
+.plugin-steps{margin:0 0 14px;padding-left:20px;color:var(--text);font-size:13.5px}
+.plugin-steps li+li{margin-top:4px}
+.plugin-form{margin:0 0 12px;border-top:1.5px solid var(--text)}
+.plugin-field{display:grid;grid-template-columns:150px minmax(0,1fr);gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+.plugin-field dt{color:var(--muted);font-size:12.5px}
+.plugin-field dd{display:flex;align-items:center;gap:8px;min-width:0;margin:0}
+.plugin-field code{flex:1;min-width:0;overflow-wrap:anywhere;color:var(--text);font-size:12.5px}
+.plugin-field button{flex:none;min-height:30px;padding:3px 10px;font-size:12.5px}
+.plugin-field input{flex:1;min-height:32px}
+.plugin-field dd>span{font-size:13px}
+.plugin-advanced{margin:14px 0;font-size:13px}
+.plugin-advanced summary{cursor:pointer;font-weight:600}
+.plugin-advanced .plugin-form{margin-top:12px}
+.plugin-status{margin:4px 0 14px;padding:10px 12px;border-top:1.5px solid var(--text);background:var(--bg);font-size:13.5px}
+.plugin-status[data-status="connStatus_verified"],.plugin-status[data-status="connStatus_authorized"]{border-top-color:var(--good)}
+.plugin-status[data-status="connStatus_provisioning"]{color:var(--muted)}
+.plugin-status[data-status="connStatus_degraded"]{border-top-color:var(--bad)}
+.connection-hint{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:-4px 0 12px;font-size:13px;color:var(--muted)}
 .connection-types{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}
 .connection-types>.card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:14px;white-space:normal;text-align:left;border-color:var(--line)}
 .connection-types>button.card:not(:disabled):hover{border-color:var(--text);background:var(--hover)}
@@ -93,3 +117,5 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .connection-copy-status{font-size:12.5px;color:var(--good)}
 @media(max-width:960px){.connection-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.connection-intro{flex-direction:column;align-items:flex-start}}
 @keyframes rise{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
+#feature-dialog ins{background:var(--hover);text-decoration:underline;text-underline-offset:4px}
+#feature-dialog del{background:var(--hover);text-decoration:line-through}

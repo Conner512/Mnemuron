@@ -10,6 +10,10 @@ export const MEMORY_WRITE_CORE_SCOPES=Object.freeze([...CORE_SCOPES,'memory:writ
 export const cloudEnabled=config=>config.cloud_memory?.enabled===true;
 export const resourceScopesFor=config=>cloudEnabled(config)?[...RESOURCE_SCOPES,'memory:write']:[...RESOURCE_SCOPES];
 export const oauthScopesFor=config=>['openid','offline_access',...resourceScopesFor(config)];
+// Anonymous discovery cannot know the selected personal client. Advertise the
+// common read baseline; legacy scopes remain accepted and writes require opt-in.
+export const DISCOVERY_RESOURCE_SCOPES=Object.freeze(['memory:read']);
+export const DISCOVERY_OAUTH_SCOPES=Object.freeze(['openid','offline_access',...DISCOVERY_RESOURCE_SCOPES]);
 export function validateCloudPolicy(config){
   if(config.cloud_memory===undefined)return;
   const c=config.cloud_memory;

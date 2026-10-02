@@ -55,6 +55,8 @@ test('WEB-MEM-01: current grants, public classification, lifecycle and Core rout
   assert.ok(!body.includes('synthetic-private-path') && !body.includes(secret.memory_id));
   grant(f,m,false);assert.equal(f.store.queryMemories(web,{query:'route marker',include_shared:true,statuses:['active','retracted','superseded']}).matched_candidate_count,0);
   f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?)').run(web.user_id,m.memory_id,'public');
+  assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,0);
+  grant(f,m); // Classification changes alone cannot undo an explicit denial.
   assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,1);
   f.store.db.prepare("UPDATE memory_privacy SET sensitivity='secret' WHERE memory_id=?").run(m.memory_id);
   assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,0);

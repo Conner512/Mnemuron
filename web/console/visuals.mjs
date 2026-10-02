@@ -147,12 +147,17 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
 }
 
 /** Library: filters, a four-column table, and a pager. The detail opens in the side pane. */
-export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', categories = [], focusSources = false, readOnly = false, pagination = ''}) {
+export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', categories = [], focusSources = false, readOnly = false, allowedActions = [], pagination = ''}) {
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
   const rows = data.results || [];
+  const batchActions = [['memory.batch_classify','batchClassify'],['memory.batch_retract','batchRetract']].filter(([action]) => allowedActions.includes(action));
+  const selectable = batchActions.length > 0 && rows.some(m => m.status === 'active');
+  const selection = selectable ? html`<div class="memory-selection" data-memory-selection>
+    <p role="status" aria-live="polite">${i18n(t,'selectedMemories')} <strong data-selection-count>0</strong> / 50</p>
+    <div class="actions">${batchActions.map(([action,label]) => html`<button type="button" data-console-action="${action}" disabled>${i18n(t,label)}</button>`)}<button type="button" class="quiet" data-clear-selection disabled>${i18n(t,'clearSelection')}</button></div></div>` : '';
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
-    <tbody>${rows.map(m => html`<tr><td><button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></td>
+    <tbody>${rows.map(m => html`<tr><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}" data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></div></td>
       <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${t(m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
     : emptyState(t);
   return String(html`<form class="toolbar memory-filters" id="search-form" role="search">
@@ -163,7 +168,7 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
     <div class="filter-actions"><button class="primary filter-submit" type="submit">${svg('search')}${i18n(t, 'search')}</button><button type="button" class="filter-reset quiet" data-reset-filters>${i18n(t, 'resetFilters')}</button></div></form>
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
-    <div id="memory-rows">${table}</div>
+    ${selection}<div id="memory-rows">${table}</div>
     <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section>`);
 }
 
@@ -182,14 +187,20 @@ export function summariesView(t, {data, pagination = ''}) {
   })}</ol>` : emptyState(t)}${trusted(pagination)}</section></div>`);
 }
 
-export function auditView(t, {entries = [], pagination = ''}) {
-  if (!entries.length) return String(emptyState(t));
-  return String(html`<section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>
+export function auditView(t, {entries = [], pagination = '',filters={}}) {
+  return String(html`<form id="audit-filter" class="toolbar">${[['action','auditAction','text'],['outcome','auditOutcome','text'],['from','auditFrom','datetime-local'],['to','auditTo','datetime-local']].map(([key,label,type])=>html`<label>${i18n(t,label)}<input name="${key}" type="${type}" value="${filters[key]||''}" maxlength="100"></label>`)}<button type="submit">${i18n(t,'filterAudit')}</button></form><section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>${!entries.length?emptyState(t):''}
     <ol class="timeline">${entries.map(e => html`<li class="timeline-item" data-outcome="${e.outcome || ''}"><span class="timeline-dot" aria-hidden="true"></span>
       <div><strong>${e.action}</strong><span class="memory-meta"><span class="tag">${e.outcome || '—'}</span><time>${formatDate(e.created)}</time>${e.audit_id ? html`<code>${e.audit_id}</code>` : ''}</span></div></li>`)}</ol>${trusted(pagination)}</section>`);
 }
 
 /** Memory detail for the side pane. `actions` is markup built from fixed action buttons. */
+export function revisionDifference(left,right){
+  const a=[...left],b=[...right];let start=0,end=0;
+  while(start<Math.min(a.length,b.length)&&a[start]===b[start])start++;
+  while(end<Math.min(a.length,b.length)-start&&a[a.length-1-end]===b[b.length-1-end])end++;
+  return [a,b].map(chars=>({prefix:chars.slice(0,start).join(''),changed:chars.slice(start,chars.length-end).join(''),suffix:chars.slice(chars.length-end).join('')}));
+}
+
 export function memoryDetailView(t, data, {actions = '', canGoBack = false}) {
   const m = data.memory || {}, content = String(m.content ?? ''), length = [...content].length;
   const sources = data.source_manifest?.sources || [];
@@ -197,6 +208,7 @@ export function memoryDetailView(t, data, {actions = '', canGoBack = false}) {
   const links = [[lifecycle.supersedes_memory_id, 'previousRecord'], [lifecycle.superseded_by_memory_id, 'replacementRecord']].filter(([id]) => id);
   return String(html`<div class="detail-meta">${typeChip(t, m.memory_type || 'fact')}<span class="tag">${i18n(t, 'revisions')} ${data.revision}</span>${statusTag(t, m.status || 'active')}</div>
   ${m.status === 'active' && actions ? html`<div class="actions detail-actions">${trusted(actions)}</div>` : ''}
+  <button type="button" data-compare-memory="${m.memory_id}" data-previous-memory="${lifecycle.supersedes_memory_id||''}">${i18n(t,'compareVersions')}</button>
   <div class="body-content">${content}</div>
   <p class="detail-range">${i18n(t, 'contentRange')} ${data.content_offset + 1}–${data.content_offset + length} / ${data.content_length} ${data.content_complete ? i18n(t, 'endOfContent') : ''}</p>
   <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>
@@ -228,7 +240,7 @@ export const featureMap = {
   overview: [
     {id: 'OVW-01', status: 'live', read: ['overview']},
     {id: 'OVW-02', status: 'live', read: ['overview']},
-    {id: 'OVW-03', status: 'planned', read: ['attention']},
+    {id: 'OVW-03', status: 'live', read: ['attention']},
   ],
   memories: [
     {id: 'MEM-01', status: 'live', read: ['memories']},
@@ -236,21 +248,21 @@ export const featureMap = {
     {id: 'MEM-03', status: 'live', write: ['memory.create']},
     {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
     {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity', 'memory.visibility']},
-    {id: 'MEM-06', status: 'planned', write: ['memory.batch_classify', 'memory.batch_retract']},
-    {id: 'MEM-07', status: 'planned', read: ['memory']},
+    {id: 'MEM-06', status: 'live', write: ['memory.batch_classify', 'memory.batch_retract']},
+    {id: 'MEM-07', status: 'live', read: ['memory-versions']},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},
     {id: 'SUM-02', status: 'live', write: ['jobs.schedule']},
-    {id: 'SUM-03', status: 'planned', read: ['taxonomy'], write: ['taxonomy.save']},
+    {id: 'SUM-03', status: 'live', read: ['taxonomy'], write: ['taxonomy.save']},
   ],
   tasks: [
     {id: 'TSK-01', status: 'live', read: ['projects']},
-    {id: 'TSK-02', status: 'planned', read: ['task-branches'], core: ['POST /v1/task-branches/preview'], scope: ['resume:read'],
+    {id: 'TSK-02', status: 'live', read: ['task-branches'], core: ['POST /v1/task-branches/preview'], scope: ['resume:read'],
       ui: {table: ['taskTitle', 'sourceBranch', 'lastCheckpoint', 'state']}},
-    {id: 'TSK-03', status: 'planned', read: ['project-context'], core: ['POST /v1/project-context/preview'], scope: ['resume:read'],
+    {id: 'TSK-03', status: 'live', read: ['project-context'], core: ['POST /v1/project-context/preview'], scope: ['resume:read'],
       ui: {form: ['select:project'], submit: 'generatePreview'}},
-    {id: 'TSK-04', status: 'planned', read: ['task-checkpoints'], core: ['GET /v1/tasks/{task_id}/checkpoints', 'GET /v1/tasks/{task_id}/canonical-revisions'],
+    {id: 'TSK-04', status: 'live', read: ['task-checkpoints'], core: ['GET /v1/tasks/{task_id}/checkpoints', 'GET /v1/tasks/{task_id}/canonical-revisions'],
       scope: ['memory:read', 'task:reconcile:read'], ui: {table: ['checkpoint', 'sources', 'created']}},
     {id: 'TSK-05', status: 'planned', write: ['projects.bootstrap', 'tasks.bootstrap'], core: ['POST /v1/project-bootstrap/preview', 'POST /v1/task-bootstrap/preview'],
       scope: ['project:bootstrap:preview', 'project:bootstrap:confirm', 'task:bootstrap:preview', 'task:bootstrap:confirm'], ui: {actions: ['newProject', 'newTask']}},
@@ -277,23 +289,23 @@ export const featureMap = {
     {id: 'CON-02', status: 'live', read: ['connections'],
       write: ['connections.create', 'connections.update', 'connections.rotate', 'connections.disable', 'connections.enable', 'connections.revoke']},
     {id: 'CON-03', status: 'live', read: ['connections'], write: ['devices.revoke'], reauth: true},
-    {id: 'CON-04', status: 'planned', read: ['capture-status'], core: ['GET /v1/status'], scope: ['memory:read']},
-    {id: 'CON-05', status: 'planned', write: ['devices.register', 'devices.rotate'], core: ['POST /v1/agent-instances/register', 'POST /v1/agent-instances/{id}/rotate-key'],
+    {id: 'CON-04', status: 'live', read: ['capture-status'], core: ['GET /v1/status'], scope: ['memory:read']},
+    {id: 'CON-05', status: 'live', write: ['devices.register', 'devices.rotate'], core: ['POST /v1/agent-instances/register', 'POST /v1/agent-instances/{id}/rotate-key'],
       scope: ['admin:devices'], reauth: true},
   ],
   models: [
     {id: 'MOD-01', status: 'live', read: ['models'], write: ['models.save', 'models.disable']},
     {id: 'MOD-02', status: 'live', write: ['models.test']},
     {id: 'MOD-03', status: 'live', write: ['vector.schedule']},
-    {id: 'MOD-04', status: 'planned', read: ['model-usage']},
+    {id: 'MOD-04', status: 'live', read: ['model-usage']},
   ],
   privacy: [
     {id: 'PRV-01', status: 'live', read: ['models']},
-    {id: 'PRV-02', status: 'planned', read: ['privacy-defaults'], write: ['privacy.defaults'],
-      ui: {form: ['select:defaultSensitivity', 'check:defaultWebVisibility'], submit: 'save'}},
-    {id: 'PRV-03', status: 'planned', read: ['retention'], write: ['retention.save'], core: ['GET /v1/retention', 'PUT /v1/retention'], scope: ['admin:retention'],
-      ui: {form: ['number:eventRetentionDays', 'number:checkpointRetentionDays'], submit: 'save'}},
-    {id: 'PRV-04', status: 'planned', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
+    {id: 'PRV-02', status: 'live', read: ['privacy-defaults'], write: ['privacy.defaults'],
+      ui: {form: ['select:defaultSensitivity'], submit: 'save'}},
+    {id: 'PRV-03', status: 'live', read: ['retention'], write: ['retention.save'],
+      ui: {form: ['number:eventRetentionDays'], submit: 'save'}},
+    {id: 'PRV-04', status: 'live', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
       ui: {actions: ['pruneNow']}},
     {id: 'PRV-05', status: 'policy'},
     {id: 'PRV-06', status: 'live', read: ['capabilities'], write: ['memory.web_policy']},
@@ -303,11 +315,11 @@ export const featureMap = {
     {id: 'SEC-02', status: 'live', write: ['security.totp.begin', 'security.totp.complete'], reauth: true},
     {id: 'SEC-03', status: 'live', write: ['security.recovery_codes'], reauth: true},
     {id: 'SEC-04', status: 'live', read: ['security'], write: ['security.session.revoke', 'security.sessions.revoke_others']},
-    {id: 'SEC-05', status: 'planned', read: ['login-history']},
+    {id: 'SEC-05', status: 'live', read: ['login-history']},
   ],
   audit: [
     {id: 'AUD-01', status: 'live', read: ['audit']},
-    {id: 'AUD-02', status: 'planned', read: ['audit']},
+    {id: 'AUD-02', status: 'live', read: ['audit']},
   ],
   storage: [
     {id: 'STO-01', status: 'live', read: ['export'], write: ['storage.export']},
@@ -328,10 +340,10 @@ export const featureMap = {
   ],
   system: [
     {id: 'SYS-01', status: 'live', read: ['capabilities'], operator: true},
-    {id: 'SYS-02', status: 'planned', read: ['system-health'], core: ['GET /v1/status', 'GET /readyz'], operator: true,
+    {id: 'SYS-02', status: 'live', read: ['system-health'], core: ['GET /v1/status', 'GET /readyz'], operator: true,
       ui: {stats: ['svcCore', 'svcWeb', 'svcAuth', 'svcWorker', 'svcVector']}},
-    {id: 'SYS-03', status: 'planned', read: ['system-version'], operator: true, ui: {stats: ['releaseVersion', 'schemaVersion', 'runtimeVersion']}},
-    {id: 'SYS-04', status: 'planned', read: ['backups'], operator: true, ui: {table: ['backupTime', 'backupSize', 'backupVerified']}},
+    {id: 'SYS-03', status: 'live', read: ['system-version'], operator: true, ui: {stats: ['releaseVersion', 'schemaVersion', 'runtimeVersion']}},
+    {id: 'SYS-04', status: 'live', read: ['backups'], operator: true, ui: {table: ['backupTime', 'backupSize', 'backupVerified']}},
   ],
 };
 /** Catalog keys for a feature: OVW-01 → featOVW01 (title) and featOVW01Note (description). */
@@ -429,8 +441,39 @@ export const prototypeOrder = page => [...(featureMap[page] || [])].sort((a, b) 
 /** New menu destinations: one card per feature. Live cards show real data; planned ones a wireframe. */
 export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
   const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'PRV-06': () => readScope(t, data, caps), 'SYS-01': () => platformSwitches(t, caps)};
-  const cards = prototypeOrder(page).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? '' : ''));
+  const cards = prototypeOrder(page).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? featureBody(t,f.id,data,caps) : ''));
   return String(html`<div class="feature-grid">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
+}
+
+export const completedViews={overview:['attention'],memories:[],summaries:['taxonomy'],tasks:['task-branches'],connections:['capture-status'],models:['model-usage'],privacy:['privacy-defaults','retention'],security:['login-history'],audit:[],system:['system-health','system-version','backups']};
+const completedIds=['OVW-03','MEM-06','MEM-07','SUM-03','TSK-02','TSK-03','TSK-04','CON-04','CON-05','MOD-04','PRV-02','PRV-03','PRV-04','SEC-05','AUD-02','SYS-02','SYS-03','SYS-04'];
+export function completedFeaturePanels(t,page,data,caps){return String(html`${(featureMap[page]||[]).filter(f=>completedIds.includes(f.id)).map(f=>featureCard(t,f,featureBody(t,f.id,data,caps)))}`);}
+function featureBody(t,id,data,caps){
+  const view={ 'OVW-03':'attention','SUM-03':'taxonomy','TSK-02':'task-branches','CON-04':'capture-status','MOD-04':'model-usage','PRV-02':'privacy-defaults','PRV-03':'retention','SEC-05':'login-history','SYS-02':'system-health','SYS-03':'system-version','SYS-04':'backups'}[id];
+  const d=data.features?.[view];
+  if(view&&!d)return sectionNote(t,'unavailable');
+  const act=(action,label,values={})=>caps.allowed_actions?.includes(action)?html`<button type="button" data-console-action="${action}"${Object.entries(values).map(([k,v])=>html` data-${trusted(k)}="${v}"`)}>${i18n(t,label)}</button>`:'';
+  const inspect=(v,p,label)=>html`<button type="button" data-feature-read="${v}" data-feature-params="${JSON.stringify(p)}">${i18n(t,label)}</button>`;
+  const table=(rows,cols)=>rows?.length?html`<div class="table-scroll"><table><thead><tr>${cols.map(([key])=>html`<th>${i18n(t,key)}</th>`)}</tr></thead><tbody>${rows.map(r=>html`<tr>${cols.map(([,get])=>html`<td>${get(r)}</td>`)}</tr>`)}</tbody></table></div>`:emptyState(t);
+  if(id==='OVW-03')return html`<dl class="metadata-grid">${[['failed_jobs','failedJobs','jobs'],['stale_summaries','staleSummaries','summaries'],['pending_reconciliation','pendingReconciliation','tasks']].map(([k,label,p])=>html`<dt>${i18n(t,label)}</dt><dd><a href="/app/${p}">${d.counts[k]}</a></dd>`)}</dl>`;
+  if(id==='MEM-06')return sectionNote(t,caps.allowed_actions?.some(a=>['memory.batch_classify','memory.batch_retract'].includes(a))?'batchNote':'batchUnavailable');
+  if(id==='MEM-07')return sectionNote(t,'compareOpenDetail');
+  if(id==='SUM-03')return html`<p>${d.categories.map(c=>html`<span class="tag">${t(c)}</span>`)}</p><p>${i18n(t,'revisions')} ${d.revision}</p>${act('taxonomy.save','configure')}`;
+  if(id==='TSK-02')return html`${table(d.tasks,[['taskTitle',r=>r.title],['status',r=>t(r.status)],['revisions',r=>r.canonical_version],['actions',r=>inspect('task-branches',{task_id:r.task_id},'sourceBranch')]])}${d.next_offset!=null?inspect('task-branches',{offset:d.next_offset},'next'):''}`;
+  if(id==='TSK-03')return table(data.projects,[['projectName',r=>r.name],['actions',r=>inspect('project-context',{project_id:r.project_id},'generatePreview')]]);
+  if(id==='TSK-04')return table(data.features?.['task-branches']?.tasks,[['taskTitle',r=>r.title],['actions',r=>html`${inspect('task-checkpoints',{task_id:r.task_id},'checkpoint')} ${inspect('task-reconciliation',{task_id:r.task_id},'proposal')}`]]);
+  if(id==='CON-04')return html`${sectionNote(t,'captureObservationNote')}${table(d.agents,[['agentId',r=>r.agent_id],['agentInstance',r=>r.agent_instance_id],['sourceCount',r=>r.events],['lastUsed',r=>formatDate(r.last_received_at)]])}`;
+  if(id==='CON-05')return html`${sectionNote(t,'agentKeyBoundary')}${act('devices.register','registerAgent')}${table((data.core_connections||[]).filter(c=>c.console_revocable),[['label',r=>r.label],['agentInstance',r=>r.agent_instance_id],['actions',r=>act('devices.rotate','rotateAgent',{id:r.credential_id})]])}`;
+  if(id==='MOD-04')return html`<p>${d.day} UTC · ${i18n(t,'usageReservationNote')}</p>${table(d.models,[['modelKind',r=>t(r.kind)],['usedRequests',r=>r.used??'—'],['dailyRequests',r=>r.limit??'—'],['remainingRequests',r=>r.remaining??'—']])}`;
+  if(id==='PRV-02')return html`<p>${i18n(t,'sensitivity')}: ${t(d.sensitivity)}</p>${sectionNote(t,'privacyDefaultsBoundary')}${act('privacy.defaults','configure')}`;
+  if(id==='PRV-03')return html`<p>${i18n(t,'eventRetentionDays')}: ${d.raw_retention_days==='permanent'?t('permanent'):d.raw_retention_days}</p>${sectionNote(t,'retentionBoundary')}${act('retention.save','configure')}`;
+  if(id==='PRV-04')return html`${sectionNote(t,'pruneBoundary')}${act('retention.prune','pruneNow')}`;
+  if(id==='SEC-05')return html`${sectionNote(t,'loginHistoryNote')}${table(d.entries,[['created',r=>formatDate(r.created)],['state',r=>t(r.outcome)],['actions',r=>r.action]])}${d.next_offset!=null?inspect('login-history',{offset:d.next_offset},'next'):''}`;
+  if(id==='AUD-02')return html`<button type="button" data-audit-export>${i18n(t,'exportAudit')}</button><p>${i18n(t,'auditExportNote')}</p><p data-audit-result role="status"></p>`;
+  if(id==='SYS-02')return html`<dl class="metadata-grid">${Object.entries(d.services).map(([k,v])=>html`<dt>${k}</dt><dd>${t(v)}</dd>`)}</dl>${sectionNote(t,'healthObservationNote')}`;
+  if(id==='SYS-03')return html`<dl class="metadata-grid">${[['releaseVersion',d.release],['schemaVersion',d.schema_version],['runtimeVersion',d.node]].map(([k,v])=>html`<dt>${i18n(t,k)}</dt><dd>${v}</dd>`)}</dl>${sectionNote(t,'migrationVersionNote')}`;
+  if(id==='SYS-04')return sectionNote(t,'backupUnknownNote');
+  return '';
 }
 
 /** Existing pages: their planned and policy features as one compact list under the live content. */

@@ -33,6 +33,7 @@ test("PKCE-01/TOKEN-01 complete HTTP password, MFA, consent, PKCE and opaque int
   assert.equal(introspection.data.sub, f.subject);
   assert.equal(introspection.data.aud, f.config.resource);
   assert.equal(introspection.data.token_kind, "access_token");
+  assert.ok(introspection.data.scope.split(' ').includes('project:read'),'explicit legacy authorization remains compatible after discovery is narrowed');
 });
 
 test("DISC-03..07 static discovery, disabled grants, exact callbacks, consent rejection and issuer", async (t) => {
@@ -44,7 +45,8 @@ test("DISC-03..07 static discovery, disabled grants, exact callbacks, consent re
   assert.equal(discovery.pushed_authorization_request_endpoint, undefined);
   assert.equal(discovery.userinfo_endpoint, undefined);
   assert.deepEqual(discovery.grant_types_supported.sort(), ["authorization_code", "refresh_token"]);
-  assert.deepEqual(discovery.scopes_supported.sort(), f.config.chatgpt_client.allowed_scopes.toSorted());
+  assert.deepEqual(discovery.scopes_supported, ['openid','offline_access','memory:read']);
+  assert.ok(f.config.chatgpt_client.allowed_scopes.includes('project:read'),'discovery does not rewrite legacy client permissions');
   for (const route of ["/reg", "/request", "/device/auth", "/v1/status", "/.env", "/userinfo"]) {
     assert.equal((await fetch(`${f.config.issuer}${route}`, { method: "POST" })).status, 404);
   }

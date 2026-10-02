@@ -7,12 +7,20 @@ import {generate} from 'otplib';
 import {fixture} from '../fixture.mjs';
 import {pendingAccount} from './identity-fixture.mjs';
 import {memoryFixture} from '../../../../server/test/helpers/core-memory-fixture.mjs';
+import {VectorIndex} from '../../../../server/lib/vector-stores/index.mjs';
+import {MockVectorStore} from '../../../../server/test/helpers/vector-mock.mjs';
 import {provisionIdentities} from '../../src/provisioning.mjs';
 import {prepareConnectionBinding,applyConnectionBinding,finishConnectionBinding} from '../../src/connection-provisioning.mjs';
 import {randomSecret,writePrivate,seconds,secretHash} from '../../../../shared/oauth-common.mjs';
 const cleanup=[],t={after:fn=>cleanup.push(fn)};
 let stopped=false;
-async function stop(){if(stopped)return;stopped=true;for(const fn of cleanup.reverse())await fn();process.exit(0);}
+async function stop(){
+ if(stopped)return;stopped=true;
+ for(const fn of cleanup.reverse())await fn();
+ const removed=!fs.existsSync(core.root)&&!fs.existsSync(f.directory);
+ process.stderr.write(JSON.stringify({synthetic_cleanup_complete:removed,core_storage_removed:!fs.existsSync(core.root),identity_storage_removed:!fs.existsSync(f.directory)})+'\n');
+ process.exit(removed?0:1);
+}
 const core=await memoryFixture(t);
 Object.assign(core.store.runtime,{cloudMemory:true,cloudSubmittedGrant:true});
 const model=http.createServer(async(req,res)=>{let data='';for await(const chunk of req)data+=chunk;const body=JSON.parse(data);let output={ok:true};
@@ -40,6 +48,7 @@ provisionIdentities(ids,core.store,{credentialDirectory:path.join(f.directory,'k
 for(const [i,o] of owners.entries()){
  o.account=ids.byId(o.account.account_id);o.console=ids.newSession('console',{accountId:o.account.account_id});
  const writer=core.issue(o.account.user_id,`synthetic-browser-${i}`);
+ core.store.upsertTask(writer.auth,{task_id:`synthetic-browser-task-${i}`,project_id:`synthetic-browser-project-${i}`,project_name:'Synthetic UI Project',title:'Synthetic UI Task',goal:'Synthetic canonical goal for read-only console acceptance.',status:'active',workstreams:[{workstream_id:`synthetic-browser-branch-${i}`,name:'Synthetic branch',status:'active'}]});
  for(const content of [i?'Synthetic private B sentinel':'合成记忆：蓝色纸船在测试港口。',i?'Synthetic B second memory':'Synthetic technical decision: preserve exact source revisions.'])core.store.saveMemory(writer.auth,{scope:'user',content});
 }
 ids.console.role(owners[0].account.account_id,true);
@@ -60,9 +69,23 @@ lines.on('line',async line=>{
    }reply={done:true};
   }
   if(req.command==='tick'){core.store.memoryConfig.console.worker_enabled=true;await core.store.consoleService.tick();core.store.memoryConfig.console.worker_enabled=false;reply={done:true};}
+  if(req.command==='enable-synthetic-processing'){
+   core.store.memoryConfig.console.worker_enabled=true;core.store.memoryConfig.vector_store={enabled:true};
+   const backend=new MockVectorStore();core.store.consoleService.vector=user=>{const e=core.store.consoleService.models.provider(user,'embedder');return new VectorIndex(core.store,backend,new Map([[e.profile.fingerprint,e]]),{ownerId:user});};
+   reply={done:true,synthetic_vector_backend:true};
+  }
+  // UI-state fixtures only; actual OAuth/MCP acceptance lives in the gateway SDK suite.
+  if(req.command==='connection-evidence'){
+   const r=ids.db.prepare('SELECT * FROM identity_connections WHERE account_id=? AND label=?').get(o.account.account_id,req.label);if(!r)throw new Error('Synthetic connection missing');
+   if(req.state==='authorized'){await new (Adapter)('Grant').upsert('synthetic-guide-'+r.connection_id,{accountId:o.account.subject,clientId:r.client_id,resources:{[f.config.resource]:'memory:read'}},3600);ids.connections.markAuthorized(r.client_id,o.account.subject);}
+   else if(req.state==='verified')ids.connections.markTool({connection_id:r.connection_id,account_id:r.account_id,connection_version:r.version});
+   else if(req.state==='revoked')ids.store.revoke({subject:o.account.subject,clientId:r.client_id});
+   reply={done:true};
+  }
   if(req.command==='invitation')reply=ids.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-browser-operator'});
   if(req.command==='codes')reply={codes:o.codes};
   if(req.command==='cookies'){o.console=ids.newSession('console',{accountId:o.account.account_id});reply={token:o.console.token};}
+  if(req.command==='basic-memory-only'){f.app.config.identity.console_operations=false;f.app.config.identity.console_basic_operations={memory:true,security:true,oauth:true};reply={done:true};}
   if(req.command==='revoke-console-sessions'){ids.db.prepare("DELETE FROM identity_sessions WHERE account_id=? AND purpose='console'").run(o.account.account_id);reply={done:true};}
   console.log(JSON.stringify({request:req.command,...reply}));
  }catch(error){console.log(JSON.stringify({fixture_error:error.code||error.errorCode||'FAILED'}));}

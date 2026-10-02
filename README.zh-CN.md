@@ -35,7 +35,7 @@ Hermes          ─┘
 
 ## 快速开始：运行本地 API
 
-需要 **Node.js 24+**（包含 `node:sqlite` 和 FTS5）、Git 和 POSIX shell。服务端没有第三方 npm 运行依赖；Hermes 适配器及完整测试集还需要 Python 3。
+需要 **Node.js 24 LTS**（见 `.node-version`）（包含 `node:sqlite` 和 FTS5）、Git 和 POSIX shell。服务端没有第三方 npm 运行依赖；Hermes 适配器及完整测试集还需要 Python 3。
 
 ```bash
 git clone https://github.com/Conner512/Mnemuron.git

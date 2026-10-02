@@ -96,6 +96,19 @@ test('A-T11/18/21/23: explicit private choice, bounded errors and unknown input 
   for(const secret of [args.content,f.token.access_token,f.token.refresh_token,f.secret])assert.equal(JSON.stringify(f.gatewayLogs).includes(secret),false);
 });
 
+test('private MCP save overrides account read-all while explicit shared writes stay readable',async t=>{
+  const f=await setup(t),user=f.core.store.authenticate(f.coreCredential.api_key).user_id;
+  const local=f.core.store.issueCredential({userId:user,deviceId:'synthetic-operator',agentId:'test',agentInstanceId:randomUUID(),scopes:['admin:tasks']});
+  f.core.store.webVisibility.setPolicy(f.core.store.authenticate(local.api_key),{read_all:true,expected_revision:0});
+  const args={...save(),cloud_read:'keep_private'},created=(await f.call('mnemuron_save_memory',args)).data.result.structuredContent;
+  assert.equal(created.status,'committed');assert.equal(created.cloud_readable,false);
+  assert.equal((await f.call('mnemuron_get_memory',{memory_id:created.memory_id})).data.result.structuredContent.error.code,'MEMORY_NOT_FOUND');
+  assert.equal((await f.call('mnemuron_search_memories',{query:'Synthetic cloud memory'})).data.result.structuredContent.result_count,0);
+  assert.deepEqual((await f.call('mnemuron_get_operation',{operation_id:args.operation_id})).data.result.structuredContent,created);
+  const shared=(await f.call('mnemuron_save_memory',save())).data.result.structuredContent;assert.equal(shared.cloud_readable,true);
+  assert.equal((await f.call('mnemuron_search_memories',{query:'Synthetic cloud memory'})).data.result.structuredContent.result_count,1);
+});
+
 test('A-T12/23: dropped post-COMMIT response is uncertain, same receipt recovers without duplicate effects',async t=>{
   const f=await setup(t),auth=await f.gateway.authorization.verify({headers:{authorization:'Bearer '+f.token.access_token}}),m=auth.mapping;
   const port=await freePort();let dropped=false;

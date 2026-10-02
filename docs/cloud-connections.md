@@ -71,21 +71,65 @@ until rotation/revocation, independently of access-token/PAT/invitation lifetime
 ## Using the console
 
 1. Open Connections, choose Add connection, then ChatGPT Web or Generic MCP.
-2. Enter its purpose/name and readonly or memory-readwrite profile. Read the
-   per-version disclosure explanation; choose a finite lifetime for a PAT.
+2. Enter its purpose/name and readonly or memory-readwrite profile (readonly is
+   the default). For ChatGPT, compare the prefilled callback with the exact URI
+   shown in ChatGPT and replace it if needed. Read the per-version disclosure
+   explanation; choose a finite lifetime for a PAT.
 3. Reauthenticate and securely save the resulting **Client ID + Client Secret**
    or **resource PAT**. No automatic clipboard copy or browser persistence occurs.
-4. For ChatGPT, create a custom MCP connection using the displayed URL and
-   OAuth `client_secret_post`. Copy the exact callback shown by that client's
-   management UI back into Mnemuron. Do not use an interaction URL as a callback.
+4. For ChatGPT, the final wizard page provides its name/description, optional
+   locally generated PNG icon, MCP URL, Client ID, masked one-time Client Secret,
+   token method and OAuth scopes with individual copy buttons. Choose a custom
+   OAuth client and `client_secret_post` in ChatGPT; do not choose DCR/CIMD or
+   fill a registration URL. The advanced section provides authorization/token
+   endpoints, issuer, resource and OIDC discovery URL if discovery needs manual
+   configuration. OAuth scopes include `openid offline_access` plus only the
+   memory permissions selected for this connection. No project/handoff scope
+   is added. Never use a temporary interaction URL as an endpoint or callback.
+   Public OAuth/OIDC discovery and the initial MCP challenge advertise only
+   `openid offline_access memory:read`; both protected-resource metadata aliases
+   advertise only `memory:read`. Anonymous discovery cannot identify the selected
+   personal client's profile, so it never requests legacy `project:read` or
+   optional `memory:write` automatically. Copy the connection's exact OAuth scopes
+   into ChatGPT's **Base scopes** to opt into writes for a read/write connection.
+   Read-only clients still reject writes. Existing explicit legacy grants and
+   refresh tokens remain accepted under their original checks. Old plugin settings
+   may retain previously discovered scopes and need refreshing or recreation;
+   do not regenerate the Mnemuron client merely to refresh cached discovery.
+   Each personal connection also supplies an **OIDC configuration URL** with a
+   public `client_id` query selector. Paste this complete URL into ChatGPT's
+   matching field: it publishes only that active connection's allowed memory
+   scopes (including `memory:write` for a read/write connection). Both discovery
+   aliases support this selector, preserve the canonical issuer/endpoints, and
+   use `no-store`; unknown, disabled, revoked or unbound clients fail closed.
+   This public metadata selector neither authenticates nor grants permissions.
+   Keep copying the exact **Base scopes** as well, since the client can retain
+   previously selected defaults. If a read/write connection's consent page says
+   read-only, the current request is underscoped: cancel, correct these two
+   ChatGPT fields, and restart. The consent page warns about this mismatch; it
+   never adds write access to a read-only request or existing token automatically.
 5. Wait for secure identity publication, complete username/password/TOTP and
    explicit consent in Mnemuron, then call a memory tool from the client.
+
+This is a visual configuration guide, not an automatic ChatGPT installer: the
+user still creates the plugin and consents in ChatGPT. Exact callbacks may also
+be updated through Configure later. Missing guide metadata is reported with a
+retry action, without regenerating the credential. Secrets expire from the
+page, are cleared when the dialog closes, and are never persisted in browser
+storage or copied automatically.
+
+The open detail guide polls for up to one minute and refreshes when focus returns;
+manual Refresh restarts the window. Unchanged results preserve focus and scroll.
+Expired/revoked grants do not imply current authorization, even if an earlier
+tool call succeeded. A degraded call shows a warning. Refresh failure leaves the
+last result visible with an explicit stale-status notice, never a new success.
 
 The deployed callback must exactly match the configured HTTPS callback family;
 wildcards, encoded paths, fragments, alternate hosts and query parameters are
 rejected. The supported families are the platform redirect and per-connector
 redirect published by ChatGPT. Authentication documentation was checked on
-2026-09-28: [OpenAI authentication](https://developers.openai.com/plugins/build/auth).
+2026-09-30: [OpenAI authentication](https://developers.openai.com/plugins/build/auth)
+and [connecting a plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt).
 Client UI names and availability may change. ChatGPT Web, Work and other clients
 require their own real-client validation; appearing in a tool list is not it.
 
@@ -156,6 +200,16 @@ revoke/re-authorize affected write grants; old tokens containing removed scopes
 must fail closed. Do not change bindings in place to silently enlarge authority.
 
 ## Reproducible validation
+
+Connection summary cards count current OAuth grants and usable personal MCP or
+Agent credentials, not saved configuration rows or proof that a client is online.
+OAuth configurations without a current owner/resource-bound memory-read grant
+remain in the list as awaiting authorization. Grant expiry or revocation removes
+them from authorized totals without deleting configuration or historical tool-call
+evidence. A read/write configuration with only a read grant counts as read-only.
+Registry `counts` retains inventory semantics; `authorization_counts` carries
+account-wide authorization totals independent of list filters and pagination.
+The wizard's Back action shares the footer row with Continue and Cancel, at the left.
 
 Run `node scripts/test-all.mjs`. Registry, BFF, isolated worker and real loopback
 OAuth/MCP SDK tests use synthetic users/databases. `scripts/test-console-connections.mjs`

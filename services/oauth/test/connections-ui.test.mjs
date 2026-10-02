@@ -3,10 +3,37 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 globalThis.document={body:{dataset:{}},documentElement:{dataset:{}},querySelectorAll:()=>[],addEventListener:()=>{}};
 const {connectionsView}=await import('../../../web/console/connections.mjs');
+test('C-06: summary uses current authorization counts, not created credentials; footer Back is a peer action',async()=>{
+ const {connectionInventory,connectionFormActions}=await import('../../../web/console/connections.mjs');
+ const data={connections:[{connection_id:'pending',label:'Synthetic pending',kind:'chatgpt_oauth',profile:'memory_readwrite',configuration_state:'ready',health:'never_used',active_grant_count:0}],counts:{active:1,memory_readwrite:1,pending:0},authorization_counts:{usable:0,readonly:0,memory_readwrite:0,pending:1,verified:0},total:1};
+ assert.deepEqual(connectionInventory(data).counts,{active:0,readonly:0,readwrite:0,pending:1});
+ const html=connectionsView(data,{});assert.match(html,/connAuthorizedCount/);assert.match(html,/connAwaitingAuthorization/);assert.match(html,/connCountsNote/);
+ const historical=connectionsView({...data,connections:[{...data.connections[0],health:'verified'}]},{});
+ assert.match(historical,/connHistoricalSuccess/);assert.doesNotMatch(historical,/connHealth_verified/);
+ const actions=connectionFormActions('continue','type');assert.match(actions,/<div class="actions connection-form-actions"><button type="button".*data-connection-back="type"/);
+ assert.ok(actions.indexOf('data-connection-back')<actions.indexOf('type="submit"'));assert.match(actions,/data-connection-close/);
+ assert.doesNotMatch(connectionFormActions(),/data-connection-back/);
+});
 test('C-01: one logical row, account counts, history/system folds, no IDs or credential secrets in main row',()=>{
  const html=connectionsView({connections:[{connection_id:'synthetic-id',label:'<script>alert(1)</script>',kind:'generic_mcp',profile:'readonly',configuration_state:'ready',health:'never_used'}],counts:{active:1,readonly:1,memory_readwrite:0,pending:0},total:1,offset:0,limit:20,next_offset:null,core_connections:[{label:'Synthetic system',credential_id:'do-not-use-as-main-row',agent_id:'chatgpt-web'}]}, {allowed_actions:['connections.create'],connection_management:{enabled:true}},{});
  assert.match(html,/data-connection-new/);assert.match(html,/&lt;script&gt;/);assert.doesNotMatch(html,/<script>/);assert.match(html,/data-connection-detail="synthetic-id"/);assert.match(html,/connSystem/);assert.match(html,/never_used/);
  const actions=fs.readFileSync(new URL('../../../web/console/actions.mjs',import.meta.url),'utf8');assert.match(actions,/connectionsView/);assert.doesNotMatch(actions,/card\('chatgptGrants'/);
+});
+test('C-05: setup uses server OAuth scopes and endpoints, never guesses missing parameters or current authorization',async()=>{
+ const {pluginValues,chatgptPluginForm,pluginStatus}=await import('../../../web/console/connections.mjs');
+ const c={kind:'chatgpt_oauth',label:'Synthetic setup',profile:'readonly',client_id:'synthetic-client',redirect_uri:'https://chatgpt.com/connector_platform_oauth_redirect',configuration_state:'ready',health:'verified'};
+ const guide={url:'https://memory.example.test/mcp',scopes:['memory:read'],oauth_scopes:['openid','offline_access','memory:read'],issuer:'https://memory.example.test',authorization_url:'https://memory.example.test/authorize',token_url:'https://memory.example.test/token',resource:'https://memory.example.test/mcp',discovery_url:'https://memory.example.test/.well-known/openid-configuration',token_endpoint_auth_method:'client_secret_post'};
+ const values=pluginValues(c,guide);assert.equal(values.scopes,'openid offline_access memory:read');assert.equal(values.issuer,guide.issuer);assert.equal(pluginValues(c).token_auth,undefined);
+ const html=chatgptPluginForm(c,guide);for(const name of ['authorization_url','token_url','issuer','resource','discovery_url'])assert.match(html,new RegExp(`data-connection-copy="${name}"`));
+ assert.match(html,/connPluginRegistration/);assert.match(html,/connPluginManual/);
+ const scopeField=html.match(/<code>([^<]*)<\/code><button[^>]*data-connection-copy="scopes"/)[1];
+ assert.equal(scopeField,values.scopes);assert.doesNotMatch(scopeField,/memory:write|project:read/);
+ assert.match(html,/基础授权范围/,'instructions explain where to paste the per-connection scopes');
+ assert.ok(html.indexOf('data-connection-copy="discovery_url"')<html.indexOf('<details'),'connection-specific discovery is not hidden in advanced details');
+ assert.doesNotMatch(html,/data-i18n="connWriteConsentCheck"/);
+ assert.equal(pluginStatus({...c,active_grant_count:0}),'connStatus_ready');
+ assert.equal(pluginStatus({...c,health:'degraded',active_grant_count:1}),'connStatus_degraded');
+ assert.equal(pluginStatus({...c,configuration_state:'draft'}),'connStatus_callback');
 });
 test('C-02: disabled policies never expose an enabled create action; no fake connection health',()=>{
  const html=connectionsView({connections:[],counts:{total:0},total:0},{allowed_actions:[],connection_management:{enabled:false}},{});
@@ -50,4 +77,23 @@ test('C-03: ChatGPT web and agent devices are counted and listed; managed and re
  assert.equal(writeInv.chatgpt.write,true);assert.deepEqual(writeInv.counts,{active:3,readonly:1,readwrite:2,pending:0});
  const writeCard=connectionsView(written,caps,{}).match(/<section class="card connection-chatgpt">[\s\S]*?<\/section>/)[0];
  assert.match(writeCard,/data-i18n="connReadWrite"/);assert.match(writeCard,/data-i18n="connWriteGranted"/);
+});
+test('C-04: the ChatGPT plugin form lists every field to copy, shows the secret only when just issued, and escapes values',async()=>{
+ const {chatgptPluginForm,pluginValues,pluginStatus,CHATGPT_CALLBACK}=await import('../../../web/console/connections.mjs');
+ const c={connection_id:'conn-1',kind:'chatgpt_oauth',label:'My <b>ChatGPT</b>',description:'',profile:'memory_readwrite',client_id:'mnmc_synthetic',redirect_uri:CHATGPT_CALLBACK,configuration_state:'ready',health:'never_used',provisioning:false};
+ const guide={url:'https://memory.example.test/mcp',scopes:['openid','offline_access','memory:read','memory:write'],token_endpoint_auth_method:'client_secret_post'};
+ const values=pluginValues(c,guide);
+ assert.equal(values.scopes,'openid offline_access memory:read memory:write');assert.equal(values.callback,CHATGPT_CALLBACK);assert.equal(values.token_auth,'client_secret_post');assert.ok(values.description);
+ const detail=chatgptPluginForm(c,guide);
+ for(const field of ['label','description','url','client_id','token_auth','scopes','callback'])assert.match(detail,new RegExp(`data-connection-copy="${field}"`),field);
+ assert.match(detail,/data-connection-icon/);assert.match(detail,/data-i18n="connSecretHidden"/);assert.doesNotMatch(detail,/id="connection-secret"/);
+ assert.match(detail,/data-i18n="connWriteConsentCheck"/);assert.match(detail,/data-i18n="connBaseScopes"/);
+ assert.match(detail,/My &lt;b&gt;ChatGPT&lt;\/b&gt;/);assert.doesNotMatch(detail,/<b>ChatGPT/);
+ const issued=chatgptPluginForm(c,guide,{withSecret:true});
+ assert.match(issued,/<input type="password" readonly autocomplete="off" id="connection-secret"/);assert.match(issued,/data-i18n-aria-label="connClientSecret"/);assert.match(issued,/data-connection-copy-secret/);
+ assert.equal(pluginStatus(c),'connStatus_ready');assert.equal(pluginStatus({...c,provisioning:true}),'connStatus_provisioning');
+ assert.equal(pluginStatus({...c,redirect_uri:null}),'connStatus_callback');assert.equal(pluginStatus({...c,health:'authorized'}),'connStatus_authorized');
+ assert.equal(pluginStatus({...c,health:'verified'}),'connStatus_verified');assert.equal(pluginStatus({...c,configuration_state:'revoked'}),'connState_revoked');
+ const card=connectionsView({connections:[],counts:{},legacy_connections:[{grants:[{grant_id:'g',client_id:'system',created:1,expires:2,scopes:[]}]}],system_chatgpt:{configured:true}},{allowed_actions:['connections.create']},{});
+ assert.match(card,/data-connection-new data-connection-start="chatgpt_oauth"/);
 });

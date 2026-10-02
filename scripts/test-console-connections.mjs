@@ -7,6 +7,7 @@ import {pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import assert from 'node:assert/strict';
+import {randomBytes,createHash} from 'node:crypto';
 
 const root=path.resolve(import.meta.dirname,'..');
 const base=path.resolve(process.env.MNEMURON_UI_EVIDENCE||os.tmpdir());
@@ -43,9 +44,14 @@ try{
  const goto=async name=>{await page.goto(cfg.url+'/app/'+name);await page.locator('#console-root h1').waitFor();await page.locator('.loading-card').waitFor({state:'detached'});};
  const pick=async(selector,value)=>{const native=page.locator(selector),index=await native.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const button=native.locator('..').locator('> .select-trigger');await button.click();await page.locator('#'+await button.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();assert.equal(await native.inputValue(),value);};
  const dialog=page.locator('#connection-dialog');
+ const footerCheck=async label=>{
+  const back=dialog.locator('[data-connection-back]'),next=dialog.locator('button[type=submit]'),cancel=dialog.locator('form [data-connection-close]');
+  await back.scrollIntoViewIfNeeded();const [b,n,c]=await Promise.all([back.boundingBox(),next.boundingBox(),cancel.boundingBox()]);
+  check(label,b&&n&&c&&Math.abs(b.y-n.y)<2&&Math.abs(n.y-c.y)<2&&b.x+b.width<n.x&&n.x<c.x&&b.width<160&&Math.abs(b.height-n.height)<2);
+ };
  const proof=async()=>{await dialog.locator('[name=current_password]').fill(cfg.password);await dialog.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);};
  const submit=async()=>{await dialog.locator('button[type=submit]').click();await dialog.locator('#connection-secret').waitFor();};
- const openNew=async kind=>{await page.locator('[data-connection-new]').click();await page.locator(`[data-connection-kind="${kind}"]`).click();};
+ const openNew=async kind=>{await page.locator('[data-connection-new]').first().click();await page.locator(`[data-connection-kind="${kind}"]`).click();};
  const basic=async(label,profile='readonly')=>{await dialog.locator('[name=label]').fill(label);await pick('#connection-dialog [name=profile]',profile);await dialog.locator('button[type=submit]').click();await proof();};
  const saveSecret=async()=>{const value=await dialog.locator('#connection-secret').inputValue();check('Secret starts masked',await dialog.locator('#connection-secret').getAttribute('type')==='password');check('Secret never appears in persistent appearance storage',!(await page.evaluate(()=>JSON.stringify(localStorage))).includes(value));await dialog.locator('[data-connection-secret-saved]').click();await dialog.locator('[data-connection-refresh]').waitFor();await command('provision-connections');await dialog.locator('[data-connection-refresh]').click();await dialog.locator('[data-connection-refresh]').waitFor();return value;};
  const close=async()=>{await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});check('Closing clears the credential DOM',await page.locator('#connection-secret').count()===0);};
@@ -58,6 +64,7 @@ try{
   }
  };
  await goto('connections');check('Real empty logical list retains legacy authorization separately',await page.locator('.connection-table [data-connection-detail]').count()===0&&await page.locator('.connection-system').count()===1);
+ const existingAuthorized=Number(await page.locator('.connection-stat').first().locator('strong').innerText());
  await openNew('generic_mcp');check('Readonly profile cannot select a write-time disclosure grant',await dialog.locator('[name=allow_submitted_revision_grant]').isDisabled());await dialog.locator('[name=label]').fill('Synthetic portable reader');await pick('#connection-dialog [name=profile]','memory_readwrite');
  await guardShortcut('Connection draft',dialog.locator('[name=label]'));
  const beforeAppearance=mutations;
@@ -69,24 +76,79 @@ try{
  await guardShortcut('Unsaved credential',dialog.locator('#connection-secret'));
  const first=await saveSecret();check('Generic credential is a personal resource token, never a Core key',first.startsWith('mcp_pat_'));check('Server configuration is not fabricated connection success',!(await dialog.innerText()).includes('记忆调用已验证'));await close();
  await page.locator('.connection-table [data-connection-detail]').first().click();await dialog.locator('[data-connection-action=rotate]').click();await proof();await submit();const second=await saveSecret();check('Rotation generates a different actual credential',second!==first);await close();
- await openNew('chatgpt_oauth');await basic('Synthetic browser ChatGPT');await submit();const clientSecret=await saveSecret();check('OAuth Client Secret is distinct from a generic token',!clientSecret.startsWith('mcp_pat_')&&!clientSecret.startsWith('mnm_'));await close();
+ await openNew('chatgpt_oauth');check('ChatGPT callback is prefilled and editable',await dialog.locator('[name=redirect_uri]').inputValue()==='https://chatgpt.com/connector_platform_oauth_redirect');
+ await footerCheck('Back/Continue/Cancel share one footer, with compact Back on the left');await basic('Synthetic browser ChatGPT');
+ await footerCheck('Credential confirmation has the same compact left Back action');await dialog.locator('[data-connection-back=basic]').click();
+ check('Back from credential confirmation preserves the connection draft',await dialog.locator('[name=label]').inputValue()==='Synthetic browser ChatGPT');
+ await dialog.locator('button[type=submit]').click();await proof();
+ // A failed metadata read must not lose the one-time secret or silently invent endpoints.
+ const guideMatch=url=>url.pathname==='/console-api/connections'&&url.searchParams.has('connection_id');
+ await page.route(guideMatch,route=>route.fulfill({status:503,contentType:'application/json',body:JSON.stringify({error_code:'TEMPORARILY_UNAVAILABLE'})}),{times:1});
+ await submit();await dialog.locator('[data-connection-retry-guide]:not([hidden])').waitFor();
+ const issuedSecret=await dialog.locator('#connection-secret').inputValue();check('Guide failure retains the issued credential without fabricating a URL',!!issuedSecret&&await dialog.locator('[data-connection-copy=url]').count()===0);
+ await dialog.locator('[data-connection-retry-guide]').click();await dialog.locator('[data-connection-copy=url]').waitFor();
+ check('Guide retry does not create another connection or rotate the credential',await dialog.locator('#connection-secret').inputValue()===issuedSecret);
+ await dialog.locator('[data-connection-copy=scopes]').click();await page.waitForFunction(async()=>await navigator.clipboard.readText()==='openid offline_access memory:read');check('Copied OAuth scopes include refresh support without adding write permission');
+ await dialog.locator('[data-connection-copy=client_id]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText()).startsWith('mnmc_'));check('Client ID copy matches actual registry value');
+ check('Connection-specific OIDC URL is visible without expanding technical details',await dialog.locator('[data-connection-copy=discovery_url]').isVisible());
+ await dialog.locator('[data-connection-copy=discovery_url]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText()).includes('/.well-known/openid-configuration?client_id='));const scopedUrl=await page.evaluate(()=>navigator.clipboard.readText());check('Copied discovery URL keeps the public client selector',new URL(scopedUrl).searchParams.get('client_id')?.startsWith('mnmc_'));
+ await command('provision-connections');const discovered=await page.evaluate(async url=>(await fetch(url)).json(),scopedUrl);check('Readonly connection discovers only allowed scopes',JSON.stringify(discovered.scopes_supported)===JSON.stringify(['openid','offline_access','memory:read']));
+ await dialog.locator('.plugin-advanced summary').click();check('Advanced setup exposes discovered endpoints and exact resource',await dialog.locator('[data-connection-copy=authorization_url]').isVisible()&&await dialog.locator('[data-connection-copy=resource]').isVisible());
+ const iconEvent=page.waitForEvent('download');await dialog.locator('[data-connection-icon]').click();const icon=await iconEvent,iconFile=path.join(evidence,'synthetic-plugin-icon.png');await icon.saveAs(iconFile);const png=fs.readFileSync(iconFile);
+ check('Plugin icon is a real local PNG within the form size limit',png.subarray(1,4).toString()==='PNG'&&png.readUInt32BE(16)===512&&png.length<=10240);
+ await page.screenshot({path:path.join(evidence,'chatgpt-plugin-setup.png'),animations:'disabled'});
+ const clientSecret=await saveSecret();check('OAuth Client Secret is distinct from a generic token',!clientSecret.startsWith('mcp_pat_')&&!clientSecret.startsWith('mnm_'));
+ check('Creating with the exact callback avoids a second configuration round',await dialog.locator('.plugin-status').getAttribute('data-status')==='connStatus_ready');
+ await command('connection-evidence',{label:'Synthetic browser ChatGPT',state:'authorized'});
+ await dialog.locator('.plugin-status[data-status=connStatus_authorized]').waitFor({timeout:10000});check('Bounded polling reflects persisted consent without claiming a tool call');
+ await command('connection-evidence',{label:'Synthetic browser ChatGPT',state:'verified'});
+ await dialog.locator('.plugin-status[data-status=connStatus_verified]').waitFor({timeout:10000});check('Polling reflects persisted successful-call evidence');
+ await command('connection-evidence',{label:'Synthetic browser ChatGPT',state:'revoked'});
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await dialog.locator('.plugin-status[data-status=connStatus_ready]').waitFor();check('Returning to the guide detects revoked consent despite historical success');await close();
+ await goto('connections');
+ const pendingRow=page.locator('.connection-list tbody tr').filter({hasText:'Synthetic browser ChatGPT'});
+ check('Saved OAuth configuration without current consent is shown as awaiting authorization',await pendingRow.locator('[data-i18n=connAwaitingAuthorization]').count()===1);
+ const counted=await page.evaluate(async()=>{const response=await fetch('/console-api/connections');if(!response.ok)throw new Error('Synthetic inventory unavailable');return (await response.json()).authorization_counts;});
+ check('Personal inventory counts only the usable generic credential, with OAuth authorization pending',counted.usable===1&&counted.pending===1);
+ check('Summary adds the usable credential to existing legacy and agent authorizations, not the pending OAuth configuration',Number(await page.locator('.connection-stat').first().locator('strong').innerText())===existingAuthorized+1&&await page.locator('.connection-stat').last().locator('strong').innerText()==='1');
  await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-action=update]').click();await dialog.locator('[name=redirect_uri]').fill('https://chatgpt.com/connector_platform_oauth_redirect');await proof();await dialog.locator('button[type=submit]').click();await dialog.locator('[data-connection-refresh]').waitFor();await command('provision-connections');await dialog.locator('[data-connection-refresh]').click();await dialog.locator('[data-connection-refresh]').waitFor();check('Exact callback persisted through real BFF',await dialog.innerText().then(v=>v.includes('https://chatgpt.com/connector_platform_oauth_redirect')));await close();
- check('Main rows represent two logical connections, not keys or grants',await page.locator('.connection-table tbody tr').count()===2);
- await page.locator('#connection-filters [name=search]').fill('portable');await page.locator('#connection-filters button[type=submit]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor({state:'detached'});check('Backend filter returns one logical connection',await page.locator('.connection-table tbody tr').count()===1);await page.locator('[data-connection-reset]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor();
+ check('Main rows represent two logical connections, not keys or grants',await page.locator('.connection-list .connection-table tbody tr').count()===2);
+ await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-action=update]').click();await dialog.locator('[name=profile]').selectOption('memory_readwrite');await proof();await dialog.locator('button[type=submit]').click();await dialog.locator('[data-connection-refresh]').waitFor();await command('provision-connections');await dialog.locator('[data-connection-refresh]').click();await dialog.locator('[data-i18n=connWriteConsentCheck]').waitFor();
+ const setupData=await page.evaluate(async()=>{const list=await fetch('/console-api/connections').then(r=>r.json()),c=list.connections.find(c=>c.label==='Synthetic browser ChatGPT');return fetch('/console-api/connections?connection_id='+c.connection_id).then(r=>r.json());});
+ const writable=await page.evaluate(async url=>(await fetch(url)).json(),setupData.guide.discovery_url);check('Read/write guide discovers memory:write without project scope',JSON.stringify(writable.scopes_supported)===JSON.stringify(['openid','offline_access','memory:read','memory:write']));
+ await dialog.locator('[data-connection-copy=scopes]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText())==='openid offline_access memory:read memory:write');check('Read/write Base scopes copy includes actual requested write permission');
+ await page.screenshot({path:path.join(evidence,'chatgpt-readwrite-guide.png'),fullPage:true});await close();
+ for(const writing of [true,false]){
+  const authPage=await page.context().newPage(),verifier=randomBytes(32).toString('base64url');
+  const scopes=writable.scopes_supported.filter(s=>writing||s!=='memory:write');
+  const authUrl=setupData.guide.authorization_url+'?'+new URLSearchParams({client_id:setupData.connection.client_id,redirect_uri:setupData.connection.redirect_uri,response_type:'code',scope:scopes.join(' '),resource:setupData.guide.resource,state:randomBytes(24).toString('base64url'),code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')});
+  await authPage.goto(authUrl);
+  if(await authPage.locator('[name=username]').count()){
+   await authPage.locator('[name=username]').fill(cfg.accounts[0].username);await authPage.locator('[name=password]').fill(cfg.password);await authPage.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);await authPage.locator('form[action$="/login"] button[type=submit]').click();
+  }
+  await authPage.locator('form[action$="/confirm"]').waitFor();
+  check(writing?'Actual consent offers memory read/write':'Underscoped request warns instead of silently gaining writes',writing?await authPage.locator('form [data-i18n=allowMemoryWrite]').count()===1:await authPage.locator('[role=alert] [data-i18n=oauthWriteNotRequested]').count()===1&&await authPage.locator('form [data-i18n=allowMemoryWrite]').count()===0);
+  await authPage.screenshot({path:path.join(evidence,writing?'oauth-readwrite-consent.png':'oauth-underscoped-warning.png'),fullPage:true});await authPage.close();
+ }
+ await page.locator('#connection-filters [name=search]').fill('portable');await page.locator('#connection-filters button[type=submit]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor({state:'detached'});check('Backend filter returns one logical connection',await page.locator('.connection-list .connection-table tbody tr').count()===1);await page.locator('[data-connection-reset]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor();
  for(const action of ['disable','enable','revoke']){
   await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).click();await dialog.locator(`[data-connection-action=${action}]`).click();await proof();await dialog.locator('button[type=submit]').click();
   if(action==='enable'){await dialog.locator('#connection-secret').waitFor();await saveSecret();}else await dialog.locator('[data-connection-refresh]').waitFor();await close();check('Real connection lifecycle '+action);
  }
  await pick('#connection-filters [name=section]','history');await page.locator('#connection-filters button[type=submit]').click();await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).waitFor();check('Revoked record moves to history, preserving the logical record');
  await page.locator('[data-connection-reset]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor();
- const bContext=await browser.newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await bp.goto(cfg.url+'/app/connections');await bp.locator('[data-connection-new]').waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
+ const bContext=await browser.newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await bp.goto(cfg.url+'/app/connections');await bp.locator('[data-connection-new]').first().waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
  for(const width of [1280,1440,1920]){
   await page.setViewportSize({width,height:1080});
   for(const locale of ['zh-CN','en']){
    await pick('#locale',locale);await openNew('generic_mcp');await dialog.locator('[name=label]').fill('Synthetic long connection label / 合成名称 / '+'.'.repeat(24));
    check(`Desktop ${width}/${locale}`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)&&await dialog.locator('[name=label]').inputValue().then(s=>s.startsWith('Synthetic')));
+   await footerCheck(`Compact left Back at ${width}/${locale}`);
    if(width===1440)await page.screenshot({path:path.join(evidence,`wizard-${locale}.png`),fullPage:true});
    await close();
+   await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-copy=url]').waitFor();
+   check(`ChatGPT setup ${width}/${locale}`,await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1)&&await dialog.locator('[data-connection-copy=callback]').isVisible());
+   if(width===1440)await page.screenshot({path:path.join(evidence,`chatgpt-guide-${locale}.png`),animations:'disabled'});await close();
   }
  }
  await pick('#locale','en');await goto('memories');check('Language persists through real navigation',await page.locator('html').getAttribute('lang')==='en');await pick('#locale','zh-CN');
@@ -112,6 +174,15 @@ try{
  for(let i=0;i<15;i++){if(await rp.locator('code').innerText()==='active')break;await new Promise(r=>setTimeout(r,1000));await rp.reload();}check('New synthetic account activates only after provisioning',await rp.locator('code').innerText()==='active');await registration.close();
  const realLogin=await browser.newContext(),lp=await realLogin.newPage();await lp.goto(cfg.url+'/login');await lp.locator('[name=username]').fill(cfg.accounts[1].username);await lp.locator('[name=password]').fill(cfg.password);await lp.locator('[name=otp]').fill((await command('otp',{owner:1,fresh:true})).otp);await lp.locator('button[type=submit]').click();await lp.waitForURL('**/app');await lp.goto(cfg.url+'/app/memories');await lp.locator('[data-memory]').first().waitFor();check('Existing real password/TOTP login isolates the second account',(await lp.innerText('body')).includes('Synthetic private B sentinel')&&!(await lp.innerText('body')).includes('蓝色纸船'));await realLogin.close();
  await goto('connections');await page.screenshot({path:path.join(evidence,'connections-final.png'),fullPage:true});
+ // Rotate an existing synthetic client and close before its real guide response arrives.
+ await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-action=rotate]').click();await proof();
+ let releaseGuide,guideStarted;const guideStart=new Promise(r=>guideStarted=r),guideGate=new Promise(r=>releaseGuide=r);
+ await page.route(guideMatch,async route=>{const response=await route.fetch();guideStarted();await guideGate;await route.fulfill({response});},{times:1});
+ await submit();await guideStart;page.once('dialog',prompt=>prompt.accept());await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});releaseGuide();await page.waitForTimeout(250);
+ check('A late guide response cannot resurrect a closed credential dialog',!await dialog.isVisible()&&await page.locator('#connection-secret').count()===0);
+ await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-action=rotate]').click();await proof();
+ await page.route('**/console-api/action',async route=>{const response=await route.fetch(),data=await response.json();assert.ok(data.secret);data.secret_expires_at=Date.now()/1000+2;await route.fulfill({response,json:data});},{times:1});
+ await submit();await dialog.locator('#connection-secret').waitFor({state:'detached',timeout:6000});check('Credential display expires and disables reveal and copy',await dialog.locator('[data-connection-show]').count()===0||await dialog.locator('[data-connection-show]').isDisabled());await close();
  await openNew('generic_mcp');await basic('Synthetic close cleanup');await submit();
  page.once('dialog',prompt=>prompt.dismiss());await dialog.locator('[data-connection-close]').first().click();check('Unsaved credential close requires explicit acknowledgement',await dialog.isVisible());
  page.once('dialog',prompt=>prompt.accept());await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});check('Unsaved credential is cleared after confirmed close',await page.locator('#connection-secret').count()===0);
@@ -119,4 +190,4 @@ try{
  check('No JavaScript or CSP errors',errors.length===0);
  fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,count:checks.length,production_data_used:false,external_client_acceptance:false},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
 }catch(error){fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'failed',checks,error:error.stack},null,2),{mode:0o600});console.error(JSON.stringify({status:'failed',checks:checks.length,evidence,error:error.message}));process.exitCode=1;}
-finally{await browser?.close();fixture.stdin.end('{"command":"stop"}\n');const timer=setTimeout(()=>fixture.kill('SIGTERM'),5000);await new Promise(r=>fixture.once('exit',r));clearTimeout(timer);fs.closeSync(log);}
+finally{await browser?.close();fixture.stdin.end('{"command":"stop"}\n');const timer=setTimeout(()=>fixture.kill('SIGTERM'),5000);await new Promise(r=>fixture.once('exit',r));clearTimeout(timer);fs.closeSync(log);assert.ok(fs.readFileSync(path.join(evidence,'fixture.stderr'),'utf8').includes('"synthetic_cleanup_complete":true'),'Synthetic fixture cleanup must be verified');}

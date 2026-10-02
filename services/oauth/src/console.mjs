@@ -1,4 +1,6 @@
 import QRCode from 'qrcode';
+import {createHash} from 'node:crypto';
+import {auditQuery} from '../../../shared/console-queries.mjs';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
 import {icon} from '../../../web/console/visuals.mjs';
@@ -165,11 +167,14 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     if(action.startsWith('connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
-    else if(action==='devices.revoke'){
+    else if(['devices.revoke','devices.register','devices.rotate','retention.prune'].includes(action)){
       // Revoking an agent key is a security change: fresh factors here, then only the target goes to Core.
-      if(Object.keys(payload).some(key=>!['agent_instance_id','current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const fields={'devices.revoke':['agent_instance_id'],'devices.register':['label','agent_id','device_id','access'],'devices.rotate':['credential_id'],'retention.prune':['confirmed','batch_size']}[action];
+      if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
       await ids.console.reauthenticate(account.account_id,session,payload);
-      result=await coreFor(account.subject).action({action,operation_id,payload:{agent_instance_id:payload.agent_instance_id}});
+      const corePayload=Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]));
+      if(['devices.register','devices.rotate'].includes(action))corePayload.receipt_session=createHash('sha256').update(token).digest('hex');
+      result=await coreFor(account.subject).action({action,operation_id,payload:corePayload});
     }
     else result=await coreFor(account.subject).action({action,operation_id,payload});
     if(result.login_required){await invalidateAuthorization();setCookie(response,config,'console','',0);}
@@ -201,9 +206,12 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       core_connections:core.connections,system_unavailable:core.unavailable===true,physical_device_verified:false});return true;
   }
   if(pathname==='/console-api/audit'&&request.method==='GET') {
-    const core=await coreFor(account.subject).view('audit',Object.fromEntries(url.searchParams));ids.session(token,'console');
-    const offset=Number(url.searchParams.get('offset')??0),limit=Number(url.searchParams.get('limit')??50);
-    const rows=ids.db.prepare('SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?').all(account.account_id,limit+1,offset);
+    let q;try{q=auditQuery(Object.fromEntries(url.searchParams));}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}
+    const core=await coreFor(account.subject).view('audit',q);ids.session(token,'console');
+    const {offset,limit}=q,conditions=['account_id=?'],values=[account.account_id];
+    for(const key of ['action','outcome'])if(q[key]){conditions.push(`${key}=?`);values.push(q[key]);}
+    if(q.from){conditions.push('created>=?');values.push(Math.ceil(Date.parse(q.from)/1000));}if(q.to){conditions.push('created<=?');values.push(Math.floor(Date.parse(q.to)/1000));}
+    const rows=ids.db.prepare(`SELECT audit_id,action,outcome,created FROM identity_audit WHERE ${conditions.join(' AND ')} ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?`).all(...values,limit+1,offset);
     sendJson(response,200,{entries:rows.slice(0,limit),core_entries:core.entries,offset,limit,next_offset:rows.length>limit||core.next_offset!==null?offset+limit:null,read_only:true});return true;
   }
   if(pathname==='/console-api/invitations'&&request.method==='GET'){
@@ -213,10 +221,17 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     if(!consoleManagement(config).accounts)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{accounts:ids.console.listAccounts(account.account_id),maintenance_enabled:identityMaintenance?.enabled()===true});return true;
   }
   if(['/console-api/export','/console-api/operation'].includes(pathname)&&config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');
-  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|operation)$/.test(pathname)) {
+  if(pathname==='/console-api/login-history'&&request.method==='GET'){
+    const p=Object.fromEntries(url.searchParams);let q;try{if(Object.keys(p).some(k=>!['limit','offset'].includes(k)))throw new Error();q=auditQuery(p);}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}
+    const rows=ids.db.prepare("SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? AND action IN ('account.login','account.login.failed') ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?").all(account.account_id,q.limit+1,q.offset);
+    sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
+  }
+  if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname))ids.console.requireOperator(account.account_id);
+  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|operation)$/.test(pathname)) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     const result=await core.view(view,Object.fromEntries(url.searchParams));
     ids.session(token,'console'); // Do not send a response after revocation raced an awaited Core read.
+    if(['system-health','system-version','backups'].includes(view))ids.console.requireOperator(account.account_id);
     ids.audit(account.account_id,`console.read.${view}`);sendJson(response,200,result);return true;
   }
   if(pathname.startsWith('/console-api/')&&request.method!=='GET')throw new BoundaryError(403,'BLOCKED_POLICY');

@@ -1,6 +1,6 @@
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
-import {icon} from './visuals.mjs';
+import {icon,revisionDifference} from './visuals.mjs';
 
 // Settings and operations pages. Views are markup only; every write goes through
 // mountActions below (explicit dialog, fresh operation ID, server-side authorization).
@@ -30,16 +30,25 @@ export function actionPage(page,data,caps,connectionQuery={}) {
   const writable=caps.enabled===true&&caps.writable===true,can=action=>canAct(caps,action);
   const onlyRead=()=>note(caps.enabled?'consoleUpgradeRequired':'viewWithoutWrite');
 
-  if(page==='models')return `<div class="card-grid">${(data.models||[]).map(m=>section(m.kind,
-      kv([['modelName',esc(m.config.model||t('modelNotConfigured'))],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',esc(m.config.daily_requests??'—')],['hasKey',l(m.has_key?'yes':'no')]])+
-      buttons([inspect('models',m.kind),...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testModel',{kind:m.kind}),actionButton('models.disable','disable',{kind:m.kind})]:[])])+(!can('models.save')?onlyRead():''),
+  if(page==='models'){
+    const p=data.processing||{},blocked=items=>(items||[]).map(code=>`<p class="muted">${esc(t(code))}</p>`).join('');
+    const launch=(action,key,ready,values={})=>can(action)?actionButton(action,key,values).replace('<button ',`<button ${ready?'':'disabled '}`):'';
+    const verification=v=>`<div class="model-verification" role="status"><strong>${l(!v?'probeNotRun':v.state==='verified'?'probeVerified':v.state==='running'?'probeRunning':'probeFailed')}</strong>${v?`<p>${esc(time(v.updated_at))}${v.error_code?` · ${esc(t(v.error_code))}`:''}</p>${v.checks?.length?`<p>${v.checks.map(c=>esc(t(c))).join(' · ')}</p>`:''}${v.skipped?.length?`<p>${l('probeSkipped')}: ${v.skipped.map(c=>esc(t(c))).join(' · ')}</p>`:''}`:''}</div>`;
+    return `<div class="card-grid">${(data.models||[]).map(m=>section(m.kind,
+      `<p>${l(m.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p>`+
+      kv([['modelName',esc(m.config.model||t('modelNotConfigured'))],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',esc(m.config.daily_requests??'—')],['hasKey',l(m.has_key?'yes':'no')],...(m.kind==='embedder'?[['dimensions',esc(m.config.dimensions??'—')]]:[])])+verification(m.verification)+
+      buttons([...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testCapabilities',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.disable')?[actionButton('models.disable','disable',{kind:m.kind})]:[]),inspect('models',m.kind)])+(!can('models.save')?onlyRead():''),
       {aside:state(m.config.enabled?'enabled':'disabled'),className:'model-card'})).join('')}</div>`+
-    section('modelBoundary',`<p>${l('modelBoundaryNote')}</p>${can('vector.schedule')?buttons([actionButton('vector.schedule','rebuildIndex')]):''}${!data.vector_enabled?`<p class="muted">${l('vectorNotConfigured')}</p>`:''}`);
+      section('modelPipeline',`<p>${l('modelPipelineNote')}</p><div class="card-grid model-pipeline">${['classification','summary','vector'].map(kind=>{
+        const step=p[kind]||{},vector=kind==='vector';return `<div data-model-stage="${kind}"><h3>${l(kind)}</h3>${state(step.ready?'ready':'notReady')}${blocked(step.blockers)}${vector?kv([['indexedDocuments',esc(step.indexed_documents??0)],['state',esc(t(step.state||'not_started'))],['semanticReadiness',l(step.search_ready?'ready':'notReady')]])+blocked(step.search_blockers)+blocked(step.error_code?[step.error_code]:[]):''}${buttons([launch(vector?'vector.schedule':'jobs.schedule',vector?'rebuildIndex':kind==='summary'?'summarize':'organize',step.ready===true,vector?{}:{type:kind})])}</div>`;
+      }).join('')}</div><div class="section-foot"><a href="/app/jobs">${l('viewJobs')} →</a><a href="/app/summaries">${l('viewSummaries')} →</a></div>`)+
+      section('modelBoundary',`<p>${l('modelBoundaryNote')}</p><p>${l('modelProbeBoundary')}</p>`);
+  }
 
   if(page==='jobs')return section('jobs',`<div class="status-line">${l('scheduleStatus')} ${state(data.settings?.schedule_enabled?'enabled':'disabled')}<span aria-hidden="true">·</span>${l('workerStatus')} ${state(data.worker_enabled?'enabled':'disabled')}${data.vector?`<span aria-hidden="true">·</span>${l('vectorIndex')} ${state(data.vector.state)} ${esc(data.vector.error_code||'')}`:''}</div>
-    ${writable?buttons([actionButton('jobs.schedule','organize',{type:'classification'}),actionButton('jobs.schedule','summarize',{type:'summary'})]):onlyRead()}
+    ${can('jobs.schedule')?buttons([actionButton('jobs.schedule','organize',{type:'classification'}),actionButton('jobs.schedule','summarize',{type:'summary'})]):onlyRead()}
     ${!data.worker_enabled?note('workerDisabledNote'):''}
-    ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td>${state(j.state)}</td><td>${progress(j.processed,j.total)}</td><td>${esc(j.last_error_code||'—')}</td><td>${writable?buttons([...(j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[actionButton('jobs.retry','retry',{id:j.job_id})]:[])]):''}</td></tr>`)}
+    ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td>${state(j.state)}</td><td>${progress(j.processed,j.total)}</td><td>${esc(j.last_error_code||'—')}</td><td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
     <div class="section-foot">${pager(data)}</div>`,{aside:refresh()});
 
   if(page==='connections')return connectionsView(data,caps,connectionQuery);
@@ -64,11 +73,60 @@ const check=(name,key,value=false)=>`<label class="check-field"><input type="che
 const reauth=()=>`<fieldset class="reauth"><legend>${l('reauthenticate')}</legend>${field('current_password','currentPassword',{type:'password',max:1024})}${field('otp','otp',{max:6})}<p>${l('otpFreshNote')}</p></fieldset>`;
 const modalActions=(submit='save')=>`<div class="actions"><button type="submit" class="primary">${l(submit)}</button><button type="button" data-operation-close>${l('cancel')}</button></div><p data-operation-error role="alert"></p>`;
 
+/** Read-only inspectors share the session-bound transport; no actions, tokens or data in storage. */
+export function mountFeatureReads({api,isActive,getAuditParams}){
+  const modal=document.createElement('dialog');modal.id='feature-dialog';modal.setAttribute('aria-labelledby','feature-read-title');
+  modal.innerHTML=`<div class="dialog-header"><h2 id="feature-read-title"></h2><button type="button" data-feature-close>${l('close')}</button></div><div data-feature-content></div>`;document.body.append(modal);
+  const content=modal.querySelector('[data-feature-content]');let seq=0,focus,next=null,compare=null,exporting=false;
+  const valid=n=>n===seq&&isActive()&&modal.open;
+  function open(title){seq++;focus=document.activeElement;next=null;compare=null;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();return seq;}
+  async function inspect(view,params={},fresh=true){const n=fresh?open(view):++seq;content.innerHTML=`<p>${l('loading')}</p>`;
+    try{const data=await api(view,params);if(!valid(n))return;const pre=document.createElement('pre');pre.className='operation-result';pre.textContent=JSON.stringify(data,null,2);content.replaceChildren(pre);
+      next=data.next_offset!=null?{view,params:{...params,offset:data.next_offset}}:null;if(next){const b=document.createElement('button');b.type='button';b.dataset.featureNext='';b.textContent=t('next');content.append(b);}
+    }catch(e){if(valid(n))content.textContent=t(e.message);}
+  }
+  async function versionText(memory_id,revision,n){let params={memory_id,revision},parts=[],bytes=0,steps=0;
+    do{const d=await api('memory-versions',params);if(!valid(n))throw new Error('STALE_ACCOUNT');bytes+=d.content.length;if(bytes>1024*1024||++steps>256)throw new Error('DETAIL_SIZE_LIMIT');parts.push(d.content);params=d.next_request;if(!params&&d.content_complete!==true)throw new Error('INCOMPLETE_CONTENT');}while(params);
+    return parts.join('');
+  }
+  async function compareMemory(memory,previous){const n=open('compareVersions');
+    try{const [right,left]=await Promise.all([api('memory-versions',{memory_id:memory,limit:100}),previous?api('memory-versions',{memory_id:previous,limit:100}):Promise.resolve(null)]);if(!valid(n))return;
+      compare={memory,previous:previous||memory};const choices=rows=>rows.map(r=>String(r.revision));const rightChoices=choices(right.versions),leftChoices=choices((left||right).versions);
+      content.innerHTML=`<p>${l('compareVersionNote')}</p><form data-version-compare><div class="columns">${select('left','previousRecord',leftChoices,leftChoices[previous?0:Math.min(1,leftChoices.length-1)])}${select('right','currentRecord',rightChoices,rightChoices[0])}</div><button type="submit">${l('compareVersions')}</button></form><div class="columns" data-comparison></div>`;
+      if(right.next_offset!=null||left?.next_offset!=null)content.insertAdjacentHTML('afterbegin',`<p>${l('latestHundredVersions')}</p>`);
+      syncAppearance();content.querySelector('form').requestSubmit();
+    }catch(e){if(valid(n))content.textContent=t(e.message);}
+  }
+  modal.addEventListener('submit',event=>{if(!event.target.matches('[data-version-compare]'))return;event.preventDefault();const n=++seq,pair={...compare},fd=new FormData(event.target),out=content.querySelector('[data-comparison]');out.textContent=t('loading');
+    void Promise.all([versionText(pair.previous,Number(fd.get('left')),n),versionText(pair.memory,Number(fd.get('right')),n)]).then(values=>{if(!valid(n))return;out.replaceChildren();revisionDifference(...values).forEach((value,i)=>{const section=document.createElement('section'),title=document.createElement('h3'),pre=document.createElement('pre'),change=document.createElement(i?'ins':'del');title.textContent=t(i?'currentRecord':'previousRecord');pre.className='body-content';change.textContent=value.changed;pre.append(document.createTextNode(value.prefix),change,document.createTextNode(value.suffix));section.append(title,pre);out.append(section);});}).catch(e=>{if(valid(n))out.textContent=t(e.message);});
+  });
+  document.addEventListener('click',event=>{
+    const read=event.target.closest('[data-feature-read]');if(read){void inspect(read.dataset.featureRead,JSON.parse(read.dataset.featureParams||'{}'));return;}
+    const compareButton=event.target.closest('[data-compare-memory]');if(compareButton){void compareMemory(compareButton.dataset.compareMemory,compareButton.dataset.previousMemory);return;}
+    if(event.target.closest('[data-feature-close]'))modal.close();
+    if(event.target.closest('[data-feature-next]')&&next)void inspect(next.view,next.params,false);
+    if(event.target.closest('[data-audit-export]')&&!exporting){const target=document.querySelector('[data-audit-result]');exporting=true;const generation=seq;
+      void(async()=>{let offset=0,entries=[],size=0,requests=0;const filters=getAuditParams();
+        for(;;){const data=await api('audit',{...filters,offset,limit:100});if(!isActive()||generation!==seq)throw new Error('STALE_ACCOUNT');
+          const page=[...(data.entries||[]).map(e=>({...e,source:'identity'})),...(data.core_entries||[]).map(e=>({...e,source:'core'}))];size+=JSON.stringify(page).length;
+          if(size>16*1024*1024||++requests>100)throw new Error('EXPORT_SIZE_LIMIT');entries.push(...page);if(data.next_offset==null)break;offset=data.next_offset;}
+        const unique=[...new Map(entries.map(e=>[e.source+':'+e.audit_id,e])).values()];const blob=new Blob([JSON.stringify({format:'mnemuron-own-audit-v1',snapshot:'bounded_live_listing',filters,entries:unique},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+        a.href=url;a.download='mnemuron-account-audit.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);if(target)target.textContent=t('auditExportDone')+' '+unique.length;
+      })().catch(e=>{if(target&&isActive())target.textContent=t(e.message);}).finally(()=>{exporting=false;});
+    }
+  });
+  modal.addEventListener('close',()=>{seq++;next=null;compare=null;content.replaceChildren();focus?.isConnected&&focus.focus();focus=null;});
+  return {clear(){seq++;next=null;compare=null;content.replaceChildren();modal.close();}};
+}
+
 export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   const modal=document.createElement('dialog');modal.id='operation-dialog';modal.setAttribute('aria-labelledby','operation-title');modal.innerHTML='<div class="dialog-header"><h2 id="operation-title"></h2><button type="button" data-operation-close aria-label="Close">×</button></div><div id="operation-content"></div>';document.body.append(modal);
   const content=modal.querySelector('#operation-content');let intent=null,opId=null,lastPayload=null,returnFocus=null,sequence=0,working=false;
   function open(title){sequence++;returnFocus=document.activeElement;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();}
   function result(data){content.replaceChildren();const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);content.append(pre);
+    if(intent?.action==='models.test'||intent?.action==='models.save'||intent?.action==='jobs.schedule'||intent?.action==='vector.schedule'){
+      const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':'modelQueued');content.prepend(message);
+    }
     if(data.codes&&data.batch_id){
       const note=document.createElement('p');note.textContent=t('invitationSavedNote');
       const codes=document.createElement('pre');codes.id='issued-invitation-codes';codes.className='operation-result';codes.textContent=data.codes.join('\n');
@@ -92,7 +150,26 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   async function begin(action,button){if(working)return;open(action);const seq=sequence;opId=crypto.randomUUID();lastPayload=null;intent={action,id:button.dataset.id,kind:button.dataset.kind,operator:button.dataset.operator};
     try{
       let fields='',data=getData();
-      if(action==='memory.create')fields=area('content','content')+select('memory_type','memoryType',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128})+select('sensitivity','sensitivity',['sensitive','internal','public','secret'],'sensitive');
+      if(action==='memory.create'){
+        const defaults=await api('privacy-defaults');if(seq!==sequence||!isActive())return;
+        fields=area('content','content')+select('memory_type','memoryType',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128})+select('sensitivity','sensitivity',['sensitive','internal','public','secret'],defaults.sensitivity);
+      }
+      else if(action.startsWith('memory.batch_')){
+        const ids=[...document.querySelectorAll('[data-batch-memory]:checked')].map(n=>n.dataset.batchMemory);if(!ids.length||ids.length>50)throw new Error('BATCH_SELECTION_REQUIRED');
+        const metas=await Promise.all(ids.map(memory_id=>api('memory-meta',{memory_id})));if(seq!==sequence||!isActive())return;
+        intent.items=metas.map(m=>({memory_id:m.memory_id,revision:m.revision}));
+        fields=`<p>${l('batchNote')} ${metas.length}</p><ul>${metas.map(m=>`<li><code>${esc(m.memory_id)}</code> · ${l('revisions')} ${m.revision}</li>`).join('')}</ul>`+
+          (action==='memory.batch_classify'?select('category','category',getCaps().taxonomy.categories,'uncategorized'):field('reason','reason',{required:false})+`<p>${l('retractNote')}</p>`);
+      }
+      else if(['taxonomy.save','privacy.defaults','retention.save'].includes(action)){
+        const view={'taxonomy.save':'taxonomy','privacy.defaults':'privacy-defaults','retention.save':'retention'}[action],current=await api(view);if(seq!==sequence||!isActive())return;intent.revision=current.revision;
+        if(action==='taxonomy.save')fields=area('categories','taxonomyCategories',current.categories.join('\n'))+`<p>${l('taxonomyEditNote')}</p>`;
+        if(action==='privacy.defaults')fields=select('sensitivity','defaultSensitivity',['sensitive','internal','public','secret'],current.sensitivity)+`<p>${l('privacyDefaultsBoundary')}</p>`;
+        if(action==='retention.save')fields=select('retention_mode','retentionMode',['limited','permanent'],current.raw_retention_days==='permanent'?'permanent':'limited')+field('raw_retention_days','eventRetentionDays',{type:'number',value:current.raw_retention_days==='permanent'?30:current.raw_retention_days,min:1,upper:3650})+`<p>${l('retentionBoundary')}</p>`;
+      }
+      else if(action==='retention.prune')fields=`<p>${l('pruneBoundary')}</p><label class="check-field"><input name="confirmed" type="checkbox" required>${l('confirmPrune')}</label>`+reauth();
+      else if(action==='devices.register')fields=field('label','label',{max:120})+field('agent_id','agentId',{max:128})+field('device_id','deviceId',{max:128})+select('access','access',['read','read_write'],'read')+`<p>${l('agentKeyBoundary')}</p>`+reauth();
+      else if(action==='devices.rotate')fields=`<p>${l('rotateAgentNote')}</p><code>${esc(intent.id)}</code>`+reauth();
       else if(action==='memory.web_policy'){
         // The page read the current policy; its revision guards against a change made in another tab.
         intent.enable=button.dataset.enabled==='true';intent.revision=(data.web_policy??getCaps().web_policy)?.revision??0;
@@ -109,13 +186,18 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
         else fields=field('reason','reason',{required:false})+`<p>${l('retractNote')}</p>`;
       } else if(action==='jobs.schedule'){
         intent.type=button.dataset.type||'classification';const status=await api('jobs');if(seq!==sequence||!isActive())return;const settings=status.settings||{revision:0,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,schedule_enabled:false};
-        intent.settings_revision=settings.revision;fields=select('type','jobType',['classification','summary'],intent.type)+field('timezone','timezone',{value:settings.timezone})+check('include_open','includeOpen')+check('schedule_enabled','enablePeriodic',settings.schedule_enabled)+`<p>${l('organizeCostNote')}</p>`;
+        intent.settings_revision=settings.revision;fields=select('type','jobType',['classification','summary'],intent.type)+field('timezone','timezone',{value:settings.timezone})+select('periods','summaryPeriods',['daily','weekly','daily_weekly'],settings.periods?.length===1?settings.periods[0]:'daily_weekly')+check('include_open','includeOpen')+check('schedule_enabled','enablePeriodic',settings.schedule_enabled)+`<p>${l('organizeCostNote')}</p>`;
       } else if(action==='models.save'){
         const model=data.models.find(m=>m.kind===intent.kind),c=model?.config||{};intent.revision=model?.revision||0;
-        fields=check('enabled','enabled',c.enabled)+select('protocol','protocol',['openai_compatible','ollama'],c.protocol||'openai_compatible')+field('base_url','baseUrl',{value:c.base_url||'',max:2048})+field('model','modelName',{value:c.model||''})+field('profile_revision','modelRevision',{value:c.profile_revision||'1'})+
-          field('api_key','apiKey',{type:'password',required:false,max:16384})+check('remove_key','removeKey')+(intent.kind==='embedder'?field('dimensions','dimensions',{type:'number',value:c.dimensions||''}):'')+
-          field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100})+field('output_tokens','outputTokens',{type:'number',value:c.output_tokens||4096})+field('batch_size','batchSize',{type:'number',value:c.batch_size||5})+
-          select('sensitivity','modelSensitivity',['public','internal','sensitive'],c.sensitivities?.includes('sensitive')?'sensitive':c.sensitivities?.includes('internal')?'internal':'public')+check('egress_approved','approveEgress',c.egress_approved)+check('query_approved','approveQuery',c.query_approved)+(intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`<p>${l('keyWriteOnlyNote')}</p>`;
+        fields=`<p>${l(intent.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p><fieldset><legend>${l('modelEndpoint')}</legend>`+check('enabled','enabled',c.enabled)+select('protocol','protocol',['openai_compatible','ollama'],c.protocol||'openai_compatible')+field('base_url','baseUrl',{value:c.base_url||'',max:2048})+`<p class="muted">${l('modelUrlHelp')}</p>`+field('model','modelName',{value:c.model||''})+
+          field('api_key','apiKey',{type:'password',required:false,max:16384})+check('remove_key','removeKey')+`<p class="muted">${l('keyWriteOnlyNote')}</p>`+(intent.kind==='embedder'?field('dimensions','dimensions',{type:'number',value:c.dimensions||'',min:1,upper:65536,step:1})+`<p>${l('dimensionsHelp')}</p>`:'')+`</fieldset><fieldset><legend>${l('modelLimits')}</legend>`+
+          field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100,min:1,upper:10000,step:1})+field('batch_size','batchSize',{type:'number',value:c.batch_size||5,min:1,upper:20,step:1})+
+          (intent.kind==='organizer'?field('output_tokens','outputTokens',{type:'number',value:c.output_tokens||4096,min:128,upper:32768,step:1}):`<input type="hidden" name="output_tokens" value="${esc(c.output_tokens||4096)}">`)+field('profile_revision','modelRevision',{value:c.profile_revision||'1',max:160})+
+          (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+select('sensitivity','modelSensitivity',['public','internal','sensitive'],c.sensitivities?.includes('sensitive')?'sensitive':c.sensitivities?.includes('internal')?'internal':'public')+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
+      } else if(action==='models.test'){
+        fields=`<p>${l('probeCostNote')}</p><p>${l(intent.kind==='organizer'?'organizerProbeNote':'embedderProbeNote')}</p>`;
+      } else if(action==='vector.schedule'){
+        fields=`<p>${l('vectorScheduleNote')}</p>`;
       } else if(action==='security.password')fields=field('new_password','newPassword',{type:'password',max:1024})+field('password_confirm','passwordConfirm',{type:'password',max:1024})+reauth();
       else if(action==='security.totp.begin'||action==='security.recovery_codes')fields=reauth();
       else if(action==='invitations.issue')fields=`<p>${l('invitationPrivateNote')}</p>`+field('count','count',{type:'number',value:1,min:1,upper:getCaps().invitation_batch_limit,step:1})+field('ttl_minutes','ttlMinutes',{type:'number',value:60,min:1,upper:1440,step:1})+reauth();
@@ -129,13 +211,20 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   }
   function payload(fd){const a=intent.action,p={};
     if(a==='memory.create'){Object.assign(p,{content:fd.get('content'),memory_type:fd.get('memory_type'),scope:fd.get('scope'),sensitivity:fd.get('sensitivity')});if(fd.get('topic'))p.topic=fd.get('topic');if(p.scope!=='user')p[`${p.scope}_id`]=fd.get('target_id');}
+    else if(a.startsWith('memory.batch_')){p.items=intent.items;if(a==='memory.batch_classify')p.category=fd.get('category');else if(fd.get('reason'))p.reason=fd.get('reason');}
+    else if(a==='taxonomy.save'){p.expected_revision=intent.revision;p.categories=String(fd.get('categories')).split(/[\s,，]+/).filter(Boolean);}
+    else if(a==='privacy.defaults'){p.expected_revision=intent.revision;p.sensitivity=fd.get('sensitivity');p.cloud_readable=false;}
+    else if(a==='retention.save'){p.expected_revision=intent.revision;p.raw_retention_days=fd.get('retention_mode')==='permanent'?'permanent':Number(fd.get('raw_retention_days'));}
+    else if(a==='retention.prune'){p.confirmed=fd.has('confirmed');p.batch_size=100;}
+    else if(a==='devices.register')Object.assign(p,{label:fd.get('label'),agent_id:fd.get('agent_id'),device_id:fd.get('device_id'),access:fd.get('access')});
+    else if(a==='devices.rotate')p.credential_id=intent.id;
     else if(a==='memory.web_policy'){p.read_all=intent.enable;p.expected_revision=intent.revision;}
     else if(a.startsWith('memory.')){Object.assign(p,{memory_id:intent.id,revision:intent.meta.revision});if(a==='memory.correct'){p.content=fd.get('content');p.topic=fd.get('topic')||null;p.memory_type=intent.meta.memory_type;}if(fd.get('reason'))p.reason=fd.get('reason');if(a==='memory.classify')p.category=fd.get('category');if(a==='memory.sensitivity')p.sensitivity=fd.get('sensitivity');if(a==='memory.visibility'){p.allow=fd.has('allow');p.state_hash=intent.meta.state_hash;}}
-    else if(a==='jobs.schedule')Object.assign(p,{type:fd.get('type'),timezone:fd.get('timezone'),periods:['daily','weekly'],include_open:fd.has('include_open'),schedule_enabled:fd.has('schedule_enabled'),settings_revision:intent.settings_revision});
+    else if(a==='jobs.schedule')Object.assign(p,{type:fd.get('type'),timezone:fd.get('timezone'),periods:fd.get('periods')==='daily_weekly'?['daily','weekly']:[fd.get('periods')],include_open:fd.has('include_open'),schedule_enabled:fd.has('schedule_enabled'),settings_revision:intent.settings_revision});
     else if(a==='jobs.cancel'||a==='jobs.retry')p.job_id=intent.id;
     else if(a==='models.save'){
       p.kind=intent.kind;p.expected_revision=intent.revision;const sensitivity=fd.get('sensitivity');p.config={enabled:fd.has('enabled'),protocol:fd.get('protocol'),base_url:fd.get('base_url'),model:fd.get('model'),profile_revision:fd.get('profile_revision'),daily_requests:Number(fd.get('daily_requests')),output_tokens:Number(fd.get('output_tokens')),batch_size:Number(fd.get('batch_size')),sensitivities:sensitivity==='public'?['public']:sensitivity==='internal'?['public','internal']:['public','internal','sensitive'],egress_approved:fd.has('egress_approved'),query_approved:fd.has('query_approved'),native_schema:intent.kind==='organizer'?fd.has('native_schema'):true};if(intent.kind==='embedder')p.config.dimensions=Number(fd.get('dimensions'));if(fd.get('api_key'))p.api_key=fd.get('api_key');if(fd.has('remove_key'))p.remove_key=true;
-    } else if(a==='models.test'||a==='models.disable'){p.kind=intent.kind;if(a==='models.disable')p.expected_revision=getData().models.find(m=>m.kind===intent.kind).revision;}
+    } else if(a==='models.test'||a==='models.disable'){p.kind=intent.kind;if(a==='models.test')p.mode='capabilities';else p.expected_revision=getData().models.find(m=>m.kind===intent.kind).revision;}
     else if(a==='oauth.revoke')p.grant_id=intent.id;
     else if(a==='devices.revoke')p.agent_instance_id=intent.id;
     else if(a==='security.password'){p.new_password=fd.get('new_password');p.password_confirm=fd.get('password_confirm');}

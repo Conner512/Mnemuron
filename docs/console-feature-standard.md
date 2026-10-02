@@ -9,7 +9,7 @@
 | 字段 | 含义 |
 | --- | --- |
 | `id` | 功能编号，格式 `ABC-00`。前缀按页面固定（见第 2 节），编号只增加、不复用。 |
-| `status` | `live` 已上线 · `planned` 规划中 · `policy` 不开放（见第 3 节）。 |
+| `status` | `live` 已实现 · `planned` 规划中 · `policy` 不开放（见第 3 节）；代码能力不等于现网部署或外部验收。 |
 | `read` | 读取的 console-api 视图名，浏览器请求 `GET /console-api/<view>`。 |
 | `write` | 写操作名，格式 `<领域>.<动词>`，经 `POST /console-api/action` 提交。 |
 | `core` | 规划中的功能将复用的现有 Core 接口。 |
@@ -45,7 +45,7 @@
 ## 3. 状态与流转
 
 - **planned 规划中**：只有界面占位。线框里的控件全部禁用，不带 `data-console-action`，不发请求，不显示假数据或假的成功提示。`write` 里的操作名在服务端允许的操作集合中**不得**已经存在；测试会检查，避免规划中的功能被悄悄调用。
-- **live 已上线**：有真实接口。`read` 视图由 BFF 提供并在 ingress 白名单内；`write` 操作在服务端允许的操作集合内。
+- **live 已实现**：有真实接口。`read` 视图由 BFF 提供并在 ingress 示例白名单内；`write` 操作在服务端允许的操作集合内。实际环境的路由、开关、凭证和数据源必须单独验证，不以此状态冒充已部署。
 - **policy 不开放**：有意不在网页端提供。说明文案写清楚原因和替代途径（例如运维在服务器上处理）。不得声明 `read` 或 `write`。
 - **从规划中到已上线**必须在同一个提交内完成：实现接口、前端、测试，把清单状态改为 `live`，并同步本文件的功能表。
 - 从 `policy` 改为其他状态，涉及安全或隐私边界，先在 issue 中讨论。
@@ -127,7 +127,46 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - [ ] 相关文档已更新
 - [ ] `node scripts/check-publication.mjs --worktree` 通过
 
-## 11. 功能表
+## 11. 本轮补齐的合同与边界
+
+本轮按既有清单实现独立的记忆、连接、用量、隐私及系统查看功能，不启用 handoff、不改变其 Hook、确认或回执协议。`production_ready` 继续为 `false`。
+
+### 接口与数据
+
+- 新增只读视图：`attention`、`capture-status`、`model-usage`、`taxonomy`、`privacy-defaults`、`retention`、`memory-versions`、`task-branches`、`project-context`、`task-checkpoints`、`task-reconciliation`、`system-health`、`system-version`、`backups`；身份服务另提供 `login-history`。查询只接受固定参数，不接受前端 `user_id`。
+- 新增操作：`memory.batch_classify`、`memory.batch_retract`、`taxonomy.save`、`privacy.defaults`、`retention.save`、`retention.prune`、`devices.register`、`devices.rotate`。沿用完整 console 写权限和功能开关，不扩展 basic credential、OAuth 或 MCP 的能力。
+- 新增 `console_preferences`，主键为 `(user_id, kind)`；只存分类、隐私、保留偏好及其版本。启动时幂等建表，不改写既有身份、记忆、来源、生命周期或 OAuth 数据。已有数据库可重复初始化；回退代码时保留此表，不执行破坏性 down migration。
+- 偏好变更要求 `expected_revision`。分类使用独立的账户版本；旧排队/运行中的整理任务被隔离并取消发布资格，旧摘要标记过期。旧分类任务不能通过重试绕过新版本，应重新调度。
+- 批量操作每次 1～50 条，不允许重复 ID，逐条检查 owner 和已确认 revision；成功和失败分别返回，重放操作 ID 不重复修改，撤回不做物理删除。
+- `memory-versions` 的正文分页按 Unicode code points，返回 `content_complete` 和 `next_request`。对比选择器列出最近 100 个版本，双栏读取选中版本完整正文并标记变化区域；超过读取上限时明确失败，不宣称完整。修订记忆可与被替代的上一条记录比较。
+- 审计按 `action/outcome` 精确过滤及 UTC `from/to` 时间筛选，两侧数据库执行相同验证。导出只包含当前账户审计元数据，最多 100 页/16 MiB，不是数据库一致性快照，也不包含记忆正文或密钥。
+
+### 隐私和权限
+
+- 隐私默认值只作用于以后在控制台新建的记忆；默认敏感级别可配置。启用该偏好后，新记录明确保持私有，即使账户开启全量云端读取也不能绕过；云端可见性仍须单独逐版本授权。
+- 保留设置只改变本账户未来捕获事件的默认值，已有事件的到期时间不变；显式事件级保留值仍遵守现有合同。记忆、检查点、权威任务状态不自动删除。
+- 清理需要用户确认、当前密码及未复用的 TOTP；只清理本人已到期且没有固定来源 pin 的原始事件正文，保留元数据和来源链。默认每次 100 条，接口上限 1000；多批须逐次确认。不写全局运维状态，不清他人数据。
+- Agent 密钥登记/轮换要求重新验证；最多授予 `memory:read` 或加上 `memory:write/capture:write`，不授予管理、Resume 或任务切换。复用 Core 的加密操作回执和撤销机制；本轮新操作的密钥响应仅原登录会话可在 5 分钟内重试恢复，不接受前端提供会话绑定。平台管理凭证不能在这里轮换。
+- 系统视图仅管理员可查看，BFF 在异步请求前后复核权限；平台管理员仍不能查看他人记忆。登录历史包括登录和敏感操作的重新验证；未知用户名及旧版未采集事件不伪造为当前账户记录。
+
+### 未完成及环境边界
+
+- `RES-01～04` 继续延后；`TSK-05` 的 bootstrap 确认及 `TSK-06` 的协调写操作依赖现有 handoff 门禁，因此不绕过门禁开放。任务、项目、检查点和协调提案只能查看。
+- `CON-04` 仅反映服务器实际收到的事件和处理状态。本机 Hook 超时、未发送队列没有可信上报入口，保持 `not_observable`，不是健康通过。
+- `MOD-04` 显示当前个人模型配置的当日预留请求及预算，包含失败尝试；没有计费金额数据，不推算费用。
+- `SYS-02` 可验证当前 Core 数据库及搜索状态；worker、向量和 MCP 的配置/进程健康分开显示，没有探测证据时为 `not_probed`。`SYS-03` 的数据库版本是实际 SQLite `user_version`，不是完整的迁移审计报告。
+- `SYS-04` 已有状态读取入口和说明，但可信备份记录源尚未接入，最近备份、大小及恢复验证仍为环境缺口。返回 `not_configured/verified:false`，不能算备份验收通过；不会启用自动备份或扫描整库文件。
+- `policy` 项继续关闭。上线还需经授权部署代码、升级相应写凭证、核对新视图的精确 ingress 规则；本地代码和合成验收不会自动修改生产环境。
+
+### 本轮验证入口
+
+- Core：`node --test server/test/console-completion.test.mjs`，含所有者隔离、批量部分失败、版本/Unicode 分页、密钥回执与撤销、pin 保留、旧任务隔离、偏好重启持久化。
+- BFF：`node --test services/oauth/test/console-actions.test.mjs services/oauth/test/console-feature-map.test.mjs`，含会话失效、管理员门禁、重新验证、接口清单、双语和日期筛选。
+- 全量：`node scripts/test-all.mjs`；零测试、失败和未说明跳过均不能通过。
+- 真实浏览器：`scripts/test-console-connections.mjs` 和 `scripts/test-console-completion.mjs`。通过已有 Playwright 模块及 Chromium 路径运行，仅使用本机合成 Core/OAuth 服务；报告及截图放 Git 外私有目录，不读取生产配置。
+- 发布内容：`node scripts/check-publication.mjs --worktree`。不等于 Git 历史、GitHub 或生产个人数据审查。
+
+## 12. 功能表
 
 「读取」列是 console-api 视图名，「写操作」列是操作名。测试会逐行核对编号和状态。
 
@@ -135,21 +174,21 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | --- | --- | --- | --- | --- | --- |
 | OVW-01 | 概览 | 记忆分布与计数 | live | overview | — |
 | OVW-02 | 概览 | 最近写入与 30 天活动 | live | overview | — |
-| OVW-03 | 概览 | 待处理事项 | planned | attention | — |
+| OVW-03 | 概览 | 待处理事项 | live | attention | — |
 | MEM-01 | 记忆库 | 检索与筛选 | live | memories | — |
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
 | MEM-04 | 记忆库 | 修订与撤回 | live | — | memory.correct, memory.retract |
 | MEM-05 | 记忆库 | 分类、敏感级别与 ChatGPT 可见性 | live | — | memory.classify, memory.sensitivity, memory.visibility |
-| MEM-06 | 记忆库 | 批量整理 | planned | — | memory.batch_classify, memory.batch_retract |
-| MEM-07 | 记忆库 | 版本对比 | planned | memory | — |
+| MEM-06 | 记忆库 | 批量整理 | live | — | memory.batch_classify, memory.batch_retract |
+| MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
 | SUM-01 | 分类与摘要 | 分类索引与派生摘要 | live | summaries, summary | — |
 | SUM-02 | 分类与摘要 | 生成分类与摘要 | live | — | jobs.schedule |
-| SUM-03 | 分类与摘要 | 自定义分类体系 | planned | taxonomy | taxonomy.save |
+| SUM-03 | 分类与摘要 | 自定义分类体系 | live | taxonomy | taxonomy.save |
 | TSK-01 | 项目与任务 | 项目列表 | live | projects | — |
-| TSK-02 | 项目与任务 | 任务与来源分支 | planned | task-branches | — |
-| TSK-03 | 项目与任务 | 项目上下文预览 | planned | project-context | — |
-| TSK-04 | 项目与任务 | 检查点与权威任务状态 | planned | task-checkpoints | — |
+| TSK-02 | 项目与任务 | 任务与来源分支 | live | task-branches | — |
+| TSK-03 | 项目与任务 | 项目上下文预览 | live | project-context | — |
+| TSK-04 | 项目与任务 | 检查点与权威任务状态 | live | task-checkpoints | — |
 | TSK-05 | 项目与任务 | 新建项目与任务 | planned | — | projects.bootstrap, tasks.bootstrap |
 | TSK-06 | 项目与任务 | 任务对账 | planned | task-reconciliation | tasks.reconcile |
 | RES-01 | 接续交接 | 接续预览 | planned | resume-preview | — |
@@ -162,25 +201,25 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | CON-01 | 连接管理 | ChatGPT 网页版与应用授权 | live | connections | oauth.revoke |
 | CON-02 | 连接管理 | 个人连接 | live | connections | connections.create, connections.update, connections.rotate, connections.disable, connections.enable, connections.revoke |
 | CON-03 | 连接管理 | Agent 实例与设备 | live | connections | devices.revoke |
-| CON-04 | 连接管理 | 捕获健康度 | planned | capture-status | — |
-| CON-05 | 连接管理 | 登记与轮换 Agent 密钥 | planned | — | devices.register, devices.rotate |
+| CON-04 | 连接管理 | 捕获健康度 | live | capture-status | — |
+| CON-05 | 连接管理 | 登记与轮换 Agent 密钥 | live | — | devices.register, devices.rotate |
 | MOD-01 | 模型配置 | 整理模型与向量模型 | live | models | models.save, models.disable |
 | MOD-02 | 模型配置 | 连通性测试 | live | — | models.test |
 | MOD-03 | 模型配置 | 个人向量索引 | live | — | vector.schedule |
-| MOD-04 | 模型配置 | 用量与预算 | planned | model-usage | — |
+| MOD-04 | 模型配置 | 用量与预算 | live | model-usage | — |
 | PRV-01 | 隐私与保留 | 外发许可总览 | live | models | — |
-| PRV-02 | 隐私与保留 | 新记忆默认设置 | planned | privacy-defaults | privacy.defaults |
-| PRV-03 | 隐私与保留 | 数据保留策略 | planned | retention | retention.save |
-| PRV-04 | 隐私与保留 | 清理过期数据 | planned | — | retention.prune |
+| PRV-02 | 隐私与保留 | 新记忆默认设置 | live | privacy-defaults | privacy.defaults |
+| PRV-03 | 隐私与保留 | 数据保留策略 | live | retention | retention.save |
+| PRV-04 | 隐私与保留 | 清理过期数据 | live | — | retention.prune |
 | PRV-05 | 隐私与保留 | 删除账户与全部数据 | policy | — | — |
 | PRV-06 | 隐私与保留 | ChatGPT 读取范围 | live | capabilities | memory.web_policy |
 | SEC-01 | 账户安全 | 修改密码 | live | — | security.password |
 | SEC-02 | 账户安全 | 更换验证器 | live | — | security.totp.begin, security.totp.complete |
 | SEC-03 | 账户安全 | 轮换恢复码 | live | — | security.recovery_codes |
 | SEC-04 | 账户安全 | 会话管理 | live | security | security.session.revoke, security.sessions.revoke_others |
-| SEC-05 | 账户安全 | 登录记录 | planned | login-history | — |
+| SEC-05 | 账户安全 | 登录记录 | live | login-history | — |
 | AUD-01 | 审计记录 | 账户事件时间线 | live | audit | — |
-| AUD-02 | 审计记录 | 筛选与导出 | planned | audit | — |
+| AUD-02 | 审计记录 | 筛选与导出 | live | audit | — |
 | STO-01 | 存储与备份 | 个人数据导出 | live | export | storage.export |
 | STO-02 | 存储与备份 | 导入为新记忆 | live | — | storage.import |
 | STO-03 | 存储与备份 | 存储用量 | live | storage | — |
@@ -193,6 +232,6 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | ACC-03 | 账户管理 | 平台管理员角色 | live | — | accounts.role |
 | ACC-04 | 账户管理 | 查看他人记忆 | policy | — | — |
 | SYS-01 | 系统状态 | 平台开关 | live | capabilities | — |
-| SYS-02 | 系统状态 | 服务健康 | planned | system-health | — |
-| SYS-03 | 系统状态 | 版本与迁移 | planned | system-version | — |
-| SYS-04 | 系统状态 | 备份状态 | planned | backups | — |
+| SYS-02 | 系统状态 | 服务健康 | live | system-health | — |
+| SYS-03 | 系统状态 | 版本与迁移 | live | system-version | — |
+| SYS-04 | 系统状态 | 备份状态 | live | backups | — |

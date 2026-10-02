@@ -33,7 +33,7 @@ export function outputSchema(type,items,{multiSpan=false,bounded=false}={}){
   }
   return object({results:{type:'array',items:item,maxItems,minItems:type==='classification'?items.length:0}});
 }
-function validateSummary(sources,results,multiSpan){
+export function validateSummary(sources,results,multiSpan){
   const selected=new Map();
   for(const result of results){
     const source=sources.find(s=>s.memory_id===result.memory_id);

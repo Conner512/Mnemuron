@@ -20,6 +20,7 @@ export class CloudMemory {
       user_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,operation_id TEXT NOT NULL,
       request_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,credential_id TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(user_id,connection_id,action,operation_id),UNIQUE(user_id,connection_id,operation_id));`);
+    this.store.webVisibility.migrateCloudPrivateChoices();
   }
   // Local provisioning only: this function is never exposed as an HTTP route.
   bind(auth,input){
@@ -60,6 +61,7 @@ export class CloudMemory {
     if(grant&&(!this.store.runtime.cloudSubmittedGrant||!binding.allow_submitted_revision_grant))throw Object.assign(new AuthorizationError('cloud submitted revision policy'),{errorCode:'CLOUD_READ_POLICY_DENIED'});
     const hash=createHash('sha256').update(JSON.stringify(canonical({action,payload}))).digest('hex');
     return this.store.memoryTransaction(()=>{
+      this.store.webVisibility.migrateCloudPrivateChoices({markEmpty:true});
       const old=this.db.prepare('SELECT * FROM cloud_memory_operations WHERE user_id=? AND connection_id=? AND operation_id=?').get(auth.user_id,binding.connection_id,operation_id);
       if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictError('Operation ID has different parameters.','IDEMPOTENCY_CONFLICT');return JSON.parse(old.receipt_json);}
       let prior;
@@ -82,7 +84,7 @@ export class CloudMemory {
         if(grant){
           if(!['internal','sensitive','public'].includes(sensitivity))throw new ValidationError('This revision cannot be shared.','CLOUD_READ_POLICY_DENIED');
           this.db.prepare('INSERT INTO memory_web_grants VALUES(?,?,?,?,?)').run(auth.user_id,id,revision.revision,revision.state_hash,sensitivity==='public'?'sensitive':sensitivity);
-        }
+        }else this.store.webVisibility.keepPrivate(auth.user_id,id,revision);
       }
       const receipt={schema_version:'cloud-memory-operation-v1',status:'committed',saved:true,action,operation_id,
         memory_id:id,revision:revision.revision,memory_status:result.status,...(prior?{previous_memory_id:prior.memory_id}:{}),

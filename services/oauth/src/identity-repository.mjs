@@ -225,15 +225,16 @@ export class IdentityRepository {
   async authenticate(username,password,otp) {
     let key;try{key=usernameKey(username);}catch{return null;}
     const a=this.db.prepare('SELECT * FROM identity_accounts WHERE username_key=?').get(key);
+    const failed=()=>{if(a)this.audit(a.account_id,'account.login.failed','failure');return null;};
     const record=a?JSON.parse(a.password_json):{salt:'synthetic-constant-cost-unknown-user',hash:''};
     const value=typeof password==='string'&&password.length<=1024?password:'';
     const hash=(await derive(value,record.salt,64,SCRYPT)).toString('base64url');
-    if(!a||!equalSecret(hash,record.hash)||!this.eligible(a.subject)||!/^\d{6}$/.test(otp||'')) return null;
+    if(!a||!equalSecret(hash,record.hash)||!this.eligible(a.subject)||!/^\d{6}$/.test(otp||'')) return failed();
     const result=await verify({secret:this.unseal(a.mfa_cipher,a.account_id,'totp'),token:otp,epochTolerance:30});
-    if(!result.valid) return null;
+    if(!result.valid) return failed();
     return this.store.transaction(()=>{
       const current=this.byId(a.account_id);
-      if(!this.eligible(a.subject)||current.security_version!==a.security_version||current.password_json!==a.password_json||current.mfa_cipher!==a.mfa_cipher||!this.store.consumeStep(a.subject,result.epoch)) return null;
+      if(!this.eligible(a.subject)||current.security_version!==a.security_version||current.password_json!==a.password_json||current.mfa_cipher!==a.mfa_cipher||!this.store.consumeStep(a.subject,result.epoch)) return failed();
       this.audit(a.account_id,'account.login');return a.subject;
     });
   }

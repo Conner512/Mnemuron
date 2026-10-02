@@ -45,11 +45,11 @@ async function setup(t){
  const authorize=async(o,r,{scope='openid offline_access memory:read memory:write'}={})=>{
    const ids=f.app.accounts;ids.db.prepare('DELETE FROM oauth_mfa_steps WHERE subject=?').run(ids.byId(o.id).subject);
    const verifier=randomSecret(),request={client_id:r.connection.client_id,redirect_uri:f.config.chatgpt_client.redirect_uris[0],response_type:'code',scope,resource:f.config.resource,state:randomSecret(),code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')},browser=new Browser(f.config.issuer);
-   let response=await browser.request(`/authorize?${new URLSearchParams(request)}`);
+   const pages=[];let response=await browser.request(`/authorize?${new URLSearchParams(request)}`);
    for(let i=0;i<12;i++){
-     const location=response.headers.get('location');if(location){const next=new URL(location,f.config.issuer);if(next.origin!==f.config.issuer)return {callback:next,verifier};response=await browser.request(next);}
+     const location=response.headers.get('location');if(location){const next=new URL(location,f.config.issuer);if(next.origin!==f.config.issuer)return {callback:next,verifier,pages};response=await browser.request(next);}
      else if(response.status!==200)return {response};else{
-       const csrf=response.text.match(/name="csrf" value="([^"]+)"/)?.[1],action=response.text.match(/action="([^"]+)"/)?.[1];assert.ok(csrf&&action);
+       pages.push(response.text);const csrf=response.text.match(/name="csrf" value="([^"]+)"/)?.[1],action=response.text.match(/action="([^"]+)"/)?.[1];assert.ok(csrf&&action);
        response=await browser.post(action,{csrf,...(action.endsWith('/login')?{username:o.name,password:'Synthetic password with spaces  ',otp:await generate({secret:o.setup.secret})}:{})});
      }
    }throw new Error('Synthetic authorization loop');
@@ -122,4 +122,114 @@ test('B-14/25: personal readonly OAuth and PAT cannot gain writes by refresh; up
  assert.equal((await x.f.introspect(issued.data.access_token)).data.active,false);
  assert.notEqual((await x.token(r,{grant_type:'refresh_token',refresh_token:issued.data.refresh_token,resource:x.f.config.resource})).status,200);
  assert.equal((await x.exchange(a,r)).status,200);
+});
+test('B-27: single-step ChatGPT setup guide drives real readonly PKCE, refresh and memory retrieval',async t=>{
+ const x=await setup(t),a=x.owners[0];
+ const r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic visual setup',profile:'readonly',redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});
+ assert.equal(x.f.app.accounts.connections.client(r.connection.client_id),undefined);x.provision();
+ const detail=()=>x.f.app.accounts.connections.detail(a.id,r.connection.connection_id),guide=detail().guide;
+ const flow=await x.authorize(a,r,{scope:guide.oauth_scopes.join(' ')});
+ const issued=await x.token(r,{grant_type:'authorization_code',code:flow.callback.searchParams.get('code'),code_verifier:flow.verifier,redirect_uri:r.connection.redirect_uri,resource:guide.resource});
+ assert.equal(issued.status,200);assert.ok(issued.data.refresh_token);assert.equal(detail().connection.active_grant_count,1);
+ const client=await x.sdk(issued.data.access_token);await client.callTool({name:'mnemuron_auth_status',arguments:{}});
+ assert.equal(detail().connection.health,'authorized','auth status alone is not memory verification');
+ assert.ok(!(await client.listTools()).tools.some(t=>t.name==='mnemuron_save_memory'));
+ const result=await client.callTool({name:'mnemuron_search_memories',arguments:{query:'Synthetic',limit:1}});assert.ok(!result.isError);assert.ok(result.structuredContent);assert.ok(!result.structuredContent.error);
+ await eventually(()=>detail().connection.health==='verified');
+ assert.equal((await x.token(r,{grant_type:'refresh_token',refresh_token:issued.data.refresh_token,resource:guide.resource})).status,200);
+ x.f.app.store.revoke({subject:a.account.subject,clientId:r.connection.client_id});assert.equal(detail().connection.active_grant_count,0);
+});
+test('B-29: undiscovered legacy scope still fails for personal clients; exact per-connection scopes authorize without expanding permission',async t=>{
+ const x=await setup(t),a=x.owners[0];
+ const metadata=await fetch(x.f.config.issuer+'/.well-known/oauth-authorization-server').then(r=>r.json());
+ assert.deepEqual(metadata.scopes_supported,['openid','offline_access','memory:read']);
+ for(const profile of ['readonly','memory_readwrite']){
+  const r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic scope reproduction '+profile,profile,redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});x.provision();
+  const guide=x.f.app.accounts.connections.detail(a.id,r.connection.connection_id).guide;
+  const rejected=await x.authorize(a,r,{scope:guide.oauth_scopes.concat('project:read').join(' ')});
+  assert.equal(rejected.callback?.searchParams.get('error'),'invalid_scope');
+  assert.equal(x.f.app.accounts.connections.detail(a.id,r.connection.connection_id).connection.active_grant_count,0);
+  if(profile==='readonly'){
+   const write=await x.authorize(a,r,{scope:guide.oauth_scopes.concat('memory:write').join(' ')});
+   assert.equal(write.callback?.searchParams.get('error'),'invalid_scope');
+  }
+  const accepted=await x.authorize(a,r,{scope:guide.oauth_scopes.join(' ')});
+  assert.ok(accepted.callback?.searchParams.get('code'));
+  const issued=await x.token(r,{grant_type:'authorization_code',code:accepted.callback.searchParams.get('code'),code_verifier:accepted.verifier,redirect_uri:r.connection.redirect_uri,resource:guide.resource});
+  assert.equal(issued.status,200);
+  const granted=issued.data.scope.split(' ');assert.ok(!granted.includes('project:read'));assert.equal(granted.includes('memory:write'),profile==='memory_readwrite');
+ }
+});
+test('B-31: client-specific discovery drives actual consent, tokens and memory read/write without widening readonly clients',async t=>{
+ const x=await setup(t),a=x.owners[0];
+ for(const profile of ['readonly','memory_readwrite']){
+  const r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic discovered '+profile,profile,allow_submitted_revision_grant:profile==='memory_readwrite',redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});x.provision();
+  const guide=x.f.app.accounts.connections.detail(a.id,r.connection.connection_id).guide;
+  assert.equal(new URL(guide.discovery_url).searchParams.get('client_id'),r.connection.client_id);
+  const response=await fetch(guide.discovery_url);assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'no-store');
+  const metadata=await response.json();assert.deepEqual(metadata.scopes_supported,guide.oauth_scopes);assert.equal(metadata.issuer,guide.issuer);
+  assert.equal(metadata.authorization_endpoint,guide.authorization_url);assert.equal(metadata.token_endpoint,guide.token_url);
+  const alias=await fetch(guide.discovery_url.replace('openid-configuration','oauth-authorization-server')).then(r=>r.json());assert.deepEqual(alias.scopes_supported,guide.oauth_scopes);
+  for(const secret of [r.secret,a.setup.secret,a.id,a.name])assert.ok(!JSON.stringify(metadata).includes(secret));
+  const flow=await x.authorize(a,r,{scope:metadata.scopes_supported.join(' ')});assert.ok(flow.callback?.searchParams.get('code'));
+  const consent=flow.pages.find(html=>html.includes('/confirm'));assert.ok(consent);
+  assert.equal(consent.includes('data-i18n="allowMemoryWrite"'),profile==='memory_readwrite');assert.ok(!consent.includes('data-i18n="oauthWriteNotRequested"'));
+  assert.ok(!consent.includes('第三方应用只获得你逐项授权的只读访问'),'shared branding does not mislabel a write consent');
+  if(profile==='readonly')assert.match(consent,/data-i18n="consentMemoryNote"/,'personal memory consent does not claim project access');
+  const issued=await x.token(r,{grant_type:'authorization_code',code:flow.callback.searchParams.get('code'),code_verifier:flow.verifier,redirect_uri:r.connection.redirect_uri,resource:guide.resource});assert.equal(issued.status,200);
+  assert.equal(issued.data.scope.split(' ').includes('memory:write'),profile==='memory_readwrite');assert.ok(!issued.data.scope.includes('project:read'));
+  const client=await x.sdk(issued.data.access_token),tools=(await client.listTools()).tools;
+  assert.equal(tools.some(t=>t.name==='mnemuron_save_memory'),profile==='memory_readwrite');
+  if(profile==='memory_readwrite'){
+   const content='Synthetic discovery read/write verification';
+   const saved=(await client.callTool({name:'mnemuron_save_memory',arguments:{operation_id:randomUUID(),scope:'user',memory_type:'fact',content,cloud_read:'allow_submitted_revision'}})).structuredContent;
+   assert.equal(saved.status,'committed');const read=(await client.callTool({name:'mnemuron_get_memory',arguments:{memory_id:saved.memory_id}})).structuredContent;assert.equal(read.memory.content,content);assert.equal(read.content_complete,true);
+  }else await assert.rejects(client.callTool({name:'mnemuron_save_memory',arguments:{operation_id:randomUUID(),scope:'user',memory_type:'fact',content:'Must not save',cloud_read:'keep_private'}}));
+  const refreshed=await x.token(r,{grant_type:'refresh_token',refresh_token:issued.data.refresh_token,resource:guide.resource});assert.equal(refreshed.status,200);assert.equal(refreshed.data.scope.split(' ').includes('memory:write'),profile==='memory_readwrite');
+ }
+});
+test('B-32: scoped discovery fails closed for unavailable clients and rejects ambiguous selectors',async t=>{
+ const x=await setup(t),a=x.owners[0],r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic scoped metadata',profile:'memory_readwrite',redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});
+ const endpoint=x.f.config.issuer+'/.well-known/openid-configuration',query='?client_id='+r.connection.client_id;
+ const status=async suffix=>{const r=await fetch(endpoint+suffix);await r.arrayBuffer();return r.status;};
+ assert.equal(await status(query),404,'unbound client has no discoverable permissions');x.provision();assert.equal(await status(query),200);
+ for(const suffix of ['?client_id=','?client_id=unknown','?client_id='+r.connection.client_id+'&client_id=other','?client_id='+r.connection.client_id+'&scope=memory:write'])assert.ok(await status(suffix)>=400);
+ await x.execute(a,'connections.disable',{connection_id:r.connection.connection_id});assert.equal(await status(query),404);
+ await x.execute(a,'connections.update',{connection_id:r.connection.connection_id,profile:'readonly'});assert.equal(await status(query),404);x.provision();
+ const downgraded=await fetch(endpoint+query).then(r=>r.json());assert.deepEqual(downgraded.scopes_supported,['openid','offline_access','memory:read']);
+ await x.execute(a,'connections.revoke',{connection_id:r.connection.connection_id});assert.equal(await status(query),404);
+ assert.equal(await status(''),200,'common read discovery remains compatible');
+});
+test('B-33: read/write connection with an underscoped request shows a warning, never silently grants write',async t=>{
+ const x=await setup(t),a=x.owners[0],r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic missing write request',profile:'memory_readwrite',redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});x.provision();
+ const flow=await x.authorize(a,r,{scope:'openid offline_access memory:read'}),consent=flow.pages.find(html=>html.includes('/confirm'));
+ assert.match(consent,/role="alert"/);assert.match(consent,/data-i18n="oauthWriteNotRequested"/);assert.match(consent,/openid offline_access memory:read memory:write/);assert.doesNotMatch(consent,/data-i18n="allowMemoryWrite"/);
+ const issued=await x.token(r,{grant_type:'authorization_code',code:flow.callback.searchParams.get('code'),code_verifier:flow.verifier,redirect_uri:r.connection.redirect_uri,resource:x.f.config.resource});assert.equal(issued.status,200);assert.ok(!issued.data.scope.includes('memory:write'));
+});
+test('B-30: every discovery entry and initial challenge forms a usable least-privilege authorization for both personal profiles',async t=>{
+ const x=await setup(t),a=x.owners[0],scopes=new Set();
+ for(const route of ['/.well-known/oauth-authorization-server','/.well-known/openid-configuration']){
+  const r=await fetch(x.f.config.issuer+route);assert.equal(r.status,200);const metadata=await r.json();
+  assert.deepEqual(metadata.scopes_supported,['openid','offline_access','memory:read']);
+  assert.equal(metadata.issuer,x.f.config.issuer);assert.ok(metadata.code_challenge_methods_supported.includes('S256'));
+  for(const scope of metadata.scopes_supported)scopes.add(scope);
+ }
+ for(const route of ['/.well-known/oauth-protected-resource','/.well-known/oauth-protected-resource/mcp']){
+  const r=await fetch(new URL(route,x.f.config.resource));assert.equal(r.status,200);const metadata=await r.json();
+  assert.deepEqual(metadata.scopes_supported,['memory:read']);for(const scope of metadata.scopes_supported)scopes.add(scope);
+ }
+ const denied=await fetch(x.f.config.resource);assert.equal(denied.status,401);await denied.arrayBuffer();
+ const challenge=denied.headers.get('www-authenticate').match(/scope="([^"]+)"/)[1];assert.equal(challenge,'openid offline_access memory:read');
+ for(const scope of challenge.split(' '))scopes.add(scope);
+ for(const profile of ['readonly','memory_readwrite']){
+  const r=await x.execute(a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic discovered '+profile,profile,redirect_uri:x.f.config.chatgpt_client.redirect_uris[0]});x.provision();
+  const flow=await x.authorize(a,r,{scope:[...scopes].join(' ')});assert.ok(flow.callback?.searchParams.get('code'));
+  const issued=await x.token(r,{grant_type:'authorization_code',code:flow.callback.searchParams.get('code'),code_verifier:flow.verifier,redirect_uri:r.connection.redirect_uri,resource:x.f.config.resource});
+  assert.equal(issued.status,200);assert.ok(issued.data.refresh_token);assert.ok(!issued.data.scope.includes('memory:write')&&!issued.data.scope.includes('project:read'));
+  const client=await x.sdk(issued.data.access_token),tools=(await client.listTools()).tools;
+  assert.ok(tools.some(t=>t.name==='mnemuron_search_memories'));assert.ok(!tools.some(t=>t.name==='mnemuron_save_memory'||t.name==='mnemuron_preview_project_context'));
+  const result=await client.callTool({name:'mnemuron_search_memories',arguments:{query:'Synthetic',limit:1}});assert.ok(!result.isError&&!result.structuredContent.error);
+  const refreshed=await x.token(r,{grant_type:'refresh_token',refresh_token:issued.data.refresh_token,resource:x.f.config.resource});assert.equal(refreshed.status,200);
+  assert.ok(!refreshed.data.scope.includes('memory:write'),'discovery/refresh does not silently grant write access');
+ }
 });

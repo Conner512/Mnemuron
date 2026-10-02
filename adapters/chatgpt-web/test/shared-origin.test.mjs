@@ -42,11 +42,14 @@ test("SHARED-02 documented path allowlist routes both discovery documents and de
   assert.equal(as.authorization_endpoint, origin + "/authorize");
   assert.deepEqual(rs.authorization_servers, [origin]);
   assert.equal(rs.resource, origin + "/mcp");
+  assert.deepEqual(as.scopes_supported,['openid','offline_access','memory:read']);
+  assert.deepEqual(rs.scopes_supported,['memory:read']);
   assert.deepEqual(rs, await (await fetch(origin + "/.well-known/oauth-protected-resource")).json());
   assert.deepEqual(as, await (await fetch(origin + "/.well-known/openid-configuration")).json());
   const noAuth = await f.mcp("tools/list");
   assert.equal(noAuth.status, 401);
   assert.ok(noAuth.headers.get("www-authenticate").includes(origin + "/.well-known/oauth-protected-resource/mcp"));
+  assert.equal(noAuth.headers.get('www-authenticate').match(/scope="([^"]+)"/)[1],'openid offline_access memory:read');
   for (const route of ["/livez", "/readyz", "/readyz/search", "/v1/identity", "/v1/memories", "/admin",
     "/.env", "/auth.sqlite3", "/userinfo", "/token/extra", "/interaction/../admin", "/mcp/extra", "/assets/script.js"]) {
     assert.equal((await fetch(origin + route)).status, 404, route);

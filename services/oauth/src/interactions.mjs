@@ -60,8 +60,10 @@ export async function interactionRequest(request, response, { provider, store, a
         const account=accounts.account(details.session?.accountId);
         if(!account||!accounts.eligible(account.subject))throw new BoundaryError(403,'ACCOUNT_DISABLED');
         const keys={openid:'scopeIdentity',offline_access:'scopeOffline','memory:read':'scopeMemory','project:read':'scopeProject','memory:write':'scopeMemoryWrite'};
+        const missingWrite=personal&&!writing&&accounts.connections.discoveryScopes(params.client_id).includes('memory:write');
         return page(response,`<div class="consent-account">${label('identity','p')}<strong>${escapeHtml(account.username)}</strong></div>
-          ${label('oauthClient','p')}<code>${escapeHtml(params.client_id)}</code><ul>${scopes.filter(s=>keys[s]).map(s=>label(keys[s],'li')).join('')}</ul>${label(writing?'consentWriteNote':'consentNote','p')}
+          ${label('oauthClient','p')}<code>${escapeHtml(params.client_id)}</code><ul>${scopes.filter(s=>keys[s]).map(s=>label(keys[s],'li')).join('')}</ul>${label(writing?'consentWriteNote':scopes.includes('project:read')?'consentNote':'consentMemoryNote','p')}
+          ${missingWrite?`<aside class="policy-box" role="alert">${label('oauthWriteNotRequested','p')}<code>${escapeHtml(accounts.connections.oauthScopes(accounts.connections.clientRow(params.client_id)).join(' '))}</code>${label('oauthWriteRestart','p')}</aside>`:''}
           ${writing?label(config.cloud_memory?.allow_submitted_revision_grant&&(!personal||accounts.connections.clientRow(params.client_id)?.allow_submitted_revision_grant)?'consentSubmittedGrant':'consentPrivateOnly','p'):''}
           <form method="post" action="/interaction/${uid}/confirm">${field}<button class="primary" type="submit" data-i18n="${writing?'allowMemoryWrite':'allow'}">${text(writing?'allowMemoryWrite':'allow')}</button></form>${abort.replace('>Cancel<',` data-i18n="cancel">${text('cancel')}<`)}`,params.redirect_uri,true,account,writing?'allowMemoryWrite':'oauthConsent');
       }

@@ -70,6 +70,10 @@ System fonts only: the CSP allows no external font source, and CJK web fonts are
 - **Buttons**: primary = ink fill; secondary = ink outline; quiet = text only. The submit button of an
   explicit operation dialog, and OAuth consent, use the accent (a "seal" confirming the action).
   Revoke, retract, disable and cancel actions use the danger colour.
+- **Memory selection**: show inline, accessibly named checkboxes only when a batch action is granted.
+  The toolbar above the list shows the count and only permitted actions, disabled until selected;
+  selection is limited to 50 active records and clears when the result set reloads. Opening a record
+  is separate from selecting it. Search placeholders disappear on focus without removing the label.
 - **Status**: shape and words carry the meaning, colour only supports it — filled square for active,
   hollow square for superseded or in progress, a dash and strike-through for retracted.
 - **Notices and policy boxes**: a 1.5px ink rule on top, no coloured side bars.

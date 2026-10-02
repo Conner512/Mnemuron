@@ -50,10 +50,12 @@ export class ConnectionRegistry {
  owner(account){const a=this.ids.byId(account);if(!a||!this.ids.eligible(a.subject))fail('SESSION_REQUIRED',401);return a;}
  row(account,id){const r=this.db.prepare('SELECT * FROM identity_connections WHERE account_id=? AND connection_id=?').get(account,id);if(!r)fail('CONNECTION_NOT_FOUND',404);return r;}
  current(r){const a=r&&this.ids.byId(r.account_id);return !!a&&this.ids.eligible(a.subject)&&r.state==='ready'&&r.binding_version===r.version&&r.binding_account_version===a.security_version&&!!r.binding_json;}
+ activeGrants(r){if(r.kind!=='chatgpt_oauth'||!this.current(r))return [];
+   return this.db.prepare("SELECT g.id grant_id,g.expires FROM oauth_records g WHERE g.model='Grant' AND g.expires>? AND json_extract(g.payload,'$.accountId')=? AND json_extract(g.payload,'$.clientId')=? AND EXISTS(SELECT 1 FROM json_each(g.payload,'$.resources') s WHERE s.key=? AND instr(' '||s.value||' ',' memory:read ')>0) ORDER BY g.expires DESC LIMIT 50").all(seconds(),this.ids.byId(r.account_id).subject,r.client_id,this.config.resource);}
  public(r){const expired=r.kind==='generic_mcp'&&!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=?').get(r.connection_id,r.version)&&!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL AND expires>?').get(r.connection_id,r.version,seconds());
    return {connection_id:r.connection_id,kind:r.kind,label:r.label,description:r.description,profile:r.profile,
      configuration_state:r.state==='ready'&&!this.current(r)?'draft':r.state,provisioning:r.state==='ready'&&!this.current(r),health:expired?'unknown':r.health,expired,
-     client_id:r.kind==='chatgpt_oauth'?r.client_id:null,redirect_uri:r.callback,version:r.version,created_at:r.created,updated_at:r.updated,
+     client_id:r.kind==='chatgpt_oauth'?r.client_id:null,...(r.kind==='chatgpt_oauth'?{active_grant_count:this.activeGrants(r).length}:{}),redirect_uri:r.callback,version:r.version,created_at:r.created,updated_at:r.updated,
      has_secret:r.state!=='revoked'&&(r.kind==='chatgpt_oauth'?!!r.secret_cipher:!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL').get(r.connection_id,r.version)),
      last_authorized_at:r.last_authorized,last_successful_tool_at:r.last_success,last_error_code:r.last_error,
      allow_submitted_revision_grant:!!r.allow_submitted_revision_grant,physical_device_verified:false};}
@@ -75,19 +77,29 @@ export class ConnectionRegistry {
    const rows=this.db.prepare(`SELECT c.* FROM identity_connections c WHERE ${where} ORDER BY c.updated DESC,c.connection_id LIMIT ? OFFSET ?`).all(...args,limit,offset);
    const current=`c.state NOT IN ('revoked','disabled') AND NOT ${expired}`;
    const counts=this.db.prepare(`SELECT COUNT(*) total,SUM(${current}) active,SUM(${current} AND c.profile='readonly') readonly,SUM(${current} AND c.profile='memory_readwrite') memory_readwrite,SUM(NOT ${expired} AND (c.state='draft' OR (c.state='ready' AND (c.binding_version IS NULL OR c.binding_version<>c.version OR c.binding_account_version<>?)))) pending FROM identity_connections c WHERE c.account_id=?`).get(this.ids.byId(account).security_version,account);
-   return {connections:rows.map(r=>this.public(r)),total,offset,limit,next_offset:offset+rows.length<total?offset+rows.length:null,counts:Object.fromEntries(Object.entries(counts).map(([k,v])=>[k,v??0])),count_scope:'all_owned_logical_connections',capabilities:this.capabilities()};
+   // Inventory totals describe saved configurations; authorization totals must use live, owner-bound evidence.
+   const grant=scope=>`EXISTS(SELECT 1 FROM oauth_records g,json_each(g.payload,'$.resources') s WHERE g.model='Grant' AND g.expires>:now AND json_extract(g.payload,'$.accountId')=:subject AND json_extract(g.payload,'$.clientId')=c.client_id AND s.key=:resource AND instr(' '||s.value||' ',' memory:read ')>0 AND instr(' '||s.value||' ',' ${scope} ')>0)`;
+   const usable=`c.state='ready' AND c.binding_json IS NOT NULL AND c.binding_version=c.version AND c.binding_account_version=:security AND ((c.kind='chatgpt_oauth' AND ${grant('memory:read')}) OR (c.kind='generic_mcp' AND EXISTS(SELECT 1 FROM identity_connection_tokens t WHERE t.connection_id=c.connection_id AND t.account_id=c.account_id AND t.version=c.version AND t.security_version=:security AND t.revoked IS NULL AND t.expires>:now)))`;
+   const authorization=this.db.prepare(`WITH inventory AS (SELECT c.*,COALESCE((${usable}),0) usable,(c.profile='memory_readwrite' AND (c.kind='generic_mcp' OR ${grant('memory:write')})) write_granted,(${expired}) expired FROM identity_connections c WHERE c.account_id=:account)
+     SELECT SUM(usable) usable,SUM(usable AND NOT write_granted) readonly,SUM(usable AND write_granted) memory_readwrite,SUM(state IN ('draft','ready') AND NOT expired AND NOT usable) pending,SUM(usable AND health='verified') verified FROM inventory`).get({account,subject:owner.subject,security:owner.security_version,now:seconds(),resource:this.config.resource});
+   return {connections:rows.map(r=>this.public(r)),total,offset,limit,next_offset:offset+rows.length<total?offset+rows.length:null,counts:Object.fromEntries(Object.entries(counts).map(([k,v])=>[k,v??0])),authorization_counts:Object.fromEntries(Object.entries(authorization).map(([k,v])=>[k,v??0])),count_scope:'all_owned_logical_connections',capabilities:this.capabilities()};
  }
- detail(account,id){this.owner(account);const r=this.row(account,id),a=this.ids.byId(account);
-   return {connection:this.public(r),guide:{transport:'Streamable HTTP',url:this.config.resource+(r.kind==='generic_mcp'?'/generic':''),resource:this.config.resource+(r.kind==='generic_mcp'?'/generic':''),authentication:r.kind==='generic_mcp'?'Personal resource token (custom Authorization header required)':'OAuth authorization_code + PKCE S256',token_endpoint_auth_method:r.kind==='chatgpt_oauth'?'client_secret_post':null,scopes:this.scopes(r),secret_placeholder:'<YOUR_PRIVATE_SECRET>',callback_source:'Copy the exact callback from the ChatGPT connection management screen; no wildcard.',not_a_universal_client_config:true,
-     ...(r.kind==='chatgpt_oauth'?{authorization_url:this.config.issuer+'/authorize',token_url:this.config.issuer+'/token'}:{}),timeout_seconds:30,
+ detail(account,id){this.owner(account);const r=this.row(account,id);
+   const grants=this.activeGrants(r);
+   return {connection:{...this.public(r),active_grant_count:grants.length},guide:{transport:'Streamable HTTP',url:this.config.resource+(r.kind==='generic_mcp'?'/generic':''),resource:this.config.resource+(r.kind==='generic_mcp'?'/generic':''),authentication:r.kind==='generic_mcp'?'Personal resource token (custom Authorization header required)':'OAuth authorization_code + PKCE S256',token_endpoint_auth_method:r.kind==='chatgpt_oauth'?'client_secret_post':null,scopes:this.scopes(r),secret_placeholder:'<YOUR_PRIVATE_SECRET>',callback_source:'Copy the exact callback from the ChatGPT connection management screen; no wildcard.',not_a_universal_client_config:true,
+     ...(r.kind==='chatgpt_oauth'?{oauth_scopes:this.oauthScopes(r),issuer:this.config.issuer,discovery_url:this.config.issuer+'/.well-known/openid-configuration?client_id='+encodeURIComponent(r.client_id),authorization_url:this.config.issuer+'/authorize',token_url:this.config.issuer+'/token'}:{}),timeout_seconds:30,
      tools:['mnemuron_auth_status','mnemuron_search_memories','mnemuron_get_memory',...(r.profile==='memory_readwrite'?['mnemuron_save_memory','mnemuron_supersede_memory','mnemuron_retract_memory','mnemuron_get_operation']:[])]},
-     grants:this.db.prepare("SELECT id,expires FROM oauth_records WHERE model='Grant' AND json_extract(payload,'$.accountId')=? AND json_extract(payload,'$.clientId')=? ORDER BY expires DESC LIMIT 50").all(a.subject,r.client_id).map(g=>({grant_id:g.id,expires:g.expires})),
+     grants,
      keys:this.db.prepare('SELECT token_id,version,created,expires,revoked FROM identity_connection_tokens WHERE account_id=? AND connection_id=? ORDER BY created DESC,token_id LIMIT 50').all(account,id),
      activity:this.db.prepare('SELECT action,outcome,created FROM identity_connection_activity WHERE account_id=? AND connection_id=? ORDER BY created DESC,rowid DESC LIMIT 50').all(account,id),details_limit:50};
  }
  activity(r,action,outcome='success'){this.db.prepare('INSERT INTO identity_connection_activity VALUES(?,?,?,?,?,?)').run(randomUUID(),r.account_id,r.connection_id,action,outcome,seconds());this.ids.audit(r.account_id,action,outcome);}
  scopes(r){return ['memory:read',...(r.profile==='memory_readwrite'?['memory:write']:[])];}
  oauthScopes(r){return ['openid','offline_access',...this.scopes(r)];}
+ discoveryScopes(id){const r=this.clientRow(id);
+   if(!this.enabled()||!this.current(r)||!r.callback)fail('CONNECTION_NOT_FOUND',404);
+   return this.oauthScopes(r).filter(scope=>scope!=='memory:write'||this.config.cloud_memory?.enabled===true);
+ }
  client(id){const r=this.db.prepare("SELECT * FROM identity_connections WHERE client_id=? AND kind='chatgpt_oauth'").get(id);
    if(!this.enabled()||!this.current(r)||!r.callback)return undefined;
    return {client_id:r.client_id,client_secret:this.ids.unseal(r.secret_cipher,r.account_id,`connection-client:${r.connection_id}`),redirect_uris:[r.callback],
@@ -120,7 +132,7 @@ export class ConnectionRegistry {
    return {...out,connection:this.public(current),replayed:true,...(row.secret_cipher&&row.secret_expires>seconds()&&out.connection.version===current.version&&!['revoked','disabled'].includes(current.state)?{secret:this.ids.unseal(row.secret_cipher,account,`connection-result:${operation}:${session.digest}`),secret_expires_at:row.secret_expires}:{secret_expired:true})};}
  async execute(account,session,action,input,operation){
    const policy=this.policy();this.currentSession(account,session);if(!connectionActions.includes(action)||typeof operation!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(operation))fail();
-   const allowed=action==='connections.create'?['kind','label','description','profile','allow_submitted_revision_grant','ttl_seconds']:action==='connections.update'?['connection_id','label','description','profile','redirect_uri','allow_submitted_revision_grant','ttl_seconds']:['connection_id','ttl_seconds'];
+   const allowed=action==='connections.create'?['kind','label','description','profile','allow_submitted_revision_grant','ttl_seconds','redirect_uri']:action==='connections.update'?['connection_id','label','description','profile','redirect_uri','allow_submitted_revision_grant','ttl_seconds']:['connection_id','ttl_seconds'];
    fields(input,[...allowed,'current_password','otp']);const {current_password,otp,...p}=input;
    const prior=this.previous(account,session,action,p,operation);if(prior)return prior;
    if(p.connection_id)this.row(account,p.connection_id);
@@ -131,7 +143,8 @@ export class ConnectionRegistry {
      if(action==='connections.create'){
        if(!['chatgpt_oauth','generic_mcp'].includes(p.kind)||!text(p.label,80)||p.description!==undefined&&(!text(p.description,400)&&p.description!==''))fail();
        if(this.db.prepare("SELECT COUNT(*) n FROM identity_connections WHERE account_id=? AND state<>'revoked'").get(account).n>=policy.max_connections)fail('CONNECTION_QUOTA',409);
-       const id=secretHash(randomSecret());r={connection_id:id,account_id:account,kind:p.kind,label:p.label.trim(),description:p.description||'',profile:p.profile,state:p.kind==='generic_mcp'?'ready':'draft',health:'never_used',client_id:`mnmc_${randomSecret()}`,secret_cipher:null,callback:null,allow_submitted_revision_grant:p.allow_submitted_revision_grant===true?1:0,version:1,created:seconds(),updated:seconds()};
+       const id=secretHash(randomSecret());r={connection_id:id,account_id:account,kind:p.kind,label:p.label.trim(),description:p.description||'',profile:p.profile,state:p.kind==='generic_mcp'||p.redirect_uri!==undefined?'ready':'draft',health:'never_used',client_id:`mnmc_${randomSecret()}`,secret_cipher:null,
+         callback:p.redirect_uri===undefined?null:p.kind==='chatgpt_oauth'?exactChatgptCallback(p.redirect_uri,{isolated:this.config.isolated}):fail(),allow_submitted_revision_grant:p.allow_submitted_revision_grant===true?1:0,version:1,created:seconds(),updated:seconds()};
        if(r.kind==='chatgpt_oauth'){secret=randomSecret();r.secret_cipher=this.ids.seal(secret,account,`connection-client:${id}`);}
        this.validateProfile(r,p);
        const keys=Object.keys(r);this.db.prepare(`INSERT INTO identity_connections(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>r[k]));

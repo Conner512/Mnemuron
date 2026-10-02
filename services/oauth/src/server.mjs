@@ -13,7 +13,7 @@ import {sendPage,label} from '../../../web/console/render.mjs';
 import { makeProvider } from "./provider.mjs";
 import { interactionRequest } from "./interactions.mjs";
 import { BoundaryError, SerialGate, WindowLimit, OAUTH_SCOPES, parseForm, readBody,
-  requestBoundary, sendJson, equalSecret,oauthScopesFor } from "../../../shared/oauth-common.mjs";
+  requestBoundary, sendJson, equalSecret,DISCOVERY_OAUTH_SCOPES } from "../../../shared/oauth-common.mjs";
 import {acquireAuthorizationLease} from './process-lease.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 import {invalidateBrowserAuthorization} from './browser-session.mjs';
@@ -22,7 +22,7 @@ function bootstrapMetadata(config) {
   return { issuer: config.issuer, authorization_endpoint: `${config.issuer}/authorize`,
     token_endpoint: `${config.issuer}/token`, jwks_uri: `${config.issuer}/jwks`,
     response_types_supported: ["code"], response_modes_supported: ["query"],
-    grant_types_supported: ["authorization_code", "refresh_token"], scopes_supported: oauthScopesFor(config),
+    grant_types_supported: ["authorization_code", "refresh_token"], scopes_supported: [...DISCOVERY_OAUTH_SCOPES],
     token_endpoint_auth_methods_supported: ["client_secret_post"], code_challenge_methods_supported: ["S256"],
     authorization_response_iss_parameter_supported: true, mnemuron_mode: "bootstrap_metadata_only" };
 }
@@ -94,6 +94,15 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         throw new BoundaryError(404, "NOT_FOUND");
       }
       if (discovery && request.method === "GET") {
+        const selector=parseForm(url.search.slice(1));
+        if([...selector.keys()].some(key=>key!=='client_id'))throw new BoundaryError(400,'INVALID_DISCOVERY_QUERY');
+        if(selector.has('client_id')){
+          const id=selector.get('client_id');
+          if(!/^mnmc_[A-Za-z0-9_-]{43}$/.test(id)||!accounts.connections)throw new BoundaryError(404,'CONNECTION_NOT_FOUND');
+          // Only public capability metadata is selected. This is not authentication
+          // and does not bind an account, grant scopes, or expose client secrets.
+          request.mnemuronDiscoveryScopes=accounts.connections.discoveryScopes(id);
+        }
         // RFC 8414 uses the live OIDC document, not a second hand-maintained capabilities list.
         request.url = "/.well-known/openid-configuration";
         return callback(request, response);

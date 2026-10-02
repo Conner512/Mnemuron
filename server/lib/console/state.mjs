@@ -13,6 +13,7 @@ export class ConsoleState {
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_operations(user_id TEXT NOT NULL,operation_id TEXT NOT NULL,action TEXT NOT NULL,request_hash TEXT NOT NULL,
       state TEXT NOT NULL,result_json TEXT,error_code TEXT,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,operation_id));
       CREATE TABLE IF NOT EXISTS console_models(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,config_json TEXT NOT NULL,secret_cipher TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,kind));
+      CREATE TABLE IF NOT EXISTS console_model_tests(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,attempt_id TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT,error_code TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,kind));
       CREATE TABLE IF NOT EXISTS console_imports(user_id TEXT NOT NULL,source_key TEXT NOT NULL,memory_id TEXT NOT NULL,content_hash TEXT NOT NULL,PRIMARY KEY(user_id,source_key));
       CREATE TABLE IF NOT EXISTS console_vector_requests(user_id TEXT PRIMARY KEY,generation TEXT,profile TEXT NOT NULL,state TEXT NOT NULL,error_code TEXT,updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_owners(generation TEXT PRIMARY KEY,user_id TEXT NOT NULL);
@@ -42,7 +43,8 @@ export class ConsoleState {
     if(row.action!==action||row.request_hash!==fingerprint(payload))throw new ConflictError('Operation ID belongs to another request.','IDEMPOTENCY_CONFLICT');
     if(row.state==='running')throw new ConflictError('Operation is pending; do not resubmit under a new ID.','OPERATION_PENDING');
     if(row.state==='failed')throw new ConflictError('Previous operation failed. Inspect its result before retrying.','OPERATION_FAILED');
-    const stored=JSON.parse(row.result_json),result=stored.sealed?(Date.now()-row.created_at<=600000?this.unseal(user,operation,stored.sealed):{status:'completed',secret_expired:true}):stored;
+    const receiptTtl=['devices.register','devices.rotate'].includes(row.action)?300000:600000;
+    const stored=JSON.parse(row.result_json),result=stored.sealed?(Date.now()-row.created_at<=receiptTtl?this.unseal(user,operation,stored.sealed):{status:'completed',secret_expired:true}):stored;
     const current=result.memory_id?this.db.prepare('SELECT status FROM memories WHERE user_id=? AND memory_id=?').get(user,result.memory_id):null;
     return {...result,...(result.memory_id?{current_status:current?.status||'unavailable'}:{}),operation_id:operation,replayed:true};
   }

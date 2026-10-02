@@ -11,4 +11,6 @@ export const CONSOLE_SELF_SERVICE_ACTIONS = Object.freeze(['devices.revoke']);
 export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&(CONSOLE_MEMORY_ACTIONS.includes(action)||CONSOLE_SELF_SERVICE_ACTIONS.includes(action)));
 export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy',
   'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','vector.schedule',
-  'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke']);
+  'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
+  'memory.batch_classify','memory.batch_retract','taxonomy.save','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate']);
+export const CONSOLE_FEATURE_VIEWS = Object.freeze(['attention','capture-status','model-usage','taxonomy','privacy-defaults','retention','task-branches','project-context','task-checkpoints','task-reconciliation','system-health','system-version','backups','memory-versions']);

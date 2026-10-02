@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {pages,renderPage} from '../../../web/console/render.mjs';
-import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState} from '../../../web/console/visuals.mjs';
+import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {consoleAllowedActions} from '../src/console-policy.mjs';
@@ -19,6 +19,13 @@ const bff=read('services/oauth/src/console.mjs');
 const servedViews=new Set([...bff.matchAll(/'\/console-api\/([a-z-]+)'/g)].map(m=>m[1]).concat(bff.match(/\/\^\\\/console-api\\\/\(([^)]+)\)\$\//)[1].split('|')));
 const ingress=read('docs/console-ingress.example.yml');
 const ingressGroup=name=>new Set(ingress.match({app:/app\(\/\(([a-z|]+)\)\)/,'console-api':/console-api\/\(([a-z|-]+)\)/}[name])[1].split('|'));
+
+test('Revision comparison preserves exact Unicode and highlights the changed region',()=>{
+  for(const pair of [['A😀旧文末','A😃新文末'],['same','same'],['','insert'],['delete',''],['<script>','<img>']]){
+    const diff=revisionDifference(...pair);diff.forEach((d,i)=>assert.equal(d.prefix+d.changed+d.suffix,pair[i]));
+  }
+  assert.deepEqual(revisionDifference('A😀旧文末','A😃新文末'),[{prefix:'A',changed:'😀旧',suffix:'文末'},{prefix:'A',changed:'😃新',suffix:'文末'}]);
+});
 
 test('Feature map: one entry per menu page, in navigation order',()=>{
  assert.deepEqual(Object.keys(featureMap),pages);
@@ -85,7 +92,7 @@ test('Placeholders render every feature and never trigger a request',()=>{
   for(const f of featureMap[page].filter(f=>f.status==='planned'))assert.ok(html.includes(`console-feature-standard.md`)&&html.includes(`${f.id}</summary>`),`${page}: ${f.id} has developer notes`);
  }
  assert.equal(roadmapCard(t,'jobs'),'','a page with nothing planned shows no roadmap');
- assert.deepEqual(prototypePages.map(pageState),['partial','planned','partial','partial']);
+ assert.deepEqual(prototypePages.map(pageState),['partial','planned','live','live']);
 });
 
 test('Live cards on prototype pages escape data and degrade on their own',()=>{
@@ -122,5 +129,5 @@ test('PRV-06: the ChatGPT read scope card shows the real policy and offers only 
  assert.match(on,/data-state="enabled"/);assert.match(on,/data-console-action="memory.web_policy" data-enabled="false"/);assert.match(on,/data-i18n="webReadAllOn"/);
  assert.doesNotMatch(card({web_policy:{read_all:false,revision:0}},{allowed_actions:[]}),/data-console-action/);
  assert.match(card({}),/data-i18n="unavailable"/);
- assert.equal(prototypeOrder('privacy')[1].id,'PRV-06','live features come first on prototype pages');
+ assert.deepEqual(prototypeOrder('privacy').map(f=>f.id),['PRV-01','PRV-02','PRV-03','PRV-04','PRV-06','PRV-05'],'implemented features come before policy-disabled features');
 });

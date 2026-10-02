@@ -43,9 +43,12 @@ test('REV-01/02 mixed-script Store and REST recall survives newer noise and excl
 test('REV-01 mixed-script derived memories retain provenance and lifecycle search behavior', async t => {
   const f = await memoryFixture(t);
   const base = {project_id:f.alpha.project_id,task_id:f.alpha.task_id,workstream_id:f.alpha.workstreams[0].workstream_id,session_id:'review-derived'};
+  // Keep the source inside retention regardless of when this regression runs.
+  // Expired raw events deliberately cannot become new derived memories.
+  const captured = Date.now() - 60_000;
   const events = [
-    {...base,event_id:'review-derived-user',event_type:'user_message',captured_at:'2026-09-01T00:00:00Z',content:'决定：数据库使用SQLite'},
-    {...base,event_id:'review-derived-stop',event_type:'assistant_message',hook_event_name:'Stop',captured_at:'2026-09-01T00:01:00Z',content:'已完成：部署CUCM语音系统'},
+    {...base,event_id:'review-derived-user',event_type:'user_message',captured_at:new Date(captured).toISOString(),content:'决定：数据库使用SQLite'},
+    {...base,event_id:'review-derived-stop',event_type:'assistant_message',hook_event_name:'Stop',captured_at:new Date(captured+30_000).toISOString(),content:'已完成：部署CUCM语音系统'},
   ];
   const result = f.store.appendEvents(f.a.auth,{events});
   assert.ok(result.checkpoints[0].structured_memories.created > 0);

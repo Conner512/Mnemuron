@@ -61,11 +61,11 @@ try:
   page.locator('[name=query]').fill('C9300');pick('[name=search_mode]','hybrid');page.locator('#search-form button[type=submit]').click();page.wait_for_timeout(200);check('Search form supports real retrieval-mode selection',page.locator('[name=search_mode]').input_value()=='hybrid')
   goto('models');begin('models.save');page.locator('[name=enabled]').check();page.locator('[name=base_url]').fill(cfg['model_url']);page.locator('[name=model]').fill('synthetic-organizer');pick('[name=sensitivity]','sensitive');page.locator('[name=egress_approved]').check();r=submit();check('Personal model settings persist through real API',r['model']['config']['model']=='synthetic-organizer');close()
   begin('models.test');r=submit();check('UI model test executes real loopback HTTP, no personal input',r['real_memory_sent']==False and r['status']=='verified');close()
-  goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick');page.locator('[data-retry]').click();page.wait_for_timeout(300);check('Worker publishes actual job results',page.locator('body').inner_text().count('succeeded')>0)
+  goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick');page.locator('[data-retry]').click();expect(page.locator('[data-state="succeeded"]').first).to_be_visible();check('Worker publishes actual job results')
   begin('jobs.schedule');pick('[name=type]','summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick');cmd('tick');goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
   page.locator('[data-summary]').first.click();page.locator('#memory-content .body-content').first.wait_for();check('Summary drawer loads source-grounded quotes',len(page.locator('#memory-content .body-content').first.inner_text())>0);page.locator('#memory-dialog [data-close]').click()
   # Connection-specific lifecycle and secret cleanup run in test-console-connections.mjs.
-  goto('connections');page.locator('[data-connection-new]').click();page.locator('[data-connection-kind="generic_mcp"]').click()
+  goto('connections');page.locator('[data-connection-new]').first.click();page.locator('[data-connection-kind="generic_mcp"]').click()
   check('Logical connection wizard uses resource tokens, not Core-key forms',page.locator('#connection-dialog [name=ttl_days]').count()==1 and page.locator('#connection-dialog [name=agent_id]').count()==0)
   page.locator('#connection-dialog [data-connection-close]').first.click()
   goto('storage');begin('storage.export')
@@ -120,3 +120,5 @@ finally:
  try:proc.wait(timeout=15)
  except:proc.kill()
  err.close()
+ if '"synthetic_cleanup_complete":true' not in (E/'browser-fixture.stderr').read_text():
+  raise RuntimeError('Synthetic fixture cleanup was not verified')

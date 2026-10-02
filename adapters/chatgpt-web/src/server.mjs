@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { SUPPORTED_PROTOCOL_VERSIONS } from "@modelcontextprotocol/sdk/types.js";
-import { BoundaryError, WindowLimit, resourceScopesFor, oauthScopesFor, requestBoundary, sendJson, readBody, secretHash, requireConfig } from "../../../shared/oauth-common.mjs";
+import { BoundaryError, WindowLimit, DISCOVERY_RESOURCE_SCOPES, DISCOVERY_OAUTH_SCOPES, requestBoundary, sendJson, readBody, secretHash, requireConfig } from "../../../shared/oauth-common.mjs";
 import { validateGatewayConfig, loadGatewayConfig, loadIdentityMappings } from "./config.mjs";
 import { GatewayAuthorization } from "./authorization.mjs";
 import { ReadonlyCoreClient } from "./core-client.mjs";
@@ -29,7 +29,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
   requireConfig(!core || core.token !== authorization.secret, "separate introspection and core credentials");
   const origin = new URL(config.resource);
   const metadataUrl = `${origin.origin}${config.protected_resource_metadata_path}`;
-  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${oauthScopesFor(config).join(" ")}"`;
+  const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${DISCOVERY_OAUTH_SCOPES.join(" ")}"`;
   const limits = new WindowLimit();
   const concurrent = new Map();
   const server = http.createServer(async (request, response) => {
@@ -65,7 +65,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
       limits.take(`peer:${request.socket.remoteAddress}`, 600);
       if (request.method === "GET" && [config.protected_resource_metadata_path, "/.well-known/oauth-protected-resource"].includes(url.pathname)) {
         return sendJson(response, 200, { resource: config.resource, authorization_servers: [config.issuer],
-          scopes_supported: resourceScopesFor(config), bearer_methods_supported: ["header"] });
+          scopes_supported: [...DISCOVERY_RESOURCE_SCOPES], bearer_methods_supported: ["header"] });
       }
       if (request.method === "GET" && ["/livez", "/readyz"].includes(url.pathname)) {
         let ready = false;

@@ -32,6 +32,47 @@ async function setup(t,{maintenance=false,recovery=false,writable=true,managemen
  const proof=async(owner=a,future=0)=>({current_password:'Synthetic password with spaces  ',otp:await generate({secret:owner.setup.secret,epoch:seconds()+future})});
  return {core,f,ids,a,b,get,act,proof};
 }
+test('HTTP-COMPLETION: new reads require login; system views require an operator and never widen account visibility',async t=>{
+ const x=await setup(t),anonymous=new Browser(x.f.config.issuer);
+ for(const view of ['attention','taxonomy','privacy-defaults','retention','capture-status','model-usage','login-history','system-health','system-version','backups']){
+   assert.equal((await anonymous.request('/console-api/'+view)).status,401,view);
+   assert.equal((await x.get(view)).status,['system-health','system-version','backups'].includes(view)?403:200,view);
+ }
+ x.ids.console.role(x.a.record.account_id,true);
+ for(const view of ['system-health','system-version','backups'])assert.equal((await x.get(view)).status,200,view);
+ for(const view of ['login-history','audit'])assert.equal((await x.get(view+'?user_id=other')).status,400);
+ assert.equal((await x.act('privacy.defaults',{expected_revision:0,sensitivity:'secret',cloud_readable:false})).status,200);
+ assert.equal((await x.get('privacy-defaults',x.b)).body.sensitivity,'sensitive');
+});
+test('HTTP-COMPLETION: sensitive Agent and retention actions require fresh proof and revoked sessions fail closed',async t=>{
+ const x=await setup(t);const key=path.join(x.core.root,'console-features.key');writePrivate(key,randomSecret());x.core.store.memoryConfig.console={key_file:key};
+ const p={label:'Synthetic agent key',agent_id:'synthetic-agent',device_id:'synthetic-local',access:'read'};
+ assert.equal((await x.act('devices.register',p)).status,403);
+ assert.equal((await x.act('retention.prune',{confirmed:true})).status,403);
+ const created=await x.act('devices.register',{...p,...await x.proof()});assert.equal(created.status,200,JSON.stringify(created.body));
+ assert.equal((await x.act('devices.rotate',{credential_id:created.body.credential.credential_id,...await x.proof(x.b)},x.b)).status,404);
+ const original=x.ids.authenticate.bind(x.ids);x.ids.authenticate=async(...args)=>{const result=await original(...args);x.ids.revokeSession(x.a.console.token);return result;};
+ assert.equal((await x.act('devices.rotate',{credential_id:created.body.credential.credential_id,...await x.proof(x.a,30)})).status,401);
+ assert.ok(x.core.store.authenticate(created.body.api_key));
+});
+test('HTTP-COMPLETION: authentication history and audit filters/export pages are owner scoped and secret free',async t=>{
+ const x=await setup(t);
+ await x.ids.authenticate(x.a.name,'wrong','000000');await x.ids.authenticate(x.b.name,'wrong','000000');
+ const history=(await x.get('login-history?limit=1')).body;assert.equal(history.entries.length,1);assert.equal(history.entries[0].action,'account.login.failed');
+ const all=await x.get('audit?action=account.login.failed&outcome=failure&limit=1');assert.equal(all.status,200);assert.equal(all.body.entries.length,1);assert.equal(all.body.core_entries.length,0);
+ assert.doesNotMatch(JSON.stringify(all.body),/password_json|mfa_cipher|wrong|000000/);
+ assert.equal((await x.get('audit?from=bad')).status,400);assert.equal((await x.get('audit?limit=101')).status,400);
+ const old=await x.get('audit?to=2000-01-01T00:00:00.000Z');assert.deepEqual(old.body.entries,[]);assert.deepEqual(old.body.core_entries,[]);
+});
+test('HTTP-COMPLETION: Agent secret recovery is bound to the login that created it',async t=>{
+ const x=await setup(t);const key=path.join(x.core.root,'console-receipt.key');writePrivate(key,randomSecret());x.core.store.memoryConfig.console={key_file:key};
+ const p={label:'Synthetic bounded receipt',agent_id:'synthetic-receipt',device_id:'synthetic-local',access:'read'},operation=randomUUID();
+ const created=await x.act('devices.register',{...p,...await x.proof()},x.a,operation);assert.equal(created.status,200);
+ const session=x.ids.newSession('console',{accountId:x.a.record.account_id});x.a.browser.cookies.set('mnm_fixture_console:/',{name:'mnm_fixture_console',path:'/',value:session.token});
+ const replay=await x.act('devices.register',{...p,...await x.proof(x.a,30)},x.a,operation);assert.equal(replay.status,409);assert.equal(replay.body.api_key,undefined);
+ assert.equal(x.core.store.db.prepare("SELECT count(*) n FROM credentials WHERE agent_id='synthetic-receipt'").get().n,1);
+ assert.equal((await x.act('devices.register',{...p,receipt_session:'a'.repeat(64)})).status,400);
+});
 test('HTTP-CON-01: real BFF binds CSRF, Origin, account and write credentials before side effects',async t=>{
  const x=await setup(t),p={scope:'user',content:'Real BFF synthetic memory'};
  let r=await x.act('memory.create',p);assert.equal(r.status,200,JSON.stringify(r.body));
@@ -262,4 +303,16 @@ test('HTTP-DEVICES-01: agent keys are revoked only with fresh factors, only for 
  assert.equal(cross.status,200,'B revokes its own device');
  assert.equal((await x.act('devices.revoke',{agent_instance_id:'synthetic-http-gateway',...await x.proof(x.b,30)},x.b)).body.error_code,'CREDENTIAL_NOT_FOUND');
  assert.ok(x.core.store.authenticate(gateway.api_key),'another account cannot reach A keys');assert.throws(()=>x.core.store.authenticate(foreign.api_key));
+});
+test('HTTP-CONNECTIONS-02: a ChatGPT connection names its exact callback at creation and is ready once bound',async t=>{
+ const x=await setup(t,{connections:true,basic:{memory:false,security:true,oauth:true}});
+ const base={kind:'chatgpt_oauth',label:'Synthetic ChatGPT plugin',profile:'readonly'},callback='https://chatgpt.com/connector_platform_oauth_redirect';
+ const created=await x.act('connections.create',{...base,redirect_uri:callback,...await x.proof()});
+ assert.equal(created.status,200,JSON.stringify(created.body));assert.equal(created.body.secret_kind,'oauth_client_secret');assert.ok(created.body.secret);
+ const c=created.body.connection;assert.equal(c.redirect_uri,callback);assert.match(c.client_id,/^mnmc_/);assert.equal(c.provisioning,true);
+ const row=x.ids.connections.row(x.a.record.account_id,c.connection_id);assert.equal(row.state,'ready');assert.equal(row.callback,callback);
+ assert.equal((await x.act('connections.create',{...base,redirect_uri:'https://evil.example/callback',...await x.proof(x.a,30)})).body.error_code,'INVALID_CALLBACK');
+ assert.equal((await x.act('connections.create',{kind:'generic_mcp',label:'Synthetic token',profile:'readonly',redirect_uri:callback,...await x.proof(x.b)},x.b)).status,400);
+ const draft=await x.act('connections.create',{...base,label:'Synthetic draft',...await x.proof(x.b,30)},x.b);
+ assert.equal(draft.status,200);assert.equal(x.ids.connections.row(x.b.record.account_id,draft.body.connection.connection_id).state,'draft');
 });

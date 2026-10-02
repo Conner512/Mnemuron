@@ -7,6 +7,7 @@ on:
       - 'server/lib/**'
       - 'shared/**'
       - 'scripts/test-console-browser.py'
+      - 'scripts/test-console-*.mjs'
       - 'scripts/console_select_checks.py'
       - '.github/workflows/console-browser.yml'
   workflow_dispatch:
@@ -40,11 +41,25 @@ jobs:
           google-chrome --version
       - name: Real HTTP console workflows with synthetic identities only
         run: '"$RUNNER_TEMP/console-browser-env/bin/python" scripts/test-console-browser.py'
+      - name: Locked browser runtime for connection, completion and model acceptance
+        run: npm install --prefix "$RUNNER_TEMP/console-browser-node" --ignore-scripts --no-audit --no-fund playwright@1.57.0
+      - name: Connection, completion and model workflows with synthetic identities only
+        run: |
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/console-browser-node/node_modules/playwright/index.mjs"
+          export CHROMIUM_EXECUTABLE="$(command -v google-chrome)"
+          export MNEMURON_UI_EVIDENCE="$RUNNER_TEMP"
+          node scripts/test-console-connections.mjs
+          node scripts/test-console-completion.mjs
+          node scripts/test-console-models.mjs
       - name: Synthetic non-secret preview screenshots
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: console-functional-synthetic-previews
-          path: ${{ runner.temp }}/mnemuron-browser-test-*/previews/*.png
+          path: |
+            ${{ runner.temp }}/mnemuron-browser-test-*/previews/*.png
+            ${{ runner.temp }}/connections-browser-*/*.png
+            ${{ runner.temp }}/completion-browser-*/*.png
+            ${{ runner.temp }}/model-browser-*/*.png
           retention-days: 3
           if-no-files-found: error

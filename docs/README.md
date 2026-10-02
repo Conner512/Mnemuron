@@ -48,3 +48,5 @@ Version labels identify individual contracts or work packages. They are not a si
 ## Sharing safely
 
 [Publication policy](publication-policy.md) covers source, fixtures, reports, and historical Git content. Keep runtime data, personal memory, credentials, and environment-specific evidence outside public contributions.
+
+- [Release review and recovery](release-review.md) and [complete feature matrix](release-feature-matrix.md): candidate scope, verification, upgrade/rollback and remaining gates.

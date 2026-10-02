@@ -415,6 +415,12 @@ export const CORE_MIGRATIONS = Object.freeze([
       CREATE INDEX IF NOT EXISTS memories_user_created_idx
         ON memories(user_id, created_at DESC, memory_id);
     `) },
+  // Older readers ignore explicit private denials. A schema boundary must prevent
+  // rolling back to those readers even though the change is structurally additive.
+  { version: 7, repeatable: true, name: "memory-web-private-denials", up: (db) => db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_web_denials (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,state_hash TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
+    `) },
 ]);
 
 export const CORE_SCHEMA_VERSION = CORE_MIGRATIONS.at(-1).version;

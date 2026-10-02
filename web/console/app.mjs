@@ -1,8 +1,8 @@
 // Console controller: account-bound requests, routing and the detail pane.
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
-import {actionButton,actionPage,mountActions,canAct} from './actions.mjs';
+import {actionButton,actionPage,mountActions,mountFeatureReads,canAct} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState} from './visuals.mjs';
+import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 
@@ -10,7 +10,7 @@ const root=document.getElementById('console-root'),pane=document.getElementById(
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections;
+let capabilities={enabled:false,writable:false},actions,connections,featureReads,auditFilters={};
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let query='',searchMode='lexical',category='',status='',offset=0;
 
@@ -22,7 +22,7 @@ function saveLocation(){const p=new URLSearchParams();if(query)p.set('query',que
 readLocation();
 
 function clear() {
- actions?.clear();connections?.clear();state.clear();requestSequence++;detailSequence++;
+ actions?.clear();connections?.clear();featureReads?.clear();state.clear();requestSequence++;detailSequence++;
  currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='lexical';offset=0;
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
@@ -71,37 +71,49 @@ function heading() {
 function render(data) {
  let html='';
  if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t)});
- else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),pagination:pagination(data)});
+ else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data)});
- else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))],pagination:pagination(data)});
+ else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))].sort((a,b)=>new Date(typeof b.created==='number'?b.created*1000:b.created)-new Date(typeof a.created==='number'?a.created*1000:a.created)),pagination:pagination(data),filters:auditFilters});
  else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
  else if(page==='models')html=policy('modelsNote',['configure']);
  else if(['invitations','accounts'].includes(page))html=policy('platformNote',[page==='invitations'?'issue':'manage']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
+ if(!prototypePages.includes(page))html+=completedFeaturePanels(t,page,data,capabilities);
  if(!prototypePages.includes(page))html+=roadmapCard(t,page);
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
 }
+function updateMemorySelection() {
+ const toolbar=root.querySelector('[data-memory-selection]');if(!toolbar)return;
+ const boxes=[...root.querySelectorAll('[data-batch-memory]')],count=boxes.filter(n=>n.checked).length;
+ toolbar.querySelector('[data-selection-count]').textContent=String(count);
+ for(const button of toolbar.querySelectorAll('[data-console-action]'))button.disabled=count===0||count>50;
+ toolbar.querySelector('[data-clear-selection]').disabled=count===0;
+ for(const box of boxes){box.disabled=!box.checked&&count>=50;box.closest('tr').toggleAttribute('data-batch-selected',box.checked);}
+}
 async function load() {
  const sequence=++requestSequence;
- if(['resume','system'].includes(page)||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ if(page==='resume'||page==='system'&&!capabilities.operator||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ const extras=async()=>Object.fromEntries(await Promise.all((completedViews[page]||[]).map(async view=>{try{return [view,await api(view)];}catch{return [view,null];}})));
  // Prototype pages read existing views for their live cards; a failure only degrades that card.
- if(page==='tasks'||page==='privacy'){
+ if(page==='tasks'||page==='privacy'||page==='system'){
    const read=async view=>{try{return await api(view);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')throw e;return null;}};
    let data;
    try{
-     if(page==='tasks')data=await read('projects')??{unavailable:true};
+     if(page==='system')data={};
+     else if(page==='tasks')data=await read('projects')??{unavailable:true};
      else{
        const [models,caps]=await Promise.all([read('models'),read('capabilities')]);
        data={...(models??{unavailable:true}),web_policy:caps?.web_policy};
        if(caps?.web_policy)capabilities={...capabilities,web_policy:caps.web_policy};
      }
+     data.features=await extras();
    }catch{return;}
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {
-   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{};
-   const data=await api(page,params);
+   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25,...(page==='audit'?auditParams():{})}:{};
+   const [data,features]=await Promise.all([api(page,params),extras()]);data.features=features;
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
    root.innerHTML=`${pageHeading(t,{title:page})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
@@ -139,6 +151,7 @@ async function openSummary(params,first=false,back=false) {
 }
 
 document.addEventListener('click',event=>{
+ if(event.target.closest('[data-clear-selection]')){for(const box of root.querySelectorAll('[data-batch-memory]'))box.checked=false;updateMemorySelection();return;}
  const memory=event.target.closest('[data-memory]');if(memory){void openMemory({memory_id:memory.dataset.memory,content_limit:1024,include_history:'true',...(memory.dataset.revision?{revision:memory.dataset.revision}:{})},true);return;}
  const summary=event.target.closest('[data-summary]');if(summary){void openSummary({summary_id:summary.dataset.summary,revision:summary.dataset.revision},true);return;}
  if(event.target.closest('[data-close]')){closePane();return;}
@@ -149,9 +162,11 @@ document.addEventListener('click',event=>{
  if(event.target.closest('[data-reset-filters]')){query='';category='';status='';searchMode='lexical';offset=0;saveLocation();void load();}
  if(event.target.closest('[data-retry]'))void load();
 });
+document.addEventListener('change',event=>{if(event.target.matches('[data-batch-memory]'))updateMemorySelection();});
 document.addEventListener('submit',event=>{
+ if(event.target.id==='audit-filter'){event.preventDefault();auditFilters=Object.fromEntries(new FormData(event.target));offset=0;void load();}
  if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'lexical');category=String(f.get('category')||'');status=String(f.get('status')||'');offset=0;saveLocation();void load();}
- if(event.target.action?.endsWith('/console-api/logout')){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;}
+ if(event.target.getAttribute('action')==='/console-api/logout'){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;}
 });
 pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
 // Keyboard: "/" or Ctrl/Cmd+K focuses search; Escape closes a docked (non-modal) pane.
@@ -172,7 +187,9 @@ document.addEventListener('appearancechange',()=>{
  document.title=`Mnemuron · ${t(page)}`;
 });
 
-actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{closePane();await load();},isActive:()=>!!state.account});
+function auditParams(){return Object.fromEntries(Object.entries(auditFilters).filter(([,v])=>v).map(([k,v])=>[k,['from','to'].includes(k)?new Date(v).toISOString():v]));}
+featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:auditParams});
+actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{closePane();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
 
 try {
