@@ -45,7 +45,7 @@ try{
   check('Unfocused empty search restores its placeholder',await search.evaluate(n=>getComputedStyle(n,'::placeholder').color)!=='rgba(0, 0, 0, 0)');
   for(const width of [1440,1024]){
     await page.setViewportSize({width,height:1100});
-    check('Checkbox is beside memory text at '+width,await boxes.first().evaluate(n=>{const c=n.getBoundingClientRect(),text=n.closest('td').querySelector('.memory-text').getBoundingClientRect();return c.right<=text.left&&Math.abs(c.y+c.height/2-(text.y+parseFloat(getComputedStyle(n.closest('td').querySelector('.memory-link')).lineHeight)/2))<8;}));
+    check('Checkbox is beside memory text at '+width,await boxes.first().evaluate(n=>{const c=n.getBoundingClientRect(),text=n.closest('td').querySelector('.memory-title,.memory-text').getBoundingClientRect();return c.right<=text.left&&Math.abs(c.y+c.height/2-(text.y+parseFloat(getComputedStyle(n.closest('td').querySelector('.memory-link')).lineHeight)/2))<8;}));
   }
   await page.setViewportSize({width:1440,height:1100});
   check('Selection has no extra visible label',!(await page.locator('.memory-table').innerText()).includes('选择这条记忆')&&await boxes.first().getAttribute('aria-label')==='选择这条记忆');
@@ -74,7 +74,7 @@ try{
   await begin('retention.save');await op.locator('[name=raw_retention_days]').fill('7');check('Retention saves own future default',(await submit()).raw_retention_days===7);await close();
   await begin('retention.prune');await op.locator('[name=confirmed]').check();await proof();check('Confirmed prune uses real empty fixture, not fake success',(await submit()).expired_events===0);await close();await shot('privacy');
   await goto('memories');await begin('memory.create');check('New form honors account sensitivity default',await op.locator('[name=sensitivity]').inputValue()==='secret');await op.locator('[name=content]').fill('Synthetic private default acceptance.');const created=await submit();check('Private memory saved',created.status==='saved');await close();
-  const metadata=await (await ctx.request.get(cfg.url+'/console-api/memory-meta?memory_id='+created.memory_id)).json();check('Default did not silently allow cloud readers',metadata.sensitivity==='secret'&&metadata.web_allowed===false);
+  const metadata=await (await ctx.request.get(cfg.url+'/console-api/memory-meta?memory_id='+created.memory_id)).json();check('Default sensitivity applied; no per-memory ChatGPT flag is exposed',metadata.sensitivity==='secret'&&metadata.web_allowed===undefined);
   await goto('connections');await begin('devices.register');await op.locator('[name=label]').fill('Synthetic browser Agent');await op.locator('[name=agent_id]').fill('synthetic-console-agent');await op.locator('[name=device_id]').fill('synthetic-device');await proof();
   const registered=await submit();check('Agent key minted, not a simulated credential',registered.api_key.startsWith('mnm_'));await close();
   await begin('devices.rotate');await proof();const rotated=await submit();check('Agent rotation changes actual key',rotated.api_key!==registered.api_key);await close();

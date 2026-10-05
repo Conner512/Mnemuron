@@ -39,7 +39,8 @@ try{
  }
  check('Both current revisions show successful verification',await page.locator('[data-i18n=probeVerified]').count()===2);
  check('The saved secret never appears in page text',!(await page.locator('#console-root').innerText()).includes('synthetic-local-only-key'));
- await command('enable-synthetic-processing');await goto('models');check('Ready pipelines have enabled actions',await page.locator('.model-pipeline button:enabled').count()===3);
+ await command('enable-synthetic-processing');await goto('models');check('Ready pipelines have enabled actions',await page.locator('.model-pipeline button:enabled').count()===4);
+check('The vector stage offers the bounded first-run preparation',await page.locator('.model-pipeline [data-first-run] [data-console-action="vector.prepare"]:enabled').count()===1);
  await page.locator('[data-model-stage=classification] [data-console-action]').click();await op.locator('form').waitFor();check('Classification submits to the worker',(await submit()).status==='queued');await close();await command('tick');
  await goto('memories');check('LLM classifications are visible in the memory library',(await page.locator('.memory-table').innerText()).includes('技术'));
  await goto('jobs');await page.locator('[data-console-action="jobs.schedule"][data-type=summary]').click();await op.locator('form').waitFor();await op.locator('[name=include_open]').check();await pick('periods','daily');
@@ -47,6 +48,25 @@ try{
  await command('enable-synthetic-processing');await goto('models');await begin('vector.schedule');check('Vector indexing is explicitly queued',(await submit()).status==='queued');await close();await command('tick');await goto('models');
  const data=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Personal index completes with real HTTP embeddings',data.processing.vector.state==='succeeded'&&data.processing.vector.indexed_documents===2&&data.processing.vector.search_ready===true);
  const search=await page.evaluate(()=>fetch('/console-api/memories?query=network&mode=semantic').then(r=>r.json()));check('Semantic retrieval returns only this account',search.results.length===2&&!JSON.stringify(search).includes('private B sentinel'));
+ // Bounded first run: freeze → probe → confirmed build → explicit activation → rollback, against a pre-created synthetic collection.
+ await command('enable-first-run-vector');await goto('models');
+ await begin('vector.prepare');await op.locator('[name=budget_calls]').fill('10');const prepared=await submit();
+ check('First run freezes a manifest and opens a finite budget without calling a model',prepared.status==='prepared'&&prepared.collection==='synthetic_first_v1'&&prepared.budget.total===10&&prepared.budget.used===0&&prepared.probe_required===false);await close();
+ await goto('models');const firstRunText=()=>page.locator('[data-first-run]').innerText();
+ check('The frozen count, digest and budget are shown before any build',(await firstRunText()).includes(prepared.manifest.digest)&&(await firstRunText()).includes('0 / 10'));await shot('first-run-prepared');
+ await begin('models.test','embedder');check('Synthetic dimension probe passes inside the budget',(await submit()).dimensions===3);await close();await goto('models');
+ const startBuild=async count=>{await page.locator('[data-first-run] [data-console-action="vector.schedule"]').click();await op.locator('form').waitFor();await op.locator('[name=expected_count]').fill(String(count));};
+ await startBuild(prepared.manifest.count+1);await op.locator('button[type=submit]').click();await op.locator('[data-operation-error]').waitFor();
+ check('A count that differs from the frozen list stops the build',(await op.locator('[data-operation-error]').innerText()).includes('清单'));await close();
+ await goto('models');await startBuild(prepared.manifest.count);check('The confirmed build waits for an explicit activation',(await submit()).activation==='explicit');await close();
+ await command('tick');await goto('models');
+ const first=(await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()))).processing.vector.first_run;
+ check('The build covers exactly the frozen list and is not switched on',first.build==='built'&&first.manifest.indexed===prepared.manifest.count&&first.serving===false&&first.budget.used===2+prepared.manifest.count);await shot('first-run-built');
+ await begin('vector.activate');check('Explicit activation switches the index on',(await submit()).status==='activated');await close();
+ const served=await page.evaluate(()=>fetch('/console-api/memories?query=network&mode=semantic').then(r=>r.json()));check('The activated first-run index serves semantic search',served.results?.length>0);
+ await goto('models');await begin('vector.deactivate');check('Deactivation is the rollback',(await submit()).status==='deactivated');await close();
+ const fallback=await page.evaluate(()=>fetch('/console-api/memories?query=network&mode=hybrid').then(r=>r.json()));check('After rollback search falls back to keywords and says why',fallback.retrieval?.effective_mode==='lexical'&&fallback.retrieval?.degradation_code==='VECTOR_NOT_READY');
+ await goto('models');check('The rolled-back index can be activated again',await page.locator('[data-first-run] [data-console-action="vector.activate"]').count()===1);await shot('first-run-rolled-back');
  for(const width of [1440,1024]){await page.setViewportSize({width,height:1050});check('Model page has no horizontal overflow at '+width,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await shot('models-ready-'+width);}
  await begin('models.save','embedder');await op.locator('[name=dimensions]').fill('4');check('Configuration change is saved',(await submit()).status==='saved');await close();check('Changed configuration invalidates its probe',await page.locator('[data-i18n=probeNotRun]').count()===1);
  await begin('models.test','embedder');await op.locator('button[type=submit]').click();await op.locator('[data-operation-error]').filter({hasText:'向量'}).waitFor();check('Wrong dimensions produce actionable failure',true);await close();await goto('models');check('Failed test remains visible',await page.locator('[data-i18n=probeFailed]').count()===1);await shot('models-failed');

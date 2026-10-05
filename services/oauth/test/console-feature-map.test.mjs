@@ -120,14 +120,15 @@ test('The ingress example routes every menu page',()=>{
  assert.deepEqual([...ingressGroup('app')].sort(),[...pages].sort());
 });
 
-test('PRV-06: the ChatGPT read scope card shows the real policy and offers only the permitted switch',()=>{
+test('PRV-06: the ChatGPT read scope card shows the operator policy read-only and offers no switch',()=>{
+ // Even a credential that still lists the removed action gets no control.
  const caps={allowed_actions:['memory.web_policy']};
  const card=(data,c=caps)=>prototypeView(t,'privacy',{data,caps:c}).match(/<section class="card feature-card" data-status="live" data-feature="PRV-06">[\s\S]*?<\/section>/)[0];
- const off=card({web_policy:{read_all:false,revision:0}});
- assert.match(off,/data-state="disabled"/);assert.match(off,/data-console-action="memory.web_policy" data-enabled="true"/);assert.match(off,/data-i18n="webPolicyEnable"/);
- const on=card({web_policy:{read_all:true,revision:3}});
- assert.match(on,/data-state="enabled"/);assert.match(on,/data-console-action="memory.web_policy" data-enabled="false"/);assert.match(on,/data-i18n="webReadAllOn"/);
- assert.doesNotMatch(card({web_policy:{read_all:false,revision:0}},{allowed_actions:[]}),/data-console-action/);
+ const off=card({read_policy:{policy:'web-memory-visibility-v1',active_records_uniform:false}});
+ assert.match(off,/data-state="disabled"/);assert.match(off,/data-i18n="readPolicyUniformOff"/);assert.match(off,/data-i18n="readPolicyOperator"/);
+ const on=card({read_policy:{policy:'web-memory-active-uniform-v1',active_records_uniform:true}});
+ assert.match(on,/data-state="enabled"/);assert.match(on,/data-i18n="readPolicyUniformOn"/);
+ for(const html of [off,on])assert.doesNotMatch(html,/data-console-action/);
  assert.match(card({}),/data-i18n="unavailable"/);
  assert.deepEqual(prototypeOrder('privacy').map(f=>f.id),['PRV-01','PRV-02','PRV-03','PRV-04','PRV-06','PRV-05'],'implemented features come before policy-disabled features');
 });

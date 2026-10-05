@@ -98,7 +98,10 @@ try{
   // One flow on a filter: topic facet → select everything matching → preview → back → cancel → confirm.
   await page.locator('.library-facets [data-facet="topic"][data-value="travel"]').click();await settle();
   await page.waitForFunction(()=>new URLSearchParams(location.search).get('topic')==='travel');
-  check('Topic facet filters the list',(await page.locator('.memory-extra .topic-chip').allInnerTexts()).every(x=>x==='travel'));
+  // Imported single-word topics are labelled tags; the filter value is the stored topic.
+  const chips=page.locator('.memory-extra .topic-chip');
+  check('Topic facet filters the list',(await chips.count())>0&&(await chips.evaluateAll(n=>n.map(x=>x.dataset.value))).every(x=>x==='travel'));
+  check('Imported topic is labelled as an original tag, not a path or title',await page.locator('.memory-extra .tag-chip .chip-label').count()===await chips.count()&&await page.locator('#memory-rows .memory-path').count()===0);
   await page.locator('[data-select-all]').click();check('Select-all states that the preview gives the exact count',(await page.locator('[data-memory-selection]').innerText()).includes('预览会显示准确数量'));
   const writesBeforePreview=writes;
   await page.locator('[data-memory-selection] [data-console-action="memory.organize"]').click();await op.locator('[data-organize-step="choose"]').waitFor();
@@ -217,7 +220,9 @@ try{
   await shot('20a-create-result',page,false);await page.keyboard.press('Escape');
   // Batch retract shows which memories (only the text already shown in the list) and reports each outcome.
   await goto('memories?topic=garden');const gardenBoxes=page.locator('[data-batch-memory]');await gardenBoxes.nth(0).check();await gardenBoxes.nth(1).check();
-  const chosen=await page.locator('tr[data-batch-selected] .memory-text').allInnerTexts();
+  // The text a row shows: its body, or its title when the body equals the title.
+  const rowText=row=>row.evaluate(n=>(n.querySelector('.memory-text')||n.querySelector('.memory-title')).innerText);
+  const chosen=await page.locator('tr[data-batch-selected]').evaluateAll(rows=>rows.map(n=>(n.querySelector('.memory-text')||n.querySelector('.memory-title')).innerText));
   await page.locator('[data-memory-selection] [data-console-action="memory.batch_retract"]').click();await op.locator('form').waitFor();const confirmText=await op.locator('.batch-confirm-list').innerText();
   check('Batch retract confirmation lists the selected memories by their visible text',chosen.every(text=>confirmText.includes([...text].slice(0,40).join('')))&&!/[0-9a-f]{8}-[0-9a-f]{4}-/.test(confirmText));
   check('Batch retract confirmation shows no more text than the list already shows',(await op.locator('.batch-confirm-list li').allInnerTexts()).every(li=>[...li.replace(/版本 \d+$/,'').trim()].length<=120));
@@ -230,9 +235,9 @@ try{
   check('Batch result summarizes successes and names each failure with a readable reason',outcome.includes('已撤回 1')&&outcome.includes('未处理 1')&&outcome.includes('记忆已更新'));
   await shot('20c-batch-retract-result',page,false);await page.keyboard.press('Escape');
   // A selection kept across pages is what the batch acts on, and the confirmation names every selected memory.
-  await goto('memories?topic=billing');const firstPick=await page.locator('.memory-table tbody tr').nth(0).locator('.memory-text').innerText();await page.locator('[data-batch-memory]').nth(0).check();
+  await goto('memories?topic=billing');const firstPick=await rowText(page.locator('.memory-table tbody tr').nth(0));await page.locator('[data-batch-memory]').nth(0).check();
   await page.locator('[data-offset="25"]').first().click();await page.locator('.memory-table').waitFor();await page.waitForFunction(()=>new URLSearchParams(location.search).get('offset')==='25');
-  const secondPick=await page.locator('.memory-table tbody tr').nth(0).locator('.memory-text').innerText();await page.locator('[data-batch-memory]').nth(0).check();
+  const secondPick=await rowText(page.locator('.memory-table tbody tr').nth(0));await page.locator('[data-batch-memory]').nth(0).check();
   check('Toolbar counts the selection across pages',(await page.locator('[data-selection-count]').innerText())==='2');
   await page.locator('[data-memory-selection] [data-console-action="memory.batch_retract"]').click();await op.locator('form').waitFor();
   const crossList=await op.locator('.batch-confirm-list').innerText();
@@ -246,8 +251,8 @@ try{
   for(const content of pathSamples)await page.evaluate(async content=>{const me=await (await fetch('/console-api/me')).json();
     await fetch('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.csrf,account_id:me.account_id,action:'memory.create',operation_id:crypto.randomUUID(),payload:JSON.stringify({content,scope:'user',memory_type:'fact',sensitivity:'sensitive'})})});},content);
   await goto('memories?origin=other');const pathRows=page.locator('.memory-table tbody tr',{has:page.locator('.memory-path')});
-  check('Path-prefixed rows show the path on its own line and the body below',await pathRows.count()===3&&(await pathRows.nth(0).locator('.memory-text').innerText()).startsWith('The console BFF'));
-  check('Rows sharing a long path are told apart by their bodies',new Set(await pathRows.locator('.memory-text').allInnerTexts()).size===3);
+  check('Path-prefixed rows show the path on its own line and the body (or the title equal to it) apart from it',await pathRows.count()===3&&(await rowText(pathRows.nth(0))).startsWith('The console BFF')&&!(await rowText(pathRows.nth(0))).includes('services/'));
+  check('Rows sharing a long path are told apart by their visible text',new Set(await pathRows.evaluateAll(rows=>rows.map(n=>(n.querySelector('.memory-text')||n.querySelector('.memory-title')).innerText))).size===3);
   check('Desktop list does not scroll sideways',await page.evaluate(()=>[...document.querySelectorAll('.table-scroll')].every(n=>n.scrollWidth<=n.clientWidth+1)));
   await shot('20d-path-rows-desktop');
 

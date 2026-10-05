@@ -3,10 +3,15 @@ import {requestJSON,authHeaders,approvedTarget} from '../model-providers/transpo
 
 export const QDRANT_PROTOCOL='qdrant-rest-v1.19';
 export function vectorConfig(input){
-  strictObject(input,['enabled','protocol','base_url','auth','egress','timeouts','limits','collection_prefix']);
+  strictObject(input,['enabled','protocol','base_url','auth','egress','timeouts','limits','collection_prefix','precreated_collections']);
   if(typeof input.enabled!=='boolean')fail('INVALID_VECTOR_CONFIG');
   if(input.enabled!==true)return {enabled:false};
   if(input.protocol!==QDRANT_PROTOCOL || !/^[a-z][a-z0-9_]{0,39}$/.test(input.collection_prefix || ''))fail('INVALID_VECTOR_CONFIG');
+  // Operations may pre-create the collections and issue a collection-scoped key. Then Mnemuron never
+  // creates a collection; each name must sit inside the configured prefix namespace.
+  if(input.precreated_collections!==undefined){const names=input.precreated_collections;
+    if(!Array.isArray(names) || !names.length || names.length>8 || new Set(names).size!==names.length
+      || names.some(n=>typeof n!=='string' || !/^[a-z][a-z0-9_]{0,100}$/.test(n) || !n.startsWith(input.collection_prefix+'_')))fail('INVALID_VECTOR_CONFIG');}
   strictObject(input.auth,['env','secret_file']);if(Object.keys(input.auth).length!==1)fail('VECTOR_AUTH_REQUIRED');
   if(Object.hasOwn(input.auth,'env') && (typeof input.auth.env!=='string' || !/^[A-Z][A-Z0-9_]{0,100}$/.test(input.auth.env)) || Object.hasOwn(input.auth,'secret_file') && (typeof input.auth.secret_file!=='string' || !input.auth.secret_file.startsWith('/')))fail('INVALID_VECTOR_CONFIG');
   strictObject(input.egress,['approved','origins','addresses','allow_private']);
@@ -24,16 +29,26 @@ export class QdrantStore {
   constructor(config,{transport=requestJSON,env=process.env}={}){this.config=vectorConfig(config);this.transport=transport;this.env=env;}
   async call(route,body,method='POST'){
     if(!this.config.enabled)fail('VECTOR_DISABLED');
-    const bearer=authHeaders(this.config,this.env).authorization;
-    const response=await this.transport({...this.config,auth:{none:true}},route,body,{method,env:this.env,headers:{'api-key':bearer.slice(7)}});
+    let bearer;try{bearer=authHeaders(this.config,this.env).authorization;}catch(error){if(['AUTH_NOT_CONFIGURED','SECRET_REFERENCE_INVALID'].includes(error.code))fail('VECTOR_AUTH_FAILED');throw error;}
+    let response;
+    // An expired or revoked (e.g. time-limited, collection-scoped) key is a vector-store failure, never an
+    // embedding-model auth failure, so it cannot block the embedder profile.
+    try{response=await this.transport({...this.config,auth:{none:true}},route,body,{method,env:this.env,headers:{'api-key':bearer.slice(7)}});}
+    catch(error){if(error.code==='AUTH_FAILED')fail('VECTOR_AUTH_FAILED');throw error;}
     if(response.status && response.status!=='ok')fail('VECTOR_REJECTED');return response.result ?? response;
   }
+  get precreated(){return this.config.precreated_collections || null;}
   async health(){const response=await this.call('/',undefined,'GET');return {state:'ready',protocol:QDRANT_PROTOCOL,version:response.version || null};}
   async ensureCollection(name,{dimensions,distance}){
-    const base=collection(name),exists=await this.call(base+'/exists',undefined,'GET');
+    const base=collection(name);
+    if(this.precreated && !this.precreated.includes(name))fail('VECTOR_COLLECTION_MISSING');
+    const exists=await this.call(base+'/exists',undefined,'GET');
     if(exists.exists){const info=await this.call(base,undefined,'GET');const v=info.config?.params?.vectors;
-      if(v?.size!==dimensions || v?.distance!==distance)fail('VECTOR_PROFILE_MISMATCH');return;
+      if(!v)fail('VECTOR_COLLECTION_UNVERIFIED');
+      if(v.size!==dimensions || v.distance!==distance)fail('VECTOR_PROFILE_MISMATCH');return;
     }
+    // A pre-created deployment never creates collections (its key may not be allowed to).
+    if(this.precreated)fail('VECTOR_COLLECTION_MISSING');
     await this.call(base,{vectors:{size:dimensions,distance}},'PUT');
   }
   async upsert(name,points){return this.call(collection(name)+'/points?wait=true&ordering=strong',{points},'PUT');}

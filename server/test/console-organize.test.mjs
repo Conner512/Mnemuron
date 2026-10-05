@@ -196,7 +196,7 @@ test('ORG-08: keep_private, secret records, original fields and writes are prese
   await f.act('privacy.defaults',{expected_revision:1,sensitivity:'sensitive',cloud_readable:false});
   const privateId=await f.create('Synthetic keep-private note');
   f.store.webVisibility.keepPrivate(f.A.auth.user_id,privateId,f.store.revisions.latest(f.A.auth.user_id,privateId));
-  await f.act('memory.web_policy',{read_all:true,expected_revision:0});
+  f.store.webVisibility.setPolicy(f.A.auth,{read_all:true,expected_revision:0}); // retained legacy setting
   const web={...f.A.auth,agent_id:'chatgpt-web'};assert.equal(f.store.webVisibility.visible(web,privateId),false);
   const snapshot=()=>({...businessSnapshot(f.store),revisions:f.store.db.prepare('SELECT * FROM memory_revisions ORDER BY rowid').all(),
     privacy:f.store.db.prepare('SELECT * FROM memory_privacy ORDER BY rowid').all(),denials:f.store.db.prepare('SELECT * FROM memory_web_denials ORDER BY rowid').all(),

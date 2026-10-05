@@ -1,7 +1,7 @@
 import {createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {digest} from '../model-providers/contracts.mjs';
 import {ConflictError,ValidationError} from '../errors.mjs';
-import {isWebReader,webMemorySql} from '../memory/web-visibility.mjs';
+import {isWebReader,webMemorySql,webReadPolicy,WEB_READ_POLICY} from '../memory/web-visibility.mjs';
 
 const bytes=value=>Buffer.byteLength(JSON.stringify(value));
 export class SummaryPagination {
@@ -26,7 +26,8 @@ export class SummaryPagination {
     if(!Number.isSafeInteger(limit) || limit<1 || limit>50 || !Number.isSafeInteger(offset) || offset<0
       || (category!==undefined && (typeof category!=='string' || !/^[a-z][a-z0-9_-]{0,63}$/.test(category))))throw new ValidationError('Invalid summary pagination or category.');
     if(cursor && offset)throw new ValidationError('Use cursor without offset.');
-    const binding=digest([user,scope,limit,category || null,auth.credential_id || null,isWebReader(auth)]);
+    // A cursor never crosses a read-policy change; the legacy binding is unchanged.
+    const binding=digest([user,scope,limit,category || null,auth.credential_id || null,isWebReader(auth),...(isWebReader(auth)&&webReadPolicy(auth)!==WEB_READ_POLICY?[webReadPolicy(auth)]:[])]);
     const eligible=isWebReader(auth)?`status='current' AND EXISTS (SELECT 1 FROM memory_summary_dependencies d WHERE d.summary_id=memory_summaries.summary_id)
       AND NOT EXISTS (SELECT 1 FROM memory_summary_dependencies d LEFT JOIN memories m ON m.user_id=d.user_id AND m.memory_id=d.memory_id
         WHERE d.summary_id=memory_summaries.summary_id AND (m.memory_id IS NULL OR NOT (${webMemorySql(auth)})))`:"status='current'";

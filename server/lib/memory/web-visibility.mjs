@@ -3,7 +3,12 @@ import {consoleMemoryWritable} from '../../../shared/console-contract.mjs';
 import {ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
 
 export const WEB_READ_POLICY = 'web-memory-visibility-v1';
+// Activated only by the runtime config key memory.agent_read_policy (see memory-runtime.mjs).
+export const WEB_READ_POLICY_ACTIVE_UNIFORM = 'web-memory-active-uniform-v1';
+export const AGENT_READ_POLICIES = Object.freeze({chatgpt_per_memory_v1:WEB_READ_POLICY,active_uniform_v1:WEB_READ_POLICY_ACTIVE_UNIFORM});
 export const isWebReader = auth => auth?.agent_id === 'chatgpt-web';
+/** The read policy bound to a ChatGPT credential at authentication. Anything else keeps the per-memory filter. */
+export const webReadPolicy = auth => auth?.read_policy === WEB_READ_POLICY_ACTIVE_UNIFORM ? WEB_READ_POLICY_ACTIVE_UNIFORM : WEB_READ_POLICY;
 
 const currentGrantSql=alias=>`EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
   ON wr.user_id=wg.user_id AND wr.memory_id=wg.memory_id AND wr.revision=wg.revision AND wr.state_hash=wg.state_hash
@@ -16,8 +21,17 @@ const currentGrantSql=alias=>`EXISTS (SELECT 1 FROM memory_web_grants wg JOIN me
 // Internal/sensitive records need a grant for their current revision, unless the owner switched
 // ChatGPT reads to all records (memory_web_policy.read_all). Explicit denials always win.
 // A denial retains its reviewed version as evidence, but never expires on a version change.
+//
+// Active-uniform policy: an ACTIVE, non-secret record is readable like it is for every other agent of the
+// account. Superseded/retracted history and every secret record keep the per-memory rules below, so legacy
+// denials and secret exclusions still hide them (including include_history-style status filters).
 export function webMemorySql(auth, alias='m') {
   if (!isWebReader(auth)) return '1=1';
+  const legacy = legacyWebMemorySql(alias);
+  if (webReadPolicy(auth) !== WEB_READ_POLICY_ACTIVE_UNIFORM) return legacy;
+  return `((${alias}.status='active' AND COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive')<>'secret') OR ${legacy})`;
+}
+function legacyWebMemorySql(alias) {
   return `(NOT EXISTS (SELECT 1 FROM memory_web_denials wd WHERE wd.user_id=${alias}.user_id AND wd.memory_id=${alias}.memory_id)
     AND (EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id AND wp.sensitivity='public')
     OR (COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive') IN ('internal','sensitive')

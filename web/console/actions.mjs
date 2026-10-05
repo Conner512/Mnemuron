@@ -33,6 +33,16 @@ export function actionPage(page,data,caps,connectionQuery={}) {
   if(page==='models'){
     const p=data.processing||{},blocked=items=>(items||[]).map(code=>`<p class="muted">${esc(t(code))}</p>`).join('');
     const launch=(action,key,ready,values={})=>can(action)?actionButton(action,key,values).replace('<button ',`<button ${ready?'':'disabled '}`):'';
+    // First run: a frozen manifest, a finite call budget, a confirmed build and an explicit activation (or rollback).
+    const firstRun=step=>{const fr=step.first_run||{},b=fr.budget;
+      const facts=fr.generation?kv([['vectorCollection',`<code>${esc(fr.collection)}</code>`],['dimensions',esc(fr.dimensions)],['manifestCount',esc(fr.manifest.count)],['manifestDigest',`<code class="digest">${esc(fr.manifest.digest)}</code>`],
+        ['manifestProgress',`${esc(fr.manifest.indexed)} ${l('indexedShort')} · ${esc(fr.manifest.pending)} ${l('pendingShort')} · ${esc(fr.manifest.stale)} ${l('staleShort')}`],['state',l('firstRunState_'+fr.build)+(fr.error_code?` · ${esc(t(fr.error_code))}`:'')],['serving',l(fr.serving?'yes':'no')]]):'';
+      const budget=b?kv([['firstRunBudget',`${esc(b.used)} / ${esc(b.total)}`]]):'';
+      const actions=[launch('vector.prepare','prepareFirstRun',step.ready===true&&!fr.serving),
+        ...(fr.generation&&fr.state==='building'&&fr.build!=='pending'?[launch('vector.schedule','startFirstRunBuild',true,{generation:fr.generation})]:[]),
+        ...(fr.generation&&['ready','retired'].includes(fr.state)&&!fr.serving?[launch('vector.activate','activateIndex',true,{generation:fr.generation})]:[]),
+        ...(fr.generation&&fr.serving?[launch('vector.deactivate','deactivateIndex',true,{generation:fr.generation})]:[])];
+      return `<div class="first-run" data-first-run><h4>${l('firstRun')}</h4><p class="muted">${l('firstRunNote')}</p>${budget}${facts}${buttons(actions)}</div>`;};
     const verification=v=>`<div class="model-verification" role="status"><strong>${l(!v?'probeNotRun':v.state==='verified'?'probeVerified':v.state==='running'?'probeRunning':'probeFailed')}</strong>${v?`<p>${esc(time(v.updated_at))}${v.error_code?` · ${esc(t(v.error_code))}`:''}</p>${v.checks?.length?`<p>${v.checks.map(c=>esc(t(c))).join(' · ')}</p>`:''}${v.skipped?.length?`<p>${l('probeSkipped')}: ${v.skipped.map(c=>esc(t(c))).join(' · ')}</p>`:''}`:''}</div>`;
     return `<div class="card-grid">${(data.models||[]).map(m=>section(m.kind,
       `<p>${l(m.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p>`+
@@ -40,7 +50,7 @@ export function actionPage(page,data,caps,connectionQuery={}) {
       buttons([...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testCapabilities',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.disable')?[actionButton('models.disable','disable',{kind:m.kind})]:[]),inspect('models',m.kind)])+(!can('models.save')?onlyRead():''),
       {aside:state(m.config.enabled?'enabled':'disabled'),className:'model-card'})).join('')}</div>`+
       section('modelPipeline',`<p>${l('modelPipelineNote')}</p><div class="card-grid model-pipeline">${['classification','summary','vector'].map(kind=>{
-        const step=p[kind]||{},vector=kind==='vector';return `<div data-model-stage="${kind}"><h3>${l(kind)}</h3>${state(step.ready?'ready':'notReady')}${blocked(step.blockers)}${vector?kv([['indexedDocuments',esc(step.indexed_documents??0)],['state',esc(t(step.state||'not_started'))],['semanticReadiness',l(step.search_ready?'ready':'notReady')]])+blocked(step.search_blockers)+blocked(step.error_code?[step.error_code]:[]):''}${buttons([launch(vector?'vector.schedule':'jobs.schedule',vector?'rebuildIndex':kind==='summary'?'summarize':'organize',step.ready===true,vector?{}:{type:kind})])}</div>`;
+        const step=p[kind]||{},vector=kind==='vector';return `<div data-model-stage="${kind}"><h3>${l(kind)}</h3>${state(step.ready?'ready':'notReady')}${blocked(step.blockers)}${vector?kv([['indexedDocuments',esc(step.indexed_documents??0)],['state',esc(t(step.state||'not_started'))],['semanticReadiness',l(step.search_ready?'ready':'notReady')]])+blocked(step.search_blockers)+blocked(step.error_code?[step.error_code]:[]):''}${vector?firstRun(step):''}${buttons([...(vector&&step.first_run?.budget?[]:[launch(vector?'vector.schedule':'jobs.schedule',vector?'rebuildIndex':kind==='summary'?'summarize':'organize',step.ready===true,vector?{}:{type:kind})])])}</div>`;
       }).join('')}</div><div class="section-foot"><a href="/app/jobs">${l('viewJobs')} →</a><a href="/app/summaries">${l('viewSummaries')} →</a></div>`)+
       section('modelBoundary',`<p>${l('modelBoundaryNote')}</p><p>${l('modelProbeBoundary')}</p>`);
   }
@@ -128,7 +138,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   const modal=document.createElement('dialog');modal.id='operation-dialog';modal.setAttribute('aria-labelledby','operation-title');modal.innerHTML='<div class="dialog-header"><h2 id="operation-title"></h2><button type="button" data-operation-close aria-label="Close">×</button></div><div id="operation-content"></div>';document.body.append(modal);
   const content=modal.querySelector('#operation-content');let intent=null,opId=null,lastPayload=null,returnFocus=null,sequence=0,working=false;
   function open(title){sequence++;returnFocus=document.activeElement;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();}
-  const MEMORY_RESULTS={'memory.create':'resultCreated','memory.correct':'resultCorrected','memory.retract':'resultRetracted','memory.sensitivity':'resultSensitivity','memory.visibility':'resultVisibility','memory.web_policy':'resultWebPolicy','memory.batch_retract':'resultBatchRetract','memory.batch_classify':'resultBatchClassify'};
+  const MEMORY_RESULTS={'memory.create':'resultCreated','memory.correct':'resultCorrected','memory.retract':'resultRetracted','memory.sensitivity':'resultSensitivity','memory.batch_retract':'resultBatchRetract','memory.batch_classify':'resultBatchClassify'};
   function result(data){content.replaceChildren();const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);
     const summary=MEMORY_RESULTS[intent?.action];
     if(summary){
@@ -141,8 +151,9 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
       if(data.replayed){const p=document.createElement('p');p.className='muted';p.textContent=t('replayedResult');box.append(p);}
       const raw=document.createElement('details'),label=document.createElement('summary');label.textContent=t('technicalDetails');raw.append(label,pre);content.append(box,raw);
     }else content.append(pre);
-    if(intent?.action==='models.test'||intent?.action==='models.save'||intent?.action==='jobs.schedule'||intent?.action==='vector.schedule'){
-      const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':'modelQueued');content.prepend(message);
+    if(intent?.action==='models.test'||intent?.action==='models.save'||intent?.action==='jobs.schedule'||intent?.action?.startsWith('vector.')){
+      const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':
+        data.status==='prepared'?'firstRunPrepared':data.status==='activated'?'indexActivated':data.status==='deactivated'?'indexDeactivated':'modelQueued');content.prepend(message);
     }
     if(intent?.action==='jobs.retry'){
       const message=document.createElement('p');message.className='policy-box';message.setAttribute('role','status');
@@ -311,11 +322,6 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
       else if(action==='retention.prune')fields=`<p>${l('pruneBoundary')}</p><label class="check-field"><input name="confirmed" type="checkbox" required>${l('confirmPrune')}</label>`+reauth();
       else if(action==='devices.register')fields=field('label','label',{max:120})+field('agent_id','agentId',{max:128})+field('device_id','deviceId',{max:128})+select('access','access',['read','read_write'],'read')+`<p>${l('agentKeyBoundary')}</p>`+reauth();
       else if(action==='devices.rotate')fields=`<p>${l('rotateAgentNote')}</p><code>${esc(intent.id)}</code>`+reauth();
-      else if(action==='memory.web_policy'){
-        // The page read the current policy; its revision guards against a change made in another tab.
-        intent.enable=button.dataset.enabled==='true';intent.revision=(data.web_policy??getCaps().web_policy)?.revision??0;
-        fields=`<p>${l(intent.enable?'webPolicyEnableNote':'webPolicyDisableNote')}</p>`+(intent.enable?`<label class="check-field"><input type="checkbox" name="confirm_web_policy" required>${l('webPolicyConfirm')}</label>`:'');
-      }
       else if(action.startsWith('memory.')){
         const meta=await api('memory',{memory_id:intent.id,metadata:'true'});if(seq!==sequence||!isActive())return;intent.meta=meta;
         if(action==='memory.correct'){
@@ -323,7 +329,6 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
           if(!page.content_complete)throw new Error('EDIT_REQUIRES_COMPLETE_RECORD');fields=area('content','content',page.memory.content)+field('reason','reason',{required:false})+field('topic','topic',{value:meta.topic||'',required:false,max:120});
         } else if(action==='memory.classify')fields=select('category','category',getCaps().taxonomy.categories,meta.category);
         else if(action==='memory.sensitivity')fields=select('sensitivity','sensitivity',['sensitive','internal','public','secret'],meta.sensitivity)+`<p>${l('sensitivityNote')}</p>`;
-        else if(action==='memory.visibility')fields=check('allow','allowChatGPT',meta.web_allowed)+`<p>${l('grantRevisionNote')}</p>`+(getCaps().web_policy?.read_all?`<p class="policy-box">${l('webPolicyActiveNote')}</p>`:'');
         else fields=field('reason','reason',{required:false})+`<p>${l('retractNote')}</p>`;
       } else if(action==='jobs.schedule'){
         intent.type=button.dataset.type||'classification';const status=await api('jobs');if(seq!==sequence||!isActive())return;const settings=status.settings||{revision:0,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,schedule_enabled:false};
@@ -337,6 +342,14 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
           (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+select('sensitivity','modelSensitivity',['public','internal','sensitive'],c.sensitivities?.includes('sensitive')?'sensitive':c.sensitivities?.includes('internal')?'internal':'public')+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
       } else if(action==='models.test'){
         fields=`<p>${l('probeCostNote')}</p><p>${l(intent.kind==='organizer'?'organizerProbeNote':'embedderProbeNote')}</p>`;
+      } else if(action==='vector.prepare'){
+        fields=`<p>${l('firstRunPrepareNote')}</p>`+field('budget_calls','firstRunBudgetField',{type:'number',min:1,upper:150,step:1})+`<p class="policy-box">${l('firstRunSendNote')}</p>`;
+      } else if(action==='vector.schedule'&&button.dataset.generation){
+        const fr=(data.processing??getData().processing)?.vector?.first_run||{};intent.generation=button.dataset.generation;intent.digest=fr.manifest?.digest;
+        fields=`<p>${l('firstRunBuildNote')}</p>`+kv([['manifestCount',esc(fr.manifest?.count)],['manifestDigest',`<code class="digest">${esc(fr.manifest?.digest)}</code>`],['firstRunBudget',`${esc(fr.budget?.used)} / ${esc(fr.budget?.total)}`]])+
+          field('expected_count','firstRunExpectedCount',{type:'number',min:1,upper:1000000,step:1})+`<p class="policy-box">${l('firstRunSendNote')}</p>`;
+      } else if(action==='vector.activate'||action==='vector.deactivate'){
+        intent.generation=button.dataset.generation;fields=`<p>${l(action==='vector.activate'?'activateIndexNote':'deactivateIndexNote')}</p><code>${esc(intent.generation)}</code>`;
       } else if(action==='vector.schedule'){
         fields=`<p>${l('vectorScheduleNote')}</p>`;
       } else if(action==='security.password')fields=field('new_password','newPassword',{type:'password',max:1024})+field('password_confirm','passwordConfirm',{type:'password',max:1024})+reauth();
@@ -360,13 +373,15 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     else if(a==='retention.prune'){p.confirmed=fd.has('confirmed');p.batch_size=100;}
     else if(a==='devices.register')Object.assign(p,{label:fd.get('label'),agent_id:fd.get('agent_id'),device_id:fd.get('device_id'),access:fd.get('access')});
     else if(a==='devices.rotate')p.credential_id=intent.id;
-    else if(a==='memory.web_policy'){p.read_all=intent.enable;p.expected_revision=intent.revision;}
-    else if(a.startsWith('memory.')){Object.assign(p,{memory_id:intent.id,revision:intent.meta.revision});if(a==='memory.correct'){p.content=fd.get('content');p.topic=fd.get('topic')||null;p.memory_type=intent.meta.memory_type;}if(fd.get('reason'))p.reason=fd.get('reason');if(a==='memory.classify')p.category=fd.get('category');if(a==='memory.sensitivity')p.sensitivity=fd.get('sensitivity');if(a==='memory.visibility'){p.allow=fd.has('allow');p.state_hash=intent.meta.state_hash;}}
+    else if(a.startsWith('memory.')){Object.assign(p,{memory_id:intent.id,revision:intent.meta.revision});if(a==='memory.correct'){p.content=fd.get('content');p.topic=fd.get('topic')||null;p.memory_type=intent.meta.memory_type;}if(fd.get('reason'))p.reason=fd.get('reason');if(a==='memory.classify')p.category=fd.get('category');if(a==='memory.sensitivity')p.sensitivity=fd.get('sensitivity');}
     else if(a==='jobs.schedule')Object.assign(p,{type:fd.get('type'),timezone:fd.get('timezone'),periods:fd.get('periods')==='daily_weekly'?['daily','weekly']:[fd.get('periods')],include_open:fd.has('include_open'),schedule_enabled:fd.has('schedule_enabled'),settings_revision:intent.settings_revision});
     else if(a==='jobs.cancel'||a==='jobs.retry')p.job_id=intent.id;
     else if(a==='models.save'){
       p.kind=intent.kind;p.expected_revision=intent.revision;const sensitivity=fd.get('sensitivity');p.config={enabled:fd.has('enabled'),protocol:fd.get('protocol'),base_url:fd.get('base_url'),model:fd.get('model'),profile_revision:fd.get('profile_revision'),daily_requests:Number(fd.get('daily_requests')),output_tokens:Number(fd.get('output_tokens')),batch_size:Number(fd.get('batch_size')),sensitivities:sensitivity==='public'?['public']:sensitivity==='internal'?['public','internal']:['public','internal','sensitive'],egress_approved:fd.has('egress_approved'),query_approved:fd.has('query_approved'),native_schema:intent.kind==='organizer'?fd.has('native_schema'):true};if(intent.kind==='embedder')p.config.dimensions=Number(fd.get('dimensions'));if(fd.get('api_key'))p.api_key=fd.get('api_key');if(fd.has('remove_key'))p.remove_key=true;
-    } else if(a==='models.test'||a==='models.disable'){p.kind=intent.kind;if(a==='models.test')p.mode='capabilities';else p.expected_revision=getData().models.find(m=>m.kind===intent.kind).revision;}
+    } else if(a==='vector.prepare')p.budget_calls=Number(fd.get('budget_calls'));
+    else if(a==='vector.schedule'&&intent.generation)Object.assign(p,{generation:intent.generation,expected_count:Number(fd.get('expected_count')),expected_digest:intent.digest});
+    else if(a==='vector.activate'||a==='vector.deactivate')p.generation=intent.generation;
+    else if(a==='models.test'||a==='models.disable'){p.kind=intent.kind;if(a==='models.test')p.mode='capabilities';else p.expected_revision=getData().models.find(m=>m.kind===intent.kind).revision;}
     else if(a==='oauth.revoke')p.grant_id=intent.id;
     else if(a==='devices.revoke')p.agent_instance_id=intent.id;
     else if(a==='security.password'){p.new_password=fd.get('new_password');p.password_confirm=fd.get('password_confirm');}

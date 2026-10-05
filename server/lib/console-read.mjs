@@ -2,7 +2,7 @@ import {ValidationError,NotFoundError,ConflictError} from './errors.mjs';
 import {credentialView} from './console/credentials.mjs';
 import {FEATURE_VIEWS,featureParams} from './console/features.mjs';
 import {auditQuery} from '../../shared/console-queries.mjs';
-import {splitLeadingPath} from '../../shared/memory-display.mjs';
+import {splitLeadingPath,memoryPresentation} from '../../shared/memory-display.mjs';
 export const isConsoleReader=auth=>auth.agent_id==='mnemuron-console';
 function pagination(params,maximum=50){
   const offset=Number(params.offset??0),limit=Number(params.limit??25);
@@ -12,7 +12,8 @@ function pagination(params,maximum=50){
 // A leading file path is returned separately (display only; content stays the stored text's first 160 chars),
 // so the list can show the path on its own line and the body beneath it instead of 160 chars of path.
 const displayParts=m=>{const parts=splitLeadingPath(m.content);return parts?{path:[...parts.path].slice(0,512).join(''),body:[...parts.body].slice(0,240).join('')}:{};};
-const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),...displayParts(m),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{}),
+// title/title_source/tag are display-only (derived on read from the full stored text and topic, never written).
+const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),...displayParts(m),...memoryPresentation(m),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{}),
   ...(m.topic?{topic:m.topic}:{}),...(m.imported?{imported:true,original_created_at:m.original_created_at||null}:{})});
 const jobView=job=>({job_id:job.job_id,job_type:job.job_type,state:job.state,total:job.total,processed:job.processed,attempt_count:job.attempt_count,last_error_code:job.last_error_code,created_at:job.created_at,updated_at:job.updated_at,result_ref:job.result_ref});
 // Owner-scoped aggregates for overview charts. Counts only: no content, IDs or other accounts.
@@ -46,7 +47,7 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'projects':return {projects:db.prepare('SELECT project_id,name FROM projects WHERE user_id=? ORDER BY name LIMIT 200').all(user)};
 
     case 'overview':return {read_only:true,production_ready:false,counts:{memories:count('memories'),sources:count('memory_sources'),summaries:count('memory_summaries'),jobs:count('memory_jobs')},
-      recent:db.prepare('SELECT memory_id,content,memory_type,status,created_at FROM memories WHERE user_id=? ORDER BY created_at DESC,memory_id LIMIT 5').all(user).map(m=>({...m,...displayParts(m),content:[...m.content].slice(0,160).join('')})),
+      recent:db.prepare('SELECT memory_id,content,memory_type,status,topic,created_at FROM memories WHERE user_id=? ORDER BY created_at DESC,memory_id LIMIT 5').all(user).map(({topic,...m})=>({...m,...displayParts(m),...memoryPresentation({...m,topic}),content:[...m.content].slice(0,160).join('')})),
       insights:overviewInsights(store,user)};
     case 'memories': {
       const organizer=store.consoleService.organizer;

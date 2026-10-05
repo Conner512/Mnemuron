@@ -75,6 +75,12 @@ lines.on('line',async line=>{
    const backend=new MockVectorStore();core.store.consoleService.vector=user=>{const e=core.store.consoleService.models.provider(user,'embedder');return new VectorIndex(core.store,backend,new Map([[e.profile.fingerprint,e]]),{ownerId:user});};
    reply={done:true,synthetic_vector_backend:true};
   }
+  // First run against a synthetic operator-pre-created collection (never created by Mnemuron; no Qdrant).
+  if(req.command==='enable-first-run-vector'){
+   core.store.memoryConfig.console.worker_enabled=true;core.store.memoryConfig.vector_store={enabled:true,collection_prefix:'synthetic'};delete core.store.consoleService.vector;
+   const backend=new MockVectorStore();backend.precreated=['synthetic_first_v1'];backend.collections.set('synthetic_first_v1',{config:{dimensions:3,distance:'Cosine'},points:new Map()});
+   core.store.consoleService.vectorBackend=()=>backend;reply={done:true,precreated:backend.precreated};
+  }
   // UI-state fixtures only; actual OAuth/MCP acceptance lives in the gateway SDK suite.
   if(req.command==='connection-evidence'){
    const r=ids.db.prepare('SELECT * FROM identity_connections WHERE account_id=? AND label=?').get(o.account.account_id,req.label);if(!r)throw new Error('Synthetic connection missing');

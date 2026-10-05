@@ -12,7 +12,7 @@ const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
 let capabilities={enabled:false,writable:false},actions,connections,featureReads,auditFilters={};
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
-let query='',searchMode='lexical',category='',status='active',topic='',origin='',offset=0;
+let detailMeta=null,query='',searchMode='lexical',category='',status='active',topic='',origin='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
 // selected maps memory_id → the text its list row already showed (kept for confirmations across pages).
 let selected=new Map(),selectAll=false,facets=null;
@@ -26,7 +26,7 @@ readLocation();
 
 function clear() {
  actions?.clear();connections?.clear();featureReads?.clear();state.clear();requestSequence++;detailSequence++;
- currentData=null;detailData=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;
+ currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -89,7 +89,7 @@ function render(data) {
 function updateMemorySelection() {
  const toolbar=root.querySelector('[data-memory-selection]');if(!toolbar||selectAll)return;
  const boxes=[...root.querySelectorAll('[data-batch-memory]')];
- for(const box of boxes)if(box.checked)selected.set(box.dataset.batchMemory,box.closest('tr')?.querySelector('.memory-text')?.textContent||'');else selected.delete(box.dataset.batchMemory);
+ for(const box of boxes)if(box.checked)selected.set(box.dataset.batchMemory,(box.closest('tr')?.querySelector('.memory-text')||box.closest('tr')?.querySelector('.memory-title'))?.textContent||'');else selected.delete(box.dataset.batchMemory);
  const count=selected.size,organize=canAct(capabilities,'memory.organize'),limit=organize?SELECTION_LIMIT:50;
  toolbar.querySelector('[data-selection-count]').textContent=String(count);
  // Batch retract (and the older batch classify) stay bounded at 50 per request.
@@ -117,8 +117,7 @@ async function load() {
      else if(page==='tasks')data=await read('projects')??{unavailable:true};
      else{
        const [models,caps]=await Promise.all([read('models'),read('capabilities')]);
-       data={...(models??{unavailable:true}),web_policy:caps?.web_policy};
-       if(caps?.web_policy)capabilities={...capabilities,web_policy:caps.web_policy};
+       data={...(models??{unavailable:true}),read_policy:caps?.read_policy};
      }
      data.features=await extras();
    }catch{return;}
@@ -137,25 +136,34 @@ async function load() {
 
 // Detail pane: docked beside the list on wide screens, modal on narrow ones.
 function openPane(title) {
- const heading=document.getElementById('detail-title');heading.dataset.i18n=title;heading.textContent=t(title);
+ setPaneTitle(title);
  if(pane.open)return;
  lastFocus=document.activeElement;
  if(WIDE_PANE.matches){pane.show();document.body.classList.add('pane-open');}else pane.showModal();
 }
+// A catalog key is translated (and re-translated on language change); a memory title is shown as stored text.
+function setPaneTitle(key,text){const heading=document.getElementById('detail-title');
+ if(text){delete heading.dataset.i18n;heading.textContent=text;heading.title=text;}else{heading.dataset.i18n=key;heading.textContent=t(key);heading.removeAttribute('title');}}
 function closePane(){if(pane.open)pane.close();}
 function beginDetail(kind,title){detailKind=kind;detailStack=[];detail.innerHTML=l('loading','p');openPane(title);}
 function markSelected(){
  const memoryId=detailKind==='memory'?detailData?.memory?.memory_id:null,summaryId=detailKind==='summary'?detailData?.results?.[0]?.summary_id:null;
  for(const node of root.querySelectorAll('[data-memory],[data-summary]'))node.toggleAttribute('data-selected',(!!memoryId&&node.dataset.memory===memoryId)||(!!summaryId&&node.dataset.summary===summaryId));
 }
-const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],...(canAct(capabilities,'memory.organize')?[['memory.organize','moveToCategory']]:[['memory.classify','classifyMemory']]),['memory.sensitivity','sensitivity'],['memory.visibility','webVisibility']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
+const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],...(canAct(capabilities,'memory.organize')?[['memory.organize','moveToCategory']]:[['memory.classify','classifyMemory']]),['memory.sensitivity','sensitivity']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
 const changed=e=>`<div role="alert">${l(/VERSION_CHANGED|MANIFEST_CHANGED/.test(e.message)?'changed':'unavailable','p')}</div>`;
 async function openMemory(params,first=false,back=false) {
  const sequence=++detailSequence;
- if(first)beginDetail('memory','detail');
- try{const data=await api('memory',params);if(!state.account||sequence!==detailSequence)return;detailData=data;
+ if(first){detailMeta=null;beginDetail('memory','detail');}
+ try{
+   // Metadata (title, category, provenance) is optional: the body still renders if that read fails.
+   const cached=detailMeta?.memory_id===params.memory_id?detailMeta:null;
+   const [data,fetched]=await Promise.all([api('memory',params),cached||!params.memory_id?cached:api('memory-meta',{memory_id:params.memory_id}).catch(e=>{if(e.message==='STALE_ACCOUNT'||e.name==='AbortError')throw e;return null;})]);
+   if(!state.account||sequence!==detailSequence)return;detailData=data;
+   const meta=fetched?.memory_id===data.memory.memory_id?fetched:detailMeta?.memory_id===data.memory.memory_id?detailMeta:null;detailMeta=meta;
    if(!back)detailStack.push({kind:'memory',params:{...params,revision:data.revision,source_version:data.source_manifest?.source_version}});
-   detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1});markSelected();}
+   setPaneTitle('detail',meta?.title);
+   detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1,meta,labels:capabilities.category_labels||{}});markSelected();}
  catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e);}
 }
 async function openSummary(params,first=false,back=false) {
@@ -187,9 +195,9 @@ document.addEventListener('change',event=>{if(event.target.matches('[data-batch-
 document.addEventListener('submit',event=>{
  if(event.target.id==='audit-filter'){event.preventDefault();auditFilters=Object.fromEntries(new FormData(event.target));offset=0;void load();}
  if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'lexical');category=String(f.get('category')||'');status=String(f.get('status')||'active');offset=0;resetSelection();saveLocation();void load();}
- if(event.target.getAttribute('action')==='/console-api/logout'){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;}
+ if(event.target.getAttribute('action')==='/console-api/logout'){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;detailMeta=null;}
 });
-pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
+pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailMeta=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
 // Keyboard: "/" or Ctrl/Cmd+K focuses search; Escape closes a docked (non-modal) pane.
 document.addEventListener('keydown',event=>{
  if(event.key==='Escape'&&pane.open&&!document.querySelector('dialog[open]:modal')&&!document.querySelector('.select-popup:popover-open')){closePane();return;}

@@ -57,9 +57,10 @@ test('Console completion: taxonomy and privacy preferences cannot affect other o
   assert.equal((await f.act('privacy.defaults',{expected_revision:0,sensitivity:'secret',cloud_readable:false})).status,200);
   const secret=await f.create();assert.equal((await f.get('memory-meta',{memory_id:secret})).body.sensitivity,'secret');
   assert.equal((await f.act('privacy.defaults',{expected_revision:1,sensitivity:'public',cloud_readable:true})).status,403);
-  await f.act('memory.web_policy',{read_all:true,expected_revision:0});
+  // Legacy account read-all (retained data, no longer a console action) still never opens default-private records.
+  const owner=f.owner.auth;f.store.webVisibility.setPolicy(owner,{read_all:true,expected_revision:0});
   assert.equal((await f.act('privacy.defaults',{expected_revision:1,sensitivity:'public',cloud_readable:false})).status,200);
-  const privatePublic=await f.create();assert.equal((await f.get('memory-meta',{memory_id:privatePublic})).body.web_allowed,false);
+  const privatePublic=await f.create();assert.equal(f.store.webVisibility.visible({...owner,agent_id:'chatgpt-web'},privatePublic),false);
   assert.equal((await f.get('memory-meta',{memory_id:m})).body.sensitivity,'sensitive');
   assert.equal((await f.get('privacy-defaults',{},f.other)).body.sensitivity,'sensitive');
 });

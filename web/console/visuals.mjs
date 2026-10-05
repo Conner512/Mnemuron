@@ -64,10 +64,18 @@ const fixed = n => Number(n.toFixed(2));
 const preview = value => [...String(value ?? '')].slice(0, 160).join('');
 export const formatDate = value => value ? new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : value).toLocaleString(globalThis.document?.documentElement?.lang || 'zh-CN') : '—';
 
-/** Memory text for a list row: a leading path on its own line, the body beneath it (both verbatim). */
-export const memoryText = m => m.path && m.body
-  ? html`<span class="memory-path" title="${m.path}">${m.path}</span><span class="memory-text">${m.body}</span>`
-  : html`<span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>`;
+/** Memory text for a list row: a short display title, then a leading file path (only with an extension or a
+ * root) and the body beneath it, both verbatim. Older servers without a title keep the previous layout. */
+export const memoryText = m => {
+  const body = m.path && m.body ? m.body : preview(m.content || m.summary || m.memory_id);
+  // A one-sentence memory whose title is the whole text is not printed twice.
+  const repeats = m.title_source === 'content' && String(body).trim().replace(/[。．.!！?？;；\s]+$/u, '') === m.title;
+  return html`${m.title ? html`<span class="memory-title" data-title-source="${m.title_source || ''}">${m.title}</span>` : ''}${m.path && m.body
+    ? html`<span class="memory-path" title="${m.path}">${m.path}</span>` : ''}${repeats ? '' : html`<span class="memory-text">${body}</span>`}`;
+};
+const ORIGIN_KEYS = {imported: 'importedOrigin', console: 'originConsole', model_tool: 'originModelTool', agent: 'originAgent'};
+/** An imported or namespace topic: a filterable tag, never a title or a file path. */
+const tagChip = (t, tag) => tag ? html`<button type="button" class="topic-chip tag-chip" data-facet="topic" data-value="${tag}" title="${t('originalTagNote')}"><span class="chip-label">${t('originalTag')}</span>${tag}</button>` : '';
 export const typeChip = (t, type = 'fact') => html`<span class="type-chip" data-type="${type}">${t(type)}</span>`;
 export const statusTag = (t, status = 'active') => html`<span class="tag lifecycle-tag" data-status="${status}">${t(status)}</span>`;
 export const emptyState = (t, key = 'empty') => html`<div class="empty">${svg('library')}${i18n(t, key, 'p')}</div>`;
@@ -209,10 +217,12 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   const selection = selectable || selectAll ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
     <p role="status" aria-live="polite">${selectAll ? i18n(t, 'allMatchingSelected') : html`${i18n(t, 'selectedMemories')} <strong data-selection-count>${count}</strong> / ${organize ? SELECTION_LIMIT : 50}`}</p>
     <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${(selectAll ? action !== 'memory.organize' : !count) ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}${canSelectAll && !selectAll ? html`<button type="button" class="quiet" data-select-all>${i18n(t, 'selectAllMatching')}</button>` : ''}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
-  const meta = m => html`${m.topic ? html`<button type="button" class="topic-chip" data-facet="topic" data-value="${m.topic}">${m.topic}</button>` : ''}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
+  // A topic already shown as the title is not repeated; an imported namespace topic is a labelled tag.
+  const topicChip = m => m.title_source === 'topic' ? '' : m.tag ? tagChip(t, m.tag) : m.topic && !m.title ? html`<button type="button" class="topic-chip" data-facet="topic" data-value="${m.topic}">${m.topic}</button>` : '';
+  const meta = m => html`${topicChip(m)}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
-    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${typeChip(t, m.memory_type || 'fact')}</button></div>${m.topic || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
+    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${typeChip(t, m.memory_type || 'fact')}</button></div>${(m.topic && m.title_source !== 'topic') || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
       <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${categoryName(t, labels, m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
     : emptyState(t, query || category || topic || origin || (status && status !== 'all') ? 'emptyFiltered' : 'empty');
   const chips = [['topic', topic, topic], ['origin', origin, origin ? t(origin === 'imported' ? 'importedOrigin' : 'otherOrigin') : '']].filter(([, value]) => value);
@@ -259,12 +269,27 @@ export function revisionDifference(left,right){
   return [a,b].map(chars=>({prefix:chars.slice(0,start).join(''),changed:chars.slice(start,chars.length-end).join(''),suffix:chars.slice(chars.length-end).join('')}));
 }
 
-export function memoryDetailView(t, data, {actions = '', canGoBack = false}) {
+/** Labelled facts for the detail pane: type, classification, lifecycle, version and provenance, each on its own row. */
+function detailFacts(t, m, data, meta, labels) {
+  const origin = meta?.origin;
+  const rows = [
+    ['memoryType', typeChip(t, m.memory_type || 'fact')],
+    ...(meta?.category ? [['category', html`<span class="category-pill" data-category="${meta.category}">${categoryName(t, labels, meta.category)}</span>`]] : []),
+    ['status', statusTag(t, m.status || 'active')],
+    ['revisions', html`<span class="figure">${data.revision}</span>`],
+    ...(origin ? [['originFacet', html`${i18n(t, ORIGIN_KEYS[origin.kind] || 'originAgent')}${origin.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(origin.original_created_at)}</time>` : ''}`]] : []),
+    ...(meta?.tag ? [['originalTag', html`<code class="tag-value">${meta.tag}</code><small class="muted">${i18n(t, 'originalTagNote')}</small>`]] : []),
+    ...(meta?.sensitivity ? [['sensitivity', html`${t(meta.sensitivity)}`]] : []),
+  ];
+  return html`<dl class="detail-facts">${rows.map(([key, value]) => html`<dt>${i18n(t, key)}</dt><dd>${value}</dd>`)}</dl>`;
+}
+
+export function memoryDetailView(t, data, {actions = '', canGoBack = false, meta = null, labels = {}}) {
   const m = data.memory || {}, content = String(m.content ?? ''), length = [...content].length;
   const sources = data.source_manifest?.sources || [];
   const lifecycle = m.lifecycle || {};
   const links = [[lifecycle.supersedes_memory_id, 'previousRecord'], [lifecycle.superseded_by_memory_id, 'replacementRecord']].filter(([id]) => id);
-  return String(html`<div class="detail-meta">${typeChip(t, m.memory_type || 'fact')}<span class="tag">${i18n(t, 'revisions')} ${data.revision}</span>${statusTag(t, m.status || 'active')}</div>
+  return String(html`${detailFacts(t, m, data, meta, labels)}
   ${m.status === 'active' && actions ? html`<div class="actions detail-actions">${trusted(actions)}</div>` : ''}
   <button type="button" data-compare-memory="${m.memory_id}" data-previous-memory="${lifecycle.supersedes_memory_id||''}">${i18n(t,'compareVersions')}</button>
   <div class="body-content">${content}</div>
@@ -305,7 +330,7 @@ export const featureMap = {
     {id: 'MEM-02', status: 'live', read: ['memory', 'memory-meta']},
     {id: 'MEM-03', status: 'live', write: ['memory.create']},
     {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
-    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity', 'memory.visibility']},
+    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity']},
     {id: 'MEM-06', status: 'live', read: ['memories'], write: ['memory.organize', 'memory.organize_undo', 'memory.batch_classify', 'memory.batch_retract']},
     {id: 'MEM-07', status: 'live', read: ['memory-versions']},
   ],
@@ -366,7 +391,7 @@ export const featureMap = {
     {id: 'PRV-04', status: 'live', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
       ui: {actions: ['pruneNow']}},
     {id: 'PRV-05', status: 'policy'},
-    {id: 'PRV-06', status: 'live', read: ['capabilities'], write: ['memory.web_policy']},
+    {id: 'PRV-06', status: 'live', read: ['capabilities']},
   ],
   security: [
     {id: 'SEC-01', status: 'live', write: ['security.password'], reauth: true},
@@ -471,13 +496,13 @@ function egressSummary(t, data) {
     <tbody>${models.map(m => html`<tr><td>${i18n(t, m.kind)}</td><td>${stateDot(t, m.config?.enabled ? 'enabled' : 'disabled')}</td><td>${yes(m.config?.egress_approved)}</td><td>${yes(m.config?.query_approved)}</td></tr>`)}</tbody></table></div>
     <div class="section-foot"><a href="/app/models">${i18n(t, 'models')} →</a></div>`;
 }
-/** PRV-06: whether ChatGPT reads every non-secret memory or only per-revision grants. */
-function readScope(t, data, caps) {
-  const policy = data.web_policy;
+/** PRV-06: the ChatGPT read policy, read-only. Operators set it in the runtime config; the console cannot change it. */
+function readScope(t, data) {
+  const policy = data.read_policy;
   if (!policy) return sectionNote(t, 'unavailable');
-  const on = policy.read_all === true, can = Array.isArray(caps.allowed_actions) && caps.allowed_actions.includes('memory.web_policy');
-  return html`<div class="status-line">${stateDot(t, on ? 'enabled' : 'disabled')}${i18n(t, 'webReadAll')}</div>${i18n(t, on ? 'webReadAllOn' : 'webReadAllOff', 'p')}
-    ${can ? html`<div class="actions"><button type="button" data-console-action="memory.web_policy" data-enabled="${on ? 'false' : 'true'}">${i18n(t, on ? 'webPolicyDisable' : 'webPolicyEnable')}</button></div>` : sectionNote(t, 'viewWithoutWrite')}`;
+  const uniform = policy.active_records_uniform === true;
+  return html`<div class="status-line">${stateDot(t, uniform ? 'enabled' : 'disabled')}${i18n(t, 'readPolicyUniform')}</div>${i18n(t, uniform ? 'readPolicyUniformOn' : 'readPolicyUniformOff', 'p')}
+    ${sectionNote(t, 'readPolicyOperator')}`;
 }
 /** SYS-01: platform switches exactly as the server reports them in its capabilities. */
 function platformSwitches(t, caps) {
@@ -498,7 +523,7 @@ function featureProgress(t) {
 export const prototypeOrder = page => [...(featureMap[page] || [])].sort((a, b) => ['live', 'planned', 'policy'].indexOf(a.status) - ['live', 'planned', 'policy'].indexOf(b.status));
 /** New menu destinations: one card per feature. Live cards show real data; planned ones a wireframe. */
 export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
-  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'PRV-06': () => readScope(t, data, caps), 'SYS-01': () => platformSwitches(t, caps)};
+  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'PRV-06': () => readScope(t, data), 'SYS-01': () => platformSwitches(t, caps)};
   const cards = prototypeOrder(page).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? featureBody(t,f.id,data,caps) : ''));
   return String(html`<div class="feature-grid">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
 }

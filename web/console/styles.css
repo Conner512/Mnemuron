@@ -504,3 +504,13 @@ body.pane-open .workspace{margin-right:var(--pane)}
 @media(max-width:760px){.shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}.sidebar>.eyebrow,.account-badge{display:none}.sidebar nav{display:flex;flex-wrap:wrap;gap:4px}.nav-group{display:contents}.nav-group h2{display:none}.topbar{position:relative;height:auto;min-height:56px;flex-wrap:wrap;padding:10px 16px}.page-heading{flex-direction:column;align-items:flex-start}}
 @keyframes slide{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Memory presentation: title line, labelled tag chip and the detail fact list. */
+.memory-title{display:block;font-weight:600;color:var(--text);line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.memory-title+.memory-text{color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tag-chip{display:inline-flex;align-items:center;gap:5px;color:var(--muted)}
+.tag-chip .chip-label{font-size:11px;color:var(--muted)}
+.detail-facts{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 16px;margin:0 0 14px;font-size:13.5px}
+.detail-facts dt{color:var(--muted);font-size:12.5px;line-height:22px}.detail-facts dd{margin:0;overflow-wrap:anywhere;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.detail-facts .tag-value{font-size:12px}.detail-facts small{width:100%}
+#detail-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

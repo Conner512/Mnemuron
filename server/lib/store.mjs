@@ -17,7 +17,7 @@ import {MemorySources} from './memory/sources.mjs';
 import { HandoffPolicy } from "./handoff-policy.mjs";
 import { MemoryRevisions, exactText } from "./memory/revisions.mjs";
 import { MemoryService } from "./memory/service.mjs";
-import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,WEB_READ_POLICY} from './memory/web-visibility.mjs';
+import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,webReadPolicy,AGENT_READ_POLICIES,WEB_READ_POLICY} from './memory/web-visibility.mjs';
 import {CloudMemory} from './memory/cloud.mjs';
 import {ConsoleService} from './console/service.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
@@ -302,6 +302,10 @@ export class MnemuronStore {
       agent_instance_id: row.agent_instance_id,
       scopes: fromJson(row.scopes_json, []),
     };
+    // The ChatGPT read policy is bound to the credential here, so every read path filters the same way.
+    if (isWebReader(auth) && this.runtime.agentReadPolicy && AGENT_READ_POLICIES[this.runtime.agentReadPolicy] !== WEB_READ_POLICY) {
+      auth.read_policy = AGENT_READ_POLICIES[this.runtime.agentReadPolicy];
+    }
     if (requiredScope && !auth.scopes.includes(requiredScope)) {
       throw new AuthorizationError(requiredScope);
     }
@@ -2979,7 +2983,7 @@ export class MnemuronStore {
     if(ownEmbedder||payload?.personal_model_only===true){
       try{if(!ownEmbedder)throw new ModelError('NOT_CONFIGURED');return await this.consoleService.vector(auth.user_id).search(auth,{...payload,mode});}
       catch(error){
-        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
       }
@@ -3155,7 +3159,7 @@ export class MnemuronStore {
         classification:conflict.classification,memory_type:conflict.memory_type,memory_ids:conflict.memory_ids,
         variants:conflict.variants.map(memory=>this.webVisibility.project(auth,memory)),automatic_resolution_performed:false,
       }));
-      result.visibility_policy=WEB_READ_POLICY;
+      result.visibility_policy=webReadPolicy(auth);
     }
     this.audit({
       auth,
@@ -3207,7 +3211,7 @@ export class MnemuronStore {
       result.memory=webMemoryProjection(memory);result.sources=[];result.source_ids_truncated=false;
       result.source_manifest=sourceManifest?{revision:sourceManifest.revision,source_version:sourceManifest.source_version,evidence_kind:sourceManifest.evidence_kind,
         independently_fact_checked:false,sources:sourceManifest.sources.map(webSourceProjection),next_source_offset:sourceManifest.next_source_offset}:null;
-      result.visibility_policy=WEB_READ_POLICY;
+      result.visibility_policy=webReadPolicy(auth);
     }
     // Legacy metadata may predate current input limits; retain IDs, omit oversized optional metadata.
     if (serializedBytes(result)>MEMORY_RESPONSE_BYTES) {
@@ -3460,7 +3464,7 @@ export class MnemuronStore {
       if(!rows.length)return unavailable;
       return {schema_version:PROJECT_CONTEXT_SCHEMA_VERSION,status:'project_context_preview',read_only:true,project:{project_id:id},tasks:[],
         structured_memories:rows.map(row=>this.webVisibility.project(auth,memorySummary(this.memoryFromRow(row),160))),
-        read_capabilities:{task_field_details:false},visibility_policy:WEB_READ_POLICY,
+        read_capabilities:{task_field_details:false},visibility_policy:webReadPolicy(auth),
         source_summary:{included_memory_count:rows.length},projection:{gateway_summary_only:true,full_context_returned:false,omitted_fields:['tasks','checkpoints','recent_activity','project_metadata']},
         safety:{resume_created:false,task_scope_changed:false,context_injected:false},next_action:{type:'read_memory',tool:'mnemuron_get_memory'}};
     }
@@ -4900,7 +4904,7 @@ export class MnemuronStore {
       agent_id: auth.agent_id,
       agent_instance_id: auth.agent_instance_id,
       identity_status: "server_verified",
-      ...(isWebReader(auth)?{web_read_policy:WEB_READ_POLICY}:{}),
+      ...(isWebReader(auth)?{web_read_policy:webReadPolicy(auth)}:{}),
       ...(isWebReader(auth)&&this.cloudMemory?.binding(auth)?{cloud_memory:{...this.cloudMemory.binding(auth),enabled:this.runtime.cloudMemory===true}}:{}),
     };
   }

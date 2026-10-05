@@ -54,6 +54,8 @@ export function memoryRuntime(input) {
       if(conversation.max_chars!==undefined)integer(conversation.max_chars,8,1000);
     }
     if(input.memory?.retrieval?.mode!==undefined && !['lexical','hybrid','semantic'].includes(input.memory.retrieval.mode))throw new Error('invalid retrieval');
+    // ChatGPT read policy. Absent = the per-memory filter. Changing it changes effective access: an operator step.
+    if(input.memory?.agent_read_policy!==undefined && !['chatgpt_per_memory_v1','active_uniform_v1'].includes(input.memory.agent_read_policy))throw new Error('invalid read policy');
   }catch{throw new ValidationError('Invalid model, vector or worker configuration.', 'INVALID_MEMORY_CONFIG');}
   for(const [section,key,value] of [[input.memory,'automatic_fact_overwrite',false],[input.memory,'preserve_atomic_records',true],[input.privacy,'include_body_in_logs',false],[input.privacy,'automatic_export',false]]){
     if(section?.[key]!==undefined && section[key]!==value)throw new ValidationError('Unsafe memory policy.','INVALID_MEMORY_CONFIG');
@@ -64,7 +66,8 @@ export function memoryRuntime(input) {
     captureExtraction:input.memory?.capture_extraction?.enabled === true,
     deploymentMode:input.deployment_mode || 'production', syntheticData:input.development?.synthetic_data === true,
     organizerConfigured:input.providers?.organizer?.enabled===true,embedderConfigured:input.providers?.embedder?.enabled===true,
-    vectorConfigured:input.vector_store?.enabled===true&&input.providers?.embedder?.enabled===true,workerConfigured:input.jobs?.enabled===true };
+    vectorConfigured:input.vector_store?.enabled===true&&input.providers?.embedder?.enabled===true,workerConfigured:input.jobs?.enabled===true,
+    agentReadPolicy:input.memory?.agent_read_policy || 'chatgpt_per_memory_v1' };
 }
 
 export function privateStoragePaths(config = {}, databasePath, configPath) {

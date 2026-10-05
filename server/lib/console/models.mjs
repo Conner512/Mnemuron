@@ -10,7 +10,48 @@ import {outputSchema,validateSummary} from '../memory-jobs/worker.mjs';
 // A browser may configure its own HTTPS service and its own key, never an env/file
 // reference, a proxy, or another user's model. Private destinations need operator approval.
 export class ConsoleModels {
-  constructor(store,state){this.store=store;this.state=state;this.db=store.db;}
+  constructor(store,state){this.store=store;this.state=state;this.db=store.db;
+    // The embedder profile each index generation was built with, so a later model change cannot break the serving
+    // index; and one finite first-run embedding allowance per account that every embedder call draws from.
+    this.db.exec(`CREATE TABLE IF NOT EXISTS console_vector_profiles(generation TEXT PRIMARY KEY,user_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
+        config_json TEXT NOT NULL,secret_cipher TEXT,created_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS console_vector_budget(user_id TEXT PRIMARY KEY,total INTEGER NOT NULL CHECK(total BETWEEN 1 AND 150),used INTEGER NOT NULL DEFAULT 0,opened_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);}
+  /** Counts one embedder call against an open first-run budget. Returns true when it replaces the daily cap (manifest build only). */
+  budgetReserve(user,purpose){
+    const row=this.db.prepare('SELECT total,used FROM console_vector_budget WHERE user_id=?').get(user);if(!row)return false;
+    if(row.used>=row.total)fail('BUDGET_EXHAUSTED');
+    this.db.prepare('UPDATE console_vector_budget SET used=used+1 WHERE user_id=?').run(user);return purpose==='manifest';
+  }
+  budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:row.total-row.used}:null;}
+  /** Records the configuration a generation is built with (sealed key included, never returned). */
+  snapshot(user,generation){const row=this.raw(user,'embedder');if(!row)fail('NOT_CONFIGURED');
+    this.db.prepare('INSERT OR IGNORE INTO console_vector_profiles VALUES(?,?,?,?,?,?)').run(generation,user,this.profile(user,'embedder',JSON.parse(row.config_json)).fingerprint,row.config_json,row.secret_cipher,Date.now());}
+  /** Providers for every retained generation profile of this owner, still bound to the owner's CURRENT consent:
+   * the embedder must be enabled, egress/query approvals and sensitivities are intersected with the current ones,
+   * and on the same origin the current key is used (a removed key stops the old profile too). */
+  snapshotProviders(user){
+    const current=this.raw(user,'embedder'),now=current&&JSON.parse(current.config_json);if(!now?.enabled)return [];
+    const seen=new Set(),out=[];
+    for(const s of this.db.prepare('SELECT * FROM console_vector_profiles WHERE user_id=? ORDER BY created_at').all(user)){
+      if(seen.has(s.fingerprint))continue;seen.add(s.fingerprint);
+      const c=JSON.parse(s.config_json),profile=this.profile(user,'embedder',c),{fingerprint:unused,...input}=profile;
+      const sameOrigin=new URL(c.base_url).origin===new URL(now.base_url).origin;
+      const provider=new Embedder(input,{transport:async(p,route,body)=>{
+        const live=this.raw(user,'embedder');if(!live||!JSON.parse(live.config_json).enabled)fail('NOT_CONFIGURED');
+        const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
+        const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
+        const cipher=sameOrigin?live.secret_cipher:s.secret_cipher;
+        const headers=cipher?{authorization:'Bearer '+this.state.unseal(user,'model:embedder',cipher)}:{};
+        return requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});
+      }});
+      provider.profile=Object.freeze({...profile,egress:Object.freeze({...profile.egress,approved:profile.egress.approved&&now.egress_approved===true,
+        query_approved:profile.egress.query_approved&&now.query_approved===true,sensitivities:profile.egress.sensitivities.filter(x=>now.sensitivities.includes(x))})});
+      out.push(provider);
+    }
+    return out;
+  }
   raw(user,kind){if(!['organizer','embedder'].includes(kind))throw new ValidationError('Unknown model kind.');return this.db.prepare('SELECT * FROM console_models WHERE user_id=? AND kind=?').get(user,kind);}
   list(user){return ['organizer','embedder'].map(kind=>{const row=this.raw(user,kind),test=row&&this.db.prepare('SELECT state,result_json,error_code,updated_at FROM console_model_tests WHERE user_id=? AND kind=? AND revision=?').get(user,kind,row.revision);
     const interrupted=test?.state==='running'&&Date.now()-test.updated_at>90000;
@@ -83,6 +124,8 @@ export class ConsoleModels {
       .run(state,result?JSON.stringify(result):null,error,Date.now(),auth.user_id,p.kind,row.revision,attempt);
     const reserve=()=>this.store.memoryTransaction(()=>{
       const day=new Date().toISOString().slice(0,10),profile=provider.profile.fingerprint;
+      // A synthetic probe call also counts against an open first-run budget (and still against the daily cap).
+      if(p.kind==='embedder')this.budgetReserve(auth.user_id,'probe');
       this.db.prepare('INSERT OR IGNORE INTO memory_model_budget VALUES(?,?,0)').run(profile,day);
       const vectorCalls=p.kind==='embedder'&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_calls'").get()?this.db.prepare('SELECT count n FROM memory_vector_calls WHERE profile=? AND day=?').get(profile,day)?.n||0:0;
       if(vectorCalls+this.db.prepare('SELECT reserved_calls n FROM memory_model_budget WHERE profile=? AND day=?').get(profile,day).n>=provider.profile.limits.daily_requests)fail('BUDGET_EXHAUSTED');

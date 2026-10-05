@@ -1,4 +1,6 @@
 import { BoundaryError, fetchJson, readPrivate, CORE_SCOPES, MEMORY_WRITE_CORE_SCOPES } from "../../../shared/oauth-common.mjs";
+// Core reports which read policy it enforces for this credential; anything else fails closed.
+export const WEB_READ_POLICIES=Object.freeze(['web-memory-visibility-v1','web-memory-active-uniform-v1']);
 
 export class ReadonlyCoreClient {
   constructor(config, writeBinding=null) {
@@ -52,7 +54,7 @@ export class ReadonlyCoreClient {
     if (!identity || identity.user_id !== mapping.mnemuron_user_id
       || (expected.credential_id && identity.credential_id!==expected.credential_id)
       || identity.agent_instance_id !== expected.agent_instance_id || identity.identity_status !== "server_verified"
-      || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
+      || identity.agent_id!=='chatgpt-web' || !WEB_READ_POLICIES.includes(identity.web_read_policy)
       || !Array.isArray(result.scopes) || result.scopes.length !== scopes.length
       || !scopes.every((scope) => result.scopes.includes(scope))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if(this.writeBinding){

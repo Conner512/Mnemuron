@@ -87,7 +87,11 @@ test('MOD-06: configured HTTP LLM classifies and summarizes, embeddings index on
  assert.equal(p.vector.state,'succeeded');assert.equal(p.vector.search_ready,true);assert.equal(p.vector.indexed_documents,1);
  const found=await f.store.searchMemories(f.a.auth,{query:'network',mode:'semantic',personal_model_only:true});assert.equal(found.results[0].memory_id,own.memory_id);
  assert.ok(!JSON.stringify(f.calls).match(/SECRET exclusion|FOREIGN exclusion/));
- await f.save('embedder',{model:'synthetic-next'},1);assert.equal((await f.read()).processing.vector.search_ready,false);
+ // A model change no longer silently breaks the serving index: the generation keeps the profile it was built with.
+ await f.save('embedder',{model:'synthetic-next'},1);const after=(await f.read()).processing.vector;
+ assert.equal(after.search_ready,true);assert.equal(after.serving_profile_differs,true);assert.ok(!after.search_blockers.includes('VECTOR_PROFILE_MISMATCH'));
+ // A generation without a retained profile (built before this change) still reports the mismatch truthfully.
+ f.store.db.prepare('DELETE FROM console_vector_profiles').run();
  assert.ok((await f.read()).processing.vector.search_blockers.includes('VECTOR_PROFILE_MISMATCH'));
 });
 
