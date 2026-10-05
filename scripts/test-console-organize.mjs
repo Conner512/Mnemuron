@@ -52,7 +52,12 @@ try{
   check('Default library view hides tombstones (status = active)',await page.locator('#search-form [name=status]').inputValue()==='active');
   check('Facet sidebar lists categories with counts',await page.locator('.library-facets [data-facet="category"]').count()>=7);
   check('Recent changes starts empty and says so',(await page.locator('.recent-changes').innerText()).includes('还没有整理记录'));
+  const status=page.locator('.classification-status');
+  check('Uncategorized library explains that classification is not set up, with manual and model paths',await status.getAttribute('data-classification-state')==='unconfigured'&&(await status.innerText()).includes('自动分类尚未设置')&&await status.locator('a[href="/app/models"]').count()===1);
+  check('No retry is offered when nothing is configured',await status.locator('[data-console-action]').count()===0&&!(await status.innerText()).includes('重试'));
   await shot('02-library-initial');
+  await goto('jobs');check('Jobs page disables organizing with the reason while no model is configured',await page.locator('[data-console-action="jobs.schedule"][data-type="classification"]').isDisabled()&&(await page.locator('#console-root').innerText()).includes('请先保存并启用对应模型'));
+  await shot('02a-jobs-not-configured');await goto('memories');
 
   // Large import through the real dialog, in chunks with progress; then straight into organizing.
   // Unusable files are explained in plain language and import nothing.
@@ -234,9 +239,23 @@ try{
   check('Batch retract confirms both pages\' selections by their visible text',(await op.locator('.batch-confirm-list li').count())===2&&crossList.includes(firstPick)&&crossList.includes(secondPick));
   await page.keyboard.press('Escape');await op.waitFor({state:'hidden'});
 
+  // Path-prefixed memories: the path gets its own line and the body wraps beneath it (verbatim, no sideways scroll).
+  const pathSamples=['/Users/example/Projects/alpha-service/src/modules/billing/invoices/generator/nightly-invoice-generator.ts: Invoices are generated nightly at 02:00 UTC and retried three times.',
+    '/Users/example/Projects/alpha-service/src/modules/billing/invoices/generator/nightly-invoice-generator.ts: The retry delay doubles after each failure.',
+    '[services/oauth/src/console.mjs] The console BFF forwards only allow-listed error codes.'];
+  for(const content of pathSamples)await page.evaluate(async content=>{const me=await (await fetch('/console-api/me')).json();
+    await fetch('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.csrf,account_id:me.account_id,action:'memory.create',operation_id:crypto.randomUUID(),payload:JSON.stringify({content,scope:'user',memory_type:'fact',sensitivity:'sensitive'})})});},content);
+  await goto('memories?origin=other');const pathRows=page.locator('.memory-table tbody tr',{has:page.locator('.memory-path')});
+  check('Path-prefixed rows show the path on its own line and the body below',await pathRows.count()===3&&(await pathRows.nth(0).locator('.memory-text').innerText()).startsWith('The console BFF'));
+  check('Rows sharing a long path are told apart by their bodies',new Set(await pathRows.locator('.memory-text').allInnerTexts()).size===3);
+  check('Desktop list does not scroll sideways',await page.evaluate(()=>[...document.querySelectorAll('.table-scroll')].every(n=>n.scrollWidth<=n.clientWidth+1)));
+  await shot('20d-path-rows-desktop');
+
   // Narrow screen.
   const mobile=await ctxA.newPage();await mobile.setViewportSize({width:390,height:844});watch(mobile);await goto('memories',mobile);
   check('Narrow layout has no horizontal page scroll',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot('17-mobile-library',mobile);
+  await goto('memories?origin=other',mobile);check('Narrow list stacks rows with path and wrapped body, no sideways scroll',await mobile.locator('.memory-path').count()===3&&await mobile.evaluate(()=>[...document.querySelectorAll('.table-scroll')].every(n=>n.scrollWidth<=n.clientWidth+1)&&document.documentElement.scrollWidth<=innerWidth+1));
+  await shot('17a-mobile-path-rows',mobile);
   await mobile.locator('.memory-table [data-batch-memory]').first().check();await mobile.locator('[data-memory-selection] [data-console-action="memory.organize"]').click();
   await mobile.locator('#operation-dialog [data-organize-step="choose"]').waitFor();await shot('18-mobile-dialog',mobile,false);await mobile.close();
 
@@ -248,7 +267,7 @@ try{
 
   const after=await command('integrity');
   check('Schema stays at version 7',after.user_version===7);
-  check('No memory was deleted; only imports, the private fixture, synthetic bulk rows, one created memory and one correction were added (A)',after.users[0].memories===before.users[0].memories+301+2010+2);
+  check('No memory was deleted; only imports, the private fixture, synthetic bulk rows, one created memory and one correction were added (A)',after.users[0].memories===before.users[0].memories+301+2010+2+3);
   check('Account B memories and revisions are untouched',JSON.stringify(after.users[1])===JSON.stringify(before.users[1]));
   // A model job fenced by a category change is rescheduled from the Jobs page (account B, synthetic model).
   const bAct=(action,payload)=>pb.evaluate(async([action,payload])=>{const me=await (await fetch('/console-api/me',{credentials:'same-origin'})).json();

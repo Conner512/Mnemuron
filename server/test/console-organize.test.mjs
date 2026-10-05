@@ -263,3 +263,35 @@ test('ORG-10: a job fenced by a category change is rescheduled under the current
   }
   assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,7);
 });
+
+test('ORG-11: the library explains why memories are uncategorized: unconfigured, blocked, unscheduled, running, completed',async t=>{
+  const f=await setup(t);f.store.memoryConfig.memory={taxonomy:syntheticTaxonomy};await f.create('Synthetic status one');await f.create('Synthetic status two');
+  const status=async()=>(await f.get('memories',{part:'facets'})).body.classification;
+  let c=await status();assert.equal(c.state,'unconfigured');assert.equal(c.model_configured,false);assert.equal(c.key_storage,true);assert.equal(c.worker_enabled,false);
+  assert.deepEqual([c.active,c.manual,c.model],[2,0,0]);
+  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:false,query_approved:false};
+  assert.equal((await f.act('models.save',{kind:'organizer',expected_revision:0,config,api_key:'synthetic-key'})).status,200);
+  c=await status();assert.equal(c.state,'blocked');assert.deepEqual(c.blockers,['EGRESS_DENIED']);
+  const jobsView=(await f.get('jobs')).body;assert.ok(jobsView.processing.classification.blockers.includes('EGRESS_DENIED'),'the Jobs page learns why scheduling would fail');
+  assert.equal((await f.act('models.save',{kind:'organizer',expected_revision:1,config:{...config,egress_approved:true}})).status,200);
+  c=await status();assert.equal(c.state,'unscheduled','a disabled worker does not block scheduling; jobs wait for it');
+  const model=organizer();model.profile=Object.freeze({...model.profile,fingerprint:'console-synthetic-profile'});f.store.consoleService.models.provider=()=>model;
+  assert.equal((await f.act('jobs.schedule',{type:'classification',timezone:'UTC',periods:['daily'],include_open:true})).status,200);
+  c=await status();assert.equal(c.state,'running');assert.equal(c.jobs.running,1);
+  await new MemoryWorker(f.store,f.store.memoryJobs,model,{workerId:'synthetic-console',userId:f.A.auth.user_id,profileFilter:model.profile.fingerprint}).drain({maxJobs:10});
+  c=await status();assert.equal(c.state,'completed');assert.equal(c.model,2);
+  assert.equal((await f.get('memories',{part:'facets'},f.B)).body.classification.state,'unconfigured','status is per account');
+});
+
+test('ORG-12: list rows carry a display split of a leading path; stored content and revisions are unchanged',async t=>{
+  const f=await setup(t),text='/Users/example/app/src/modules/billing/invoices/generator/nightly-invoice-generator.ts: Invoices are generated nightly and retried three times before alerting.';
+  const id=await f.create(text),plain=await f.create('Synthetic plain memory');
+  const rows=(await f.get('memories',{limit:10})).body.results,row=rows.find(r=>r.memory_id===id);
+  assert.equal(row.path,'/Users/example/app/src/modules/billing/invoices/generator/nightly-invoice-generator.ts');
+  assert.equal(row.body,'Invoices are generated nightly and retried three times before alerting.','the whole body reaches the list even though the path is long');
+  assert.equal(row.content,[...text].slice(0,160).join(''),'content keeps its previous meaning');
+  assert.equal(rows.find(r=>r.memory_id===plain).path,undefined);
+  assert.equal(f.store.db.prepare('SELECT content FROM memories WHERE memory_id=?').get(id).content,text);
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memory_revisions WHERE memory_id=?').get(id).n,1);
+  assert.equal((await f.get('overview')).body.recent.find(r=>r.memory_id===id).body,row.body);
+});

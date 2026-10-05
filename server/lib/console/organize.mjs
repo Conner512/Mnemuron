@@ -96,9 +96,29 @@ export class ConsoleOrganizer {
     const importDays=this.db.prepare("SELECT substr(imported_at,1,10) day,COUNT(*) count FROM console_import_records WHERE user_id=? GROUP BY day ORDER BY day DESC LIMIT 10").all(user);
     return {read_only:true,categories:taxonomy.categories.map(c=>({category:c,label:labels[c]||null,count:counts.get(c)||0})),
       topics,statuses:{active:statuses.active||0,superseded:statuses.superseded||0,retracted:statuses.retracted||0},
-      origins:{imported,other:(statuses.active||0)-imported},import_days:importDays,taxonomy_version:taxonomy.version};
+      origins:{imported,other:(statuses.active||0)-imported},import_days:importDays,taxonomy_version:taxonomy.version,classification:this.classification(auth)};
   }
 
+  /** Why memories are (un)categorized: configuration, blockers and classification job states. Counts only. */
+  classification(auth){
+    const user=auth.user_id,service=this.service,taxonomy=this.taxonomy(user);
+    const organizer=service.models.list(user).find(m=>m.kind==='organizer')?.config||{},processing=service.processing(user).classification;
+    const jobs=Object.fromEntries(this.db.prepare("SELECT state,COUNT(*) n FROM memory_jobs WHERE user_id=? AND job_type='classification' AND COALESCE(last_error_code,'')<>'RESCHEDULED' GROUP BY state").all(user).map(r=>[r.state,r.n]));
+    const last=this.db.prepare("SELECT state,last_error_code,updated_at FROM memory_jobs WHERE user_id=? AND job_type='classification' AND COALESCE(last_error_code,'')<>'RESCHEDULED' ORDER BY updated_at DESC,job_id LIMIT 1").get(user);
+    const counts=this.db.prepare(`SELECT SUM(o.memory_id IS NOT NULL) manual,SUM(o.memory_id IS NULL AND a.memory_id IS NOT NULL AND a.category<>'uncategorized') model,COUNT(*) active FROM memories m
+      LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
+      LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
+        AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
+      WHERE m.user_id=? AND m.status='active'`).get(taxonomy.version,user);
+    const running=(jobs.pending||0)+(jobs.leased||0)+(jobs.retry_wait||0),failed=['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required'].reduce((n,s)=>n+(jobs[s]||0),0);
+    // Scheduling works with the worker disabled (jobs wait for it); only these make a schedule fail.
+    const configured=!!organizer.model&&organizer.enabled===true,blocking=processing.blockers.filter(code=>['NOT_CONFIGURED','EGRESS_DENIED'].includes(code));
+    const state=!configured?'unconfigured':blocking.length?'blocked':running?'running':last&&failed&&last.state!=='succeeded'?'failed':jobs.succeeded?'completed':'unscheduled';
+    return {state,blockers:blocking,model_configured:!!organizer.model,model_enabled:organizer.enabled===true,
+      worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,key_storage:!!this.store.memoryConfig.console?.key_file,
+      jobs:{running,failed,succeeded:jobs.succeeded||0},last_job:last?{state:last.state,error_code:last.last_error_code,updated_at:last.updated_at}:null,
+      active:counts.active||0,manual:counts.manual||0,model:counts.model||0};
+  }
   selection(auth,p){
     const user=auth.user_id;let ids;
     if(p.memory_ids!==undefined){

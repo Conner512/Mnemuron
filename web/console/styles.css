@@ -217,7 +217,14 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .memory-row:hover{background:var(--hover)}
 .memory-row:has([data-selected]),tr:has([data-selected]),.summary-row:has([data-selected]){background:var(--soft)}
 [data-selected] .memory-text{font-weight:600}
-.memory-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;overflow-wrap:anywhere}
+.memory-text{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;overflow-wrap:anywhere}
+/* A leading path gets one line of its own; the full path is in the title and the detail pane. */
+.memory-path{display:block;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--muted)}
+/* Narrow screens: rows stack instead of scrolling sideways. */
+@container (max-width:640px){.memory-table{table-layout:auto}.memory-table colgroup,.memory-table thead{display:none}
+ .memory-table,.memory-table tbody,.memory-table tr{display:block;width:100%}.memory-table tr{border-bottom:1px solid var(--border);padding-bottom:6px}
+ .memory-table td{display:block;border:0}.memory-table td:not(:first-child){display:inline-block;padding:2px 0 2px 14px;vertical-align:middle}
+ .memory-table td.memory-date{display:block;padding-top:0}.memory-extra{padding-left:14px}}
 .memory-meta{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:4px;font-size:12px;color:var(--muted)}
 .memory-meta time,.memory-date time{font-family:var(--font-mono);font-size:11.5px}
 .pulse{display:flex;flex-direction:column;gap:14px}
@@ -297,6 +304,9 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .topic-chip{min-height:22px;padding:0 7px;border:1px solid var(--line);font-size:12px;background:transparent}
 .import-note{font-size:12px;color:var(--muted)}
 .batch-confirm-list{margin:8px 0 12px;padding-left:20px;font-size:13px;max-height:40vh;overflow:auto}.batch-confirm-list li{overflow-wrap:anywhere;margin-bottom:4px}.batch-confirm-list small{color:var(--muted);margin-left:6px}
+.classification-status{margin:0 0 14px;padding:12px 14px;border:1px solid var(--line);border-left:3px solid var(--accent);background:var(--surface);font-size:13.5px}
+.classification-status p{margin:0 0 6px}.classification-status ul{margin:0 0 6px;padding-left:18px}.classification-status .actions{margin:8px 0 0;gap:8px;flex-wrap:wrap}
+.classification-status[data-classification-state="completed"],.classification-status[data-classification-state="running"]{border-left-color:var(--line)}
 .job-error{display:block}.job-hint{display:block;color:var(--muted);max-width:32ch;white-space:normal}
 .organize-blocked .organize-headline .figure{color:var(--text)}
 .memory-selection[data-select-all-active]{border-color:var(--text);background:var(--soft)}

@@ -46,7 +46,10 @@ export function actionPage(page,data,caps,connectionQuery={}) {
   }
 
   if(page==='jobs')return section('jobs',`<div class="status-line">${l('scheduleStatus')} ${state(data.settings?.schedule_enabled?'enabled':'disabled')}<span aria-hidden="true">·</span>${l('workerStatus')} ${state(data.worker_enabled?'enabled':'disabled')}${data.vector?`<span aria-hidden="true">·</span>${l('vectorIndex')} ${state(data.vector.state)} ${esc(data.vector.error_code||'')}`:''}</div>
-    ${can('jobs.schedule')?buttons([actionButton('jobs.schedule','organize',{type:'classification'}),actionButton('jobs.schedule','summarize',{type:'summary'})]):onlyRead()}
+    ${can('jobs.schedule')?(data.processing?.classification?.blockers?.some(code=>['NOT_CONFIGURED','EGRESS_DENIED'].includes(code))
+      // Without a usable model these buttons can only fail: say why and where to fix it instead.
+      ?`<div class="actions action-toolbar">${[['organize','classification'],['summarize','summary']].map(([k,type])=>`<button type="button" data-console-action="jobs.schedule" data-type="${type}" disabled>${l(k)}</button>`).join('')}</div><p class="policy-box">${l('jobsNotReady')} ${data.processing.classification.blockers.filter(code=>code!=='WORKER_DISABLED').map(code=>esc(t(code))).join(' · ')} · <a href="/app/models">${l('classifyOpenModels')}</a></p>`
+      :buttons([actionButton('jobs.schedule','organize',{type:'classification'}),actionButton('jobs.schedule','summarize',{type:'summary'})])):onlyRead()}
     ${!data.worker_enabled?note('workerDisabledNote'):''}
     ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td><td>${progress(j.processed,j.total)}</td>
       <td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span><small><code>${esc(j.last_error_code)}</code></small>${j.stale_taxonomy&&j.last_error_code!=='RESCHEDULED'?`<small class="job-hint">${l('jobStaleTaxonomyHint')}</small>`:''}`:'—'}</td>

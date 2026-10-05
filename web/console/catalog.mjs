@@ -1108,3 +1108,24 @@ Object.assign(catalog.en,{
  INVALID_IDENTIFIER:'An identifier is malformed; refresh the page and try again.',CONSOLE_INPUT_TOO_LARGE:'This submission is too large; reduce the amount and retry.',OPERATION_FAILED:'This operation failed earlier; review the result before starting it again.',
  EXPORT_RECORD_TOO_LARGE:'A record exceeds the page export limit; use the offline export procedure.',STALE_ACCOUNT:'Your sign-in changed; refresh the page.',UNAVAILABLE:'The service is temporarily unavailable; try again later.',
 });
+// Classification status in the library and Jobs page.
+Object.assign(catalog['zh-CN'],{
+ classifyUnconfigured:'自动分类尚未设置，所以记忆都显示为“未分类”。这不是分类结果丢失。',classifyBlocked:'已有分类模型，但目前不能运行：',
+ classifyUnscheduled:'分类模型已就绪，但还没有运行过自动分类。',classifyRunning:'自动分类正在进行，等待或执行中的任务：',classifyFailed:'最近一次自动分类没有完成：',
+ classifyCompleted:'最近一次自动分类完成于',classifyCompletedRemaining:'模型未能归类的记忆仍显示为“未分类”，可以手动整理。',
+ classifyManualPath:'现在就可以手动整理：按主题或来源筛选，点“选择全部匹配结果”，再“移到分类”（每次最多 2000 条，可撤销）；也可以逐条勾选。',
+ classifySetupModel:'如需自动分类，请在“模型配置”中设置分类模型并批准发送范围；首次运行前可先测试。',
+ classifyOperatorNeeds:'还需要管理员开启',classifyNeedKeyStorage:'模型密钥加密存储',classifyNeedWorker:'后台执行器',
+ classifyBrowseUncategorized:'查看未分类记忆',classifyOpenModels:'前往模型配置',classifyStart:'开始自动分类',
+ classifyCounts:'当前分类来源',classifyManual:'手动',classifyModel:'模型',jobsNotReady:'暂时不能开始整理：',
+});
+Object.assign(catalog.en,{
+ classifyUnconfigured:'Automatic classification is not set up, so memories show as “Uncategorized”. No classifications were lost.',classifyBlocked:'A classification model exists but cannot run yet:',
+ classifyUnscheduled:'The classification model is ready, but automatic classification has not run yet.',classifyRunning:'Automatic classification is in progress; waiting or running jobs:',classifyFailed:'The last automatic classification did not finish:',
+ classifyCompleted:'Last automatic classification finished',classifyCompletedRemaining:'Memories the model could not place stay “Uncategorized”; you can organize them by hand.',
+ classifyManualPath:'You can organize by hand now: filter by topic or origin, choose “Select everything matching this filter”, then “Move to category” (up to 2,000 at a time, undoable), or tick memories one by one.',
+ classifySetupModel:'For automatic classification, set up a classification model under Models and approve what may be sent; you can test it before the first run.',
+ classifyOperatorNeeds:'An operator also needs to enable',classifyNeedKeyStorage:'encrypted model-key storage',classifyNeedWorker:'the background worker',
+ classifyBrowseUncategorized:'Show uncategorized memories',classifyOpenModels:'Open Models',classifyStart:'Start automatic classification',
+ classifyCounts:'Current category sources',classifyManual:'manual',classifyModel:'model',jobsNotReady:'Organizing cannot start yet:',
+});

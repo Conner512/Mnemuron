@@ -64,6 +64,10 @@ const fixed = n => Number(n.toFixed(2));
 const preview = value => [...String(value ?? '')].slice(0, 160).join('');
 export const formatDate = value => value ? new Date(typeof value === 'number' && value < 1e12 ? value * 1000 : value).toLocaleString(globalThis.document?.documentElement?.lang || 'zh-CN') : '—';
 
+/** Memory text for a list row: a leading path on its own line, the body beneath it (both verbatim). */
+export const memoryText = m => m.path && m.body
+  ? html`<span class="memory-path" title="${m.path}">${m.path}</span><span class="memory-text">${m.body}</span>`
+  : html`<span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>`;
 export const typeChip = (t, type = 'fact') => html`<span class="type-chip" data-type="${type}">${t(type)}</span>`;
 export const statusTag = (t, status = 'active') => html`<span class="tag lifecycle-tag" data-status="${status}">${t(status)}</span>`;
 export const emptyState = (t, key = 'empty') => html`<div class="empty">${svg('library')}${i18n(t, key, 'p')}</div>`;
@@ -72,7 +76,7 @@ export const emptyState = (t, key = 'empty') => html`<div class="empty">${svg('l
 export function memoryRows(rows = [], t) {
   if (!rows?.length) return String(emptyState(t));
   return String(html`<ol class="stream-list">${rows.map(m => html`<li class="memory-row">
-    <button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>
+    <button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}
     <span class="memory-meta">${typeChip(t, m.memory_type || 'fact')}<time>${formatDate(m.created_at)}</time></span></button>${statusTag(t, m.status || 'active')}</li>`)}</ol>`);
 }
 
@@ -169,6 +173,27 @@ function libraryFacets(t, {facets, labels, category, topic, origin, canManage, c
   </aside>`;
 }
 
+/** Why memories are uncategorized and what to do next. Never offers a retry that cannot work. */
+function classificationStatus(t, c, {canSchedule, uncategorized}) {
+  if (!c || !c.active) return '';
+  const manualPath = html`<p>${i18n(t, 'classifyManualPath')}</p>`;
+  const browse = uncategorized ? html`<a class="button" href="/app/memories?category=uncategorized">${i18n(t, 'classifyBrowseUncategorized')} (${uncategorized})</a>` : '';
+  const models = html`<a class="button" href="/app/models">${i18n(t, 'classifyOpenModels')}</a>`;
+  const counts = html`<p class="muted">${i18n(t, 'classifyCounts')}: ${i18n(t, 'classifyManual')} ${c.manual} · ${i18n(t, 'classifyModel')} ${c.model} · ${i18n(t, 'uncategorized')} ${uncategorized}</p>`;
+  const body = {
+    unconfigured: html`<p><strong>${i18n(t, 'classifyUnconfigured')}</strong></p>${manualPath}<p>${i18n(t, 'classifySetupModel')}</p>${!c.key_storage || !c.worker_enabled ? html`<p class="muted">${i18n(t, 'classifyOperatorNeeds')}: ${[!c.key_storage && t('classifyNeedKeyStorage'), !c.worker_enabled && t('classifyNeedWorker')].filter(Boolean).join(' · ')}</p>` : ''}`,
+    blocked: html`<p><strong>${i18n(t, 'classifyBlocked')}</strong></p><ul>${(c.blockers || []).map(code => html`<li>${t(code)}</li>`)}</ul>${manualPath}`,
+    unscheduled: html`<p><strong>${i18n(t, 'classifyUnscheduled')}</strong></p>${!c.worker_enabled ? i18n(t, 'workerDisabledNote', 'p') : ''}${manualPath}`,
+    running: html`<p><strong>${i18n(t, 'classifyRunning')}</strong> ${c.jobs.running}</p>${!c.worker_enabled ? i18n(t, 'workerDisabledNote', 'p') : ''}`,
+    failed: html`<p><strong>${i18n(t, 'classifyFailed')}</strong> ${c.last_job?.error_code ? t(c.last_job.error_code) : ''}</p>${manualPath}`,
+    completed: html`<p><strong>${i18n(t, 'classifyCompleted')}</strong> <time>${formatDate(c.last_job?.updated_at)}</time></p>${uncategorized ? html`<p>${i18n(t, 'classifyCompletedRemaining')}</p>` : ''}`,
+  }[c.state];
+  const actions = [browse, c.state === 'unscheduled' && canSchedule ? html`<button type="button" data-console-action="jobs.schedule" data-type="classification">${i18n(t, 'classifyStart')}</button>` : '',
+    ['unconfigured', 'blocked'].includes(c.state) ? models : '', ['running', 'failed'].includes(c.state) ? html`<a class="button" href="/app/jobs">${i18n(t, 'viewJobs')}</a>` : ''];
+  if (c.state === 'completed' && !uncategorized) return '';
+  return html`<section class="classification-status" data-classification-state="${c.state}" role="status">${body}${counts}<div class="actions">${actions}</div></section>`;
+}
+
 /** Library: facets, filters, a four-column table, one organize toolbar and a pager. The detail opens in the side pane. */
 export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', topic = '', origin = '', categories = [], labels = {}, facets, selected = [], selectAll = false, focusSources = false, readOnly = false, allowedActions = [], pagination = ''}) {
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
@@ -187,7 +212,7 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   const meta = m => html`${m.topic ? html`<button type="button" class="topic-chip" data-facet="topic" data-value="${m.topic}">${m.topic}</button>` : ''}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
-    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></div>${m.topic || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
+    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${typeChip(t, m.memory_type || 'fact')}</button></div>${m.topic || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
       <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${categoryName(t, labels, m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
     : emptyState(t, query || category || topic || origin || (status && status !== 'all') ? 'emptyFiltered' : 'empty');
   const chips = [['topic', topic, topic], ['origin', origin, origin ? t(origin === 'imported' ? 'importedOrigin' : 'otherOrigin') : '']].filter(([, value]) => value);
@@ -197,6 +222,7 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
     <label class="filter-category">${i18n(t, 'category')}<select name="category">${option('', 'allCategories', category)}${categories.map(categoryOption)}</select></label>
     <label class="filter-status">${i18n(t, 'status')}<select name="status">${['active', 'superseded', 'retracted'].map(v => option(v, v, status || 'active'))}${option('all', 'allStatuses', status)}</select></label>
     <div class="filter-actions"><button class="primary filter-submit" type="submit">${svg('search')}${i18n(t, 'search')}</button><button type="button" class="filter-reset quiet" data-reset-filters>${i18n(t, 'resetFilters')}</button></div></form>
+  ${facets ? classificationStatus(t, facets.classification, {canSchedule: allowedActions.includes('jobs.schedule'), uncategorized: (facets.categories || []).find(c => c.category === 'uncategorized')?.count || 0}) : ''}
   ${chips.length ? html`<div class="filter-chips">${chips.map(([facet, , label]) => html`<span class="filter-chip">${label}<button type="button" class="quiet" data-clear-facet="${facet}" data-i18n-aria-label="clearFilter" aria-label="${t('clearFilter')}">×</button></span>`)}</div>` : ''}
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
