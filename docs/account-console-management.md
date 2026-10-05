@@ -79,6 +79,20 @@ supplies `database_file` and optional `memory_config_file`; `web` supplies its s
 outside Git. Preserve existing paths and owners. Keep this configuration in a
 root-owned 0700 directory with 0600 permissions.
 
+`auth.config_file` is the worker's own view of the OAuth configuration, and the worker
+refuses any view with `identity.console_operations: true` ("isolated worker excludes
+general writes"). If the web service enables `console_operations` (for example for
+model operations), do not point the worker at that file: give it a separate private
+copy that differs **only** in `identity.console_operations` being `false`, and keep
+every other field identical when either file changes. The worker then keeps issuing
+read-only (or basic-memory) console credentials. Model writes still require
+`console:write`, which an account receives only through the confirmed
+`console-operator.mjs enable-console` operation. A later re-provision after a security
+change issues read/basic credentials again, so a reviewed `enable-console` must be
+repeated. With `console_operations: false` on the web service, model writes are
+refused even for an enabled account. `services/oauth/test/isolated-web-models.test.mjs`
+covers these cases with synthetic configuration.
+
 Run the coordinator as a bounded root oneshot, for example through a local systemd
 timer. It listens on no port. Each fixed phase drops to its service uid/gid, handles
 only durable account operations, and sends temporary credentials through private
