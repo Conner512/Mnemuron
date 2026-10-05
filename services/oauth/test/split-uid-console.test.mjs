@@ -14,9 +14,25 @@ import {main as operatorCommand} from '../bin/console-operator.mjs';
 // Synthetic split-service deployment. By default the phases run as separate child processes through private pipes
 // under the current UID, as in the isolated worker tests. On a Linux test host, root can run the same tests with
 // real distinct service UIDs: MNEMURON_SPLIT_UIDS=oauthUid:coreUid:webUid (each also used as the gid).
+// The fixture's OAuth config is loopback HTTP, which production validation correctly rejects (HTTPS), so the
+// phases always use the test-harness config flag. It does not affect UID switching: every phase child is spawned
+// with its configured uid/gid and checks process.getuid() itself. Real-UID mode additionally asserts the production
+// worker-config validation and the resulting file ownership.
 const REAL_UIDS=process.env.MNEMURON_SPLIT_UIDS?.split(':').map(Number);
-if(REAL_UIDS)assert.ok(process.getuid()===0&&REAL_UIDS.length===3&&REAL_UIDS.every(n=>Number.isInteger(n)&&n>0)&&new Set(REAL_UIDS).size===3,'real-UID mode needs root and three distinct non-root UIDs');
-const ISOLATED=!REAL_UIDS;
+const ISOLATED=true;
+const PHASE_MODULE=new URL('../src/isolated-maintenance.mjs',import.meta.url).pathname;
+/** Everything a real-UID run needs before any fixture is built; returns readable problems instead of failing later. */
+export function realUidPrerequisites(uids,{uid=process.getuid(),tmpdir=os.tmpdir(),files=[[PHASE_MODULE,0o004],[process.execPath,0o001]]}={}){
+  const problems=[];
+  if(uid!==0)problems.push('run as root (the coordinator launches each phase under its service uid)');
+  if(!Array.isArray(uids)||uids.length!==3||!uids.every(n=>Number.isInteger(n)&&n>0)||new Set(uids).size!==3)problems.push('MNEMURON_SPLIT_UIDS needs three distinct non-root uids oauth:core:web');
+  if((fs.statSync(tmpdir).mode&0o001)===0)problems.push(`temporary directory ${tmpdir} is not traversable by service uids; set TMPDIR=/tmp`);
+  for(const [file,bit] of files){
+    if((fs.statSync(file).mode&bit)===0)problems.push(`${file} is not ${bit===0o004?'readable':'executable'} by service uids`);
+    for(let dir=path.dirname(file);dir!==path.dirname(dir);dir=path.dirname(dir))if((fs.statSync(dir).mode&0o001)===0){problems.push(`${dir} is not traversable by service uids`);break;}}
+  return problems;
+}
+if(REAL_UIDS){const problems=realUidPrerequisites(REAL_UIDS);assert.deepEqual(problems,[],'real-UID prerequisites: '+problems.join('; '));}
 const chownTree=(dir,uid)=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){const p=path.join(dir,entry.name);if(entry.isDirectory())chownTree(p,uid);else fs.chownSync(p,uid,uid);}fs.chownSync(dir,uid,uid);};
 async function setup(t,{basic=false}={}){
  const core=await memoryFixture(t),f=await consoleFixture(t,{core}),ids=f.app.accounts;
@@ -34,8 +50,17 @@ async function setup(t,{basic=false}={}){
  const workerFile=path.join(coordinatorDir,'identity-worker.json');writePrivate(workerFile,worker);
  if(REAL_UIDS){fs.mkdirSync(worker.auth.credential_directory,{mode:0o700});fs.mkdirSync(worker.web.credential_directory,{mode:0o700});
    chownTree(f.directory,oauthUid);chownTree(core.root,coreUid);chownTree(webDir,webUid);}
- const {runIsolatedMaintenance,runConsoleCapability}=await import('../src/isolated-maintenance.mjs');
+ const {runIsolatedMaintenance,runConsoleCapability,validateWorkerConfig}=await import('../src/isolated-maintenance.mjs');
+ // Real-UID mode: the production validation (distinct non-root identities, fixed private paths) must accept this config.
+ if(REAL_UIDS)validateWorkerConfig(worker,{isolated:false});
  runIsolatedMaintenance(worker,{isolated:ISOLATED});
+ if(REAL_UIDS){
+   // Each phase really ran under its own uid: published files belong to the service that wrote them.
+   const owner=file=>fs.statSync(file).uid;
+   for(const o of owners){const a=ids.byId(o.account.account_id),bs=ids.bindings(a.subject);
+     assert.equal(owner(bs.find(b=>b.purpose==='console').credential_file),oauthUid);assert.equal(owner(bs.find(b=>b.purpose==='web').credential_file),webUid);}
+   assert.equal(owner(worker.web.identity_map_file),webUid);assert.equal(owner(core.databasePath),coreUid);
+ }
  const account=o=>ids.byId(o.account.account_id);
  const binding=(o,purpose)=>ids.bindings(account(o).subject).find(b=>b.purpose===purpose);
  const scopes=(o,purpose='console')=>JSON.parse(core.store.db.prepare('SELECT scopes_json FROM credentials WHERE credential_id=?').get(binding(o,purpose).credential_id).scopes_json);
@@ -45,6 +70,30 @@ async function setup(t,{basic=false}={}){
  return {core,f,ids,owners,worker,workerFile,account,binding,scopes,audits,enable,credentials,runConsoleCapability,runIsolatedMaintenance};
 }
 const quiet=async fn=>{const log=console.log;const out=[];console.log=v=>out.push(v);try{await fn();}finally{console.log=log;}return out.map(v=>JSON.parse(v));};
+
+test('SPLIT-CONFIG: real-UID construction is checked without root: prerequisites, production worker validation and why the harness flag is needed',async t=>{
+ // Prerequisite logic on synthetic directories (no host change).
+ const open=fs.mkdtempSync(path.join(os.tmpdir(),'synthetic-open-'));t.after(()=>fs.rmSync(open,{recursive:true,force:true}));
+ fs.chmodSync(open,0o755);const module=path.join(open,'phase.mjs');fs.writeFileSync(module,'');fs.chmodSync(module,0o644);
+ const closed=path.join(open,'private');fs.mkdirSync(closed,{mode:0o700});
+ const check=(uids,o={})=>realUidPrerequisites(uids,{uid:0,tmpdir:open,files:[[module,0o004]],...o});
+ assert.deepEqual(check([61001,61002,61003]),[]);
+ assert.match(check([61001,61001,61003]).join(),/three distinct non-root uids/);assert.match(check([0,61002,61003]).join(),/three distinct non-root uids/);
+ assert.match(check([61001,61002,61003],{uid:1000}).join(),/run as root/);
+ assert.match(check([61001,61002,61003],{tmpdir:closed}).join(),/TMPDIR=\/tmp/);
+ const hidden=path.join(closed,'phase.mjs');fs.writeFileSync(hidden,'');fs.chmodSync(hidden,0o644);
+ assert.match(check([61001,61002,61003],{files:[[hidden,0o004]]}).join(),/not traversable/);
+ // The production worker-config validation (distinct non-root identities, fixed private paths) for the real-UID layout.
+ const {validateWorkerConfig}=await import('../src/isolated-maintenance.mjs');
+ const worker=(a,c,w)=>({config_version:'isolated-identity-worker-v1',auth:{uid:a,gid:a,config_file:path.join(open,'auth.json'),credential_directory:path.join(open,'console-keys')},
+   core:{uid:c,gid:c,database_file:path.join(open,'core.sqlite3')},web:{uid:w,gid:w,credential_directory:path.join(open,'web-keys'),identity_map_file:path.join(open,'web-map.json')}});
+ assert.doesNotThrow(()=>validateWorkerConfig(worker(61001,61002,61003),{isolated:false}));
+ for(const ids of [[61001,61001,61003],[0,61002,61003]])assert.throws(()=>validateWorkerConfig(worker(...ids),{isolated:false}),/distinct unprivileged service identities/);
+ // The loopback fixture config is rejected by production validation (the deployment gate failure) and accepted by the harness flag.
+ const {loadAuthConfig}=await import('../src/config.mjs'),core=await memoryFixture(t),f=await consoleFixture(t,{core});
+ f.config.identity.provisioning={enabled:true,mode:'external_worker'};const file=path.join(f.directory,'worker-auth.json');writePrivate(file,f.config);
+ assert.throws(()=>loadAuthConfig(file,{isolated:false}),/HTTPS/);assert.doesNotThrow(()=>loadAuthConfig(file,{isolated:true}));
+});
 
 test('SPLIT-REPRO: the owner check that stops the single-process command rejects a private directory owned by another user',async t=>{
  // Deployment stack: console-operator.mjs:36 -> sqlite-adapter.mjs:9 -> oauth-common.mjs privateDirectory. The failing check
