@@ -182,21 +182,21 @@ test('FIRST-RUN-06: a later model change does not silently break the serving ind
 });
 
 test('FIRST-RUN-07: runtime config honours the prefix and pre-created names; the Qdrant client never creates them and maps an expired key',async()=>{
-  const base={enabled:true,protocol:QDRANT_PROTOCOL,base_url:'http://127.0.0.1:6333',collection_prefix:'mnemuron_ct',auth:{env:'SYNTHETIC_VECTOR_KEY'},
+  const base={enabled:true,protocol:QDRANT_PROTOCOL,base_url:'http://127.0.0.1:6333',collection_prefix:'mnemuron_vec',auth:{env:'SYNTHETIC_VECTOR_KEY'},
     egress:{approved:true,origins:['http://127.0.0.1:6333'],addresses:['127.0.0.1'],allow_private:true},timeouts:{request_ms:1000},limits:{input_bytes:100000,output_bytes:100000}};
-  assert.deepEqual(vectorConfig({...base,precreated_collections:['mnemuron_ct_gemini768_v1']}).precreated_collections,['mnemuron_ct_gemini768_v1']);
-  for(const names of [[],['other_prefix_v1'],['mnemuron_ct_a','mnemuron_ct_a'],['Mnemuron_ct_upper'],'mnemuron_ct_x'])
+  assert.deepEqual(vectorConfig({...base,precreated_collections:['mnemuron_vec_embed768_v1']}).precreated_collections,['mnemuron_vec_embed768_v1']);
+  for(const names of [[],['other_prefix_v1'],['mnemuron_vec_a','mnemuron_vec_a'],['Mnemuron_vec_upper'],'mnemuron_vec_x'])
     assert.throws(()=>vectorConfig({...base,precreated_collections:names}),String(names));
   const requests=[];let mode='ok';
   const transport=async(_p,route,body,{method})=>{requests.push([method,route]);
     if(mode==='expired'){const e=new Error('auth');e.code='AUTH_FAILED';throw e;}
     if(route.endsWith('/exists'))return {result:{exists:mode!=='missing'}};
     return {result:{config:{params:{vectors:{size:mode==='mismatch'?3:768,distance:'Cosine'}}}}};};
-  const store=new QdrantStore({...base,precreated_collections:['mnemuron_ct_gemini768_v1']},{transport,env:{SYNTHETIC_VECTOR_KEY:'synthetic-only'}});
-  await store.ensureCollection('mnemuron_ct_gemini768_v1',{dimensions:768,distance:'Cosine'});
+  const store=new QdrantStore({...base,precreated_collections:['mnemuron_vec_embed768_v1']},{transport,env:{SYNTHETIC_VECTOR_KEY:'synthetic-only'}});
+  await store.ensureCollection('mnemuron_vec_embed768_v1',{dimensions:768,distance:'Cosine'});
   for(const [m,code] of [['missing','VECTOR_COLLECTION_MISSING'],['mismatch','VECTOR_PROFILE_MISMATCH'],['expired','VECTOR_AUTH_FAILED']]){mode=m;
-    await assert.rejects(()=>store.ensureCollection('mnemuron_ct_gemini768_v1',{dimensions:768,distance:'Cosine'}),e=>e.code===code,m);}
-  await assert.rejects(()=>store.ensureCollection('mnemuron_ct_unlisted',{dimensions:768,distance:'Cosine'}),e=>e.code==='VECTOR_COLLECTION_MISSING');
+    await assert.rejects(()=>store.ensureCollection('mnemuron_vec_embed768_v1',{dimensions:768,distance:'Cosine'}),e=>e.code===code,m);}
+  await assert.rejects(()=>store.ensureCollection('mnemuron_vec_unlisted',{dimensions:768,distance:'Cosine'}),e=>e.code==='VECTOR_COLLECTION_MISSING');
   assert.ok(requests.every(([method])=>method==='GET'),'a pre-created deployment only reads collection metadata');
   await assert.rejects(()=>new QdrantStore(base,{transport,env:{}}).health(),e=>e.code==='VECTOR_AUTH_FAILED','a missing key is a vector auth failure');
 });

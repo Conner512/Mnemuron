@@ -189,7 +189,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
 | MEM-04 | 记忆库 | 修订与撤回 | live | — | memory.correct, memory.retract |
-| MEM-05 | 记忆库 | 分类、敏感级别与 ChatGPT 可见性 | live | — | memory.classify, memory.sensitivity, memory.visibility |
+| MEM-05 | 记忆库 | 分类与敏感级别 | live | — | memory.classify, memory.sensitivity |
 | MEM-06 | 记忆库 | 批量整理 | live | memories | memory.organize, memory.organize_undo, memory.batch_classify, memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
 | SUM-01 | 分类与摘要 | 分类索引与派生摘要 | live | summaries, summary | — |
@@ -215,14 +215,14 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | CON-05 | 连接管理 | 登记与轮换 Agent 密钥 | live | — | devices.register, devices.rotate |
 | MOD-01 | 模型配置 | 整理模型与向量模型 | live | models | models.save, models.disable |
 | MOD-02 | 模型配置 | 连通性测试 | live | — | models.test |
-| MOD-03 | 模型配置 | 个人向量索引 | live | — | vector.schedule |
+| MOD-03 | 模型配置 | 个人向量索引（含首次建立：冻结清单、总预算、手动启用与回滚） | live | — | vector.schedule, vector.prepare, vector.activate, vector.deactivate |
 | MOD-04 | 模型配置 | 用量与预算 | live | model-usage | — |
 | PRV-01 | 隐私与保留 | 外发许可总览 | live | models | — |
 | PRV-02 | 隐私与保留 | 新记忆默认设置 | live | privacy-defaults | privacy.defaults |
 | PRV-03 | 隐私与保留 | 数据保留策略 | live | retention | retention.save |
 | PRV-04 | 隐私与保留 | 清理过期数据 | live | — | retention.prune |
 | PRV-05 | 隐私与保留 | 删除账户与全部数据 | policy | — | — |
-| PRV-06 | 隐私与保留 | ChatGPT 读取范围 | live | capabilities | memory.web_policy |
+| PRV-06 | 隐私与保留 | ChatGPT 读取范围（只读，运维配置） | live | capabilities | — |
 | SEC-01 | 账户安全 | 修改密码 | live | — | security.password |
 | SEC-02 | 账户安全 | 更换验证器 | live | — | security.totp.begin, security.totp.complete |
 | SEC-03 | 账户安全 | 轮换恢复码 | live | — | security.recovery_codes |
