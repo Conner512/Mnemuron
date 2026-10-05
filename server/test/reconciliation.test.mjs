@@ -11,7 +11,10 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { createMnemuronApp } from "../lib/app.mjs";
+import { fixtureClock } from "./helpers/fixture-clock.mjs";
 import { MnemuronStore } from "../lib/store.mjs";
+
+const at = fixtureClock("2026-09-03T04:00:00.000Z");
 
 async function api(baseUrl, apiKey, method, endpoint, body, expectedStatus = 200) {
   const response = await fetch(new URL(endpoint, baseUrl), {
@@ -96,7 +99,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
         {
           event_id: userEventId,
           event_type: "user_message",
-          captured_at: "2026-09-03T01:00:00.000Z",
+          captured_at: at("2026-09-03T01:00:00.000Z"),
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
           workstream_id: "workstream-clientb",
@@ -107,7 +110,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           event_id: assistantEventId,
           event_type: "assistant_message",
           hook_event_name: "Stop",
-          captured_at: "2026-09-03T01:01:00.000Z",
+          captured_at: at("2026-09-03T01:01:00.000Z"),
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
           workstream_id: "workstream-clientb",
@@ -143,7 +146,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
         {
           event_id: userEventId,
           event_type: "user_message",
-          captured_at: "2026-09-03T01:00:00.000Z",
+          captured_at: at("2026-09-03T01:00:00.000Z"),
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
           workstream_id: "workstream-clientb",
@@ -154,7 +157,7 @@ test("safe derived progress auto-applies once with immutable provenance", async 
           event_id: assistantEventId,
           event_type: "assistant_message",
           hook_event_name: "Stop",
-          captured_at: "2026-09-03T01:01:00.000Z",
+          captured_at: at("2026-09-03T01:01:00.000Z"),
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
           workstream_id: "workstream-clientb",
@@ -201,7 +204,7 @@ test("checkpoint telemetry stays immutable without becoming a canonical resource
         event_id: eventId,
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T01:10:00.000Z",
+        captured_at: at("2026-09-03T01:10:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clientb",
@@ -443,7 +446,7 @@ test("material operations require exact confirmation and remain separate from Re
           event_id: randomUUID(),
           event_type: "assistant_message",
           hook_event_name: "Stop",
-          captured_at: "2026-09-03T01:30:00.000Z",
+          captured_at: at("2026-09-03T01:30:00.000Z"),
           project_id: baseTask.project_id,
           task_id: baseTask.task_id,
           workstream_id: "workstream-clientb",
@@ -505,7 +508,7 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T02:00:00.000Z",
+        captured_at: at("2026-09-03T02:00:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clientb",
@@ -522,7 +525,7 @@ test("pending proposal stays stable while parallel Workstream checkpoints are de
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T02:01:00.000Z",
+        captured_at: at("2026-09-03T02:01:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clienta",
@@ -710,7 +713,7 @@ test("curated checkpoint proposal preserves evidence without importing derived n
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T03:00:00.000Z",
+        captured_at: at("2026-09-03T03:00:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clientb",
@@ -725,7 +728,7 @@ test("curated checkpoint proposal preserves evidence without importing derived n
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T03:01:00.000Z",
+        captured_at: at("2026-09-03T03:01:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clienta",
@@ -915,7 +918,7 @@ test("reconciliation failure never rolls back accepted Events or Checkpoints", a
         event_id: eventId,
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-03T03:00:00.000Z",
+        captured_at: at("2026-09-03T03:00:00.000Z"),
         project_id: baseTask.project_id,
         task_id: baseTask.task_id,
         workstream_id: "workstream-clientb",

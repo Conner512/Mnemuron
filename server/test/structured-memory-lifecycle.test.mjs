@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createMnemuronApp } from "../lib/app.mjs";
+import { fixtureClock } from "./helpers/fixture-clock.mjs";
+
+const at = fixtureClock("2026-09-04T06:00:00.000Z");
 
 async function api(baseUrl, apiKey, method, endpoint, body, expectedStatus = 200) {
   const response = await fetch(new URL(endpoint, baseUrl), {
@@ -66,7 +69,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
       {
         event_id: miniDecisionEvent,
         event_type: "user_message",
-        captured_at: "2026-09-04T05:00:00.000Z",
+        captured_at: at("2026-09-04T05:00:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -77,7 +80,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-04T05:01:00.000Z",
+        captured_at: at("2026-09-04T05:01:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -89,7 +92,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
       {
         event_id: randomUUID(),
         event_type: "user_message",
-        captured_at: "2026-09-04T05:02:00.000Z",
+        captured_at: at("2026-09-04T05:02:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clienta",
@@ -100,7 +103,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-04T05:03:00.000Z",
+        captured_at: at("2026-09-04T05:03:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clienta",
