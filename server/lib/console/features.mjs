@@ -52,13 +52,16 @@ export class ConsoleFeatures {
       local_hook_failures:'not_observable',local_queue:'not_observable',
       processing:db.prepare('SELECT state,count(*) count FROM memory_processing_outbox WHERE user_id=? GROUP BY state').all(user)});
     if(view==='model-usage'){
-      const day=new Date().toISOString().slice(0,10),hasVectors=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_owner_vector_usage'").get();
+      const day=new Date().toISOString().slice(0,10),hasVectors=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_owner_vector_usage'").get(),hasBuild=!!db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_owner_vector_build_usage'").get();
       const models=service.models.list(user).map(m=>{
         if(!m.config.model)return {kind:m.kind,configured:false,used:null,limit:null};
         const profile=service.models.profile(user,m.kind,m.config).fingerprint;
         const calls=db.prepare('SELECT reserved_calls n FROM memory_owner_model_usage WHERE user_id=? AND profile=? AND day=?').get(user,profile,day)?.n||0;
         const vectorCalls=hasVectors?db.prepare('SELECT count n FROM memory_owner_vector_usage WHERE user_id=? AND profile=? AND day=?').get(user,profile,day)?.n||0:0;
-        return {kind:m.kind,configured:true,used:calls+vectorCalls,limit:m.config.daily_requests,remaining:Math.max(0,m.config.daily_requests-calls-vectorCalls)};
+        // First-run build calls are real requests but are bounded by the first-run total, not the daily limit.
+        const buildCalls=hasBuild?db.prepare('SELECT count n FROM memory_owner_vector_build_usage WHERE user_id=? AND profile=? AND day=?').get(user,profile,day)?.n||0:0;
+        return {kind:m.kind,configured:true,used:calls+vectorCalls,limit:m.config.daily_requests,remaining:Math.max(0,m.config.daily_requests-calls-vectorCalls),
+          first_run_build_calls:buildCalls,total_requests:calls+vectorCalls+buildCalls};
       });return result({day,unit:'reserved_requests',cost:null,cost_status:'not_metered',models});
     }
     if(view==='task-branches'){

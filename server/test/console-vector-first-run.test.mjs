@@ -228,6 +228,65 @@ test('FIRST-RUN-09: after rollback a new first run is refused clearly; a provide
   assert.ok(r.results.some(m=>m.memory_id===ids.network));
 });
 
+const embedderUsage=f=>{const {used,limit,remaining,first_run_build_calls,total_requests}=f.service.features.read(f.a.auth,'model-usage',{}).models.find(m=>m.kind==='embedder');
+  return {used,limit,remaining,first_run_build_calls,total_requests};};
+const hybrid=(f,query='synthetic network')=>f.store.searchMemories(f.a.auth,{query,mode:'hybrid',personal_model_only:true});
+const firstRunBuild=async(f,budget)=>{const p=await f.act('vector.prepare',{budget_calls:budget});await f.act('models.test',{kind:'embedder',mode:'capabilities'});
+  await f.act('vector.schedule',{generation:p.generation,expected_count:p.manifest.count,expected_digest:p.manifest.digest});
+  const built=await f.drain();assert.equal(built.build,'built');await f.act('vector.activate',{generation:p.generation});return p;};
+
+test('FIRST-RUN-11: manifest build calls draw on the first-run total, not the daily query/probe allowance; readiness reports daily exhaustion',async t=>{
+  const f=await setup(t),ids=await seed(f);await f.save({daily_requests:4});
+  await firstRunBuild(f,20);assert.equal(f.calls.length,7,'2 probe + 5 build');
+  assert.equal(f.status().search_ready,true,'two probe calls leave two of four daily calls');
+  assert.deepEqual(embedderUsage(f),{used:2,limit:4,remaining:2,first_run_build_calls:5,total_requests:7});
+  for(let n=0;n<2;n++){const r=await hybrid(f);assert.equal(r.retrieval.effective_mode,'hybrid');assert.equal(r.results[0].memory_id,ids.network);}
+  assert.equal(f.calls.length,9);
+  // Daily allowance used up: readiness says so, a query falls back without a model call, a probe is refused, and the
+  // refused calls are not charged to the total.
+  const s=f.status();assert.equal(s.search_ready,false);assert.deepEqual(s.search_blockers,['DAILY_BUDGET_EXHAUSTED']);
+  const r=await hybrid(f);assert.deepEqual([r.retrieval.effective_mode,r.retrieval.degradation_code],['lexical','BUDGET_EXHAUSTED']);
+  await assert.rejects(()=>f.act('models.test',{kind:'embedder',mode:'capabilities'}),e=>e.code==='BUDGET_EXHAUSTED');
+  assert.equal(f.calls.length,9);assert.deepEqual([f.status().first_run.budget.used,f.status().first_run.budget.remaining],[9,11],'the total counts every request made');
+  assert.deepEqual(embedderUsage(f),{used:4,limit:4,remaining:0,first_run_build_calls:5,total_requests:9});
+  // Existing accounting tables keep their meaning: daily vector counters hold queries only; build calls are kept apart.
+  const db=f.store.db,sum=table=>db.prepare(`SELECT COALESCE(SUM(count),0) n FROM ${table}`).get().n;
+  assert.deepEqual([sum('memory_vector_calls'),sum('memory_owner_vector_usage'),sum('memory_owner_vector_build_usage')],[2,2,5]);
+});
+
+test('FIRST-RUN-12: a 103-record build with daily limit 25 leaves same-day semantic queries their daily allowance, then exhausts it',async t=>{
+  const f=await setup(t);const network=await f.create('Synthetic network router decision.');
+  for(let n=1;n<103;n++)await f.create(`Synthetic acceptance note ${n}.`);
+  await f.save({daily_requests:25});
+  const p=await firstRunBuild(f,150);assert.equal(p.manifest.count,103);assert.equal(f.calls.length,105);
+  assert.equal(f.status().search_ready,true);assert.deepEqual(f.status().first_run.budget.remaining,45);
+  // 25 daily - 2 probes = 23 same-day semantic queries.
+  for(let n=0;n<23;n++){const r=await hybrid(f);assert.equal(r.retrieval.effective_mode,'hybrid',`query ${n+1}`);assert.equal(r.results[0].memory_id,network);}
+  assert.equal(f.calls.length,128);
+  const s=f.status();assert.equal(s.search_ready,false);assert.deepEqual(s.search_blockers,['DAILY_BUDGET_EXHAUSTED']);
+  const r=await hybrid(f);assert.deepEqual([r.retrieval.effective_mode,r.retrieval.degradation_code],['lexical','BUDGET_EXHAUSTED']);
+  assert.equal(f.calls.length,128);assert.deepEqual([s.first_run.budget.used,s.first_run.budget.remaining],[128,22]);
+  assert.deepEqual(embedderUsage(f),{used:25,limit:25,remaining:0,first_run_build_calls:103,total_requests:128});
+});
+
+test('FIRST-RUN-13: an exhausted first-run total stops queries and probes, is reported by readiness, and is never reset',async t=>{
+  const f=await setup(t);await seed(f);await f.save();
+  const p=await firstRunBuild(f,9);
+  for(let n=0;n<2;n++)assert.equal((await hybrid(f)).retrieval.effective_mode,'hybrid');
+  assert.equal(f.calls.length,9);
+  let s=f.status();assert.equal(s.search_ready,false);assert.deepEqual(s.search_blockers,['FIRST_RUN_BUDGET_EXHAUSTED'],'the daily allowance (100) is not the cause');
+  assert.deepEqual([s.first_run.budget.used,s.first_run.budget.remaining],[9,0]);
+  const r=await hybrid(f);assert.deepEqual([r.retrieval.effective_mode,r.retrieval.degradation_code],['lexical','BUDGET_EXHAUSTED']);
+  await assert.rejects(()=>f.act('models.test',{kind:'embedder',mode:'capabilities'}),e=>e.code==='BUDGET_EXHAUSTED');
+  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:150}),e=>e.errorCode==='BUDGET_ALREADY_SET');
+  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:9}),e=>e.errorCode==='MANIFEST_EXCEEDS_BUDGET');
+  await assert.rejects(()=>f.act('vector.schedule',{}),e=>e.errorCode==='FIRST_RUN_ACTIVE');
+  assert.equal(f.calls.length,9);s=f.status();assert.deepEqual([s.first_run.budget.total,s.first_run.budget.used],[9,9]);
+  // Rollback keeps reporting the exhausted total next to the inactive index.
+  await f.act('vector.deactivate',{generation:p.generation});
+  assert.deepEqual(f.status().search_blockers,['VECTOR_NOT_READY','FIRST_RUN_BUDGET_EXHAUSTED']);
+});
+
 test('FIRST-RUN-10: the read scope reports a legacy account read-all and the operator inspection uses the configured policy',async t=>{
   const f=await setup(t),m=await f.create('Synthetic sensitive record without a grant.');
   const caps=()=>f.service.capabilities(f.a.auth).read_policy;

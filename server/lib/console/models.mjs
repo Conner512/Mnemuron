@@ -25,6 +25,18 @@ export class ConsoleModels {
     this.db.prepare('UPDATE console_vector_budget SET used=used+1 WHERE user_id=?').run(user);return purpose==='manifest';
   }
   budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:row.total-row.used}:null;}
+  /** Calls left today for a query on this embedder profile: the cap and counters the query reserve checks. Manifest
+   * build calls are outside the daily cap. Null when no configuration for the profile is known. */
+  dailyRemaining(user,profile){
+    const row=this.raw(user,'embedder'),current=row&&JSON.parse(row.config_json);
+    // The current configuration serves its own fingerprint; otherwise the first retained snapshot does (see vector()).
+    const config=current?.enabled&&this.profile(user,'embedder',current).fingerprint===profile?current
+      :JSON.parse(this.db.prepare('SELECT config_json FROM console_vector_profiles WHERE user_id=? AND fingerprint=? ORDER BY created_at LIMIT 1').get(user,profile)?.config_json||'null');
+    if(!config)return null;
+    const day=new Date().toISOString().slice(0,10),count=(table,column)=>this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)
+      ?this.db.prepare(`SELECT ${column} n FROM ${table} WHERE profile=? AND day=?`).get(profile,day)?.n||0:0;
+    return Math.max(0,config.daily_requests-count('memory_vector_calls','count')-count('memory_model_budget','reserved_calls'));
+  }
   /** Records the configuration a generation is built with (sealed key included, never returned). */
   snapshot(user,generation){const row=this.raw(user,'embedder');if(!row)fail('NOT_CONFIGURED');
     this.db.prepare('INSERT OR IGNORE INTO console_vector_profiles VALUES(?,?,?,?,?,?)').run(generation,user,this.profile(user,'embedder',JSON.parse(row.config_json)).fingerprint,row.config_json,null,Date.now());} // keys are never copied; the current key is used

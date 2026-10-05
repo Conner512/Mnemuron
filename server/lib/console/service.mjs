@@ -53,6 +53,9 @@ export class ConsoleService {
     const retained=active&&this.models.retainedServes(user,active.generation);
     if(!active)search.push('VECTOR_NOT_READY');
     else if(embedder.enabled&&configured!==active.profile&&!retained)search.push('VECTOR_PROFILE_MISMATCH');
+    // A query also needs a call left in an open first-run total and in today's allowance of the serving profile.
+    if(this.models.budget(user)?.remaining<=0)search.push('FIRST_RUN_BUDGET_EXHAUSTED');
+    if(active&&this.models.dailyRemaining(user,active.profile)===0)search.push('DAILY_BUDGET_EXHAUSTED');
     const hasDocuments=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_documents'").get();
     const indexed=active&&hasDocuments?this.db.prepare("SELECT COUNT(*) n FROM memory_vector_documents WHERE user_id=? AND generation=? AND state='indexed'").get(user,active.generation).n:0;
     return {classification:{ready:!organizer.length,blockers:organizer},summary:{ready:!organizer.length,blockers:organizer},

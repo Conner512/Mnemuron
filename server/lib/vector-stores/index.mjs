@@ -31,6 +31,7 @@ export class VectorIndex {
       CREATE INDEX IF NOT EXISTS memory_vector_point_doc ON memory_vector_points(generation,user_id,memory_id);
       CREATE TABLE IF NOT EXISTS memory_vector_calls (profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(profile,day));
       CREATE TABLE IF NOT EXISTS memory_owner_vector_usage (user_id TEXT NOT NULL,profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(user_id,profile,day));
+      CREATE TABLE IF NOT EXISTS memory_owner_vector_build_usage (user_id TEXT NOT NULL,profile TEXT NOT NULL,day TEXT NOT NULL,count INTEGER NOT NULL,PRIMARY KEY(user_id,profile,day));
       CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);
   }
@@ -39,9 +40,12 @@ export class VectorIndex {
     if(this.db.prepare('SELECT state FROM memory_profile_state WHERE profile=?').get(p.fingerprint)?.state==='blocked_auth')fail('AUTH_FAILED');
     this.db.prepare('INSERT OR IGNORE INTO memory_vector_calls VALUES (?,?,0)').run(p.fingerprint,day);
     // A first-run budget counts every call (it throws when exhausted); only manifest document calls skip the daily cap.
+    // They are bounded by that total instead, so they are recorded apart and never use the daily query/probe allowance.
     const firstRun=this.budget?this.budget(purpose)===true:false;
+    if(firstRun){this.db.prepare(`INSERT INTO memory_owner_vector_build_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)
+      DO UPDATE SET count=count+1`).run(userId,p.fingerprint,day);return;}
     const probes=this.ownerId?this.db.prepare('SELECT reserved_calls n FROM memory_model_budget WHERE profile=? AND day=?').get(p.fingerprint,day)?.n||0:0;
-    if(!firstRun&&probes+this.db.prepare('SELECT count FROM memory_vector_calls WHERE profile=? AND day=?').get(p.fingerprint,day).count>=p.limits.daily_requests)fail('BUDGET_EXHAUSTED');
+    if(probes+this.db.prepare('SELECT count FROM memory_vector_calls WHERE profile=? AND day=?').get(p.fingerprint,day).count>=p.limits.daily_requests)fail('BUDGET_EXHAUSTED');
     this.db.prepare('UPDATE memory_vector_calls SET count=count+1 WHERE profile=? AND day=?').run(p.fingerprint,day);
     this.db.prepare(`INSERT INTO memory_owner_vector_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)
       DO UPDATE SET count=count+1`).run(userId,p.fingerprint,day);
