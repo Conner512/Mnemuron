@@ -89,7 +89,11 @@ read-only (or basic-memory) console credentials. Model writes still require
 `console:write`, which an account receives only through the confirmed
 `console-operator.mjs enable-console` operation. A later re-provision after a security
 change issues read/basic credentials again, so a reviewed `enable-console` must be
-repeated. With `console_operations: false` on the web service, model writes are
+repeated. In a split-UID installation run that operation through the worker's fixed phases as root:
+`node services/oauth/bin/console-operator.mjs enable-console --worker-config /private/identity-worker.json --account-id ID --confirm`
+(`enable-console-basic` likewise). The OAuth phase binds the exact eligible account and console credential and
+passes only a key hash; the Core phase changes only that credential's scopes (compare-and-set, audited as before);
+if the account changes meanwhile the change is restored. With `console_operations: false` on the web service, model writes are
 refused even for an enabled account. `services/oauth/test/isolated-web-models.test.mjs`
 covers these cases with synthetic configuration.
 
