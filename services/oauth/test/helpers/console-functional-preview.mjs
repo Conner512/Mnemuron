@@ -94,6 +94,9 @@ lines.on('line',async line=>{
   if(req.command==='keep-private'){const writer=core.issue(o.account.user_id,'synthetic-private-'+Date.now());const m=core.store.saveMemory(writer.auth,{scope:'user',content:'Synthetic keep-private memory for organize acceptance',topic:'privacy-check'}).memory;
    core.store.webVisibility.keepPrivate(o.account.user_id,m.memory_id,core.store.revisions.latest(o.account.user_id,m.memory_id));reply={memory_id:m.memory_id};}
   if(req.command==='web-visible'){reply={visible:core.store.webVisibility.visible({user_id:o.account.user_id,agent_id:'chatgpt-web',scopes:['memory:read']},req.memory_id),denied:core.store.webVisibility.denied(o.account.user_id,req.memory_id)};}
+  // Synthetic bulk memories for limit acceptance (owner-scoped, one transaction).
+  if(req.command==='bulk'){const writer=core.issue(o.account.user_id,'synthetic-bulk-'+Date.now());core.store.db.exec('BEGIN');
+   try{for(let i=0;i<req.count;i++)core.store.saveMemory(writer.auth,{scope:'user',content:`Synthetic bulk limit note ${i}`,topic:req.topic});core.store.db.exec('COMMIT');}catch(e){core.store.db.exec('ROLLBACK');throw e;}reply={created:req.count};}
   if(req.command==='invitation')reply=ids.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-browser-operator'});
   if(req.command==='codes')reply={codes:o.codes};
   if(req.command==='cookies'){o.console=ids.newSession('console',{accountId:o.account.account_id});reply={token:o.console.token};}

@@ -95,7 +95,10 @@ export class ConsoleService {
     }
     if(action==='jobs.cancel'){object(p,['job_id']);const job=this.job(auth,p.job_id);if(job.state==='succeeded')throw new ConflictError('A completed job cannot be cancelled.','JOB_TERMINAL');store.memoryJobs.cancel(job.job_id);return {status:'cancelled',job_id:job.job_id};}
     if(action==='jobs.retry'){object(p,['job_id']);const job=this.job(auth,p.job_id);
-      if(!['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(job.state))throw new ConflictError('Job is not retryable.','JOB_NOT_RETRYABLE');
+      if(!['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(job.state)||job.last_error_code==='RESCHEDULED')throw new ConflictError('Job is not retryable.','JOB_NOT_RETRYABLE');
+      // A job planned with an outdated category list cannot run as is; retrying it re-plans the same work
+      // under the current categories. Existing classifications stay; the stale job is kept as superseded.
+      if(job.metadata.taxonomy&&job.metadata.taxonomy.version!==this.taxonomy(auth.user_id).version)return this.reschedule(auth,job);
       const provider=this.models.provider(auth.user_id,'organizer');if(provider.profile.fingerprint!==job.profile||job.metadata.taxonomy?.version!==this.taxonomy(auth.user_id).version||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i)))throw new ConflictError('Inputs/model/taxonomy changed; schedule a new job.','STALE_INPUT');
       this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(job.profile);
       this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL,fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE job_id=? AND user_id=?").run(Date.now(),Date.now(),job.job_id,auth.user_id);return {status:'queued',job_id:job.job_id};}
@@ -119,6 +122,21 @@ export class ConsoleService {
       const created=store.issueCredential({label:row.label,userId:auth.user_id,deviceId:row.device_id,agentId:row.agent_id,agentInstanceId:row.agent_instance_id,scopes,expiresAt:row.expires_at});return {status:'rotated',...created,secret_expires_in_seconds:600};}
     if(action==='storage.import')return this.import(auth,p);
     throw new NotFoundError('Action not found.');
+  }
+  /** Supersede every retryable job of this type planned under an outdated taxonomy and queue the work again. */
+  reschedule(auth,job){
+    const store=this.store,user=auth.user_id,taxonomy=this.taxonomy(user),organizer=this.models.provider(user,'organizer');
+    if(!organizer.profile.egress.approved)throw new ConflictError('Model egress must be explicitly approved.','EGRESS_DENIED');
+    const stale=this.db.prepare("SELECT job_id,metadata_json FROM memory_jobs WHERE user_id=? AND job_type=? AND state IN ('dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled','pending') AND COALESCE(last_error_code,'')<>'RESCHEDULED' AND json_extract(metadata_json,'$.taxonomy.version')<>?")
+      .all(user,job.job_type,taxonomy.version).map(r=>({job_id:r.job_id,window:JSON.parse(r.metadata_json).window}));
+    const windows=stale.map(r=>r.window).filter(Boolean),settings=this.settings(user),now=Date.now();
+    const periods=[...new Set(windows.map(w=>w.period))],timezone=windows[0]?.timezone||settings.timezone;
+    const result=scheduleLibrary(store,store.memoryJobs,{userId:user,organizer,taxonomy,type:job.job_type,timezone,
+      periods:periods.length?periods:settings.periods,includeOpen:windows.some(w=>Date.parse(w.end)>now)});
+    const superseded=this.db.prepare("UPDATE memory_jobs SET state='cancelled',last_error_code='RESCHEDULED',fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE user_id=? AND job_id IN (SELECT value FROM json_each(?))")
+      .run(now,user,JSON.stringify(stale.map(r=>r.job_id))).changes;
+    store.audit({auth,action:'console.jobs.reschedule',targetType:'memory_job',targetId:job.job_id,metadata:{superseded,queued:result.jobs.length,job_type:job.job_type}});
+    return {status:result.jobs.length?'rescheduled':'no_work',job_id:job.job_id,superseded,jobs:result.jobs,job_type:job.job_type,worker_enabled:store.memoryConfig.console?.worker_enabled===true};
   }
   sensitivity(value){if(!['public','internal','sensitive','secret'].includes(value))throw new ValidationError('Invalid sensitivity.');}
   export(auth,p){this.require(auth);object(p,['after','highwater','limit']);const after=number(Number(p.after||0),0,Number.MAX_SAFE_INTEGER),limit=number(Number(p.limit||10),1,20);

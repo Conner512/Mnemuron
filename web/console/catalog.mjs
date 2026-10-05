@@ -1058,3 +1058,30 @@ Object.assign(catalog.en,{organizeNote:'Select up to 100 memories across pages, 
  featMEM06Note:'Select memories or a filter, preview, move them to a category and undo if needed; or retract in batches.',featSUM03Note:'Create, rename and delete categories (members move to a chosen category, undoable); model classifications stay visible.'});
 Object.assign(catalog['zh-CN'],{importRateWait:'已达到每分钟写入上限，约 1 分钟后自动继续，已导入的记录会保留'});
 Object.assign(catalog.en,{importRateWait:'Write limit reached; continuing automatically in about a minute. Imported records are kept.'});
+// Bounded fixes: accurate organize limit and taxonomy-fenced job rescheduling.
+Object.assign(catalog['zh-CN'],{
+ allMatchingSelected:'已选择当前筛选条件下的全部有效记忆（一次最多整理 2000 条），预览会显示准确数量。',
+ organizeMatchCount:'条记忆匹配当前筛选',organizeLimitIs:'超过单次整理上限',organizeTruncatedHeadline:'检索匹配超过可核验的 500 条窗口',organizeNextStep:'下一步',
+ organizeNarrowHint:'按分类、主题或来源进一步筛选，让匹配数量不超过上限后再整理。',organizeSelectHint:'也可以在列表中逐条勾选（每次最多 100 条，可跨页）。',
+ organizeNarrow:'缩小筛选范围',confirmMoveBlocked:'超过上限，无法确认',
+ jobState_pending:'等待执行',jobState_leased:'执行中',jobState_retry_wait:'等待重试',jobState_succeeded:'已完成',jobState_cancelled:'已取消',jobState_dead_letter:'多次失败',
+ jobState_blocked_auth:'模型认证失败',jobState_blocked_budget:'今日额度已用尽',jobState_blocked_config:'需要处理',jobState_review_required:'需要人工检查',
+ STALE_TAXONOMY:'分类已变更，这个任务按旧分类规划，不能直接运行',RESCHEDULED:'已按新分类重新排队，由新任务接替',
+ jobStaleTaxonomyHint:'点击“按新分类重新整理”，会用当前分类重新安排同类任务；已有分类结果保留。',
+ rescheduleWithCategories:'按新分类重新整理','jobs.retry':'重试任务',
+ rescheduleNote:'这个任务按旧的分类规划。确认后会按当前分类重新安排同类整理任务，并把按旧分类排队的同类任务标记为已接替。已有的分类结果和手动分类都会保留；可能产生模型调用费用。',
+ rescheduledResult:'已按新分类排队任务数',supersededResult:'已接替的旧任务',rescheduledNoWork:'没有需要重新整理的记忆，旧任务已标记为已接替。',
+});
+Object.assign(catalog.en,{
+ allMatchingSelected:'All active memories matching the current filter are selected (at most 2,000 per step); the preview shows the exact count.',
+ organizeMatchCount:'memories match this filter',organizeLimitIs:'more than the per-step limit of',organizeTruncatedHeadline:'The search matches more than the 500 records that can be verified',organizeNextStep:'Next step',
+ organizeNarrowHint:'Narrow by category, topic or origin until the matches fit within the limit, then organize.',organizeSelectHint:'Or select memories in the list (up to 100 at a time, across pages).',
+ organizeNarrow:'Narrow the filter',confirmMoveBlocked:'Over the limit — cannot confirm',
+ jobState_pending:'Waiting',jobState_leased:'Running',jobState_retry_wait:'Waiting to retry',jobState_succeeded:'Completed',jobState_cancelled:'Cancelled',jobState_dead_letter:'Failed repeatedly',
+ jobState_blocked_auth:'Model authentication failed',jobState_blocked_budget:'Daily limit reached',jobState_blocked_config:'Needs attention',jobState_review_required:'Needs review',
+ STALE_TAXONOMY:'Categories changed; this job was planned with the old categories and cannot run as is',RESCHEDULED:'Rescheduled with the current categories; a new job replaces it',
+ jobStaleTaxonomyHint:'Use “Reschedule with current categories” to plan this work again; existing classifications are kept.',
+ rescheduleWithCategories:'Reschedule with current categories','jobs.retry':'Retry job',
+ rescheduleNote:'This job was planned with an older category list. Confirming plans the same kind of organizing again with the current categories and marks the outdated queued jobs of this kind as replaced. Existing classifications and manual categories are kept; model calls may be charged.',
+ rescheduledResult:'Jobs queued with current categories',supersededResult:'outdated jobs replaced',rescheduledNoWork:'Nothing needs organizing again; the outdated jobs were marked as replaced.',
+});

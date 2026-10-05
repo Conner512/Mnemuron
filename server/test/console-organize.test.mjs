@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import {randomBytes,randomUUID} from 'node:crypto';
 import {memoryFixture,businessSnapshot} from './helpers/core-memory-fixture.mjs';
 import {CONSOLE_WRITE_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_READ_SCOPES} from '../../shared/console-contract.mjs';
+import {organizer,taxonomy as syntheticTaxonomy} from './helpers/memory-models.mjs';
+import {MemoryWorker} from '../lib/memory-jobs/worker.mjs';
 
 // Synthetic accounts and memories only; disposable loopback store per test.
 async function setup(t){
@@ -84,6 +86,8 @@ test('ORG-03: organizing beyond the safe limit or a truncated search is refused 
   const f=await setup(t);
   f.store.db.exec('BEGIN');for(let i=0;i<2005;i++)f.store.saveMemory(f.A.auth,{scope:'user',content:`Synthetic bulk window marker ${i}`,topic:'bulk'});f.store.db.exec('COMMIT');
   const pv=await f.preview('technical',{topic:'bulk'});assert.equal(pv.over_limit,true);assert.equal(pv.applicable,false);assert.equal(pv.matched,2000);
+  assert.equal(pv.total,2005,'the preview reports the exact number of matches, not the capped count');assert.equal(pv.limit,2000);
+  assert.equal((await f.preview('technical',{topic:'bulk',query:'window marker 1'})).total>0,true);
   assert.equal((await f.act('memory.organize',{category:'technical',topic:'bulk',preview_token:pv.preview_token})).body.error_code,'SELECTION_TOO_LARGE');
   const q=await f.preview('technical',{query:'bulk window marker'});assert.equal(q.truncated,true);assert.equal(q.applicable,false);
   assert.equal((await f.act('memory.organize',{category:'technical',query:'bulk window marker',preview_token:q.preview_token})).body.error_code,'SELECTION_TRUNCATED');
@@ -228,4 +232,34 @@ test('ORG-09: existing classify and batch classify share the write path and are 
   const fixed=await f.act('memory.correct',{memory_id:c,revision:1,content:'Synthetic corrected later, fixed',memory_type:'fact'});
   const undone=await f.act('memory.organize_undo',{batch_id:moved.body.batch_id});
   assert.equal(undone.status,409);assert.equal(undone.body.error_code,'UNDO_CONFLICT');assert.equal(await f.categoryOf(fixed.body.memory_id),'decisions');
+});
+
+test('ORG-10: a job fenced by a category change is rescheduled under the current categories; classifications are kept',async t=>{
+  const f=await setup(t);f.store.memoryConfig.memory={taxonomy:syntheticTaxonomy};
+  const model=organizer();model.profile=Object.freeze({...model.profile,fingerprint:'console-synthetic-profile'});f.store.consoleService.models.provider=()=>model;
+  const drain=()=>new MemoryWorker(f.store,f.store.memoryJobs,model,{workerId:'synthetic-console',userId:f.A.auth.user_id,profileFilter:model.profile.fingerprint}).drain({maxJobs:10});
+  const schedule=()=>f.act('jobs.schedule',{type:'classification',timezone:'UTC',periods:['daily'],include_open:true});
+  const jobs=async()=>(await f.get('jobs')).body.jobs,ids=[await f.create('Synthetic job note one'),await f.create('Synthetic job note two')];
+  assert.equal((await schedule()).status,200);await drain();
+  for(const id of ids)assert.equal(await f.categoryOf(id),'engineering');
+  const manual=await f.organize('preferences',{memory_ids:ids[1]});assert.equal(manual.status,200);
+  for(const [label,edit] of [['create',rev=>f.act('category.create',{label:'Synthetic Later',expected_revision:rev})],['delete',rev=>f.act('category.delete',{category:'synthetic-later',move_to:'uncategorized',expected_revision:rev})]]){
+    ids.push(await f.create(`Synthetic job note before ${label}`));
+    const queued=(await schedule()).body.jobs[0];assert.equal(f.store.memoryJobs.get(queued).state,'pending');
+    assert.equal((await edit((await f.taxonomy()).revision)).status,200);
+    const fenced=f.store.memoryJobs.get(queued);assert.equal(fenced.state,'blocked_config');assert.equal(fenced.last_error_code,'STALE_TAXONOMY');
+    const listed=(await jobs()).find(j=>j.job_id===queued);assert.equal(listed.stale_taxonomy,true,'the jobs view marks the outdated plan');
+    assert.equal(await f.categoryOf(ids[0]),'engineering');assert.equal(await f.categoryOf(ids[1]),'preferences');
+    assert.equal((await f.act('jobs.retry',{job_id:queued},f.B)).status,404,'another owner cannot reschedule');
+    const retried=await f.act('jobs.retry',{job_id:queued});
+    assert.equal(retried.status,200,JSON.stringify(retried.body));assert.equal(retried.body.status,'rescheduled');assert.equal(retried.body.superseded,1);assert.equal(retried.body.jobs.length,1);
+    const old=f.store.memoryJobs.get(queued);assert.equal(old.state,'cancelled');assert.equal(old.last_error_code,'RESCHEDULED');
+    assert.equal((await f.act('jobs.retry',{job_id:queued})).body.error_code,'JOB_NOT_RETRYABLE','a replaced job cannot be retried again');
+    assert.equal((await f.get('attention')).body.counts.failed_jobs,0);
+    const replacement=f.store.memoryJobs.get(retried.body.jobs[0]);assert.equal(replacement.metadata.taxonomy.version,(await f.taxonomy()).version);
+    await drain();assert.equal(f.store.memoryJobs.get(retried.body.jobs[0]).state,'succeeded');
+    assert.equal(await f.categoryOf(ids.at(-1)),'engineering','the rescheduled job classifies the new memory');
+    assert.equal(await f.categoryOf(ids[0]),'engineering');assert.equal(await f.categoryOf(ids[1]),'preferences','manual categories still win');
+  }
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,7);
 });

@@ -48,7 +48,9 @@ export function actionPage(page,data,caps,connectionQuery={}) {
   if(page==='jobs')return section('jobs',`<div class="status-line">${l('scheduleStatus')} ${state(data.settings?.schedule_enabled?'enabled':'disabled')}<span aria-hidden="true">·</span>${l('workerStatus')} ${state(data.worker_enabled?'enabled':'disabled')}${data.vector?`<span aria-hidden="true">·</span>${l('vectorIndex')} ${state(data.vector.state)} ${esc(data.vector.error_code||'')}`:''}</div>
     ${can('jobs.schedule')?buttons([actionButton('jobs.schedule','organize',{type:'classification'}),actionButton('jobs.schedule','summarize',{type:'summary'})]):onlyRead()}
     ${!data.worker_enabled?note('workerDisabledNote'):''}
-    ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td>${state(j.state)}</td><td>${progress(j.processed,j.total)}</td><td>${esc(j.last_error_code||'—')}</td><td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
+    ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td><td>${progress(j.processed,j.total)}</td>
+      <td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span><small><code>${esc(j.last_error_code)}</code></small>${j.stale_taxonomy&&j.last_error_code!=='RESCHEDULED'?`<small class="job-hint">${l('jobStaleTaxonomyHint')}</small>`:''}`:'—'}</td>
+      <td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&j.last_error_code!=='RESCHEDULED'&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[j.stale_taxonomy?actionButton('jobs.retry','rescheduleWithCategories',{id:j.job_id,stale:'true'}):actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
     <div class="section-foot">${pager(data)}</div>`,{aside:refresh()});
 
   if(page==='connections')return connectionsView(data,caps,connectionQuery);
@@ -127,6 +129,10 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     if(intent?.action==='models.test'||intent?.action==='models.save'||intent?.action==='jobs.schedule'||intent?.action==='vector.schedule'){
       const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':'modelQueued');content.prepend(message);
     }
+    if(intent?.action==='jobs.retry'){
+      const message=document.createElement('p');message.className='policy-box';message.setAttribute('role','status');
+      message.textContent=data.status==='rescheduled'?`${t('rescheduledResult')} ${data.jobs.length} · ${t('supersededResult')} ${data.superseded}`:data.status==='no_work'?t('rescheduledNoWork'):t('modelQueued');content.prepend(message);
+    }
     if(data.codes&&data.batch_id){
       const note=document.createElement('p');note.textContent=t('invitationSavedNote');
       const codes=document.createElement('pre');codes.id='issued-invitation-codes';codes.className='operation-result';codes.textContent=data.codes.join('\n');
@@ -179,6 +185,14 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     const p=await api('memories',{part:'preview',target:flow.category,...rest,...(memory_ids?{memory_ids:memory_ids.join(',')}:{}),...(filter_category?{category:filter_category}:{}),...(all?{all:'true'}:{})});
     if(!fresh(seq))return;flow.preview=p;flow.opId=crypto.randomUUID();
     const warn=p.over_limit?'organizeOverLimit':p.truncated?'organizeTruncated':!p.matched?'SELECTION_EMPTY':!p.changed?'organizeNothing':null,ready=p.applicable&&p.changed>0;
+    if(p.over_limit||p.truncated){
+      // Nothing can be applied: say exactly how many match, what the limit is, and what to do next.
+      content.innerHTML=`<div class="organize-preview organize-blocked">${notice?`<p class="policy-box" role="status">${l(notice)}</p>`:''}
+        <p class="organize-headline" id="organize-limit">${p.over_limit?`<strong class="figure">${p.total}</strong> ${l('organizeMatchCount')} · ${l('organizeLimitIs')} <strong>${p.limit}</strong>`:l('organizeTruncatedHeadline')}</p>
+        <p class="policy-box" role="alert">${l(warn)}</p><h3>${l('organizeNextStep')}</h3><ul class="organize-facts"><li>${l('organizeNarrowHint')}</li><li>${l('organizeSelectHint')}</li></ul></div>
+        <form data-organize-step="confirm"><div class="actions"><button type="submit" class="primary" disabled data-keep-disabled aria-describedby="organize-limit">${l('confirmMoveBlocked')}</button><button type="button" data-organize-narrow>${l('organizeNarrow')}</button><button type="button" data-organize-back>${l('goBack')}</button><button type="button" data-operation-close>${l('cancel')}</button></div><p data-operation-error role="alert"></p></form>`;
+      syncAppearance();content.querySelector('[data-organize-narrow]')?.focus();return;
+    }
     content.innerHTML=`<div class="organize-preview">${notice?`<p class="policy-box" role="status">${l(notice)}</p>`:''}
       <p class="organize-headline"><strong class="figure">${p.changed}</strong> ${l('organizeWillMove')} <strong>${esc(labelOf(p.category))}</strong></p>
       ${p.unchanged||p.missing?`<ul class="organize-facts">${p.unchanged?`<li>${p.unchanged} ${l('organizeAlready')}</li>`:''}${p.missing?`<li>${p.missing} ${l('organizeMissing')}</li>`:''}</ul>`:''}
@@ -246,6 +260,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   modal.addEventListener('click',event=>{
     if(!flow||working)return;const seq=sequence;
     if(event.target.closest('[data-organize-back]')){chooseStep(flow.category);return;}
+    if(event.target.closest('[data-organize-narrow]')){modal.close();const field=document.querySelector('#search-form [name=category]')?.closest('label')?.querySelector('.select-trigger,select')||document.querySelector('[data-search-input]');field?.focus();return;}
     const undo=event.target.closest('[data-organize-undo]');if(undo){void runUndo(seq,undo.dataset.organizeUndo);return;}
     if(event.target.closest('[data-manage-back]')){void manager(seq).catch(e=>fail(e,seq));return;}
     const rename=event.target.closest('[data-category-rename]'),remove=event.target.closest('[data-category-delete]');
@@ -313,6 +328,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
       else if(action==='devices.revoke'){const device=(data.core_connections||[]).find(c=>c.agent_instance_id===intent.id);
         fields=`<p>${l('connRevokeDeviceNote')}</p><p><strong>${esc(device?.agent_id||'')}</strong> ${esc(device?.label||'')} <code>${esc(intent.id)}</code></p>`+reauth();}
       else if(action==='storage.import')fields=`<p>${l('portableNote')}</p><label>${l('file')}<input type="file" name="file" accept="application/json,.json" required></label><label class="check-field"><input type="checkbox" name="confirm_import" required>${l('confirmImport')}</label>`;
+      else if(action==='jobs.retry'&&button.dataset.stale==='true'){modal.querySelector('h2').textContent=t('rescheduleWithCategories');fields=`<p>${l('rescheduleNote')}</p><code>${esc(intent.id)}</code>`;}
       else fields=`<p>${l(action==='storage.export'?'exportPrivacyNote':action==='models.test'?'probeCostNote':'confirmAction')}</p><code>${esc(intent.id||intent.kind||'')}</code>`;
       if(seq!==sequence||!isActive())return;content.innerHTML=`<form id="operation-form">${fields}${modalActions(action==='storage.export'?'export':'confirm')}</form>`;syncAppearance();content.querySelector('input,textarea,select,button')?.focus();
     }catch(e){if(seq!==sequence||!isActive())return;content.innerHTML=`<p role="alert">${esc(t(e.message))}</p><button type="button" data-operation-close>${l('close')}</button>`;}

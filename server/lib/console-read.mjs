@@ -85,7 +85,10 @@ export async function consoleRead(store,auth,view,params={}) {
       return {...result,next_request:next,next_cursor:next?.cursor||null,next_offset:null,complete:!next};
     }
     case 'jobs':{const {offset,limit}=pagination(params);if(params.job_id)return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};
-      const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset);
+      // stale_taxonomy: the job was planned with a category list the account has since changed.
+      const version=store.consoleService.taxonomy(user).version;
+      const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at,json_extract(metadata_json,\'$.taxonomy.version\') taxonomy_version FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset)
+        .map(({taxonomy_version,...job})=>({...job,stale_taxonomy:!!taxonomy_version&&taxonomy_version!==version}));
       return {read_only:true,worker_enabled:store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
     case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user).map(row=>credentialView(row)),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
     case 'audit':{let q;try{q=auditQuery(params);}catch{throw new ValidationError('Invalid audit query.');}const {offset,limit}=q;

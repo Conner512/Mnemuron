@@ -184,6 +184,19 @@ try{
   await op.locator('[data-organize-step="confirm"] button[type=submit]').click();await op.locator('.organize-result').waitFor();await op.locator('[data-operation-close]').last().click();
   const vis=await command('web-visible',{memory_id:priv.memory_id});check('keep_private still rejects web reads after organizing',vis.visible===false&&vis.denied===true);
 
+  // Over the per-step limit: exact total, the limit, a clearly disabled confirmation and a next step.
+  await command('bulk',{count:2010,topic:'bulk-limit'});await goto('memories?topic=bulk-limit');await page.locator('[data-select-all]').click();
+  check('Select-all banner states the per-step limit',(await page.locator('[data-memory-selection] p').innerText()).includes('2000'));
+  await page.locator('[data-memory-selection] [data-console-action="memory.organize"]').click();await pick('#operation-dialog [name=category]','technical');
+  await op.locator('[data-organize-step="choose"] button[type=submit]').click();await op.locator('.organize-blocked').waitFor();
+  const capText=await op.locator('.organize-blocked').innerText(),confirm=op.locator('[data-organize-step="confirm"] button[type=submit]');
+  check('Over-limit preview shows the exact total and the limit, not a capped "will move" count',capText.includes('2010')&&capText.includes('2000')&&!capText.includes('条记忆将移到'));
+  check('Over-limit confirmation is disabled and looks disabled',await confirm.isDisabled()&&(await confirm.innerText()).includes('超过上限')&&await confirm.evaluate(b=>{const s=getComputedStyle(b);return s.borderStyle==='dashed'&&s.backgroundColor!=='rgb(174, 63, 44)'&&s.cursor==='not-allowed';}));
+  check('Over-limit preview explains the next step',capText.includes('下一步')&&capText.includes('缩小'));
+  await shot('20-organize-over-limit',page,false);
+  await op.locator('[data-organize-narrow]').click();await op.waitFor({state:'hidden'});
+  check('Narrow-the-filter closes the dialog without writing and returns to the filters',(await facets()).categories.find(c=>c.category==='technical').count===1);
+
   // Narrow screen.
   const mobile=await ctxA.newPage();await mobile.setViewportSize({width:390,height:844});watch(mobile);await goto('memories',mobile);
   check('Narrow layout has no horizontal page scroll',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot('17-mobile-library',mobile);
@@ -198,8 +211,35 @@ try{
 
   const after=await command('integrity');
   check('Schema stays at version 7',after.user_version===7);
-  check('No memory was deleted; only imports and the private fixture were added (A)',after.users[0].memories===before.users[0].memories+301);
+  check('No memory was deleted; only imports, the private fixture and synthetic bulk rows were added (A)',after.users[0].memories===before.users[0].memories+301+2010);
   check('Account B memories and revisions are untouched',JSON.stringify(after.users[1])===JSON.stringify(before.users[1]));
+  // A model job fenced by a category change is rescheduled from the Jobs page (account B, synthetic model).
+  const bAct=(action,payload)=>pb.evaluate(async([action,payload])=>{const me=await (await fetch('/console-api/me',{credentials:'same-origin'})).json();
+    const body=new URLSearchParams({csrf:me.csrf,account_id:me.account_id,action,operation_id:crypto.randomUUID(),payload:JSON.stringify(payload)});
+    const r=await fetch('/console-api/action',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body});return {status:r.status,body:await r.json()};},[action,payload]);
+  const bGet=async(view,params={})=>pb.evaluate(async([v,q])=>(await fetch('/console-api/'+v+'?'+new URLSearchParams(q),{credentials:'same-origin'})).json(),[view,params]);
+  const bSchedule=async()=>bAct('jobs.schedule',{type:'classification',timezone:'UTC',periods:['daily'],include_open:true,schedule_enabled:false,settings_revision:(await bGet('jobs')).settings.revision});
+  const bDrain=async()=>{for(let i=0;i<10;i++){await command('tick',{owner:1});if((await bGet('jobs')).jobs.every(j=>j.state!=='pending'))break;}};
+  check('Synthetic organizer configured for B',(await bAct('models.save',{kind:'organizer',expected_revision:0,api_key:'synthetic-key',config:{enabled:true,protocol:'openai_compatible',base_url:cfg.model_url,model:'synthetic-organizer',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:false,native_schema:true}})).status===200);
+  await bSchedule();await bDrain();const bIds=(await bGet('memories',{limit:50})).results.map(m=>m.memory_id),bCategory=async id=>(await bGet('memory-meta',{memory_id:id})).category;
+  check('Model classified B before the category change',(await Promise.all(bIds.map(bCategory))).every(c=>c==='technical'));
+  await bAct('memory.create',{content:'Synthetic B memory added before a category change',scope:'user',memory_type:'fact',sensitivity:'sensitive'});
+  const pendingJob=(await bSchedule()).body.jobs[0];await bAct('category.create',{label:'Synthetic B later',expected_revision:(await bGet('taxonomy')).revision});
+  await goto('jobs',pb);const row=pb.locator('tr',{has:pb.locator(`[data-job-detail="${pendingJob}"]`)});
+  check('Fenced job shows a translated state and reason, not raw codes',(await row.innerText()).includes('需要处理')&&(await row.innerText()).includes('分类已变更'));
+  check('Fenced job offers reschedule instead of a bare retry',await row.locator('[data-console-action="jobs.retry"][data-stale="true"]').count()===1&&!(await row.innerText()).includes('重试'));
+  await shot('21-jobs-fenced',pb,false);
+  check('Earlier classifications stay visible while the job is fenced',(await Promise.all(bIds.map(bCategory))).every(c=>c==='technical'));
+  await row.locator('[data-console-action="jobs.retry"]').click();const bop=pb.locator('#operation-dialog');await bop.locator('form').waitFor();
+  check('Reschedule dialog explains what happens and that classifications are kept',(await bop.innerText()).includes('当前分类')&&(await bop.innerText()).includes('保留'));
+  await bop.locator('button[type=submit]').click();await bop.locator('.policy-box[role=status]').waitFor();
+  check('Reschedule queues a replacement job and reports it',(await bop.locator('.policy-box[role=status]').innerText()).includes('已按新分类排队任务数 1'));
+  await shot('22-jobs-rescheduled',pb,false);await bop.locator('[data-operation-close]').last().click();
+  await bDrain();const afterJobs=(await bGet('jobs')).jobs;
+  check('Replacement job succeeds; the outdated job is marked replaced',afterJobs[0].state==='succeeded'&&afterJobs.find(j=>j.job_id===pendingJob).last_error_code==='RESCHEDULED');
+  const allB=(await bGet('memories',{limit:50})).results.map(m=>m.memory_id);
+  check('All B memories classified after reschedule, earlier ones unchanged',(await Promise.all(allB.map(bCategory))).every(c=>c==='technical'));
+  await goto('jobs',pb);check('Replaced job no longer offers any action',await pb.locator('tr',{has:pb.locator(`[data-job-detail="${pendingJob}"]`)}).locator('[data-console-action]').count()===0);
   check('No JavaScript or CSP failures',errors.length===0);
   await command('stop').catch(()=>{});
   fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,integrity:{before,after}},null,2),{mode:0o600});

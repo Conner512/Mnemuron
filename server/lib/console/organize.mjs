@@ -58,8 +58,8 @@ export class ConsoleOrganizer {
     return f;
   }
   /** Rows matching a filter, newest first (or search rank). Candidate windows are bounded and say so. */
-  rows(auth,f,{ids,ranked,limit=ORGANIZE_LIMIT+1,offset=0}={}){
-    const user=auth.user_id;let order=ranked||null,truncated=false;
+  rows(auth,f,{ids,ranked,limit=ORGANIZE_LIMIT+1,offset=0,count=false}={}){
+    const user=auth.user_id;let order=ranked||null,truncated=false,total;
     if(ranked)ids=ids?ids.filter(x=>ranked.includes(x)):ranked;
     if(f.query){
       const found=this.store.memorySearch.candidates(user,f.query,{}, {auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES});
@@ -79,10 +79,11 @@ export class ConsoleOrganizer {
     let rows;
     if(order){
       // Keep search rank; the candidate window is already bounded by the search.
-      const byId=new Map(this.db.prepare(sql).all(...args).map(r=>[r.memory_id,r]));
-      rows=ids.map(x=>byId.get(x)).filter(Boolean).slice(offset,offset+limit);
-    }else rows=this.db.prepare(sql+' ORDER BY m.created_at DESC,m.rowid DESC LIMIT ? OFFSET ?').all(...args,limit,offset);
-    return {rows:rows.map(r=>({...r,imported:r.imported===1})),truncated};
+      const byId=new Map(this.db.prepare(sql).all(...args).map(r=>[r.memory_id,r])),all=ids.map(x=>byId.get(x)).filter(Boolean);
+      rows=all.slice(offset,offset+limit);if(count)total=all.length;
+    }else{rows=this.db.prepare(sql+' ORDER BY m.created_at DESC,m.rowid DESC LIMIT ? OFFSET ?').all(...args,limit,offset);
+      if(count)total=rows.length<limit&&offset===0?rows.length:this.db.prepare(`SELECT COUNT(*) n FROM (${sql})`).get(...args).n;}
+    return {rows:rows.map(r=>({...r,imported:r.imported===1})),truncated,...(count?{total}:{})};
   }
   /** Facets for browsing a large collection: active memories only, owner scoped, counts only. */
   facets(auth){
@@ -107,8 +108,8 @@ export class ConsoleOrganizer {
     }
     const f=this.filter(user,{query:p.query,category:p.filter_category,topic:p.topic,origin:p.origin},{organize:true});
     if(!ids&&!Object.keys(f).some(k=>k!=='status')&&p.all!==true&&p.all!=='true')throw new ValidationError('Choose memories or a filter to organize.','INVALID_SELECTION');
-    const {rows,truncated}=this.rows(auth,f,{ids});
-    return {rows,truncated,filter:f,ids};
+    const {rows,truncated,total}=this.rows(auth,f,{ids,count:true});
+    return {rows,truncated,total,filter:f,ids};
   }
   token(target,rows){return fingerprint(['organize-v1',target,rows.map(r=>[r.memory_id,r.revision,r.category])]);}
 
@@ -118,11 +119,12 @@ export class ConsoleOrganizer {
     object(p,['category','memory_ids','query','filter_category','topic','origin','all']);
     const user=auth.user_id,taxonomy=this.taxonomy(user);
     if(!taxonomy.categories.includes(p.category))throw new ValidationError('Invalid category.','INVALID_CATEGORY');
-    const {rows,truncated,ids}=this.selection(auth,p);
-    const over=rows.length>ORGANIZE_LIMIT,list=rows.slice(0,ORGANIZE_LIMIT);
+    const {rows,truncated,total,ids}=this.selection(auth,p);
+    const over=total>ORGANIZE_LIMIT,list=rows.slice(0,ORGANIZE_LIMIT);
     const breakdown=new Map();for(const r of list)breakdown.set(r.category,(breakdown.get(r.category)||0)+1);
     const unchanged=breakdown.get(p.category)||0;
-    return {rows:list,preview:{read_only:true,category:p.category,matched:list.length,changed:list.length-unchanged,unchanged,
+    // total is the exact number of matching active memories; matched is what one step could cover.
+    return {rows:list,preview:{read_only:true,category:p.category,total,matched:list.length,changed:list.length-unchanged,unchanged,
       missing:ids?ids.length-list.length:0,by_category:[...breakdown].map(([category,count])=>({category,count})).sort((a,b)=>b.count-a.count),
       sample:list.slice(0,5).map(r=>({memory_id:r.memory_id,content:[...String(r.content)].slice(0,120).join(''),category:r.category})),
       truncated,over_limit:over,limit:ORGANIZE_LIMIT,applicable:!over&&!truncated&&list.length>0,preview_token:this.token(p.category,list)}};

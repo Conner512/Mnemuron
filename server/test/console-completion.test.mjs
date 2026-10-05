@@ -170,7 +170,12 @@ test('Console completion: taxonomy changes fence old leases and stale retries wi
   const lease=f.store.memoryJobs.claim('synthetic-taxonomy',{userId:f.owner.auth.user_id,profile:model.profile.fingerprint});assert.equal(lease.job_id,a);
   assert.equal((await f.act('taxonomy.save',{expected_revision:0,categories:['uncategorized','synthetic']})).status,200);
   assert.equal(f.store.memoryJobs.owns(lease),false);assert.equal(f.store.memoryJobs.get(a).state,'blocked_config');assert.equal(f.store.memoryJobs.get(b).state,'pending');
-  assert.equal((await f.act('jobs.retry',{job_id:a})).status,409);
+  // Retrying a job planned under the old taxonomy re-plans it under the new one; the old lease stays fenced.
+  const retried=await f.act('jobs.retry',{job_id:a});assert.equal(retried.status,200,JSON.stringify(retried.body));assert.equal(retried.body.status,'rescheduled');
+  assert.equal(f.store.memoryJobs.owns(lease),false);assert.equal(f.store.memoryJobs.get(a).last_error_code,'RESCHEDULED');
+  assert.equal(f.store.memoryJobs.get(retried.body.jobs[0]).metadata.taxonomy.categories.includes('synthetic'),true);
+  assert.equal(f.store.memoryJobs.get(b).state,'pending');assert.equal(f.store.memoryJobs.get(b).last_error_code,null,'another owner is never superseded');
+  assert.equal((await f.act('jobs.retry',{job_id:a})).status,409,'a replaced job cannot be retried again');
 });
 
 test('Console completion: additive preference initialization is repeatable and persists without rewriting memories',async t=>{

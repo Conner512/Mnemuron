@@ -43,7 +43,7 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 #operation-content textarea,.connection-content textarea{min-height:140px;resize:vertical;border-color:var(--muted);line-height:1.7}
 #operation-content .select-shell,.connection-content .select-shell{width:100%}
 /* The final submit of an explicit operation is a confirmation: it carries the seal colour. */
-#operation-content form>.actions button.primary{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
+#operation-content form>.actions button.primary:not(:disabled){border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
 #operation-content form>.actions button.primary:not(:disabled):hover{filter:brightness(.92)}
 .check-field{display:flex!important;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--text)!important;font-size:13.5px;font-weight:400;line-height:1.6}
 .check-field input[type=checkbox]{width:16px;height:16px;min-height:0;margin:3px 0 0;flex:none;accent-color:var(--text)}
