@@ -32,6 +32,7 @@
           "version": {"$ref": "#/$defs/name"}, "categories": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
             "contains": {"const": "uncategorized"}, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}}
         }},
+        "agent_read_policy": {"enum": ["chatgpt_per_memory_v1", "active_uniform_v1"], "description": "ChatGPT read policy. Absent means chatgpt_per_memory_v1. Changing it changes effective access."},
         "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}}}
       }
     },
@@ -47,6 +48,7 @@
       "enabled": {"type": "boolean"}, "protocol": {"const": "qdrant-rest-v1.19"}, "base_url": {"type": "string", "format": "uri"},
       "auth": {"type": "object", "minProperties": 1, "maxProperties": 1, "additionalProperties": false, "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,100}$"}, "secret_file": {"type": "string", "pattern": "^/"}}},
       "collection_prefix": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$"},
+        "precreated_collections": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,100}$"}, "description": "Operator pre-created collections; each starts with collection_prefix + \"_\". Never created by Mnemuron."},
       "egress": {"type": "object", "required": ["approved", "origins", "addresses", "allow_private"], "additionalProperties": false, "properties": {
         "approved": {"const": true}, "allow_private": {"const": true}, "origins": {"$ref": "#/$defs/stringList"}, "addresses": {"$ref": "#/$defs/stringList"}
       }},

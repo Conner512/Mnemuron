@@ -110,6 +110,8 @@ export class WebMemoryVisibility {
       return {read_all,revision,policy:WEB_READ_POLICY};
     });
   }
+  /** A ChatGPT reader of this owner under the operator's configured read policy (for local inspection). */
+  reader(auth){const policy=AGENT_READ_POLICIES[this.store.runtime?.agentReadPolicy];return {...auth,agent_id:'chatgpt-web',...(policy&&policy!==WEB_READ_POLICY?{read_policy:policy}:{})};}
   visible(auth,id) {
     return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${webMemorySql(auth)}`).get(auth.user_id,id);
   }
@@ -131,7 +133,7 @@ export class WebMemoryVisibility {
     if(!current)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';
     return {memory_id:id,revision:current.revision,state_hash:current.state_hash,sensitivity,
-      allowed:this.visible({...auth,agent_id:'chatgpt-web'},id),content_returned:false,policy:WEB_READ_POLICY};
+      allowed:this.visible(this.reader(auth),id),content_returned:false,policy:webReadPolicy(this.reader(auth))};
   }
   set(auth,id,{allow,revision,state_hash}={}) {
     if(!consoleMemoryWritable(auth))this.store.requireScope(auth,'admin:tasks');

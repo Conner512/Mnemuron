@@ -38,7 +38,9 @@ export function actionPage(page,data,caps,connectionQuery={}) {
       const facts=fr.generation?kv([['vectorCollection',`<code>${esc(fr.collection)}</code>`],['dimensions',esc(fr.dimensions)],['manifestCount',esc(fr.manifest.count)],['manifestDigest',`<code class="digest">${esc(fr.manifest.digest)}</code>`],
         ['manifestProgress',`${esc(fr.manifest.indexed)} ${l('indexedShort')} · ${esc(fr.manifest.pending)} ${l('pendingShort')} · ${esc(fr.manifest.stale)} ${l('staleShort')}`],['state',l('firstRunState_'+fr.build)+(fr.error_code?` · ${esc(t(fr.error_code))}`:'')],['serving',l(fr.serving?'yes':'no')]]):'';
       const budget=b?kv([['firstRunBudget',`${esc(b.used)} / ${esc(b.total)}`]]):'';
-      const actions=[launch('vector.prepare','prepareFirstRun',step.ready===true&&!fr.serving),
+      // Once a first run embedded records its budget belongs to it: re-activate it instead of preparing again.
+      const embedded=!!(fr.manifest?.indexed||fr.manifest?.stale||fr.manifest?.excluded);
+      const actions=[...(embedded?[]:[launch('vector.prepare','prepareFirstRun',step.ready===true&&!fr.serving)]),
         ...(fr.generation&&fr.state==='building'&&fr.build!=='pending'?[launch('vector.schedule','startFirstRunBuild',true,{generation:fr.generation})]:[]),
         ...(fr.generation&&['ready','retired'].includes(fr.state)&&!fr.serving?[launch('vector.activate','activateIndex',true,{generation:fr.generation})]:[]),
         ...(fr.generation&&fr.serving?[launch('vector.deactivate','deactivateIndex',true,{generation:fr.generation})]:[])];

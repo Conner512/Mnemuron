@@ -106,21 +106,24 @@ test('FIRST-RUN-01: prepare → probe → confirmed build of exactly the manifes
 });
 
 test('FIRST-RUN-02: the total budget is hard (probe, build, retries and queries); build calls replace the daily cap, nothing else does',async t=>{
-  const f=await setup(t);await seed(f);await f.save({daily_requests:2});
-  const prepared=await f.act('vector.prepare',{budget_calls:4});
-  await f.act('models.test',{kind:'embedder',mode:'capabilities'});assert.equal(f.calls.length,2);
+  const f=await setup(t);await seed(f);await f.save({daily_requests:4});
+  // A budget that cannot cover the probe plus one call per record is refused before anything opens.
+  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:6}),e=>e.errorCode==='MANIFEST_EXCEEDS_BUDGET');assert.equal(f.status().first_run.budget,null);
+  const prepared=await f.act('vector.prepare',{budget_calls:7});
+  // Two probes use 4 units and the whole daily cap (4); build calls still proceed, but only up to the total.
+  for(let n=0;n<2;n++)await f.act('models.test',{kind:'embedder',mode:'capabilities'});assert.equal(f.calls.length,4);
   await f.act('vector.schedule',{generation:prepared.generation,expected_count:5,expected_digest:prepared.manifest.digest});
   const stopped=await f.drain();
   assert.equal(stopped.build,'failed');assert.equal(stopped.error_code,'BUDGET_EXHAUSTED');
-  assert.equal(f.calls.length,4,'never more than the total, although the daily cap (2) was already used by the probe');
-  assert.deepEqual([stopped.budget.used,stopped.budget.remaining],[4,0]);assert.equal(stopped.manifest.indexed,2);
-  for(let n=0;n<5;n++)await f.service.tick();assert.equal(f.calls.length,4,'a failed build is never retried automatically');
+  assert.equal(f.calls.length,7,'never more than the total; build calls passed the exhausted daily cap');
+  assert.deepEqual([stopped.budget.used,stopped.budget.remaining],[7,0]);assert.equal(stopped.manifest.indexed,3);
+  for(let n=0;n<5;n++)await f.service.tick();assert.equal(f.calls.length,7,'a failed build is never retried automatically');
   // A retry is an explicit schedule, and it still cannot pass the total.
-  await f.act('vector.schedule',{generation:prepared.generation,expected_count:5,expected_digest:prepared.manifest.digest});await f.drain();assert.equal(f.calls.length,4);
-  await assert.rejects(()=>f.act('models.test',{kind:'embedder',mode:'capabilities'}),e=>e.code==='BUDGET_EXHAUSTED');assert.equal(f.calls.length,4);
+  await f.act('vector.schedule',{generation:prepared.generation,expected_count:5,expected_digest:prepared.manifest.digest});await f.drain();assert.equal(f.calls.length,7);
+  await assert.rejects(()=>f.act('models.test',{kind:'embedder',mode:'capabilities'}),e=>e.code==='BUDGET_EXHAUSTED');assert.equal(f.calls.length,7);
   // The budget is never raised or reset from the console, and a started build cannot be re-prepared.
   await assert.rejects(()=>f.act('vector.prepare',{budget_calls:150}),e=>e.errorCode==='BUDGET_ALREADY_SET');
-  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:4}),e=>e.errorCode==='FIRST_RUN_IN_PROGRESS');
+  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:7}),e=>e.errorCode==='FIRST_RUN_IN_PROGRESS');
   for(const value of [0,151,'150'])await assert.rejects(()=>f.act('vector.prepare',{budget_calls:value}),e=>e.statusCode===400);
 });
 
@@ -206,4 +209,33 @@ test('FIRST-RUN-08: the manifest digest is order independent and bound to exact 
   assert.equal(manifestDigest(items),manifestDigest([...items].reverse()));
   assert.notEqual(manifestDigest(items),manifestDigest([{...items[0],revision:2},items[1]]));
   assert.match(manifestDigest(items),/^[a-f0-9]{64}$/);
+});
+
+test('FIRST-RUN-09: after rollback a new first run is refused clearly; a provider (origin) change stops the retained profile',async t=>{
+  const f=await setup(t),ids=await seed(f);await f.save();
+  const prepared=await f.act('vector.prepare',{budget_calls:30});await f.act('models.test',{kind:'embedder',mode:'capabilities'});
+  await f.act('vector.schedule',{generation:prepared.generation,expected_count:5,expected_digest:prepared.manifest.digest});await f.drain();
+  await f.act('vector.activate',{generation:prepared.generation});await f.act('vector.deactivate',{generation:prepared.generation});
+  await assert.rejects(()=>f.act('vector.prepare',{budget_calls:30}),e=>e.errorCode==='FIRST_RUN_EXISTS');
+  await f.act('vector.activate',{generation:prepared.generation});
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM console_vector_profiles WHERE secret_cipher IS NOT NULL').get().n,0,'keys are never copied into retained profiles');
+  // Moving the embedder to another origin drops its key by design; the old profile must not keep receiving queries.
+  const other='http://127.0.0.2:9';f.store.memoryConfig.console.allowed_private_origins.push(other);
+  await f.save({base_url:other},1);const before=f.calls.length;
+  const s=f.status();assert.equal(s.search_ready,false);assert.ok(s.search_blockers.includes('VECTOR_PROFILE_MISMATCH'));
+  const r=await f.store.searchMemories(f.a.auth,{query:'network',mode:'hybrid',personal_model_only:true});
+  assert.equal(r.retrieval.effective_mode,'lexical');assert.equal(f.calls.length,before,'no query reaches the previous provider');
+  assert.ok(r.results.some(m=>m.memory_id===ids.network));
+});
+
+test('FIRST-RUN-10: the read scope reports a legacy account read-all and the operator inspection uses the configured policy',async t=>{
+  const f=await setup(t),m=await f.create('Synthetic sensitive record without a grant.');
+  const caps=()=>f.service.capabilities(f.a.auth).read_policy;
+  assert.equal(caps().legacy_read_all,false);
+  f.store.webVisibility.setPolicy(f.a.auth,{read_all:true,expected_revision:0});assert.equal(caps().legacy_read_all,true);
+  f.store.webVisibility.setPolicy(f.a.auth,{read_all:false,expected_revision:1});
+  const admin={...f.a.auth,scopes:[...f.a.auth.scopes,'admin:tasks']};
+  assert.deepEqual([f.store.webVisibility.inspect(admin,m).allowed,f.store.webVisibility.inspect(admin,m).policy],[false,'web-memory-visibility-v1']);
+  f.store.runtime.agentReadPolicy='active_uniform_v1';
+  assert.deepEqual([f.store.webVisibility.inspect(admin,m).allowed,f.store.webVisibility.inspect(admin,m).policy],[true,'web-memory-active-uniform-v1']);
 });

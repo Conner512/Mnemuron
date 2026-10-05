@@ -81,7 +81,7 @@ test('CON-04: ChatGPT visibility is not a console action; sensitivity stays a ve
   assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'})).status,200);
   const caps=(await f.get('capabilities')).body;
   assert.equal(caps.web_policy,undefined);
-  assert.deepEqual(caps.read_policy,{policy:'web-memory-visibility-v1',setting:'chatgpt_per_memory_v1',active_records_uniform:false,history_and_secret_filtered:true,configured_by:'operator'});
+  assert.deepEqual(caps.read_policy,{policy:'web-memory-visibility-v1',setting:'chatgpt_per_memory_v1',active_records_uniform:false,legacy_read_all:false,history_and_secret_filtered:true,configured_by:'operator'});
 });
 test('CON-05: manual categories validate taxonomy and foreign ownership',async t=>{
   const f=await setup(t),m=(await create(f)).body.memory_id,revision=1;

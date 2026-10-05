@@ -215,6 +215,28 @@ The retained profile still follows current consent:
 - Egress, query approvals and sensitivities are intersected with the current settings.
 - On the same origin, the current key is used.
 
+### Known limits (deliberate in this bounded first run)
+
+- **Budget size.** Prepare refuses a budget that cannot cover the probe and one call per listed
+  record (`MANIFEST_EXCEEDS_BUDGET`). Leave headroom for retries and queries.
+- **An exhausted budget is final.** Once it is used up, every embedding call for the account,
+  queries included, fails with `BUDGET_EXHAUSTED`, and search falls back to keywords. Closing or
+  replacing the budget for ordinary operation is a separate, later approval and change.
+- **One first run per account.** After a first run has embedded records, a new prepare is
+  refused (`FIRST_RUN_EXISTS`); the existing index can be activated again at any time.
+- **Pre-created collections are not reclaimed.** A generation keeps its pre-created collection
+  for rollback, and nothing deletes points. Further builds need further pre-created names.
+- **ChatGPT search after new writes.** ChatGPT semantic and hybrid reads require every
+  ChatGPT-readable active record to be indexed. Without catch-up, they fall back to lexical
+  search once a newer record exists. This also happens when the embedder's approved sensitivities
+  exclude records that ChatGPT may read.
+- **Provider change.** A retained profile serves only on the embedder's current origin, using the
+  current key; keys are never copied into retained profiles. Moving the embedder to another
+  origin stops the old index (`VECTOR_PROFILE_MISMATCH`) until a new build is approved.
+- **Legacy account read-all.** An account that earlier enabled "ChatGPT may read all memories"
+  keeps that setting under the default policy. The console now shows it but can no longer change
+  it.
+
 ### Schema, compatibility and rollback
 
 - **Additive tables only**, created idempotently at start: `console_vector_budget`,

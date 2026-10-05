@@ -49,7 +49,7 @@ test('C-03: ChatGPT web and agent devices are counted and listed; managed and re
    key('chatgpt-web','inst-gateway',{managed:true,console_revocable:false,last_used_at:'2026-09-30T06:42:01Z',scopes:['memory:read']}),
    key('mnemuron','inst-admin',{managed:true,console_revocable:false,scopes:['admin:devices']}),
    key('mnemuron-loadgen','inst-old',{state:'revoked',revoked_at:'2026-09-02T07:10:00Z',console_revocable:false})]};
- const caps={allowed_actions:['oauth.revoke','devices.revoke'],web_policy:{read_all:true},connection_management:{enabled:true}};
+ const caps={allowed_actions:['oauth.revoke','devices.revoke'],read_policy:{active_records_uniform:false,legacy_read_all:true},connection_management:{enabled:true}};
  const inv=connectionInventory(data,caps);
  assert.deepEqual(inv.counts,{active:3,readonly:2,readwrite:1,pending:0});
  assert.deepEqual(inv.devices.map(c=>c.agent_id),['openclaw','hermes']);
@@ -65,8 +65,10 @@ test('C-03: ChatGPT web and agent devices are counted and listed; managed and re
  const system=html.match(/<details class="card connection-system">[\s\S]*<\/details>/)[0];
  assert.match(system,/data-i18n="agent_chatgpt_web"/);assert.match(system,/data-i18n="connState_revoked"/);assert.doesNotMatch(system,/data-console-action/);
  assert.doesNotMatch(html,/已连接|Connected/);
- const readonly=connectionsView(data,{allowed_actions:[],web_policy:{read_all:false}},{});
+ const readonly=connectionsView(data,{allowed_actions:[],read_policy:{active_records_uniform:false,legacy_read_all:false}},{});
  assert.doesNotMatch(readonly,/data-console-action/);assert.match(readonly,/data-i18n="connReadGranted"/);
+ // The operator's active-uniform policy is shown as such, whatever the legacy account setting.
+ assert.match(connectionsView(data,{allowed_actions:[],read_policy:{active_records_uniform:true,legacy_read_all:false}},{}),/data-i18n="connReadActiveUniform"/);
  const none=connectionInventory({connections:[],counts:{},core_connections:[]},{});
  assert.deepEqual([none.chatgpt.configured,none.counts.active],[false,0]);assert.doesNotMatch(connectionsView({connections:[],counts:{}},{},{}),/connection-chatgpt/);
  assert.match(card,/data-i18n="connWriteOff"/);

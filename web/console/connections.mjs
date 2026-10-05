@@ -63,7 +63,7 @@ export function connectionInventory(data,caps={}){
  // Last sign of use: the gateway key's last Core call or the last token ChatGPT obtained.
  const last=Math.max(0,...creds.filter(c=>c.agent_id==='chatgpt-web'&&c.state==='active').map(c=>ms(c.last_used_at)),ms(data.system_chatgpt?.last_token_at));
  // Write needs both the account's cloud binding and an authorization that actually granted memory:write.
- const chatgpt={configured:data.system_chatgpt?.configured===true||grants.length>0,authorized:grants.length>0,grants,first:firsts.length?Math.min(...firsts):0,last,read_all:caps.web_policy?.read_all===true,
+ const chatgpt={configured:data.system_chatgpt?.configured===true||grants.length>0,authorized:grants.length>0,grants,first:firsts.length?Math.min(...firsts):0,last,read_scope:caps.read_policy?.active_records_uniform===true?'connReadActiveUniform':caps.read_policy?.legacy_read_all===true?'connReadAll':'connReadGranted',
    write_enabled:data.system_chatgpt?.write_enabled===true,write:grants.some(g=>(g.scopes||[]).includes('memory:write'))};
  const devices=creds.filter(c=>c.state==='active'&&!c.managed),managed=creds.filter(c=>c.state==='active'&&c.managed),history=creds.filter(c=>c.state!=='active');
  const r=data.authorization_counts||{},web=chatgpt.authorized?1:0,webWrite=web&&chatgpt.write?1:0;
@@ -76,7 +76,7 @@ function chatgptCard(c,caps){
  const rows=c.grants.map(g=>`<tr><td>${esc(when(g.created))}</td><td>${esc(when(g.expires))}</td><td>${(g.scopes||[]).filter(s=>s!=='openid').map(s=>`<code>${esc(s)}</code>`).join(' ')||'—'}</td>
    <td>${revoke?`<button type="button" data-console-action="oauth.revoke" data-id="${esc(g.grant_id)}">${l('connRevokeGrant')}</button>`:''}</td></tr>`).join('');
  return `<section class="card connection-chatgpt"><header class="section-head"><h2>${l('connChatGPTWeb')}</h2><span class="state-dot" data-state="${c.authorized?'enabled':'disabled'}">${l(c.authorized?'connAuthorized':'connNotAuthorized')}</span></header>
- ${l('connChatGPTWebNote','p')}${enabled(caps)?`<p class="connection-hint">${l('connChatGPTAddHint')} <button type="button" class="quiet" data-connection-new data-connection-start="chatgpt_oauth">${l('addConnection')}</button></p>`:''}<dl class="metadata-grid">${valuePair('access',c.write?'connReadWrite':'readOnly')}${valuePair('connWriteAccess',c.write?'connWriteGranted':c.write_enabled?'connWritePending':'connWriteOff')}<dt>${l('connReadScope')}</dt><dd>${l(c.read_all?'connReadAll':'connReadGranted')} · <a href="/app/privacy">${l('connAdjust')}</a></dd>
+ ${l('connChatGPTWebNote','p')}${enabled(caps)?`<p class="connection-hint">${l('connChatGPTAddHint')} <button type="button" class="quiet" data-connection-new data-connection-start="chatgpt_oauth">${l('addConnection')}</button></p>`:''}<dl class="metadata-grid">${valuePair('access',c.write?'connReadWrite':'readOnly')}${valuePair('connWriteAccess',c.write?'connWriteGranted':c.write_enabled?'connWritePending':'connWriteOff')}<dt>${l('connReadScope')}</dt><dd>${l(c.read_scope)} · <a href="/app/privacy">${l('connReadDetails')}</a></dd>
  <dt>${l('connGrantsLabel')}</dt><dd>${esc(c.grants.length)}</dd>${pair('connFirstAuthorized',c.first?when(c.first):null)}${pair('connLastActivity',c.last?when(c.last):null)}</dl>
  ${rows?`<details class="connection-grants"><summary>${l('connGrantList')}</summary><div class="table-scroll"><table><thead><tr>${['connAuthorizedAt','expires','scope','actions'].map(k=>`<th>${l(k)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></details>`:''}</section>`;
 }

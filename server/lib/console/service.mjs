@@ -25,10 +25,12 @@ export class ConsoleService {
   require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;return user?this.features.taxonomy(user,fallback):fallback;}
   capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),
-    read_policy:this.readPolicy(),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
+    read_policy:this.readPolicy(auth),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
   /** Read-only: which ChatGPT read policy the operator configured. The console cannot change it. */
-  readPolicy(){const key=this.store.runtime.agentReadPolicy||'chatgpt_per_memory_v1';
-    return {policy:AGENT_READ_POLICIES[key],setting:key,active_records_uniform:key==='active_uniform_v1',history_and_secret_filtered:true,configured_by:'operator'};}
+  // legacy_read_all is this account's earlier "ChatGPT may read all memories" setting: still in force under the
+  // per-memory policy, shown so the console never understates what ChatGPT can read.
+  readPolicy(auth){const key=this.store.runtime.agentReadPolicy||'chatgpt_per_memory_v1';
+    return {policy:AGENT_READ_POLICIES[key],setting:key,active_records_uniform:key==='active_uniform_v1',legacy_read_all:this.store.webVisibility.policy(auth).read_all,history_and_secret_filtered:true,configured_by:'operator'};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
   meta(auth,p){object(p,['memory_id']);const {row,current}=this.memory(auth,p.memory_id);
@@ -48,7 +50,7 @@ export class ConsoleService {
     const embedder=models.find(m=>m.kind==='embedder').config,search=[...blockers('embedder'),...(!this.store.memoryConfig.vector_store?.enabled?['VECTOR_DISABLED']:[]),...(!embedder.query_approved?['QUERY_EGRESS_DENIED']:[])];
     const configured=embedder.enabled?this.models.profile(user,'embedder',embedder).fingerprint:null;
     // A generation built with a retained profile keeps serving after the configuration changes.
-    const retained=active&&this.db.prepare('SELECT 1 FROM console_vector_profiles WHERE generation=?').get(active.generation);
+    const retained=active&&this.models.retainedServes(user,active.generation);
     if(!active)search.push('VECTOR_NOT_READY');
     else if(embedder.enabled&&configured!==active.profile&&!retained)search.push('VECTOR_PROFILE_MISMATCH');
     const hasDocuments=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_documents'").get();
@@ -174,12 +176,17 @@ export class ConsoleService {
       // An earlier prepared generation that never embedded anything is discarded, freeing its pre-created collection.
       const prior=this.firstRun(user,null);
       if(prior.generation&&prior.state!=='retired'&&prior.state!=='active'){
-        if(prior.manifest.indexed||prior.manifest.stale||prior.manifest.excluded||prior.build==='pending')throw new ConflictError('A first-run build already started; activate or deactivate it first.','FIRST_RUN_IN_PROGRESS');
+        // Something was already embedded: the one-time budget belongs to that run. Re-activate it, or a new
+        // first run needs a new approval and change.
+        if(prior.manifest.indexed||prior.manifest.stale||prior.manifest.excluded||prior.build==='pending')throw new ConflictError('A first run already embedded records; activate it again instead.',prior.state==='building'?'FIRST_RUN_IN_PROGRESS':'FIRST_RUN_EXISTS');
         for(const table of ['memory_vector_manifest','memory_vector_owners','console_vector_profiles','memory_vector_generations'])this.db.prepare(`DELETE FROM ${table} WHERE generation=?`).run(prior.generation);
         this.db.prepare('DELETE FROM console_vector_requests WHERE user_id=? AND generation=?').run(user,prior.generation);
       }
       const {items,excluded}=this.manifestCandidates(user,profile);
       if(!items.length)throw new ConflictError('No active record is approved for embedding.','MANIFEST_EMPTY');
+      // The build needs at least one call per record plus the two probe calls; a smaller budget could only strand it.
+      const remaining=budget?budget.remaining:p.budget_calls;
+      if(items.length+2>remaining)throw new ConflictError('The budget cannot cover the probe and one call per listed record.','MANIFEST_EXCEEDS_BUDGET');
       if(!budget)this.db.prepare('INSERT INTO console_vector_budget VALUES(?,?,0,?)').run(user,p.budget_calls,Date.now());
       const generation=index.begin(profile.fingerprint,{manifest:items});this.models.snapshot(user,generation);
       const g=owned(generation);

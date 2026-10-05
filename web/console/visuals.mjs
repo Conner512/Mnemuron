@@ -501,7 +501,7 @@ function readScope(t, data) {
   const policy = data.read_policy;
   if (!policy) return sectionNote(t, 'unavailable');
   const uniform = policy.active_records_uniform === true;
-  return html`<div class="status-line">${stateDot(t, uniform ? 'enabled' : 'disabled')}${i18n(t, 'readPolicyUniform')}</div>${i18n(t, uniform ? 'readPolicyUniformOn' : 'readPolicyUniformOff', 'p')}
+  return html`<div class="status-line">${stateDot(t, uniform ? 'enabled' : 'disabled')}${i18n(t, 'readPolicyUniform')}</div>${i18n(t, uniform ? 'readPolicyUniformOn' : policy.legacy_read_all === true ? 'readPolicyLegacyReadAll' : 'readPolicyUniformOff', 'p')}
     ${sectionNote(t, 'readPolicyOperator')}`;
 }
 /** SYS-01: platform switches exactly as the server reports them in its capabilities. */

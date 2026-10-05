@@ -27,22 +27,26 @@ export class ConsoleModels {
   budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:row.total-row.used}:null;}
   /** Records the configuration a generation is built with (sealed key included, never returned). */
   snapshot(user,generation){const row=this.raw(user,'embedder');if(!row)fail('NOT_CONFIGURED');
-    this.db.prepare('INSERT OR IGNORE INTO console_vector_profiles VALUES(?,?,?,?,?,?)').run(generation,user,this.profile(user,'embedder',JSON.parse(row.config_json)).fingerprint,row.config_json,row.secret_cipher,Date.now());}
-  /** Providers for every retained generation profile of this owner, still bound to the owner's CURRENT consent:
-   * the embedder must be enabled, egress/query approvals and sensitivities are intersected with the current ones,
-   * and on the same origin the current key is used (a removed key stops the old profile too). */
+    this.db.prepare('INSERT OR IGNORE INTO console_vector_profiles VALUES(?,?,?,?,?,?)').run(generation,user,this.profile(user,'embedder',JSON.parse(row.config_json)).fingerprint,row.config_json,null,Date.now());} // keys are never copied; the current key is used
+  /** Providers for retained generation profiles on the CURRENT origin, bound to the owner's current consent: the
+   * embedder must be enabled, approvals and sensitivities are intersected with the current ones, and only the
+   * current key is used (a removed key or a different origin stops the old profile). */
+  retainedServes(user,generation){const s=this.db.prepare('SELECT config_json FROM console_vector_profiles WHERE generation=? AND user_id=?').get(generation,user),row=this.raw(user,'embedder');
+    return !!s&&!!row&&new URL(JSON.parse(s.config_json).base_url).origin===new URL(JSON.parse(row.config_json).base_url).origin;}
   snapshotProviders(user){
     const current=this.raw(user,'embedder'),now=current&&JSON.parse(current.config_json);if(!now?.enabled)return [];
     const seen=new Set(),out=[];
     for(const s of this.db.prepare('SELECT * FROM console_vector_profiles WHERE user_id=? ORDER BY created_at').all(user)){
       if(seen.has(s.fingerprint))continue;seen.add(s.fingerprint);
-      const c=JSON.parse(s.config_json),profile=this.profile(user,'embedder',c),{fingerprint:unused,...input}=profile;
-      const sameOrigin=new URL(c.base_url).origin===new URL(now.base_url).origin;
+      const c=JSON.parse(s.config_json);
+      // Moving the embedder to another origin drops the old key on purpose; that profile then stops serving.
+      if(new URL(c.base_url).origin!==new URL(now.base_url).origin)continue;
+      const profile=this.profile(user,'embedder',c),{fingerprint:unused,...input}=profile;
       const provider=new Embedder(input,{transport:async(p,route,body)=>{
         const live=this.raw(user,'embedder');if(!live||!JSON.parse(live.config_json).enabled)fail('NOT_CONFIGURED');
         const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
         const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
-        const cipher=sameOrigin?live.secret_cipher:s.secret_cipher;
+        const cipher=live.secret_cipher;
         const headers=cipher?{authorization:'Bearer '+this.state.unseal(user,'model:embedder',cipher)}:{};
         return requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});
       }});

@@ -1161,3 +1161,13 @@ Object.assign(catalog.en,{built:'Built, awaiting activation',deactivated:'Deacti
  VECTOR_CATCHUP_REQUIRED:'The index does not yet cover every listed record.',VECTOR_ALREADY_BUILT:'This index is already built.',PROBE_REQUIRED:'Run the model API test first; it must return the configured dimensions.',
  MANIFEST_CHANGED:'The list differs from the one you checked; nothing started.',MANIFEST_EMPTY:'No active record may be sent to the embedding model.',NOT_FIRST_RUN:'This is not a first-run index.',FIRST_RUN_ACTIVE:'A full rebuild is not available in first-run mode.',
  FIRST_RUN_IN_PROGRESS:'The first build already started; activate or deactivate it first.',BUDGET_ALREADY_SET:'The first-run budget is already set and cannot change.',BUDGET_REQUIRED:'Prepare the first build first.'});
+
+// Read scope as ChatGPT actually experiences it, including an earlier account-wide read-all setting.
+Object.assign(catalog['zh-CN'],{connReadActiveUniform:'与其他智能体一致的有效记忆（机密除外）',connReadDetails:'详情',
+ readPolicyLegacyReadAll:'尚未启用统一读取，但此账户之前开启了“允许 ChatGPT 读取全部记忆”：ChatGPT 可以读取全部记忆（机密及你明确设为私有的除外）。控制台已不能更改这项旧设置；如需关闭，请联系运维。',
+ readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有规则读取（公开记忆和逐条授权的记忆）。启用需要运维单独确认。',
+ MANIFEST_EXCEEDS_BUDGET:'预算不足以覆盖接口测试和清单中每条记录各一次调用。',FIRST_RUN_EXISTS:'首次建立已经生成向量，请重新启用它；新的首次建立需要另行批准。'});
+Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other agents (except secret)',connReadDetails:'Details',
+ readPolicyLegacyReadAll:'Not enabled yet, but this account earlier turned on “ChatGPT may read all memories”: ChatGPT can read all memories except secret ones and those you explicitly kept private. The console can no longer change that setting; ask an operator to turn it off.',
+ readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (public memories and memories allowed one by one). Enabling it needs a separate operator confirmation.',
+ MANIFEST_EXCEEDS_BUDGET:'The budget cannot cover the probe and one call per listed record.',FIRST_RUN_EXISTS:'This first run already embedded records; activate it again. A new first run needs a separate approval.'});
