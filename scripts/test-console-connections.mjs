@@ -188,7 +188,31 @@ try{
  await openNew('generic_mcp');await basic('Synthetic close cleanup');await submit();
  page.once('dialog',prompt=>prompt.dismiss());await dialog.locator('[data-connection-close]').first().click();check('Unsaved credential close requires explicit acknowledgement',await dialog.isVisible());
  page.once('dialog',prompt=>prompt.accept());await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});check('Unsaved credential is cleared after confirmed close',await page.locator('#connection-secret').count()===0);
- await openNew('generic_mcp');await basic('Synthetic logout cleanup');await submit();await command('revoke-console-sessions');await dialog.locator('[data-connection-copy-secret]').click();await page.locator('#connection-secret').waitFor({state:'detached'});check('A revoked login clears secrets before any copy',await page.locator('#connection-secret').count()===0);
+ // A session revoked while a one-time credential is on screen. Creating a connection starts a background
+ // refresh (connections + capture-status); whichever request first meets the revoked session wipes the
+ // secret and goes to sign-in. Wait for those exact reads (a load-state wait returns at once on an idle
+ // page), then test each order deterministically.
+ const refreshAfterCreate=()=>Promise.all(['/console-api/connections?','/console-api/capture-status?'].map(part=>page.waitForResponse(r=>r.url().includes(part))));
+ // A sentinel proves the clipboard is readable and untouched; a failed read cannot pass the check.
+ const sentinel='synthetic-clipboard-sentinel',setSentinel=()=>page.evaluate(v=>navigator.clipboard.writeText(v),sentinel);
+ const clipboardUntouched=async()=>(await page.evaluate(()=>navigator.clipboard.readText().catch(()=>'unreadable')))===sentinel;
+ const signInAgain=async()=>{const {token}=await command('cookies');await context.addCookies([{name:cfg.cookie,value:token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);await goto('connections');};
+ // Order 1: Copy is the first request after revocation; a double-click must not copy or error.
+ await openNew('generic_mcp');await basic('Synthetic logout cleanup');let refreshed=refreshAfterCreate();await submit();await refreshed;
+ const firstSecret=await page.locator('#connection-secret').inputValue();await setSentinel();await command('revoke-console-sessions');
+ await dialog.locator('[data-connection-copy-secret]').dblclick();await page.waitForURL('**/login');
+ check('A revoked login clears secrets before any copy',await page.locator('#connection-secret').count()===0);
+ check('Double-clicking Copy after revocation copies nothing',await clipboardUntouched());
+ await page.goBack().catch(()=>{});await page.waitForURL('**/login');
+ check('Browser back after the redirect never shows the credential again',await page.locator('#connection-secret').count()===0&&!(await page.content()).includes(firstSecret));
+ // Order 2: a background session check (returning to the tab) meets the revocation before any click.
+ await signInAgain();await openNew('generic_mcp');await basic('Synthetic background revoke');refreshed=refreshAfterCreate();await submit();await refreshed;
+ const secondSecret=await page.locator('#connection-secret').inputValue();await setSentinel();await command('revoke-console-sessions');
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await page.waitForURL('**/login');
+ check('A background check after revocation wipes the credential and goes to sign-in',await page.locator('#connection-secret').count()===0&&await clipboardUntouched()&&!(await page.content()).includes(secondSecret));
+ // Signing in again: the connection exists, its one-time secret is never shown again; rotation is the way forward.
+ await signInAgain();await page.getByRole('button',{name:'Synthetic background revoke',exact:true}).click();await dialog.locator('[data-connection-action=rotate]').waitFor();
+ check('After signing in again the connection remains and its secret is not re-displayed',await dialog.locator('#connection-secret').count()===0&&!(await page.content()).includes(secondSecret));
  check('No JavaScript or CSP errors',errors.length===0);
  fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,count:checks.length,production_data_used:false,external_client_acceptance:false},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
 }catch(error){fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'failed',checks,error:error.stack},null,2),{mode:0o600});console.error(JSON.stringify({status:'failed',checks:checks.length,evidence,error:error.message}));process.exitCode=1;}
