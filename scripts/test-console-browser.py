@@ -43,8 +43,8 @@ try:
   def begin(a,index=0):
    page.locator('[data-console-action="'+a+'"]').nth(index).click();page.locator('#operation-dialog form').wait_for()
   def submit():
-   page.locator('#operation-dialog button[type=submit]').click();page.locator('#operation-dialog .operation-result').first.wait_for(timeout=40000)
-   result=json.loads(page.locator('#operation-dialog .operation-result').last.inner_text())
+   page.locator('#operation-dialog button[type=submit]').click();page.locator('#operation-dialog .operation-result').first.wait_for(state='attached',timeout=40000)
+   result=json.loads(page.locator('#operation-dialog .operation-result').last.text_content())
    if page.locator('#issued-invitation-codes').count():result['codes']=page.locator('#issued-invitation-codes').inner_text().splitlines()
    return result
   def close():

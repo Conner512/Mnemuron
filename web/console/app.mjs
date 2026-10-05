@@ -14,7 +14,8 @@ let capabilities={enabled:false,writable:false},actions,connections,featureReads
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let query='',searchMode='lexical',category='',status='active',topic='',origin='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
-let selected=new Set(),selectAll=false,facets=null;
+// selected maps memory_id → the text its list row already showed (kept for confirmations across pages).
+let selected=new Map(),selectAll=false,facets=null;
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
@@ -25,7 +26,7 @@ readLocation();
 
 function clear() {
  actions?.clear();connections?.clear();featureReads?.clear();state.clear();requestSequence++;detailSequence++;
- currentData=null;detailData=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Set();selectAll=false;facets=null;
+ currentData=null;detailData=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -73,7 +74,7 @@ function heading() {
 function render(data) {
  let html='';
  if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{}});
- else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,topic,origin,facets,selected:[...selected],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
+ else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,topic,origin,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data),labels:capabilities.category_labels||{}});
  else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))].sort((a,b)=>new Date(typeof b.created==='number'?b.created*1000:b.created)-new Date(typeof a.created==='number'?a.created*1000:a.created)),pagination:pagination(data),filters:auditFilters});
  else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
@@ -88,7 +89,7 @@ function render(data) {
 function updateMemorySelection() {
  const toolbar=root.querySelector('[data-memory-selection]');if(!toolbar||selectAll)return;
  const boxes=[...root.querySelectorAll('[data-batch-memory]')];
- for(const box of boxes)if(box.checked)selected.add(box.dataset.batchMemory);else selected.delete(box.dataset.batchMemory);
+ for(const box of boxes)if(box.checked)selected.set(box.dataset.batchMemory,box.closest('tr')?.querySelector('.memory-text')?.textContent||'');else selected.delete(box.dataset.batchMemory);
  const count=selected.size,organize=canAct(capabilities,'memory.organize'),limit=organize?SELECTION_LIMIT:50;
  toolbar.querySelector('[data-selection-count]').textContent=String(count);
  // Batch retract (and the older batch classify) stay bounded at 50 per request.
@@ -96,10 +97,10 @@ function updateMemorySelection() {
  toolbar.querySelector('[data-clear-selection]').disabled=count===0;
  for(const box of boxes){box.disabled=!box.checked&&count>=limit;box.closest('tr').toggleAttribute('data-batch-selected',box.checked);}
 }
-const resetSelection=()=>{selected=new Set();selectAll=false;};
+const resetSelection=()=>{selected=new Map();selectAll=false;};
 /** What the organize dialog acts on: the explicit selection, or the current filter (lexical, active only). */
 function librarySelection(){
- if(!selectAll)return {memory_ids:[...selected]};
+ if(!selectAll)return {memory_ids:[...selected.keys()],snippets:Object.fromEntries(selected)};
  const filter={...(query?{query}:{}),...(category?{filter_category:category}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})};
  return Object.keys(filter).length?filter:{all:true};
 }
@@ -179,7 +180,7 @@ document.addEventListener('click',event=>{
    if(facet.dataset.facet==='category')category=category===value&&value?'':value;else if(facet.dataset.facet==='topic')topic=topic===value?'':value;else if(facet.dataset.facet==='origin')origin=origin===value?'':value;
    offset=0;resetSelection();saveLocation();void load();return;}
  const clearFacet=event.target.closest('[data-clear-facet]');if(clearFacet){if(clearFacet.dataset.clearFacet==='topic')topic='';else origin='';offset=0;resetSelection();saveLocation();void load();return;}
- if(event.target.closest('[data-select-all]')){selectAll=true;selected=new Set();render(currentData);return;}
+ if(event.target.closest('[data-select-all]')){selectAll=true;selected=new Map();render(currentData);return;}
  if(event.target.closest('[data-retry]'))void load();
 });
 document.addEventListener('change',event=>{if(event.target.matches('[data-batch-memory]'))updateMemorySelection();});

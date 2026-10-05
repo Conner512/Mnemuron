@@ -1085,3 +1085,26 @@ Object.assign(catalog.en,{
  rescheduleNote:'This job was planned with an older category list. Confirming plans the same kind of organizing again with the current categories and marks the outdated queued jobs of this kind as replaced. Existing classifications and manual categories are kept; model calls may be charged.',
  rescheduledResult:'Jobs queued with current categories',supersededResult:'outdated jobs replaced',rescheduledNoWork:'Nothing needs organizing again; the outdated jobs were marked as replaced.',
 });
+// Readable results and errors for existing memory actions.
+Object.assign(catalog['zh-CN'],{
+ IMPORT_INVALID_JSON:'文件不是有效的 JSON，可能已损坏或不完整。请重新导出后再导入，本次未导入任何记录。',INVALID_IMPORT:'文件格式不是 Mnemuron 个人导出（mnemuron-personal-portable-v1），本次未导入任何记录。',
+ IMPORT_EMPTY:'文件中没有可导入的记录，本次未导入任何记录。',IMPORT_FILE_TOO_LARGE:'文件超过 16 MiB，请分批导出后再导入。',
+ batchRetractCount:'条记忆将被撤回（保留原文和历史，可在“已撤回”中查看）：',batchClassifyCount:'条记忆将被分类：',
+ resultCreated:'已保存新记忆。',resultCorrected:'已保存修订，原记录保留为历史版本。',resultRetracted:'已撤回，原文和历史仍保留。',resultSensitivity:'敏感级别已更新。',
+ resultVisibility:'ChatGPT 可见性已更新。',resultWebPolicy:'账户的 ChatGPT 读取设置已更新。',resultBatchRetract:'已撤回',resultBatchClassify:'已分类',resultFailedCount:'未处理',
+ MEMORY_NOT_FOUND:'找不到这条记忆，可能已不在当前账户中。',JOB_NOT_RETRYABLE:'这个任务当前不能重试。',JOB_TERMINAL:'已完成的任务不能取消。',JOB_NOT_FOUND:'找不到这个任务。',
+ IMPORT_CONFLICT:'同一条导出记录的内容与之前导入的版本不同，已停止导入。请检查文件来源。',INVALID_CONSOLE_INPUT:'输入格式不正确，请刷新页面后重试。',INVALID_PAYLOAD:'输入内容不符合要求，请检查后重试。',
+ INVALID_IDENTIFIER:'标识格式不正确，请刷新页面后重试。',CONSOLE_INPUT_TOO_LARGE:'这次提交的内容太大，请减少数量后重试。',OPERATION_FAILED:'同一操作之前已失败，请查看结果后重新发起。',
+ EXPORT_RECORD_TOO_LARGE:'有记录超过单页导出上限，请使用离线导出流程。',STALE_ACCOUNT:'登录状态已变化，请刷新页面。',UNAVAILABLE:'服务暂时不可用，请稍后重试。',
+});
+Object.assign(catalog.en,{
+ IMPORT_INVALID_JSON:'The file is not valid JSON; it may be damaged or incomplete. Export again and retry. Nothing was imported.',INVALID_IMPORT:'The file is not a Mnemuron personal export (mnemuron-personal-portable-v1). Nothing was imported.',
+ IMPORT_EMPTY:'The file contains no records to import. Nothing was imported.',IMPORT_FILE_TOO_LARGE:'The file is larger than 16 MiB; export in smaller parts.',
+ batchRetractCount:'memories will be retracted (text and history are kept and remain visible under Retracted):',batchClassifyCount:'memories will be classified:',
+ resultCreated:'New memory saved.',resultCorrected:'Correction saved; the previous text is kept as history.',resultRetracted:'Retracted; the text and history are kept.',resultSensitivity:'Sensitivity updated.',
+ resultVisibility:'ChatGPT visibility updated.',resultWebPolicy:'Account ChatGPT read setting updated.',resultBatchRetract:'Retracted',resultBatchClassify:'Classified',resultFailedCount:'not processed',
+ MEMORY_NOT_FOUND:'This memory could not be found; it may no longer be in this account.',JOB_NOT_RETRYABLE:'This job cannot be retried now.',JOB_TERMINAL:'A completed job cannot be cancelled.',JOB_NOT_FOUND:'This job could not be found.',
+ IMPORT_CONFLICT:'A record in the file differs from the version imported earlier, so the import stopped. Check where the file came from.',INVALID_CONSOLE_INPUT:'The input format is invalid; refresh the page and try again.',INVALID_PAYLOAD:'The input does not meet the requirements; check it and try again.',
+ INVALID_IDENTIFIER:'An identifier is malformed; refresh the page and try again.',CONSOLE_INPUT_TOO_LARGE:'This submission is too large; reduce the amount and retry.',OPERATION_FAILED:'This operation failed earlier; review the result before starting it again.',
+ EXPORT_RECORD_TOO_LARGE:'A record exceeds the page export limit; use the offline export procedure.',STALE_ACCOUNT:'Your sign-in changed; refresh the page.',UNAVAILABLE:'The service is temporarily unavailable; try again later.',
+});

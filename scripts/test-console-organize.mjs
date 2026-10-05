@@ -55,6 +55,14 @@ try{
   await shot('02-library-initial');
 
   // Large import through the real dialog, in chunks with progress; then straight into organizing.
+  // Unusable files are explained in plain language and import nothing.
+  for(const [name,content,expected] of [['malformed.json','{"format":"mnemuron-personal-portable-v1","records":[','不是有效的 JSON'],['wrong-format.json',JSON.stringify({format:'other',records:[]}),'mnemuron-personal-portable-v1'],['empty.json',JSON.stringify({format:'mnemuron-personal-portable-v1',records:[]}),'没有可导入的记录']]){
+    const file=path.join(evidence,'synthetic-'+name);fs.writeFileSync(file,content,{mode:0o600});await goto('storage');await page.locator('[data-console-action="storage.import"]').click();await op.locator('form').waitFor();
+    await op.locator('input[type=file]').setInputFiles(file);await op.locator('[name=confirm_import]').check();const w=writes;await op.locator('button[type=submit]').click();
+    await op.locator('[data-operation-error]').filter({hasText:/\S/}).waitFor();const message=await op.locator('[data-operation-error]').innerText();
+    check(`Import error for ${name} is readable and writes nothing`,message.includes(expected)&&!/Unexpected|INVALID_IMPORT ·/.test(message)&&writes===w);
+    if(name==='malformed.json')await shot('03a-import-malformed',page,false);await page.keyboard.press('Escape');await op.waitFor({state:'hidden'});
+  }
   await goto('storage');await page.locator('[data-console-action="storage.import"]').click();await op.locator('form').waitFor();
   await op.locator('input[type=file]').setInputFiles(importFile);await op.locator('[name=confirm_import]').check();
   const importStarted=writes;await op.locator('button[type=submit]').click();await op.locator('a[href="/app/memories?origin=imported"]').waitFor({timeout:60000});
@@ -197,6 +205,35 @@ try{
   await op.locator('[data-organize-narrow]').click();await op.waitFor({state:'hidden'});
   check('Narrow-the-filter closes the dialog without writing and returns to the filters',(await facets()).categories.find(c=>c.category==='technical').count===1);
 
+  // Single-memory results read as a confirmation; the receipt stays under technical details.
+  await goto('memories');await page.locator('[data-console-action="memory.create"]').first().click();await op.locator('[name=content]').fill('Synthetic result wording check');
+  await op.locator('button[type=submit]').click();await op.locator('.policy-box[role=status]').waitFor();
+  check('Memory create ends with a plain confirmation, receipt collapsed',(await op.locator('.policy-box[role=status]').innerText()).includes('已保存新记忆')&&await op.locator('details .operation-result').count()===1&&!(await op.locator('details').getAttribute('open')));
+  await shot('20a-create-result',page,false);await page.keyboard.press('Escape');
+  // Batch retract shows which memories (only the text already shown in the list) and reports each outcome.
+  await goto('memories?topic=garden');const gardenBoxes=page.locator('[data-batch-memory]');await gardenBoxes.nth(0).check();await gardenBoxes.nth(1).check();
+  const chosen=await page.locator('tr[data-batch-selected] .memory-text').allInnerTexts();
+  await page.locator('[data-memory-selection] [data-console-action="memory.batch_retract"]').click();await op.locator('form').waitFor();const confirmText=await op.locator('.batch-confirm-list').innerText();
+  check('Batch retract confirmation lists the selected memories by their visible text',chosen.every(text=>confirmText.includes([...text].slice(0,40).join('')))&&!/[0-9a-f]{8}-[0-9a-f]{4}-/.test(confirmText));
+  check('Batch retract confirmation shows no more text than the list already shows',(await op.locator('.batch-confirm-list li').allInnerTexts()).every(li=>[...li.replace(/版本 \d+$/,'').trim()].length<=120));
+  await shot('20b-batch-retract-confirm',page,false);
+  // A correction in another tab between confirmation and submit makes one item stale: reported, not hidden.
+  const stalePage=await ctxA.newPage();watch(stalePage);await goto('memories?topic=garden',stalePage);await stalePage.locator('.memory-table [data-memory]').nth(1).click();
+  await stalePage.locator('#memory-dialog [data-console-action="memory.correct"]').click();await stalePage.locator('#operation-dialog [name=content]').fill('Synthetic garden note corrected in another tab');
+  await stalePage.locator('#operation-dialog button[type=submit]').click();await stalePage.locator('#operation-dialog .policy-box[role=status]').waitFor();await stalePage.close();
+  await op.locator('button[type=submit]').click();await op.locator('.policy-box[role=status]').waitFor();const outcome=await op.locator('.policy-box[role=status]').innerText();
+  check('Batch result summarizes successes and names each failure with a readable reason',outcome.includes('已撤回 1')&&outcome.includes('未处理 1')&&outcome.includes('记忆已更新'));
+  await shot('20c-batch-retract-result',page,false);await page.keyboard.press('Escape');
+  // A selection kept across pages is what the batch acts on, and the confirmation names every selected memory.
+  await goto('memories?topic=billing');const firstPick=await page.locator('.memory-table tbody tr').nth(0).locator('.memory-text').innerText();await page.locator('[data-batch-memory]').nth(0).check();
+  await page.locator('[data-offset="25"]').first().click();await page.locator('.memory-table').waitFor();await page.waitForFunction(()=>new URLSearchParams(location.search).get('offset')==='25');
+  const secondPick=await page.locator('.memory-table tbody tr').nth(0).locator('.memory-text').innerText();await page.locator('[data-batch-memory]').nth(0).check();
+  check('Toolbar counts the selection across pages',(await page.locator('[data-selection-count]').innerText())==='2');
+  await page.locator('[data-memory-selection] [data-console-action="memory.batch_retract"]').click();await op.locator('form').waitFor();
+  const crossList=await op.locator('.batch-confirm-list').innerText();
+  check('Batch retract confirms both pages\' selections by their visible text',(await op.locator('.batch-confirm-list li').count())===2&&crossList.includes(firstPick)&&crossList.includes(secondPick));
+  await page.keyboard.press('Escape');await op.waitFor({state:'hidden'});
+
   // Narrow screen.
   const mobile=await ctxA.newPage();await mobile.setViewportSize({width:390,height:844});watch(mobile);await goto('memories',mobile);
   check('Narrow layout has no horizontal page scroll',await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));await shot('17-mobile-library',mobile);
@@ -211,7 +248,7 @@ try{
 
   const after=await command('integrity');
   check('Schema stays at version 7',after.user_version===7);
-  check('No memory was deleted; only imports, the private fixture and synthetic bulk rows were added (A)',after.users[0].memories===before.users[0].memories+301+2010);
+  check('No memory was deleted; only imports, the private fixture, synthetic bulk rows, one created memory and one correction were added (A)',after.users[0].memories===before.users[0].memories+301+2010+2);
   check('Account B memories and revisions are untouched',JSON.stringify(after.users[1])===JSON.stringify(before.users[1]));
   // A model job fenced by a category change is rescheduled from the Jobs page (account B, synthetic model).
   const bAct=(action,payload)=>pb.evaluate(async([action,payload])=>{const me=await (await fetch('/console-api/me',{credentials:'same-origin'})).json();

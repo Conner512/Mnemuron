@@ -155,7 +155,7 @@ try{
  for(const name of ['overview','memories','summaries','tasks','resume','jobs','connections','models','privacy','security','audit','storage','invitations','accounts','system']){await goto(name);check('Existing console route '+name,await page.locator('#console-root [role=alert]').count()===0);}
  const operationDialog=page.locator('#operation-dialog');
  const begin=async action=>{await page.locator(`[data-console-action="${action}"]`).first().click();await operationDialog.locator('form').waitFor();};
- const runOperation=async()=>{await operationDialog.locator('button[type=submit]').click();await operationDialog.locator('.operation-result').first().waitFor();return JSON.parse(await operationDialog.locator('.operation-result').last().innerText());};
+ const runOperation=async()=>{await operationDialog.locator('button[type=submit]').click();await operationDialog.locator('.operation-result').first().waitFor({state:'attached'});return JSON.parse(await operationDialog.locator('.operation-result').last().innerText());};
  const closeOperation=async()=>{await operationDialog.locator('[data-operation-close]').first().click();await operationDialog.waitFor({state:'hidden'});};
  await goto('memories');await begin('memory.create');await operationDialog.locator('[name=content]').fill('Synthetic browser regression: blue paper boat.');const created=await runOperation();check('Existing memory create persists',created.status==='saved');await closeOperation();
  await page.locator(`[data-memory="${created.memory_id}"]`).click();await page.locator('#memory-dialog [data-console-action="memory.organize"]').click();await operationDialog.locator('form').waitFor();await pick('#operation-dialog [name=category]','technical');

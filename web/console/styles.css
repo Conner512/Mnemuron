@@ -296,6 +296,7 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .memory-extra{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:0 14px 10px 44px;margin-top:-6px}
 .topic-chip{min-height:22px;padding:0 7px;border:1px solid var(--line);font-size:12px;background:transparent}
 .import-note{font-size:12px;color:var(--muted)}
+.batch-confirm-list{margin:8px 0 12px;padding-left:20px;font-size:13px;max-height:40vh;overflow:auto}.batch-confirm-list li{overflow-wrap:anywhere;margin-bottom:4px}.batch-confirm-list small{color:var(--muted);margin-left:6px}
 .job-error{display:block}.job-hint{display:block;color:var(--muted);max-width:32ch;white-space:normal}
 .organize-blocked .organize-headline .figure{color:var(--text)}
 .memory-selection[data-select-all-active]{border-color:var(--text);background:var(--soft)}

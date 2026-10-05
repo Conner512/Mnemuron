@@ -30,7 +30,7 @@ try{
   const begin=async action=>{await page.locator(`[data-console-action="${action}"]`).first().click();await op.locator('form').waitFor();};
   const pick=async(selector,value)=>{const native=page.locator(selector),index=await native.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const button=native.locator('..').locator('> .select-trigger');await button.click();await page.locator('#'+await button.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();};
   const proof=async()=>{await op.locator('[name=current_password]').fill(cfg.password);await op.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);};
-  const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor();return JSON.parse(await op.locator('.operation-result').first().innerText());};
+  const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor({state:'attached'});return JSON.parse(await op.locator('.operation-result').first().innerText());};
   const close=async()=>{await op.locator('[data-operation-close]').first().click();await op.waitFor({state:'hidden'});};
   await goto('overview');check('Attention shows real account counts',await page.locator('[data-feature="OVW-03"] .metadata-grid').count()===1);await shot('overview');
   await goto('summaries');await begin('taxonomy.save');await op.locator('[name=categories]').fill('uncategorized\ntechnical\nsynthetic');check('Taxonomy saved through real BFF', (await submit()).status==='saved');await close();

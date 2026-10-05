@@ -23,7 +23,7 @@ try{
  const page=await context.newPage(),errors=[];page.setDefaultTimeout(15000);page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&/Content Security Policy|Refused/.test(m.text()))errors.push(m.text());});
  const goto=async name=>{await page.goto(cfg.url+'/app/'+name);await page.locator('#console-root h1').waitFor();await page.locator('.loading-card').waitFor({state:'detached'});};
  const op=page.locator('#operation-dialog'),begin=async(action,kind)=>{await page.locator(`[data-console-action="${action}"]${kind?`[data-kind="${kind}"]`:''}`).first().click();await op.locator('form').waitFor();};
- const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor();return JSON.parse(await op.locator('.operation-result').first().innerText());};
+ const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor({state:'attached'});return JSON.parse(await op.locator('.operation-result').first().innerText());};
  const close=async()=>{await op.locator('[data-operation-close]').first().click();await op.waitFor({state:'hidden'});};
  const pick=async(name,value)=>{const s=op.locator(`[name="${name}"]`),index=await s.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const b=s.locator('..').locator('> .select-trigger');await b.click();await page.locator('#'+await b.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();};
  const shot=async name=>{await page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});};

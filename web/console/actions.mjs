@@ -125,7 +125,19 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   const modal=document.createElement('dialog');modal.id='operation-dialog';modal.setAttribute('aria-labelledby','operation-title');modal.innerHTML='<div class="dialog-header"><h2 id="operation-title"></h2><button type="button" data-operation-close aria-label="Close">×</button></div><div id="operation-content"></div>';document.body.append(modal);
   const content=modal.querySelector('#operation-content');let intent=null,opId=null,lastPayload=null,returnFocus=null,sequence=0,working=false;
   function open(title){sequence++;returnFocus=document.activeElement;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();}
-  function result(data){content.replaceChildren();const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);content.append(pre);
+  const MEMORY_RESULTS={'memory.create':'resultCreated','memory.correct':'resultCorrected','memory.retract':'resultRetracted','memory.sensitivity':'resultSensitivity','memory.visibility':'resultVisibility','memory.web_policy':'resultWebPolicy','memory.batch_retract':'resultBatchRetract','memory.batch_classify':'resultBatchClassify'};
+  function result(data){content.replaceChildren();const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);
+    const summary=MEMORY_RESULTS[intent?.action];
+    if(summary){
+      // A plain confirmation first; the receipt stays available for support under technical details.
+      const box=document.createElement('div');box.className='policy-box';box.setAttribute('role','status');
+      if(Array.isArray(data.results)){const ok=data.results.filter(r=>r.ok).length,failed=data.results.filter(r=>!r.ok);
+        const head=document.createElement('p');head.textContent=`${t(summary)} ${ok}${failed.length?` · ${t('resultFailedCount')} ${failed.length}`:''}`;box.append(head);
+        if(failed.length){const list=document.createElement('ul');for(const r of failed){const li=document.createElement('li');li.textContent=`${intent.snippets?.[r.memory_id]||r.memory_id} — ${t(r.error_code)}`;list.append(li);}box.append(list);}
+      }else{const p=document.createElement('p');p.textContent=t(summary);box.append(p);}
+      if(data.replayed){const p=document.createElement('p');p.className='muted';p.textContent=t('replayedResult');box.append(p);}
+      const raw=document.createElement('details'),label=document.createElement('summary');label.textContent=t('technicalDetails');raw.append(label,pre);content.append(box,raw);
+    }else content.append(pre);
     if(intent?.action==='models.test'||intent?.action==='models.save'||intent?.action==='jobs.schedule'||intent?.action==='vector.schedule'){
       const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':'modelQueued');content.prepend(message);
     }
@@ -278,10 +290,13 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
         fields=area('content','content')+select('memory_type','memoryType',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128})+select('sensitivity','sensitivity',['sensitive','internal','public','secret'],defaults.sensitivity);
       }
       else if(action.startsWith('memory.batch_')){
-        const ids=[...document.querySelectorAll('[data-batch-memory]:checked')].map(n=>n.dataset.batchMemory);if(!ids.length||ids.length>50)throw new Error('BATCH_SELECTION_REQUIRED');
+        // The same selection the toolbar counts (kept across pages), not only this page's checked boxes.
+        const picked=getSelection(),ids=picked.memory_ids?.length?picked.memory_ids:[...document.querySelectorAll('[data-batch-memory]:checked')].map(n=>n.dataset.batchMemory);if(!ids.length||ids.length>50)throw new Error('BATCH_SELECTION_REQUIRED');
         const metas=await Promise.all(ids.map(memory_id=>api('memory-meta',{memory_id})));if(seq!==sequence||!isActive())return;
         intent.items=metas.map(m=>({memory_id:m.memory_id,revision:m.revision}));
-        fields=`<p>${l('batchNote')} ${metas.length}</p><ul>${metas.map(m=>`<li><code>${esc(m.memory_id)}</code> · ${l('revisions')} ${m.revision}</li>`).join('')}</ul>`+
+        // Show what is being changed, not only identifiers: the visible rows carry each memory's text.
+        const shown=new Map((data.results||[]).map(r=>[r.memory_id,r.content]));intent.snippets=Object.fromEntries(metas.map(m=>[m.memory_id,[...String(picked.snippets?.[m.memory_id]||shown.get(m.memory_id)||'')].slice(0,120).join('')]));
+        fields=`<p><strong>${metas.length}</strong> ${l(action==='memory.batch_retract'?'batchRetractCount':'batchClassifyCount')}</p><ol class="batch-confirm-list">${metas.map(m=>`<li>${esc(intent.snippets[m.memory_id]||m.memory_id)} <small>${l('revisions')} ${m.revision}</small></li>`).join('')}</ol>`+
           (action==='memory.batch_classify'?select('category','category',getCaps().taxonomy.categories,'uncategorized'):field('reason','reason',{required:false})+`<p>${l('retractNote')}</p>`);
       }
       else if(['taxonomy.save','privacy.defaults','retention.save'].includes(action)){
@@ -362,7 +377,10 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   }
   async function exportFile(){let p={},records=[],pages=0,bytes=0;do{const page=await api('export',p);if(!isActive())throw new Error('STALE_ACCOUNT');bytes+=new TextEncoder().encode(JSON.stringify(page.records)).length;if(bytes>16*1024*1024)throw new Error('EXPORT_SIZE_LIMIT');records.push(...page.records);p=page.next_request;if(++pages>10000)throw new Error('EXPORT_PAGE_LIMIT');}while(p);
     const blob=new Blob([JSON.stringify({format:'mnemuron-personal-portable-v1',records},null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='mnemuron-personal-memories.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return {status:'exported',records:records.length,includes_credentials:false};}
-  async function importFile(fd){const file=fd.get('file');if(!file||file.size>16*1024*1024)throw new Error('IMPORT_FILE_TOO_LARGE');const doc=JSON.parse(await file.text());if(doc.format!=='mnemuron-personal-portable-v1'||!Array.isArray(doc.records)||!doc.records.length)throw new Error('INVALID_IMPORT');
+  async function importFile(fd){const file=fd.get('file');if(!file||file.size>16*1024*1024)throw new Error('IMPORT_FILE_TOO_LARGE');
+    // A parser message ("Unexpected end of JSON input") means nothing to a person: report what is wrong with the file.
+    let doc;try{doc=JSON.parse(await file.text());}catch{throw new Error('IMPORT_INVALID_JSON');}
+    if(doc?.format!=='mnemuron-personal-portable-v1')throw new Error('INVALID_IMPORT');if(!Array.isArray(doc.records)||!doc.records.length)throw new Error('IMPORT_EMPTY');
     // Preflight every record before sending any chunk. No SQL, credentials or scopes from files are executable.
     for(const r of doc.records)if(typeof r.content!=='string'||r.content.length>4096||!r.content.trim())throw new Error('IMPORT_CONTENT_TOO_LONG');
     // Up to 20 records per request (the Core limit), bounded by size. Each chunk commits atomically; a
