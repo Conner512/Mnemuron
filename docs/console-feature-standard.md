@@ -166,6 +166,15 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - 真实浏览器：`scripts/test-console-connections.mjs` 和 `scripts/test-console-completion.mjs`。通过已有 Playwright 模块及 Chromium 路径运行，仅使用本机合成 Core/OAuth 服务；报告及截图放 Git 外私有目录，不读取生产配置。
 - 发布内容：`node scripts/check-publication.mjs --worktree`。不等于 Git 历史、GitHub 或生产个人数据审查。
 
+### 记忆整理（分类、筛选整理与撤销）
+
+- **一个整理流程**：选择（当前页勾选最多 100 条，可跨页保留；或“当前筛选的全部有效记忆”）→ 选择或新建分类 → 预览 → 确认 → 结果与撤销。单条“移到分类”、批量整理、删除分类时的成员移动都走同一个写入路径（`server/lib/console/organize.mjs`），每次写入记录为一个整理批次。
+- **读取**：沿用 `memories` 视图，不新增入口路径（ingress 不变）。`part=facets` 返回分类计数（含 0）、主题、来源（导入/其他）、导入日期和最近整理；`part=preview&target=<分类>` 加上 `memory_ids` 或筛选（`query`、`category`、`topic`、`origin`、`all=true`）返回将要变化的数量、已在该分类的数量、按当前分类的分布、示例和 `preview_token`。列表新增 `topic`、`origin` 筛选，行内返回主题、是否导入和原始时间。
+- **写入**：`memory.organize` 必须携带预览返回的 `preview_token`；服务端在同一事务内重新解析选择，任何变化都返回 `PREVIEW_CHANGED`，不部分写入。一次最多 2000 条；检索候选窗口（500 条）被截断时返回 `SELECTION_TRUNCATED`。`memory.organize_undo` 只恢复此后未再改动的记忆，其余列为 `CHANGED_SINCE`；全部都已改动时返回 `UNDO_CONFLICT` 且批次保持可撤销。同一操作 ID 重放返回同一结果。
+- **分类**：ID 稳定，名称可改。`category.create`（名称 1–40 字符，可用中文，ID 自动生成）、`category.rename`（只改名称，不改分类体系版本，不暂停任务，不使摘要过期）、`category.delete`（必须指定 `move_to`，手动分类与模型分类一并移动，可撤销并恢复原分类）。均需 `expected_revision`，并发修改返回 `SETTINGS_VERSION_CHANGED`。分类体系版本变化时，模型分类结果按 ID 复制到新版本（旧行保留，不改写）；指向已不存在分类的结果回落为未分类。`taxonomy.save` 保留为高级入口，同样复制模型分类。
+- **边界**：手动分类是本地元数据，任何有效记忆都可以设置（包括 secret 和来源已过期的记录）；模型输入规则不变，secret 仍不会发送给模型。整理不修改记忆内容、修订、来源、敏感级别、ChatGPT 授权或 keep_private 拒绝；修订一条记忆时，手动分类随替代记录保留。不物理删除任何记忆。新增动作与 `memory.classify` 同属 memory 组（需要 `memory:organize`），不扩展凭据、scope 或 OAuth/MCP 权限。
+- **数据库**：仅新增 `console_organize_batches`、`console_organize_items`、`console_import_records`（`CREATE TABLE IF NOT EXISTS`），不新增迁移步骤，`PRAGMA user_version` 保持 7。旧版本打开同一数据库时忽略这些表，自定义分类显示为 ID。
+
 ## 12. 功能表
 
 「读取」列是 console-api 视图名，「写操作」列是操作名。测试会逐行核对编号和状态。
@@ -180,11 +189,11 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
 | MEM-04 | 记忆库 | 修订与撤回 | live | — | memory.correct, memory.retract |
 | MEM-05 | 记忆库 | 分类、敏感级别与 ChatGPT 可见性 | live | — | memory.classify, memory.sensitivity, memory.visibility |
-| MEM-06 | 记忆库 | 批量整理 | live | — | memory.batch_classify, memory.batch_retract |
+| MEM-06 | 记忆库 | 批量整理 | live | memories | memory.organize, memory.organize_undo, memory.batch_classify, memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
 | SUM-01 | 分类与摘要 | 分类索引与派生摘要 | live | summaries, summary | — |
 | SUM-02 | 分类与摘要 | 生成分类与摘要 | live | — | jobs.schedule |
-| SUM-03 | 分类与摘要 | 自定义分类体系 | live | taxonomy | taxonomy.save |
+| SUM-03 | 分类与摘要 | 自定义分类体系 | live | taxonomy | category.create, category.rename, category.delete, taxonomy.save |
 | TSK-01 | 项目与任务 | 项目列表 | live | projects | — |
 | TSK-02 | 项目与任务 | 任务与来源分支 | live | task-branches | — |
 | TSK-03 | 项目与任务 | 项目上下文预览 | live | project-context | — |

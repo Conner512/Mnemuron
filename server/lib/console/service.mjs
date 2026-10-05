@@ -8,15 +8,16 @@ import {MemoryWorker,scheduleLibrary} from '../memory-jobs/worker.mjs';
 import {VectorIndex} from '../vector-stores/index.mjs';
 import {QdrantStore} from '../vector-stores/qdrant.mjs';
 import {ConsoleFeatures,FEATURE_ACTIONS} from './features.mjs';
+import {ConsoleOrganizer} from './organize.mjs';
 import {ModelError} from '../model-providers/contracts.mjs';
 
 const taxonomyDefault={version:'console-default-v1',categories:['uncategorized','preferences','projects','technical','personal','decisions']};
 const receipt=result=>({status:result.status,memory_id:result.replacement_memory?.memory_id||result.memory?.memory_id||result.memory_id,physically_deleted:false});
 export class ConsoleService {
-  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.busy=false;}
+  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.busy=false;}
   require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;return user?this.features.taxonomy(user,fallback):fallback;}
-  capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),
+  capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),
     web_policy:this.store.webVisibility.policy(auth),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
@@ -49,7 +50,7 @@ export class ConsoleService {
   }
   apply(auth,action,p){const store=this.store;
     if(FEATURE_ACTIONS.includes(action))return this.features.apply(auth,action,p);
-    if(action.startsWith('memory.')&&!['memory.create','memory.web_policy'].includes(action))number(p.revision,1,2147483647);
+    if(action.startsWith('memory.')&&!['memory.create','memory.web_policy','memory.organize','memory.organize_undo'].includes(action))number(p.revision,1,2147483647);
     if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id','sensitivity']);
       const defaults=this.features.privacy(auth.user_id),{sensitivity=defaults.sensitivity,...input}=p;this.sensitivity(sensitivity);const result=store.saveMemory(auth,{...input,source:'console_explicit'});
       store.memorySources.setSensitivity(auth,result.memory.memory_id,sensitivity);
@@ -60,7 +61,16 @@ export class ConsoleService {
       store.memorySources.setSensitivity(auth,result.replacement_memory.memory_id,sensitivity);return receipt(result);}
     if(action==='memory.retract'){object(p,['memory_id','revision','reason']);this.memory(auth,p.memory_id,p.revision);return receipt(store.retractMemory(auth,p.memory_id,{reason:p.reason||'Explicit console retraction.'}));}
     if(action==='memory.sensitivity'){object(p,['memory_id','revision','sensitivity']);this.memory(auth,p.memory_id,p.revision);this.sensitivity(p.sensitivity);store.memorySources.setSensitivity(auth,p.memory_id,p.sensitivity);return {status:'updated',...this.meta(auth,{memory_id:p.memory_id})};}
-    if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);return {status:'classified',...store.derivedMemory.setCategory(auth,p.memory_id,p.category,this.taxonomy(auth.user_id))};}
+    if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);store.requireScope(auth,'memory:organize');
+      const {results:[r],batch}=this.organizer.classify(auth,[{memory_id:p.memory_id,revision:p.revision}],p.category,{kind:'classify'});
+      if(!r.ok)throw new ValidationError('This memory cannot be categorized.','INVALID_CATEGORY_TARGET');
+      return {status:'classified',locked:true,category:p.category,batch_id:batch.batch_id,changed:batch.changed,undo_available:batch.undo_available};}
+    // One organize flow: preview (read view) → memory.organize with the preview token → optional undo.
+    if(action==='memory.organize'){store.requireScope(auth,'memory:organize');return this.organizer.organize(auth,p);}
+    if(action==='memory.organize_undo'){store.requireScope(auth,'memory:organize');return this.organizer.undo(auth,p);}
+    if(action==='category.create'){store.requireScope(auth,'memory:organize');return this.features.categories.create(auth,p);}
+    if(action==='category.rename'){store.requireScope(auth,'memory:organize');return this.features.categories.rename(auth,p);}
+    if(action==='category.delete'){store.requireScope(auth,'memory:organize');return this.features.categories.remove(auth,p,this.organizer);}
     if(action==='memory.visibility'){object(p,['memory_id','revision','state_hash','allow']);this.memory(auth,p.memory_id,p.revision);return {status:'updated',...store.webVisibility.set(auth,p.memory_id,p)};}
     if(action==='memory.web_policy'){object(p,['read_all','expected_revision']);return {status:'updated',...store.webVisibility.setPolicy(auth,p)};}
     if(action==='devices.revoke'){object(p,['agent_instance_id']);id(p.agent_instance_id);
@@ -136,7 +146,7 @@ export class ConsoleService {
       this.store.memorySources.setSensitivity(auth,memoryId,r.sensitivity);
       if(r.status!=='active')this.store.retractMemory(auth,memoryId,{reason:'Imported non-active record; retained as a tombstone, not reactivated.'});
       if(r.cloud_private===true)this.store.webVisibility.keepPrivate(auth.user_id,memoryId,this.store.revisions.latest(auth.user_id,memoryId));
-      this.db.prepare('INSERT INTO console_imports VALUES(?,?,?,?)').run(auth.user_id,key,memoryId,hash);imported.push(memoryId);
+      this.db.prepare('INSERT INTO console_imports VALUES(?,?,?,?)').run(auth.user_id,key,memoryId,hash);this.organizer.recordImport(auth.user_id,memoryId,r.created_at);imported.push(memoryId);
     }
     return {status:'imported',created:imported.length,existing:existing.length,memory_ids:imported,originals_overwritten:false,scope:'user'};
   }

@@ -3308,6 +3308,7 @@ export class MnemuronStore {
       const replacement = this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(replacementId);
       const revision = this.revisions.record(replacement,"explicit_correction");
       this.webVisibility.inheritPrivate(auth.user_id,memoryId,replacementId);
+      this.derivedMemory.inheritCategory(auth.user_id,memoryId,replacementId);
       this.revisions.linkExplicit(replacement,revision);
       this.revisions.record(this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(memoryId),"superseded");
       this.audit({

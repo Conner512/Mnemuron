@@ -51,6 +51,7 @@ jobs:
           node scripts/test-console-connections.mjs
           node scripts/test-console-completion.mjs
           node scripts/test-console-models.mjs
+          node scripts/test-console-organize.mjs
       - name: Synthetic non-secret preview screenshots
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -61,5 +62,6 @@ jobs:
             ${{ runner.temp }}/connections-browser-*/*.png
             ${{ runner.temp }}/completion-browser-*/*.png
             ${{ runner.temp }}/model-browser-*/*.png
+            ${{ runner.temp }}/organize-browser-*/*.png
           retention-days: 3
           if-no-files-found: error

@@ -22,7 +22,7 @@ const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create
 test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
   const caps=(await f.get('capabilities',{},basic)).body;
-  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy','devices.revoke']);
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy','memory.organize','memory.organize_undo','category.create','category.rename','category.delete','devices.revoke']);
   const m=(await create(f,basic)).body.memory_id;assert.ok(m);
   let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);

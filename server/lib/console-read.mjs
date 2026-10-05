@@ -8,7 +8,8 @@ function pagination(params,maximum=50){
   if(!Number.isSafeInteger(offset)||offset<0||offset>1000000||!Number.isSafeInteger(limit)||limit<1||limit>maximum)throw new ValidationError('Invalid pagination.');
   return {offset,limit};
 }
-const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{})});
+const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{}),
+  ...(m.topic?{topic:m.topic}:{}),...(m.imported?{imported:true,original_created_at:m.original_created_at||null}:{})});
 const jobView=job=>({job_id:job.job_id,job_type:job.job_type,state:job.state,total:job.total,processed:job.processed,attempt_count:job.attempt_count,last_error_code:job.last_error_code,created_at:job.created_at,updated_at:job.updated_at,result_ref:job.result_ref});
 // Owner-scoped aggregates for overview charts. Counts only: no content, IDs or other accounts.
 function overviewInsights(store,user){
@@ -26,7 +27,7 @@ function overviewInsights(store,user){
 export async function consoleRead(store,auth,view,params={}) {
   store.requireScope(auth,'console:read');
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
-  const allowed={memories:['offset','limit','query','mode','status','category'],summaries:['offset','limit'],jobs:['offset','limit','job_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit']}[view]||[];
+  const allowed={memories:['offset','limit','query','mode','status','category','topic','origin','part','target','memory_ids','all'],summaries:['offset','limit'],jobs:['offset','limit','job_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit']}[view]||[];
   if(Object.keys(params).some(key=>!(view==='audit'?['offset','limit','action','outcome','from','to']:featureParams[view]||allowed).includes(key)))throw new ValidationError('Unknown console query parameter.');
   if(FEATURE_VIEWS.includes(view))return store.consoleService.features.read(auth,view,params);
   const db=store.db,user=auth.user_id;
@@ -44,35 +45,27 @@ export async function consoleRead(store,auth,view,params={}) {
       recent:db.prepare('SELECT memory_id,content,memory_type,status,created_at FROM memories WHERE user_id=? ORDER BY created_at DESC,memory_id LIMIT 5').all(user).map(m=>({...m,content:[...m.content].slice(0,160).join('')})),
       insights:overviewInsights(store,user)};
     case 'memories': {
-      const {offset,limit}=pagination(params),taxonomy=store.consoleService.taxonomy(user);
+      const organizer=store.consoleService.organizer;
+      // Sub-reads of the library share its filter: facets for browsing, and the exact organize preview.
+      if(params.part==='facets'){if(Object.keys(params).length!==1)throw new ValidationError('Unknown console query parameter.');return {...organizer.facets(auth),recent_batches:organizer.batches(auth,{}).batches};}
+      if(params.part==='preview'){const {part,target,category,offset:_o,limit:_l,mode:_m,status:_s,...rest}=params;
+        if(_o!==undefined||_l!==undefined||_m!==undefined||_s!==undefined)throw new ValidationError('Unknown console query parameter.');
+        return organizer.preview(auth,{category:target,...(category?{filter_category:category}:{}),...rest});}
+      if(params.part!==undefined&&params.part!=='list')throw new ValidationError('Invalid library part.');
+      if(params.target!==undefined||params.memory_ids!==undefined||params.all!==undefined)throw new ValidationError('Unknown console query parameter.');
+      const {offset,limit}=pagination(params);
       if(params.mode!==undefined&&!['lexical','hybrid','semantic'].includes(params.mode))throw new ValidationError('Invalid retrieval mode.');
-      if(params.status!==undefined&&!['active','superseded','retracted'].includes(params.status))throw new ValidationError('Invalid status.');
-      if(params.category!==undefined&&!taxonomy.categories.includes(params.category))throw new ValidationError('Invalid category.');
-      if(params.query!==undefined&&(typeof params.query!=='string'||params.query.length>2000))throw new ValidationError('Invalid query.');
-      const categorySelect=`SELECT m.memory_id,COALESCE(o.category,a.category,'uncategorized') category FROM memories m
-        LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
-        LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
-          AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
-        WHERE m.user_id=?`;
-      if(params.query?.trim()){
-        const statuses=params.status?[params.status]:['active','superseded','retracted'];let rows,retrieval,truncated=false;
-        if(!params.mode||params.mode==='lexical'){
-          const found=store.memorySearch.candidates(user,params.query,{}, {auth,statuses,memoryTypes:['fact','goal','constraint','decision','completed','blocker','remaining','next_step']});
-          rows=found.rows;truncated=found.truncated;retrieval={mode:'lexical',candidate_limit:500,degraded:false};
-        }else{
-          const found=await store.searchMemories(auth,{query:params.query,limit:20,mode:params.mode,statuses,personal_model_only:true});
-          rows=found.results;retrieval={...found.retrieval,window_limited:true,candidate_limit:20};truncated=found.truncated===true;
-        }
-        // Filter the bounded, owner-scoped candidate window before slicing a UI page.
-        const categoryFor=db.prepare(`SELECT category FROM (${categorySelect}) WHERE memory_id=?`);
-        rows=rows.map(m=>({...m,category:categoryFor.get(taxonomy.version,user,m.memory_id)?.category||'uncategorized'}));
-        if(params.category)rows=rows.filter(m=>m.category===params.category);
-        return {read_only:true,results:rows.slice(offset,offset+limit).map(snippet),offset,limit,next_offset:rows.length>offset+limit?offset+limit:null,truncated,retrieval};
+      const f=organizer.filter(user,params);
+      if(f.query&&params.mode&&params.mode!=='lexical'){
+        const statuses=f.status?[f.status]:['active','superseded','retracted'];
+        const found=await store.searchMemories(auth,{query:f.query,limit:20,mode:params.mode,statuses,personal_model_only:true});
+        const {query,...rest}=f,rows=organizer.rows(auth,rest,{ranked:found.results.map(r=>r.memory_id),limit:limit+1,offset}).rows;
+        return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,next_offset:rows.length>limit?offset+limit:null,truncated:found.truncated===true,retrieval:{...found.retrieval,window_limited:true,candidate_limit:20}};
       }
-      const rows=db.prepare(`SELECT m.memory_id,m.content,m.memory_type,m.status,m.created_at,c.category FROM memories m
-        JOIN (${categorySelect}) c ON c.memory_id=m.memory_id WHERE m.user_id=? AND (? IS NULL OR m.status=?) AND (? IS NULL OR c.category=?)
-        ORDER BY m.created_at DESC,m.memory_id LIMIT ? OFFSET ?`).all(taxonomy.version,user,user,params.status||null,params.status||null,params.category||null,params.category||null,limit+1,offset);
-      return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,next_offset:rows.length>limit?offset+limit:null};
+      // Filters apply inside the owner-scoped (and, for a search, bounded) candidate set before paging.
+      const {rows,truncated}=organizer.rows(auth,f,{limit:limit+1,offset});
+      return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,next_offset:rows.length>limit?offset+limit:null,
+        ...(f.query?{truncated,retrieval:{mode:'lexical',candidate_limit:500,degraded:false}}:{})};
     }
     case 'summaries':{const {offset,limit}=pagination(params);const rows=db.prepare('SELECT summary_id,category,status,revision,coverage,omitted,created_at FROM memory_summaries WHERE user_id=? ORDER BY created_at DESC,summary_id LIMIT ? OFFSET ?').all(user,limit+1,offset);return {read_only:true,
       categories:db.prepare(`SELECT COALESCE(o.category,a.category,'uncategorized') category,COUNT(*) count FROM memories m

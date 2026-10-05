@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {object,id,number} from './state.mjs';
 import {ValidationError,ConflictError,NotFoundError,AuthorizationError} from '../errors.mjs';
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
+import {categoryEditor} from './organize.mjs';
 
 export {FEATURE_VIEWS};
 export const FEATURE_ACTIONS=['memory.batch_classify','memory.batch_retract','taxonomy.save','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate'];
@@ -20,7 +21,7 @@ const packageVersion=JSON.parse(readFileSync(new URL('../../../package.json',imp
 
 // Console preferences are account-owned. Never write the global operator retention settings.
 export class ConsoleFeatures {
-  constructor(service){this.service=service;this.store=service.store;this.db=service.db;
+  constructor(service){this.service=service;this.store=service.store;this.db=service.db;this.categories=categoryEditor(this);
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_preferences(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,value_json TEXT NOT NULL,PRIMARY KEY(user_id,kind));`);
   }
   preference(user,kind,fallback){const row=this.db.prepare('SELECT revision,value_json FROM console_preferences WHERE user_id=? AND kind=?').get(user,kind);return {revision:row?.revision||0,...(row?JSON.parse(row.value_json):fallback)};}
@@ -32,11 +33,14 @@ export class ConsoleFeatures {
   privacy(user){return this.preference(user,'privacy',{sensitivity:'sensitive',cloud_readable:false});}
   retention(user){return {...this.preference(user,'retention',{raw_retention_days:this.store.getRetention().raw_retention_days}),applies_to_existing_events:false,checkpoints:'permanent',memories:'permanent',pinned_sources_preserved:true};}
   taxonomy(user,fallback){const p=this.preference(user,'taxonomy',fallback);return {version:p.version,categories:p.categories};}
+  // Display names for category IDs. Built-in IDs without a stored name are translated by the browser.
+  labels(user){const p=this.preference(user,'taxonomy',{});return p.labels&&typeof p.labels==='object'?p.labels:{};}
+  restoreCategory(auth,detail){return this.categories.restore(auth,detail);}
   task(auth,taskId){id(taskId);const row=this.db.prepare('SELECT * FROM tasks WHERE user_id=? AND task_id=?').get(auth.user_id,taskId);if(!row)throw new NotFoundError('Task not found.');return row;}
   read(auth,view,p){
     object(p,featureParams[view]||[]);const {db,store,service}=this,user=auth.user_id;
     const result=value=>({read_only:true,production_ready:false,...value});
-    if(view==='taxonomy')return result({...this.preference(user,'taxonomy',service.taxonomy(user)),...service.taxonomy(user)});
+    if(view==='taxonomy')return result({...this.preference(user,'taxonomy',service.taxonomy(user)),...service.taxonomy(user),labels:this.labels(user)});
     if(view==='privacy-defaults')return result({...this.privacy(user),applies_to:'new_console_memories',cloud_grant_requires_explicit_revision:true});
     if(view==='retention')return result(this.retention(user));
     if(view==='attention')return result({counts:{memories:count(db,'SELECT count(*) n FROM memories WHERE user_id=?',user),
@@ -97,8 +101,13 @@ export class ConsoleFeatures {
       if(new Set(p.items.map(i=>i.memory_id)).size!==p.items.length)throw new ValidationError('Duplicate records in batch.');
       if(action==='memory.batch_classify'&&!service.taxonomy(user).categories.includes(p.category))throw new ValidationError('Invalid category.');
       if(p.reason!==undefined&&(typeof p.reason!=='string'||p.reason.length>4096))throw new ValidationError('Invalid reason.');
+      if(action==='memory.batch_classify'){
+        // One recorded batch for the eligible items, so the whole selection can be undone together.
+        const {results,batch}=service.organizer.classify(auth,p.items,p.category,{kind:'batch_classify'});
+        return {status:results.every(r=>r.ok)?'completed':'partial',results,physically_deleted:false,...(batch?{batch_id:batch.batch_id,changed:batch.changed,undo_available:batch.undo_available}:{})};
+      }
       const results=p.items.map(item=>{
-        try{return store.memoryTransaction(()=>({memory_id:item.memory_id,ok:true,result:service.apply(auth,action==='memory.batch_classify'?'memory.classify':'memory.retract',{...item,...(action==='memory.batch_classify'?{category:p.category}:{reason:p.reason})})}));}
+        try{return store.memoryTransaction(()=>({memory_id:item.memory_id,ok:true,result:service.apply(auth,'memory.retract',{...item,reason:p.reason})}));}
         catch(error){if(!error.errorCode)throw error;return {memory_id:item.memory_id,ok:false,error_code:error.errorCode};}
       });return {status:results.every(r=>r.ok)?'completed':'partial',results,physically_deleted:false};
     }
@@ -107,11 +116,14 @@ export class ConsoleFeatures {
       const taxonomy={version,categories:p.categories};store.derivedMemory.taxonomy(taxonomy);
       const used=db.prepare('SELECT DISTINCT category FROM memory_category_overrides WHERE user_id=? AND locked=1').all(user);
       if(used.some(r=>!p.categories.includes(r.category)))throw new ConflictError('Reclassify records before removing their category.','CATEGORY_IN_USE');
-      const saved=this.save(user,'taxonomy',p,taxonomy);
+      const before=this.categories.current(user),labels=Object.fromEntries(Object.entries(before.labels).filter(([c])=>p.categories.includes(c)));
+      const saved=this.save(user,'taxonomy',p,{...taxonomy,labels});
+      // Model classifications of kept IDs stay visible under the new version; old rows are preserved.
+      this.categories.carryForward(user,before.version,version,p.categories);
       // Jobs keep their immutable taxonomy; fence the old queued jobs before any output can publish.
-      db.prepare("UPDATE memory_jobs SET state='blocked_config',fence=fence+1,lease_owner=NULL,lease_expires=NULL,last_error_code='STALE_TAXONOMY' WHERE user_id=? AND state IN ('pending','leased','retry_wait')").run(user);
+      this.categories.fence(user);
       db.prepare("UPDATE memory_summaries SET status='stale' WHERE user_id=? AND status='current'").run(user);
-      return saved;
+      return {...saved,labels:undefined};
     }
     if(action==='privacy.defaults'){
       object(p,['expected_revision','sensitivity','cloud_readable']);service.sensitivity(p.sensitivity);

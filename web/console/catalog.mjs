@@ -1004,3 +1004,57 @@ Object.assign(catalog.en,{
 });
 
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;
+
+// Memory organization: categories with names, facets for large imports, one preview-confirmed move with undo.
+Object.assign(catalog['zh-CN'],{
+ moveToCategory:'移到分类','memory.organize':'整理到分类','memory.organize_undo':'撤销整理','category.manage':'管理分类','category.create':'新建分类','category.rename':'重命名分类','category.delete':'删除分类',
+ categoriesFacet:'分类',topicsFacet:'主题',originFacet:'来源',importedOrigin:'导入的记忆',otherOrigin:'在此添加或采集',originalDate:'原始时间',manageCategories:'管理',
+ recentChanges:'最近整理',noRecentChanges:'还没有整理记录',undo:'撤销',undone:'已撤销',facetsUnavailable:'分类统计暂不可用，列表仍可正常浏览',clearFilter:'清除此筛选',
+ emptyFiltered:'没有符合当前筛选条件的记忆。可清除筛选或切换状态。',
+ batchKind_selection:'勾选整理',batchKind_filter:'按筛选整理',batchKind_classify:'单条分类',batchKind_batch_classify:'批量分类','batchKind_category.delete':'删除分类并移动',
+ selectAllMatching:'选择全部匹配结果',allMatchingSelected:'已选择当前筛选条件下的全部有效记忆，预览会显示准确数量。',allActiveMemories:'全部有效记忆',
+ previewChange:'预览变更',confirmMove:'确认移动',goBack:'返回上一步',orCreateCategory:'或新建一个分类',newCategoryName:'新分类名称',
+ organizeWillMove:'条记忆将移到',organizeAlready:'条已在该分类，保持不变',organizeMissing:'条已不可用（已撤回、已修订或不属于此账户），不会处理',organizeFrom:'当前分类',organizeSample:'示例',
+ organizeOverLimit:'一次最多整理 2000 条。请先按分类、主题或来源缩小范围。',organizeTruncated:'检索结果超过可核验的 500 条窗口。请缩小检索词，或改用分类、主题、来源筛选。',
+ organizeNothing:'没有需要移动的记忆：所选记忆都已在该分类。',organizeUndoHint:'确认后可在结果页或“最近整理”中撤销。只修改分类，不修改记忆内容。',
+ organizeDone:'已移动',organizeDoneTo:'条记忆到',organizeUnchangedResult:'条原本就在该分类',replayedResult:'这是同一次操作的结果，没有重复执行。',showCategory:'查看该分类',
+ undoNote:'撤销会把这次整理改动过的记忆恢复到之前的分类。之后又被改动过的记忆保持现状并单独列出。',undoResult:'已恢复',undoSkipped:'条在之后被改动过，保持不变',categoryRestored:'已恢复分类',
+ categoryCount:'条',renameCategory:'重命名',deleteCategory:'删除',categoryFixed:'固定分类，不能修改',createCategory:'新建分类',
+ deleteCategoryNote:'这个分类中的记忆移到：',deleteCategoryBoundary:'不会删除任何记忆，模型分类结果也一并移动。可在“最近整理”中撤销。',deleteAndMove:'删除并移动',
+ categoryManagerNote:'名称可随时修改，不影响已分类的记忆和摘要。分类最多 64 个。',categoryCreated:'已新建分类',categoryRenamed:'已重命名',categoryDeleted:'已删除分类，移动的记忆数：',
+ importProgress:'正在导入',importDone:'导入完成',importCreated:'新增',importExisting:'已存在（未重复导入）',organizeImported:'整理导入的记忆',importResumeNote:'重新导入同一文件会跳过已导入的记录',
+ PREVIEW_CHANGED:'预览之后记忆有变化。已重新生成预览，请核对后再次确认。',PREVIEW_REQUIRED:'请先预览变更再确认',SELECTION_TOO_LARGE:'一次最多整理 2000 条，请缩小范围',
+ SELECTION_TRUNCATED:'检索结果过多，无法完整核验，请缩小范围',SELECTION_EMPTY:'当前选择已没有可整理的记忆',INVALID_SELECTION:'请勾选 1–100 条记忆，或使用“选择全部匹配结果”',
+ BATCH_ALREADY_UNDONE:'这次整理已经撤销过',BATCH_NOT_FOUND:'找不到这次整理记录',UNDO_CONFLICT:'这次整理涉及的记忆之后都被改动过，没有可撤销的内容。可先撤销之后的那次整理。',
+ CATEGORY_EXISTS:'已有同名分类',INVALID_CATEGORY_LABEL:'分类名称需为 1–40 个字符，不能包含 < >',INVALID_CATEGORY:'这个分类不能执行该操作',TAXONOMY_FULL:'分类最多 64 个',
+ SETTINGS_VERSION_CHANGED:'分类已在其他页面修改，已载入最新内容，请重新操作',INVALID_CATEGORY_TARGET:'只有有效记忆可以分类',
+});
+Object.assign(catalog.en,{
+ moveToCategory:'Move to category','memory.organize':'Organize into a category','memory.organize_undo':'Undo organize','category.manage':'Manage categories','category.create':'Create category','category.rename':'Rename category','category.delete':'Delete category',
+ categoriesFacet:'Categories',topicsFacet:'Topics',originFacet:'Origin',importedOrigin:'Imported',otherOrigin:'Added or captured here',originalDate:'Original date',manageCategories:'Manage',
+ recentChanges:'Recent changes',noRecentChanges:'No organize changes yet',undo:'Undo',undone:'Undone',facetsUnavailable:'Category counts are unavailable; the list still works.',clearFilter:'Clear this filter',
+ emptyFiltered:'No memories match these filters. Clear a filter or change the status.',
+ batchKind_selection:'Selected memories',batchKind_filter:'Filter',batchKind_classify:'Single memory',batchKind_batch_classify:'Batch classify','batchKind_category.delete':'Category deleted, moved',
+ selectAllMatching:'Select everything matching this filter',allMatchingSelected:'All active memories matching the current filter are selected; the preview shows the exact count.',allActiveMemories:'All active memories',
+ previewChange:'Preview change',confirmMove:'Confirm move',goBack:'Back',orCreateCategory:'Or create a new category',newCategoryName:'New category name',
+ organizeWillMove:'memories will move to',organizeAlready:'already in this category, left unchanged',organizeMissing:'no longer available (retracted, corrected or not in this account) and skipped',organizeFrom:'Currently in',organizeSample:'Examples',
+ organizeOverLimit:'At most 2,000 memories can be organized at once. Narrow by category, topic or origin first.',organizeTruncated:'The search matches more than the 500 records that can be verified. Narrow the search or filter by category, topic or origin.',
+ organizeNothing:'Nothing to move: every selected memory is already in this category.',organizeUndoHint:'You can undo this from the result or from Recent changes. Only categories change, never memory content.',
+ organizeDone:'Moved',organizeDoneTo:'memories to',organizeUnchangedResult:'were already there',replayedResult:'This is the result of the same operation; nothing ran twice.',showCategory:'Show this category',
+ undoNote:'Undo returns the memories this change moved to their previous category. Memories changed again since are left as they are and listed.',undoResult:'Restored',undoSkipped:'changed since and were left as they are',categoryRestored:'Category restored',
+ categoryCount:'memories',renameCategory:'Rename',deleteCategory:'Delete',categoryFixed:'Fixed category',createCategory:'Create category',
+ deleteCategoryNote:'Move its memories to:',deleteCategoryBoundary:'No memory is deleted; model classifications move too. You can undo this from Recent changes.',deleteAndMove:'Delete and move',
+ categoryManagerNote:'Names can change at any time without affecting classified memories or summaries. Up to 64 categories.',categoryCreated:'Category created',categoryRenamed:'Renamed',categoryDeleted:'Category deleted; memories moved:',
+ importProgress:'Importing',importDone:'Import finished',importCreated:'New',importExisting:'Already present (not duplicated)',organizeImported:'Organize imported memories',importResumeNote:'importing the same file again skips records already imported',
+ PREVIEW_CHANGED:'Memories changed after the preview. The preview was refreshed; review it and confirm again.',PREVIEW_REQUIRED:'Preview the change before confirming',SELECTION_TOO_LARGE:'At most 2,000 memories at once; narrow the selection',
+ SELECTION_TRUNCATED:'Too many search matches to verify; narrow the selection',SELECTION_EMPTY:'Nothing in this selection can be organized any more',INVALID_SELECTION:'Select 1–100 memories, or use “Select everything matching this filter”',
+ BATCH_ALREADY_UNDONE:'This change was already undone',BATCH_NOT_FOUND:'This change could not be found',UNDO_CONFLICT:'Every memory in this change was changed again since, so nothing was undone. Undo the later change first.',
+ CATEGORY_EXISTS:'A category with this name already exists',INVALID_CATEGORY_LABEL:'Category names need 1–40 characters and cannot contain < or >',INVALID_CATEGORY:'This category does not allow that operation',TAXONOMY_FULL:'At most 64 categories',
+ SETTINGS_VERSION_CHANGED:'Categories changed in another tab. The latest version is loaded; try again.',INVALID_CATEGORY_TARGET:'Only active memories can be categorized',
+});
+Object.assign(catalog['zh-CN'],{organizeNote:'可跨页勾选最多 100 条，或选择当前筛选的全部结果；先预览，再确认，之后可撤销。批量撤回每批最多 50 条。',editCategoryIds:'编辑分类标识（高级）',
+ featMEM06Note:'勾选或按筛选选择记忆，预览后移到分类，可撤销；也可批量撤回。',featSUM03Note:'新建、重命名和删除分类（成员移到指定分类，可撤销）；模型分类结果保持可见。'});
+Object.assign(catalog.en,{organizeNote:'Select up to 100 memories across pages, or everything matching the filter; preview, confirm, and undo afterwards. Batch retract handles up to 50 at a time.',editCategoryIds:'Edit category IDs (advanced)',
+ featMEM06Note:'Select memories or a filter, preview, move them to a category and undo if needed; or retract in batches.',featSUM03Note:'Create, rename and delete categories (members move to a chosen category, undoable); model classifications stay visible.'});
+Object.assign(catalog['zh-CN'],{importRateWait:'已达到每分钟写入上限，约 1 分钟后自动继续，已导入的记录会保留'});
+Object.assign(catalog.en,{importRateWait:'Write limit reached; continuing automatically in about a minute. Imported records are kept.'});

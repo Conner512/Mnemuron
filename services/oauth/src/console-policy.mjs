@@ -1,7 +1,7 @@
-import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_ACTIONS,CONSOLE_ORGANIZE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {connectionActions} from './connections.mjs';
 const basicActions={
-  memory:['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy'],
+  memory:['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy',...CONSOLE_ORGANIZE_ACTIONS],
   security:['security.password','security.totp.begin','security.totp.complete','security.session.revoke','security.sessions.revoke_others','devices.revoke'],
   oauth:['oauth.revoke'],
 };

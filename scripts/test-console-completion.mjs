@@ -58,8 +58,12 @@ try{
   check('Selection alone performs no write',selectionWrites===0);page.off('request',countWrites);
   await boxes.first().check();await page.locator('[data-reset-filters]').click();await page.waitForFunction(()=>document.querySelector('[data-selection-count]')?.textContent==='0');
   check('Reload clears stale selection',await page.locator('[data-batch-memory]:checked').count()===0);
-  await boxes.first().check();await begin('memory.batch_classify');await pick('#operation-dialog [name=category]','synthetic');
-  check('Selected memory is actually classified',(await submit()).results[0].ok===true);await close();
+  // Selected memories are filed through the one organize flow: choose → preview → confirm → result.
+  await boxes.first().check();await begin('memory.organize');await pick('#operation-dialog [name=category]','synthetic');
+  await op.locator('[data-organize-step="choose"] button[type=submit]').click();await op.locator('[data-organize-step="confirm"]').waitFor();
+  check('Organize preview states the exact change before writing',(await op.locator('.organize-headline').innerText()).startsWith('1'));
+  await op.locator('[data-organize-step="confirm"] button[type=submit]').click();await op.locator('.organize-result').waitFor();
+  check('Selected memory is actually classified',(await page.locator('.category-pill[data-category="synthetic"]').count())===1);await close();
   await page.locator('[data-memory]').first().click();await begin('memory.correct');await op.locator('[name=content]').fill('Synthetic revised body with Unicode 😀.');check('Correction creates a real replacement',(await submit()).status==='superseded');await close();
   await page.locator('[data-memory]').first().click();await page.locator('[data-compare-memory]').click();await detail.locator('[data-comparison] pre').nth(1).waitFor();
   check('Comparison highlights the actual changed region',(await detail.locator('ins').innerText()).includes('revised'));
@@ -92,8 +96,9 @@ try{
   check('Member sees no operator service data',await mp.locator('[data-feature="SYS-02"]').count()===0);check('Member denied at BFF as well',(await member.request.get(cfg.url+'/console-api/system-health')).status()===403);await member.close();
   await command('basic-memory-only');await goto('memories');
   check('Basic-only account keeps new-memory operation',await page.locator('[data-console-action="memory.create"]').count()===1);
-  check('Basic-only account has no unusable selection',await boxes.count()===0&&await selection.count()===0&&await page.locator('[data-console-action^="memory.batch_"]').count()===0);
-  check('Basic-only batch limitation is explained',await page.locator('[data-i18n="batchUnavailable"]').count()===1);
+  // Basic memory rights include organizing (same gate as memory.classify), never batch retract.
+  check('Basic-only account selection offers only the organize flow',await boxes.count()>0&&await selection.locator('[data-console-action]').count()===1&&await selection.locator('[data-console-action="memory.organize"]').count()===1&&await page.locator('[data-console-action^="memory.batch_"]').count()===0);
+  check('Basic-only organize scope is explained',await page.locator('[data-i18n="organizeNote"]').count()===1);
   await shot('memory-basic-only-en');
   fs.writeFileSync(path.join(evidence,'browser-errors.json'),JSON.stringify(errors,null,2),{mode:0o600});check('No JavaScript or CSP failures',errors.length===0);
   fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));

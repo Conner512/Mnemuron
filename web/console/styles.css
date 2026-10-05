@@ -273,6 +273,48 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .memory-library .empty{margin:16px 0}
 .library-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 4px 0;font-family:var(--font-mono);font-size:12px;color:var(--muted)}
 .library-footer p{margin:0}
+.library-layout{display:grid;grid-template-columns:232px minmax(0,1fr);gap:24px;align-items:start}
+.library-layout>:only-child{grid-column:1/-1}
+.library-main{min-width:0;container-type:inline-size}
+.library-facets{display:grid;gap:18px;position:sticky;top:calc(var(--topbar) + 12px);max-height:calc(100vh - var(--topbar) - 24px);overflow:auto;padding-right:4px}
+.facet-group h2{margin:0;padding-bottom:6px;border-bottom:1.5px solid var(--text);font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.facet-head{display:flex;align-items:end;justify-content:space-between;gap:8px;border-bottom:1.5px solid var(--text)}
+.facet-head h2{border:0;flex:1}
+.facet-manage{min-height:26px;padding:2px 8px;font-size:12px;margin-bottom:4px}
+.facet-list,.batch-list{list-style:none;margin:0;padding:0}
+.facet-item{display:flex;width:100%;justify-content:space-between;gap:8px;min-height:32px;padding:5px 6px;border:0;border-bottom:1px solid var(--border);background:transparent;text-align:left;white-space:normal;font-size:13px}
+.facet-item[aria-pressed="true"]{background:var(--soft);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
+.facet-label{min-width:0;overflow-wrap:anywhere}
+.facet-count{font-family:var(--font-mono);font-size:12px;color:var(--muted)}
+.batch-list li{display:grid;gap:2px;padding:7px 0;border-bottom:1px solid var(--border);font-size:12.5px}
+.batch-list small{color:var(--muted)}
+.batch-list button{justify-self:start;min-height:26px;padding:2px 8px;font-size:12px}
+.recent-changes>p{margin:6px 0 0;font-size:12.5px;color:var(--muted)}
+.filter-chips{display:flex;flex-wrap:wrap;gap:6px;margin:-8px 0 14px}
+.filter-chip{display:inline-flex;align-items:center;gap:4px;padding:0 0 0 8px;border:1px solid var(--line);font-size:12.5px;background:var(--surface)}
+.filter-chip button{min-height:24px;padding:0 8px;border:0}
+.memory-extra{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:0 14px 10px 44px;margin-top:-6px}
+.topic-chip{min-height:22px;padding:0 7px;border:1px solid var(--line);font-size:12px;background:transparent}
+.import-note{font-size:12px;color:var(--muted)}
+.memory-selection[data-select-all-active]{border-color:var(--text);background:var(--soft)}
+.organize-headline{font-size:15px;margin:0 0 8px}
+.organize-headline .figure{font-family:var(--font-serif);font-size:24px;font-weight:500}
+.organize-preview h3{margin:14px 0 6px;font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
+.organize-facts,.organize-breakdown{margin:0;padding-left:18px;font-size:13px}
+.organize-breakdown{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:6px 14px}
+.organize-breakdown li{display:flex;align-items:center;gap:6px}
+.organize-sample{margin:0;padding-left:20px;font-size:13px;color:var(--muted)}
+.organize-sample li{overflow-wrap:anywhere;margin-bottom:3px}
+.organize-new{margin:10px 0}
+.organize-result+.actions,.organize-preview+form .actions{margin-top:16px}
+.category-manager{list-style:none;margin:0 0 14px;padding:0}
+.category-manager>li{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;border-bottom:1px solid var(--border)}
+.category-manager>li>small{color:var(--muted)}
+.category-manager .actions{margin:0 0 0 auto;gap:6px}
+.category-manager form{flex:1 1 100%}
+.category-create{display:flex;align-items:end;gap:8px}
+.category-create label{flex:1;margin:0}
+@container (max-width:860px){.library-layout{grid-template-columns:minmax(0,1fr)}.library-facets{position:static;max-height:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));overflow:visible}}
 @container (max-width:1040px){.memory-filters{grid-template-columns:repeat(3,minmax(160px,1fr))}.memory-filters .query-field,.memory-filters .filter-actions{grid-column:1/-1}.home-grid,.split{grid-template-columns:minmax(0,1fr)}.radar-panel{grid-template-columns:minmax(0,1fr)}.memory-table .col-date{width:150px}}
 @container (max-width:620px){.memory-filters{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 

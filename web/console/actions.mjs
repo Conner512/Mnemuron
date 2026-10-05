@@ -1,6 +1,6 @@
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
-import {icon,revisionDifference} from './visuals.mjs';
+import {icon,revisionDifference,categoryName} from './visuals.mjs';
 
 // Settings and operations pages. Views are markup only; every write goes through
 // mountActions below (explicit dialog, fresh operation ID, server-side authorization).
@@ -119,7 +119,7 @@ export function mountFeatureReads({api,isActive,getAuditParams}){
   return {clear(){seq++;next=null;compare=null;content.replaceChildren();modal.close();}};
 }
 
-export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
+export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getSelection=()=>({memory_ids:[]}),reload,isActive}) {
   const modal=document.createElement('dialog');modal.id='operation-dialog';modal.setAttribute('aria-labelledby','operation-title');modal.innerHTML='<div class="dialog-header"><h2 id="operation-title"></h2><button type="button" data-operation-close aria-label="Close">×</button></div><div id="operation-content"></div>';document.body.append(modal);
   const content=modal.querySelector('#operation-content');let intent=null,opId=null,lastPayload=null,returnFocus=null,sequence=0,working=false;
   function open(title){sequence++;returnFocus=document.activeElement;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();}
@@ -132,6 +132,10 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
       const codes=document.createElement('pre');codes.id='issued-invitation-codes';codes.className='operation-result';codes.textContent=data.codes.join('\n');
       const copy=document.createElement('button');copy.type='button';copy.dataset.copy=codes.id;copy.textContent=t('copy');
       content.prepend(note,codes,copy);pre.textContent=JSON.stringify({...display,codes:undefined},null,2);
+    }
+    if(intent?.action==='storage.import'&&data.status==='imported'){
+      const note=document.createElement('p');note.className='policy-box';note.setAttribute('role','status');note.textContent=`${t('importDone')}: ${t('importCreated')} ${data.created} · ${t('importExisting')} ${data.existing}`;
+      const next=document.createElement('a');next.className='button primary';next.href='/app/memories?origin=imported';next.textContent=t('organizeImported');content.prepend(note,next);
     }
     if(data.login_required){const a=document.createElement('a');a.href='/login';a.textContent=t('signIn');content.append(a);}
     if(data.qr_svg){const qr=document.createElement('div');qr.className='qr';qr.innerHTML=data.qr_svg;content.prepend(qr);}
@@ -147,7 +151,111 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
     const raw=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');summary.textContent=t('technicalDetails');pre.className='operation-result';pre.textContent=JSON.stringify(data,null,2);raw.append(summary,pre);
     const close=document.createElement('button');close.type='button';close.dataset.operationClose='';close.textContent=t('close');content.replaceChildren(dl,raw,close);
   }
-  async function begin(action,button){if(working)return;open(action);const seq=sequence;opId=crypto.randomUUID();lastPayload=null;intent={action,id:button.dataset.id,kind:button.dataset.kind,operator:button.dataset.operator};
+  // ---- Organize: one flow for every category move — choose → preview → confirm → result, with undo.
+  // Previews are reads; the confirm sends the preview token, so nothing changes that was not shown.
+  let flow=null;
+  const caps=()=>getCaps(),can=action=>canAct(caps(),action);
+  const labelOf=(id,labels=caps().category_labels||{})=>categoryName(t,labels,id);
+  const options=(ids,current,labels)=>ids.map(c=>`<option value="${esc(c)}"${c===current?' selected':''}>${esc(labelOf(c,labels))}</option>`).join('');
+  const live=text=>{const node=document.getElementById('live-status');if(node)node.textContent=text;};
+  function busy(on){working=on;for(const c of content.querySelectorAll('button,input,select,textarea'))c.disabled=on||c.hasAttribute('data-keep-disabled');}
+  const fail=(e,seq)=>{if(seq!==sequence||!isActive())return;const node=content.querySelector('[data-operation-error]');const text=t(e.message);if(node)node.textContent=text;else content.insertAdjacentHTML('beforeend',`<p role="alert">${esc(text)}</p>`);live(text);};
+  const fresh=seq=>seq===sequence&&isActive()&&modal.open;
+  function selectionNote(sel){
+    if(sel.memory_ids)return `<p>${l('selectedMemories')} <strong>${sel.memory_ids.length}</strong></p>`;
+    const parts=[sel.query&&`“${esc(sel.query)}”`,sel.filter_category&&esc(labelOf(sel.filter_category)),sel.topic&&esc(sel.topic),sel.origin&&esc(t(sel.origin==='imported'?'importedOrigin':'otherOrigin'))].filter(Boolean);
+    return `<p>${l('allMatchingSelected')}</p><p class="muted">${parts.length?parts.join(' · '):l('allActiveMemories')}</p>`;
+  }
+  function chooseStep(initial='uncategorized'){
+    content.innerHTML=`<form data-organize-step="choose">${selectionNote(flow.selection)}<label>${l('moveToCategory')}<select name="category">${options(caps().taxonomy?.categories||[],initial)}</select></label>`+
+      (can('category.create')?`<details class="organize-new"><summary>${l('orCreateCategory')}</summary><label>${l('newCategoryName')}<input name="new_label" maxlength="40" autocomplete="off"></label></details>`:'')+
+      `<div class="actions"><button type="submit" class="primary">${l('previewChange')}</button><button type="button" data-operation-close>${l('cancel')}</button></div><p data-operation-error role="alert"></p></form>`;
+    syncAppearance();content.querySelector('select')?.focus();
+  }
+  const selectionParams=sel=>({...(sel.memory_ids?{memory_ids:sel.memory_ids}:{}),...(sel.query?{query:sel.query}:{}),...(sel.filter_category?{filter_category:sel.filter_category}:{}),...(sel.topic?{topic:sel.topic}:{}),...(sel.origin?{origin:sel.origin}:{}),...(sel.all?{all:true}:{})});
+  async function previewStep(seq,notice=''){
+    content.innerHTML=`<p role="status">${l('loading')}</p>`;
+    const sel=selectionParams(flow.selection),{memory_ids,filter_category,all,...rest}=sel;
+    const p=await api('memories',{part:'preview',target:flow.category,...rest,...(memory_ids?{memory_ids:memory_ids.join(',')}:{}),...(filter_category?{category:filter_category}:{}),...(all?{all:'true'}:{})});
+    if(!fresh(seq))return;flow.preview=p;flow.opId=crypto.randomUUID();
+    const warn=p.over_limit?'organizeOverLimit':p.truncated?'organizeTruncated':!p.matched?'SELECTION_EMPTY':!p.changed?'organizeNothing':null,ready=p.applicable&&p.changed>0;
+    content.innerHTML=`<div class="organize-preview">${notice?`<p class="policy-box" role="status">${l(notice)}</p>`:''}
+      <p class="organize-headline"><strong class="figure">${p.changed}</strong> ${l('organizeWillMove')} <strong>${esc(labelOf(p.category))}</strong></p>
+      ${p.unchanged||p.missing?`<ul class="organize-facts">${p.unchanged?`<li>${p.unchanged} ${l('organizeAlready')}</li>`:''}${p.missing?`<li>${p.missing} ${l('organizeMissing')}</li>`:''}</ul>`:''}
+      ${p.by_category.length?`<h3>${l('organizeFrom')}</h3><ul class="organize-breakdown">${p.by_category.map(c=>`<li><span class="category-pill" data-category="${esc(c.category)}">${esc(labelOf(c.category))}</span><strong>${c.count}</strong></li>`).join('')}</ul>`:''}
+      ${p.sample.length?`<h3>${l('organizeSample')}</h3><ol class="organize-sample">${p.sample.map(m=>`<li>${esc(m.content)}</li>`).join('')}</ol>`:''}
+      ${warn?`<p class="policy-box" role="alert">${l(warn)}</p>`:`<p class="muted">${l('organizeUndoHint')}</p>`}</div>
+      <form data-organize-step="confirm"><div class="actions"><button type="submit" class="primary"${ready?'':' disabled data-keep-disabled'}>${l('confirmMove')}</button><button type="button" data-organize-back>${l('goBack')}</button><button type="button" data-operation-close>${l('cancel')}</button></div><p data-operation-error role="alert"></p></form>`;
+    syncAppearance();content.querySelector('[data-organize-step="confirm"] button:not([disabled])')?.focus();
+  }
+  function resultStep(data){
+    const text=`${t('organizeDone')} ${data.changed} ${t('organizeDoneTo')} ${labelOf(data.category)}`;
+    content.innerHTML=`<div class="organize-result" role="status"><p class="organize-headline">${l('organizeDone')} <strong class="figure">${data.changed}</strong> ${l('organizeDoneTo')} <strong>${esc(labelOf(data.category))}</strong></p>${data.unchanged?`<p>${data.unchanged} ${l('organizeUnchangedResult')}</p>`:''}${data.replayed?`<p class="muted">${l('replayedResult')}</p>`:''}</div>
+      <div class="actions">${data.undo_available&&can('memory.organize_undo')?`<button type="button" data-organize-undo="${esc(data.batch_id)}">${l('undo')}</button>`:''}<a class="button" href="/app/memories?category=${encodeURIComponent(data.category)}">${l('showCategory')}</a><button type="button" class="primary" data-operation-close>${l('close')}</button></div><p data-operation-error role="alert"></p>`;
+    syncAppearance();live(text);content.querySelector('.primary')?.focus();
+  }
+  async function runUndo(seq,batch){
+    try{busy(true);const data=await mutate('memory.organize_undo',{batch_id:batch},flow.undoOp||(flow.undoOp=crypto.randomUUID()));if(!fresh(seq))return;await reload({});if(!fresh(seq))return;
+      content.innerHTML=`<div role="status"><p class="organize-headline">${l('undoResult')} <strong class="figure">${data.restored}</strong></p>${data.skipped_count?`<p>${data.skipped_count} ${l('undoSkipped')}</p>`:''}${data.restored_category?`<p>${l('categoryRestored')} <strong>${esc(labelOf(data.restored_category))}</strong></p>`:''}</div><div class="actions"><button type="button" class="primary" data-operation-close>${l('close')}</button></div>`;
+      syncAppearance();live(`${t('undoResult')} ${data.restored}`);
+    }catch(e){fail(e,seq);}finally{busy(false);}
+  }
+  async function manager(seq,message='',undoBatch=null){
+    content.innerHTML=`<p role="status">${l('loading')}</p>`;
+    const [tax,f]=await Promise.all([api('taxonomy'),api('memories',{part:'facets'}).catch(()=>null)]);if(!fresh(seq))return;
+    const counts=new Map((f?.categories||[]).map(c=>[c.category,c.count])),labels=tax.labels||{};
+    flow={kind:'manage',revision:tax.revision,categories:tax.categories,labels,counts};
+    content.innerHTML=`${message?`<p class="policy-box" role="status">${esc(message)}${undoBatch&&can('memory.organize_undo')?` <button type="button" data-organize-undo="${esc(undoBatch)}">${l('undo')}</button>`:''}</p>`:''}
+      <ul class="category-manager">${tax.categories.map(c=>`<li data-manage-category="${esc(c)}"><span class="category-pill" data-category="${esc(c)}">${esc(labelOf(c,labels))}</span><small>${counts.has(c)?counts.get(c):'—'} ${l('categoryCount')}</small>${c==='uncategorized'?`<small class="muted">${l('categoryFixed')}</small>`:`<span class="actions">${can('category.rename')?`<button type="button" class="quiet" data-category-rename="${esc(c)}">${l('renameCategory')}</button>`:''}${can('category.delete')?`<button type="button" class="quiet" data-category-delete="${esc(c)}">${l('deleteCategory')}</button>`:''}</span>`}</li>`).join('')}</ul>
+      ${can('category.create')?`<form data-organize-step="create" class="category-create"><label>${l('newCategoryName')}<input name="label" maxlength="40" required autocomplete="off"></label><button type="submit">${l('createCategory')}</button></form>`:''}
+      <p class="muted">${l('categoryManagerNote')}</p><p data-operation-error role="alert"></p><div class="actions"><button type="button" data-operation-close>${l('close')}</button></div>`;
+    syncAppearance();if(message)live(message);
+  }
+  async function managerWrite(seq,action,payload,done){
+    try{busy(true);const data=await mutate(action,{...payload,expected_revision:flow.revision},crypto.randomUUID());if(!fresh(seq))return;await reload({keepSelection:true});if(!fresh(seq))return;await done(data);}
+    catch(e){if(!fresh(seq))return;if(e.message==='SETTINGS_VERSION_CHANGED'){await manager(seq,t('SETTINGS_VERSION_CHANGED')).catch(error=>fail(error,seq));return;}fail(e,seq);}
+    finally{busy(false);}
+  }
+  async function organizeBegin(action,button){
+    open(action==='memory.organize'?'moveToCategory':action);const seq=sequence;intent=null;
+    try{
+      if(action==='category.manage')return await manager(seq);
+      if(action==='memory.organize_undo'){flow={kind:'undo',batch:button.dataset.id};
+        content.innerHTML=`<form data-organize-step="undo"><p>${l('undoNote')}</p><div class="actions"><button type="submit" class="primary">${l('undo')}</button><button type="button" data-operation-close>${l('cancel')}</button></div><p data-operation-error role="alert"></p></form>`;syncAppearance();return;}
+      const selection=button.dataset.id?{memory_ids:[button.dataset.id]}:getSelection();
+      if(selection.memory_ids&&(!selection.memory_ids.length||selection.memory_ids.length>100))throw new Error('INVALID_SELECTION');
+      flow={kind:'organize',selection};let current='uncategorized';
+      if(button.dataset.id){const meta=await api('memory-meta',{memory_id:button.dataset.id});if(!fresh(seq))return;current=meta.category;}
+      chooseStep(current);
+    }catch(e){if(!fresh(seq))return;content.innerHTML=`<p role="alert">${esc(t(e.message))}</p><button type="button" data-operation-close>${l('close')}</button>`;}
+  }
+  modal.addEventListener('submit',event=>{
+    const step=event.target.dataset?.organizeStep;if(!step||!flow)return;event.preventDefault();if(working)return;const seq=sequence,fd=new FormData(event.target);
+    if(step==='choose')void(async()=>{try{busy(true);const label=String(fd.get('new_label')||'').trim();flow.category=String(fd.get('category'));
+        if(label){const tax=await api('taxonomy');if(!fresh(seq))return;const created=await mutate('category.create',{label,expected_revision:tax.revision},crypto.randomUUID());if(!fresh(seq))return;
+          await reload({keepSelection:true});if(!fresh(seq))return;flow.category=created.category;}
+        await previewStep(seq);}catch(e){fail(e,seq);}finally{busy(false);}})();
+    if(step==='confirm')void(async()=>{try{busy(true);const data=await mutate('memory.organize',{category:flow.category,...selectionParams(flow.selection),preview_token:flow.preview.preview_token},flow.opId);
+        if(!fresh(seq))return;await reload({});if(!fresh(seq))return;resultStep(data);}
+      catch(e){if(!fresh(seq))return;if(e.message==='PREVIEW_CHANGED'){await previewStep(seq,'PREVIEW_CHANGED').catch(error=>fail(error,seq));return;}fail(e,seq);}finally{busy(false);}})();
+    if(step==='undo')void runUndo(seq,flow.batch);
+    if(step==='create')void managerWrite(seq,'category.create',{label:String(fd.get('label')||'')},data=>manager(seq,`${t('categoryCreated')}: ${data.label}`));
+    if(step==='rename')void managerWrite(seq,'category.rename',{category:event.target.dataset.category,label:String(fd.get('label')||'')},data=>manager(seq,`${t('categoryRenamed')}: ${data.label}`));
+    if(step==='delete')void managerWrite(seq,'category.delete',{category:event.target.dataset.category,move_to:String(fd.get('move_to'))},data=>manager(seq,`${t('categoryDeleted')} ${data.moved}`,data.batch_id));
+  });
+  modal.addEventListener('click',event=>{
+    if(!flow||working)return;const seq=sequence;
+    if(event.target.closest('[data-organize-back]')){chooseStep(flow.category);return;}
+    const undo=event.target.closest('[data-organize-undo]');if(undo){void runUndo(seq,undo.dataset.organizeUndo);return;}
+    if(event.target.closest('[data-manage-back]')){void manager(seq).catch(e=>fail(e,seq));return;}
+    const rename=event.target.closest('[data-category-rename]'),remove=event.target.closest('[data-category-delete]');
+    if(rename||remove){const id=(rename||remove).dataset[rename?'categoryRename':'categoryDelete'],row=content.querySelector(`[data-manage-category="${CSS.escape(id)}"]`);if(!row)return;
+      row.innerHTML=rename?`<form data-organize-step="rename" data-category="${esc(id)}"><label>${l('renameCategory')}<input name="label" maxlength="40" required autocomplete="off" value="${esc(labelOf(id,flow.labels))}"></label><div class="actions"><button type="submit" class="primary">${l('save')}</button><button type="button" data-manage-back>${l('cancel')}</button></div></form>`
+        :`<form data-organize-step="delete" data-category="${esc(id)}"><p><strong>${esc(labelOf(id,flow.labels))}</strong> · ${flow.counts.has(id)?flow.counts.get(id):'—'} ${l('categoryCount')}</p><label>${l('deleteCategoryNote')}<select name="move_to">${options(flow.categories.filter(c=>c!==id),'uncategorized',flow.labels)}</select></label><p class="muted">${l('deleteCategoryBoundary')}</p><div class="actions"><button type="submit" class="primary">${l('deleteAndMove')}</button><button type="button" data-manage-back>${l('goBack')}</button></div></form>`;
+      syncAppearance();row.querySelector('input,select')?.focus();}
+  });
+  const ORGANIZE_FLOW=['memory.organize','memory.organize_undo','category.manage'];
+  async function begin(action,button){if(working)return;if(ORGANIZE_FLOW.includes(action))return organizeBegin(action,button);open(action);const seq=sequence;opId=crypto.randomUUID();lastPayload=null;intent={action,id:button.dataset.id,kind:button.dataset.kind,operator:button.dataset.operator};
     try{
       let fields='',data=getData();
       if(action==='memory.create'){
@@ -241,10 +349,23 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
   async function importFile(fd){const file=fd.get('file');if(!file||file.size>16*1024*1024)throw new Error('IMPORT_FILE_TOO_LARGE');const doc=JSON.parse(await file.text());if(doc.format!=='mnemuron-personal-portable-v1'||!Array.isArray(doc.records)||!doc.records.length)throw new Error('INVALID_IMPORT');
     // Preflight every record before sending any chunk. No SQL, credentials or scopes from files are executable.
     for(const r of doc.records)if(typeof r.content!=='string'||r.content.length>4096||!r.content.trim())throw new Error('IMPORT_CONTENT_TOO_LONG');
-    let created=0,existing=0;
-    for(const [i,r] of doc.records.entries()){if(!isActive())throw new Error('STALE_ACCOUNT');try{const res=await mutate('storage.import',{format:doc.format,records:[r],confirm_personal_scope:true},`${opId}.${i}`);created+=res.created;existing+=res.existing;}
-      catch(e){throw new Error(`${t('importPartial')}: ${i}/${doc.records.length} · ${e.message}`);}}
-    return {status:'imported',created,existing,originals_overwritten:false};
+    // Up to 20 records per request (the Core limit), bounded by size. Each chunk commits atomically; a
+    // re-run of the same file reports already imported records as existing instead of duplicating them.
+    const chunks=[];let chunk=[],bytes=0;
+    for(const r of doc.records){const n=new TextEncoder().encode(JSON.stringify(r)).length;if(chunk.length&&(chunk.length>=20||bytes+n>40000)){chunks.push(chunk);chunk=[];bytes=0;}chunk.push(r);bytes+=n;}
+    if(chunk.length)chunks.push(chunk);
+    const status=document.createElement('p');status.setAttribute('role','status');status.dataset.importProgress='';content.querySelector('form')?.append(status);
+    let created=0,existing=0,done=0;
+    for(const [i,records] of chunks.entries()){if(!isActive())throw new Error('STALE_ACCOUNT');
+      for(let attempt=0;;attempt++){
+        try{const res=await mutate('storage.import',{format:doc.format,records,confirm_personal_scope:true},`${opId}.c${i}`);created+=res.created;existing+=res.existing;done+=records.length;status.textContent=`${t('importProgress')} ${done} / ${doc.records.length}`;break;}
+        catch(e){
+          // The console write limit is a fixed one-minute window and rejects before Core runs anything:
+          // wait it out and resend the same chunk under the same operation ID.
+          if(e.message==='RATE_LIMITED'&&attempt<3&&isActive()){status.textContent=`${t('importProgress')} ${done} / ${doc.records.length} · ${t('importRateWait')}`;await new Promise(r=>setTimeout(r,61000));continue;}
+          throw new Error(`${t('importPartial')}: ${done}/${doc.records.length} · ${t(e.message)} · ${t('importResumeNote')}`);
+        }}}
+    return {status:'imported',created,existing,total:doc.records.length,originals_overwritten:false};
   }
   modal.addEventListener('submit',async event=>{event.preventDefault();if(!intent||working)return;const fd=new FormData(event.target),action=intent.action;const seq=sequence;working=true;
     const controls=[...event.target.querySelectorAll('button,input,select,textarea')];controls.forEach(c=>c.disabled=true);
@@ -258,6 +379,6 @@ export function mountActions({api,mutate,getData,getCaps,reload,isActive}) {
     const inspection=event.target.closest('[data-inspect]');if(inspection){const keys={models:'kind',connections:'grant_id',core_connections:'credential_id',sessions:'session_id'};const key=keys[inspection.dataset.inspect];if(!key)return;const item=getData()[inspection.dataset.inspect]?.find(row=>String(row[key])===inspection.dataset.id);if(item){open('inspectDetails');inspectResult(item);}return;}
     const job=event.target.closest('[data-job-detail]');if(job){open('jobs');const seq=sequence;void api('jobs',{job_id:job.dataset.jobDetail}).then(data=>{if(seq===sequence&&modal.open&&isActive())inspectResult(data);}).catch(e=>{if(seq===sequence&&modal.open&&isActive())content.textContent=t(e.message);});}});
   modal.addEventListener('cancel',event=>{if(working)event.preventDefault();});
-  modal.addEventListener('close',()=>{sequence++;intent=null;opId=null;lastPayload=null;content.replaceChildren();returnFocus?.focus();returnFocus=null;});
-  return {clear(){sequence++;intent=null;opId=null;lastPayload=null;working=false;content.replaceChildren();modal.close();}};
+  modal.addEventListener('close',()=>{sequence++;intent=null;flow=null;opId=null;lastPayload=null;content.replaceChildren();returnFocus?.focus();returnFocus=null;});
+  return {clear(){sequence++;intent=null;flow=null;opId=null;lastPayload=null;working=false;content.replaceChildren();modal.close();}};
 }

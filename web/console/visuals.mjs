@@ -109,31 +109,31 @@ function distributionCategories(insights) {
 }
 
 /** Distribution ring: each arc is a real category share of active memories; the centre is the total. */
-function distribution(insights, t) {
+function distribution(insights, t, labels = {}) {
   const cats = distributionCategories(insights), total = cats.reduce((n, c) => n + c.count, 0);
   const R = 84, C = 2 * Math.PI * R, gap = cats.length > 1 ? 3 : 0; // square ends: a hairline of paper between arcs
   let offset = 0;
-  const arcs = cats.map((c, i) => { const len = Math.max(0.1, c.count / total * C - gap), arc = html`<circle class="arc hue-${i}" cx="110" cy="110" r="${R}" stroke-dasharray="${fixed(len)} ${fixed(C - len)}" stroke-dashoffset="${fixed(-offset)}"><title>${t(c.value)} · ${c.count}</title></circle>`; offset += c.count / total * C; return arc; });
+  const arcs = cats.map((c, i) => { const len = Math.max(0.1, c.count / total * C - gap), arc = html`<circle class="arc hue-${i}" cx="110" cy="110" r="${R}" stroke-dasharray="${fixed(len)} ${fixed(C - len)}" stroke-dashoffset="${fixed(-offset)}"><title>${categoryName(t, labels, c.value)} · ${c.count}</title></circle>`; offset += c.count / total * C; return arc; });
   return html`<figure class="distribution${cats.length ? '' : ' is-empty'}"><svg viewBox="0 0 220 220" role="img" data-i18n-aria-label="radarTitle" aria-label="${t('radarTitle')}" focusable="false">
     <circle class="ring-track" cx="110" cy="110" r="${R}"/><g class="arcs" transform="rotate(-90 110 110)">${arcs}</g>
     <text class="ring-total" x="110" y="108" text-anchor="middle">${total}</text><text class="ring-caption" x="110" y="132" text-anchor="middle" data-i18n="activeMemories">${t('activeMemories')}</text></svg>
     ${cats.length ? '' : html`<figcaption class="radar-empty">${i18n(t, 'radarEmpty')}</figcaption>`}</figure>`;
 }
-function distributionLegend(insights, t) {
+function distributionLegend(insights, t, labels = {}) {
   const cats = distributionCategories(insights), total = cats.reduce((n, c) => n + c.count, 0);
   if (!cats.length) return '';
-  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i>${i18n(t, c.value)}<strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
+  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i>${categoryText(t, labels, c.value)}<strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
 }
 
 /** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
-export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t)}) {
+export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t), labels = {}}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
   const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}">${i18n(t, title)}<strong>${count(key)}</strong></a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
   return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
       <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
         <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
-      ${distributionLegend(data.insights, t)}</div>${distribution(data.insights, t)}</section>
+      ${distributionLegend(data.insights, t, labels)}</div>${distribution(data.insights, t, labels)}</section>
   <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/jobs')}</div>
   <div class="home-grid">
     <section class="card stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
@@ -146,41 +146,73 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
     </aside></div>`);
 }
 
-/** Library: filters, a four-column table, and a pager. The detail opens in the side pane. */
-export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', categories = [], focusSources = false, readOnly = false, allowedActions = [], pagination = ''}) {
+/** Category display name: an account-defined name, otherwise the translated built-in ID. */
+export const categoryName = (t, labels, id) => (labels && typeof labels[id] === 'string' && labels[id]) || t(id);
+// Built-in IDs translate with the interface language; account-defined names are user text and never do.
+const categoryText = (t, labels, id) => labels?.[id] ? html`<span>${labels[id]}</span>` : i18n(t, id);
+export const SELECTION_LIMIT = 100;
+
+function libraryFacets(t, {facets, labels, category, topic, origin, canManage, canUndo}) {
+  if (!facets) return html`<aside class="library-facets" data-i18n-aria-label="categoriesFacet" aria-label="${t('categoriesFacet')}"><p class="muted" role="status">${i18n(t, 'facetsUnavailable')}</p></aside>`;
+  const item = (facet, value, label, count, current) => html`<li><button type="button" class="facet-item" data-facet="${facet}" data-value="${value}" aria-pressed="${String(current === value)}"><span class="facet-label">${label}</span><span class="facet-count">${count}</span></button></li>`;
+  const total = facets.statuses?.active ?? 0;
+  const batches = (facets.recent_batches || []).slice(0, 5);
+  return html`<aside class="library-facets" data-i18n-aria-label="categoriesFacet" aria-label="${t('categoriesFacet')}">
+    <section class="facet-group"><header class="facet-head">${i18n(t, 'categoriesFacet', 'h2')}${canManage ? html`<button type="button" class="quiet facet-manage" data-console-action="category.manage">${i18n(t, 'manageCategories')}</button>` : ''}</header>
+      <ul class="facet-list">${item('category', '', i18n(t, 'allCategories'), total, category)}${(facets.categories || []).map(c => item('category', c.category, categoryText(t, labels, c.category), c.count, category))}</ul></section>
+    ${facets.topics?.length ? html`<section class="facet-group">${i18n(t, 'topicsFacet', 'h2')}<ul class="facet-list">${facets.topics.slice(0, 12).map(x => item('topic', x.topic, html`<span>${x.topic}</span>`, x.count, topic))}</ul></section>` : ''}
+    ${facets.origins?.imported ? html`<section class="facet-group">${i18n(t, 'originFacet', 'h2')}<ul class="facet-list">${item('origin', 'imported', i18n(t, 'importedOrigin'), facets.origins.imported, origin)}${item('origin', 'other', i18n(t, 'otherOrigin'), facets.origins.other, origin)}</ul></section>` : ''}
+    <section class="facet-group recent-changes">${i18n(t, 'recentChanges', 'h2')}${batches.length ? html`<ol class="batch-list">${batches.map(b => html`<li data-batch="${b.batch_id}">
+      <span>${i18n(t, 'batchKind_' + b.kind)} · ${b.changed} → ${b.deleted_category ? html`<s>${b.deleted_label || t(b.deleted_category)}</s> → ` : ''}${categoryText(t, labels, b.category)}</span>
+      <small><time>${formatDate(b.created_at)}</time>${b.undone_at ? html` · ${i18n(t, 'undone')}` : ''}</small>
+      ${b.undoable && canUndo ? html`<button type="button" class="quiet" data-console-action="memory.organize_undo" data-id="${b.batch_id}">${i18n(t, 'undo')}</button>` : ''}</li>`)}</ol>` : i18n(t, 'noRecentChanges', 'p')}</section>
+  </aside>`;
+}
+
+/** Library: facets, filters, a four-column table, one organize toolbar and a pager. The detail opens in the side pane. */
+export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', topic = '', origin = '', categories = [], labels = {}, facets, selected = [], selectAll = false, focusSources = false, readOnly = false, allowedActions = [], pagination = ''}) {
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
+  const categoryOption = value => labels?.[value] ? html`<option value="${value}"${value === category ? trusted(' selected') : ''}>${labels[value]}</option>` : option(value, value, category);
   const rows = data.results || [];
-  const batchActions = [['memory.batch_classify','batchClassify'],['memory.batch_retract','batchRetract']].filter(([action]) => allowedActions.includes(action));
+  const chosen = new Set(selected);
+  const organize = allowedActions.includes('memory.organize');
+  // One way to file memories: Move to category (preview → confirm → undo). Older credentials keep batch classify.
+  const batchActions = [organize ? ['memory.organize', 'moveToCategory'] : ['memory.batch_classify', 'batchClassify'], ['memory.batch_retract', 'batchRetract']].filter(([action]) => allowedActions.includes(action));
   const selectable = batchActions.length > 0 && rows.some(m => m.status === 'active');
-  const selection = selectable ? html`<div class="memory-selection" data-memory-selection>
-    <p role="status" aria-live="polite">${i18n(t,'selectedMemories')} <strong data-selection-count>0</strong> / 50</p>
-    <div class="actions">${batchActions.map(([action,label]) => html`<button type="button" data-console-action="${action}" disabled>${i18n(t,label)}</button>`)}<button type="button" class="quiet" data-clear-selection disabled>${i18n(t,'clearSelection')}</button></div></div>` : '';
+  const count = selectAll ? null : chosen.size;
+  const canSelectAll = organize && searchMode === 'lexical' && (status === 'active' || !status);
+  const selection = selectable || selectAll ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
+    <p role="status" aria-live="polite">${selectAll ? i18n(t, 'allMatchingSelected') : html`${i18n(t, 'selectedMemories')} <strong data-selection-count>${count}</strong> / ${organize ? SELECTION_LIMIT : 50}`}</p>
+    <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${(selectAll ? action !== 'memory.organize' : !count) ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}${canSelectAll && !selectAll ? html`<button type="button" class="quiet" data-select-all>${i18n(t, 'selectAllMatching')}</button>` : ''}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
+  const meta = m => html`${m.topic ? html`<button type="button" class="topic-chip" data-facet="topic" data-value="${m.topic}">${m.topic}</button>` : ''}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
-    <tbody>${rows.map(m => html`<tr><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}" data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></div></td>
-      <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${t(m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
-    : emptyState(t);
-  return String(html`<form class="toolbar memory-filters" id="search-form" role="search">
+    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}"><span class="memory-text">${preview(m.content || m.summary || m.memory_id)}</span>${typeChip(t, m.memory_type || 'fact')}</button></div>${m.topic || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
+      <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${categoryName(t, labels, m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
+    : emptyState(t, query || category || topic || origin || (status && status !== 'all') ? 'emptyFiltered' : 'empty');
+  const chips = [['topic', topic, topic], ['origin', origin, origin ? t(origin === 'imported' ? 'importedOrigin' : 'otherOrigin') : '']].filter(([, value]) => value);
+  return String(html`<div class="library-layout">${facets !== undefined ? libraryFacets(t, {facets, labels, category, topic, origin, canManage: allowedActions.includes('category.create'), canUndo: allowedActions.includes('memory.organize_undo')}) : ''}<div class="library-main"><form class="toolbar memory-filters" id="search-form" role="search">
     <label class="query-field"><span class="sr-only" data-i18n="query">${t('query')}</span><span class="query-input">${svg('search')}<input name="query" value="${query}" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"></span></label>
     <label class="filter-mode">${i18n(t, 'searchMode')}<select name="search_mode">${['lexical', 'hybrid', 'semantic'].map(v => option(v, v, searchMode))}</select></label>
-    <label class="filter-category">${i18n(t, 'category')}<select name="category">${option('', 'allCategories', category)}${categories.map(v => option(v, v, category))}</select></label>
-    <label class="filter-status">${i18n(t, 'status')}<select name="status">${option('', 'allStatuses', status)}${['active', 'superseded', 'retracted'].map(v => option(v, v, status))}</select></label>
+    <label class="filter-category">${i18n(t, 'category')}<select name="category">${option('', 'allCategories', category)}${categories.map(categoryOption)}</select></label>
+    <label class="filter-status">${i18n(t, 'status')}<select name="status">${['active', 'superseded', 'retracted'].map(v => option(v, v, status || 'active'))}${option('all', 'allStatuses', status)}</select></label>
     <div class="filter-actions"><button class="primary filter-submit" type="submit">${svg('search')}${i18n(t, 'search')}</button><button type="button" class="filter-reset quiet" data-reset-filters>${i18n(t, 'resetFilters')}</button></div></form>
+  ${chips.length ? html`<div class="filter-chips">${chips.map(([facet, , label]) => html`<span class="filter-chip">${label}<button type="button" class="quiet" data-clear-facet="${facet}" data-i18n-aria-label="clearFilter" aria-label="${t('clearFilter')}">×</button></span>`)}</div>` : ''}
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
     ${selection}<div id="memory-rows">${table}</div>
-    <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section>`);
+    <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section></div></div>`);
 }
 
-export function summariesView(t, {data, pagination = ''}) {
+export function summariesView(t, {data, pagination = '', labels = {}}) {
   const cats = (data.categories || []).filter(c => safeCount(c.count) !== null);
   const max = Math.max(1, ...cats.map(c => c.count));
   const summaries = data.summaries || [];
   return String(html`<div class="split">
-  <section class="index-panel">${i18n(t, 'summaryIndex', 'h2')}${cats.length ? html`<ul class="category-index">${cats.map(c => html`<li><a class="category-link" href="/app/memories?category=${encodeURIComponent(c.category)}&amp;status=active"><span>${t(c.category)}</span>
+  <section class="index-panel">${i18n(t, 'summaryIndex', 'h2')}${cats.length ? html`<ul class="category-index">${cats.map(c => html`<li><a class="category-link" href="/app/memories?category=${encodeURIComponent(c.category)}&amp;status=active"><span>${categoryName(t, labels, c.category)}</span>
     <svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${fixed(Math.max(3, c.count / max * 100))}" height="4" rx="2"/></svg><strong>${c.count}</strong></a></li>`)}</ul>` : emptyState(t)}</section>
   <section class="list-panel">${i18n(t, 'summaryList', 'h2')}${summaries.length ? html`<ol class="summary-list">${summaries.map(s => {
-    const body = html`<span class="summary-title">${t(s.category)}</span><span class="memory-meta"><span>${i18n(t, 'revisions')} ${s.revision}</span><span>${i18n(t, 'sourceCount')} ${s.coverage}</span><code>${s.summary_id}</code></span>`;
+    const body = html`<span class="summary-title">${categoryName(t, labels, s.category)}</span><span class="memory-meta"><span>${i18n(t, 'revisions')} ${s.revision}</span><span>${i18n(t, 'sourceCount')} ${s.coverage}</span><code>${s.summary_id}</code></span>`;
     return html`<li class="summary-row">${s.status === 'current'
       ? html`<button type="button" class="memory-link" data-summary="${s.summary_id}" data-revision="${s.revision}">${body}</button>`
       : html`<div class="memory-link">${body}<small>${i18n(t, 'summaryNotCurrent')} · <a href="/app/memories?category=${encodeURIComponent(s.category)}">${i18n(t, 'browseMemories')}</a></small></div>`}${html`<span class="tag">${t(s.status)}</span>`}</li>`;
@@ -248,13 +280,13 @@ export const featureMap = {
     {id: 'MEM-03', status: 'live', write: ['memory.create']},
     {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
     {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity', 'memory.visibility']},
-    {id: 'MEM-06', status: 'live', write: ['memory.batch_classify', 'memory.batch_retract']},
+    {id: 'MEM-06', status: 'live', read: ['memories'], write: ['memory.organize', 'memory.organize_undo', 'memory.batch_classify', 'memory.batch_retract']},
     {id: 'MEM-07', status: 'live', read: ['memory-versions']},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},
     {id: 'SUM-02', status: 'live', write: ['jobs.schedule']},
-    {id: 'SUM-03', status: 'live', read: ['taxonomy'], write: ['taxonomy.save']},
+    {id: 'SUM-03', status: 'live', read: ['taxonomy'], write: ['category.create', 'category.rename', 'category.delete', 'taxonomy.save']},
   ],
   tasks: [
     {id: 'TSK-01', status: 'live', read: ['projects']},
@@ -456,9 +488,9 @@ function featureBody(t,id,data,caps){
   const inspect=(v,p,label)=>html`<button type="button" data-feature-read="${v}" data-feature-params="${JSON.stringify(p)}">${i18n(t,label)}</button>`;
   const table=(rows,cols)=>rows?.length?html`<div class="table-scroll"><table><thead><tr>${cols.map(([key])=>html`<th>${i18n(t,key)}</th>`)}</tr></thead><tbody>${rows.map(r=>html`<tr>${cols.map(([,get])=>html`<td>${get(r)}</td>`)}</tr>`)}</tbody></table></div>`:emptyState(t);
   if(id==='OVW-03')return html`<dl class="metadata-grid">${[['failed_jobs','failedJobs','jobs'],['stale_summaries','staleSummaries','summaries'],['pending_reconciliation','pendingReconciliation','tasks']].map(([k,label,p])=>html`<dt>${i18n(t,label)}</dt><dd><a href="/app/${p}">${d.counts[k]}</a></dd>`)}</dl>`;
-  if(id==='MEM-06')return sectionNote(t,caps.allowed_actions?.some(a=>['memory.batch_classify','memory.batch_retract'].includes(a))?'batchNote':'batchUnavailable');
+  if(id==='MEM-06')return sectionNote(t,caps.allowed_actions?.includes('memory.organize')?'organizeNote':caps.allowed_actions?.some(a=>['memory.batch_classify','memory.batch_retract'].includes(a))?'batchNote':'batchUnavailable');
   if(id==='MEM-07')return sectionNote(t,'compareOpenDetail');
-  if(id==='SUM-03')return html`<p>${d.categories.map(c=>html`<span class="tag">${t(c)}</span>`)}</p><p>${i18n(t,'revisions')} ${d.revision}</p>${act('taxonomy.save','configure')}`;
+  if(id==='SUM-03')return html`<p>${d.categories.map(c=>html`<span class="tag">${categoryName(t,d.labels,c)}</span>`)}</p><p>${i18n(t,'revisions')} ${d.revision}</p><div class="actions">${caps.allowed_actions?.includes('category.create')?html`<button type="button" data-console-action="category.manage">${i18n(t,'manageCategories')}</button>`:''}${act('taxonomy.save','editCategoryIds')}</div>`;
   if(id==='TSK-02')return html`${table(d.tasks,[['taskTitle',r=>r.title],['status',r=>t(r.status)],['revisions',r=>r.canonical_version],['actions',r=>inspect('task-branches',{task_id:r.task_id},'sourceBranch')]])}${d.next_offset!=null?inspect('task-branches',{offset:d.next_offset},'next'):''}`;
   if(id==='TSK-03')return table(data.projects,[['projectName',r=>r.name],['actions',r=>inspect('project-context',{project_id:r.project_id},'generatePreview')]]);
   if(id==='TSK-04')return table(data.features?.['task-branches']?.tasks,[['taskTitle',r=>r.title],['actions',r=>html`${inspect('task-checkpoints',{task_id:r.task_id},'checkpoint')} ${inspect('task-reconciliation',{task_id:r.task_id},'proposal')}`]]);

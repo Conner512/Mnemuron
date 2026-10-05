@@ -2,6 +2,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import readline from 'node:readline';
+import {createHash} from 'node:crypto';
 import http from 'node:http';
 import {generate} from 'otplib';
 import {fixture} from '../fixture.mjs';
@@ -82,6 +83,17 @@ lines.on('line',async line=>{
    else if(req.state==='revoked')ids.store.revoke({subject:o.account.subject,clientId:r.client_id});
    reply={done:true};
   }
+  // Read-only integrity evidence for organize acceptance: schema version and row counts, never content.
+  if(req.command==='integrity'){const db=core.store.db,n=(sql,...a)=>db.prepare(sql).get(...a).n;
+   reply={user_version:db.prepare('PRAGMA user_version').get().user_version,users:owners.map(x=>({memories:n('SELECT COUNT(*) n FROM memories WHERE user_id=?',x.account.user_id),
+    active:n("SELECT COUNT(*) n FROM memories WHERE user_id=? AND status='active'",x.account.user_id),revisions:n('SELECT COUNT(*) n FROM memory_revisions WHERE user_id=?',x.account.user_id),
+    overrides:n('SELECT COUNT(*) n FROM memory_category_overrides WHERE user_id=?',x.account.user_id),denials:n('SELECT COUNT(*) n FROM memory_web_denials WHERE user_id=?',x.account.user_id),
+    // Original memory fields (content, type, lifecycle, topic, scope, dates) must never change by organizing.
+    fields_sha256:createHash('sha256').update(JSON.stringify(db.prepare('SELECT memory_id,content,memory_type,status,topic,scope,source,created_at,updated_at FROM memories WHERE user_id=? ORDER BY memory_id').all(x.account.user_id))).digest('hex')}))};
+  }
+  if(req.command==='keep-private'){const writer=core.issue(o.account.user_id,'synthetic-private-'+Date.now());const m=core.store.saveMemory(writer.auth,{scope:'user',content:'Synthetic keep-private memory for organize acceptance',topic:'privacy-check'}).memory;
+   core.store.webVisibility.keepPrivate(o.account.user_id,m.memory_id,core.store.revisions.latest(o.account.user_id,m.memory_id));reply={memory_id:m.memory_id};}
+  if(req.command==='web-visible'){reply={visible:core.store.webVisibility.visible({user_id:o.account.user_id,agent_id:'chatgpt-web',scopes:['memory:read']},req.memory_id),denied:core.store.webVisibility.denied(o.account.user_id,req.memory_id)};}
   if(req.command==='invitation')reply=ids.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-browser-operator'});
   if(req.command==='codes')reply={codes:o.codes};
   if(req.command==='cookies'){o.console=ids.newSession('console',{accountId:o.account.account_id});reply={token:o.console.token};}
