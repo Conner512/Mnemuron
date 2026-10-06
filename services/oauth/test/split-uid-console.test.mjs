@@ -22,14 +22,15 @@ const REAL_UIDS=process.env.MNEMURON_SPLIT_UIDS?.split(':').map(Number);
 const ISOLATED=true;
 const PHASE_MODULE=new URL('../src/isolated-maintenance.mjs',import.meta.url).pathname;
 /** Everything a real-UID run needs before any fixture is built; returns readable problems instead of failing later. */
-export function realUidPrerequisites(uids,{uid=process.getuid(),tmpdir=os.tmpdir(),files=[[PHASE_MODULE,0o004],[process.execPath,0o001]]}={}){
+// `boundary` limits the ancestor walk to a synthetic tree; real-UID runs leave it unset and check every ancestor.
+export function realUidPrerequisites(uids,{uid=process.getuid(),tmpdir=os.tmpdir(),files=[[PHASE_MODULE,0o004],[process.execPath,0o001]],boundary}={}){
   const problems=[];
   if(uid!==0)problems.push('run as root (the coordinator launches each phase under its service uid)');
   if(!Array.isArray(uids)||uids.length!==3||!uids.every(n=>Number.isInteger(n)&&n>0)||new Set(uids).size!==3)problems.push('MNEMURON_SPLIT_UIDS needs three distinct non-root uids oauth:core:web');
   if((fs.statSync(tmpdir).mode&0o001)===0)problems.push(`temporary directory ${tmpdir} is not traversable by service uids; set TMPDIR=/tmp`);
   for(const [file,bit] of files){
     if((fs.statSync(file).mode&bit)===0)problems.push(`${file} is not ${bit===0o004?'readable':'executable'} by service uids`);
-    for(let dir=path.dirname(file);dir!==path.dirname(dir);dir=path.dirname(dir))if((fs.statSync(dir).mode&0o001)===0){problems.push(`${dir} is not traversable by service uids`);break;}}
+    for(let dir=path.dirname(file);dir!==path.dirname(dir);dir=path.dirname(dir)){if((fs.statSync(dir).mode&0o001)===0){problems.push(`${dir} is not traversable by service uids`);break;}if(dir===boundary)break;}}
   return problems;
 }
 if(REAL_UIDS){const problems=realUidPrerequisites(REAL_UIDS);assert.deepEqual(problems,[],'real-UID prerequisites: '+problems.join('; '));}
@@ -76,13 +77,18 @@ test('SPLIT-CONFIG: real-UID construction is checked without root: prerequisites
  const open=fs.mkdtempSync(path.join(os.tmpdir(),'synthetic-open-'));t.after(()=>fs.rmSync(open,{recursive:true,force:true}));
  fs.chmodSync(open,0o755);const module=path.join(open,'phase.mjs');fs.writeFileSync(module,'');fs.chmodSync(module,0o644);
  const closed=path.join(open,'private');fs.mkdirSync(closed,{mode:0o700});
- const check=(uids,o={})=>realUidPrerequisites(uids,{uid:0,tmpdir:open,files:[[module,0o004]],...o});
+ // Synthetic files only: the walk stops at the fixture root, so the host's own temporary-directory parents do not matter.
+ const check=(uids,o={})=>realUidPrerequisites(uids,{uid:0,tmpdir:open,files:[[module,0o004]],boundary:open,...o});
  assert.deepEqual(check([61001,61002,61003]),[]);
  assert.match(check([61001,61001,61003]).join(),/three distinct non-root uids/);assert.match(check([0,61002,61003]).join(),/three distinct non-root uids/);
  assert.match(check([61001,61002,61003],{uid:1000}).join(),/run as root/);
  assert.match(check([61001,61002,61003],{tmpdir:closed}).join(),/TMPDIR=\/tmp/);
  const hidden=path.join(closed,'phase.mjs');fs.writeFileSync(hidden,'');fs.chmodSync(hidden,0o644);
  assert.match(check([61001,61002,61003],{files:[[hidden,0o004]]}).join(),/not traversable/);
+ // Without a boundary (the real-UID gate) every ancestor is checked: a closed ancestor above the fixture is reported.
+ const nested=path.join(closed,'open-inside');fs.mkdirSync(nested);fs.chmodSync(nested,0o755);const deep=path.join(nested,'phase.mjs');fs.writeFileSync(deep,'');fs.chmodSync(deep,0o644);
+ assert.match(realUidPrerequisites([61001,61002,61003],{uid:0,tmpdir:open,files:[[deep,0o004]]}).join(),new RegExp(`${closed.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')} is not traversable`));
+ assert.match(check([61001,61002,61003],{files:[[deep,0o004]],boundary:nested}).join(),/^$/);
  // The production worker-config validation (distinct non-root identities, fixed private paths) for the real-UID layout.
  const {validateWorkerConfig}=await import('../src/isolated-maintenance.mjs');
  const worker=(a,c,w)=>({config_version:'isolated-identity-worker-v1',auth:{uid:a,gid:a,config_file:path.join(open,'auth.json'),credential_directory:path.join(open,'console-keys')},
