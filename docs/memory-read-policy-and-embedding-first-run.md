@@ -200,7 +200,9 @@ Each account sets a daily and a total call limit for each model kind (`organizer
   today under the account's model profiles carry into the daily count. The organizer total counts
   from the deployment of this change (`counting_since`).
 - **Daily is per UTC day, per account and kind**, across model changes. First-run manifest build
-  calls stay outside the daily count and inside the total.
+  calls stay outside the daily count and inside the total. A daily limit of 0 therefore does not
+  stop a confirmed manifest build; to stop every embedder call, set the total (for example to the
+  current used count) or disable the model.
 - **Transitions.** A new or lower limit applies to the next call, against the existing counts.
   Lowering below the current usage is accepted and shown as exhausted (`DAILY_BUDGET_EXHAUSTED`,
   `TOTAL_BUDGET_EXHAUSTED`). The next call is then refused with `BUDGET_EXHAUSTED` before
@@ -284,7 +286,10 @@ The retained profile still follows current consent:
   `console_vector_profiles` and `memory_vector_manifest`, and for owner call limits
   `console_model_quotas`, `console_model_usage` and `console_model_usage_daily`. Rolling the
   code back ignores the call-limit tables, so the legacy caps apply again (for example 25 per day
-  and 150 in total). The schema version is unchanged and no
+  and 150 in total) against the first-run record, which kept counting: once it has passed its
+  total, every embedder call fails with `BUDGET_EXHAUSTED` immediately after the rollback.
+  Likewise a `vector.prepare` made under a manual total may have recorded a `budget_calls`
+  smaller than its manifest, which the old code would enforce. The schema version is unchanged and no
   existing row is rewritten.
 - **Deploy Core and the console BFF together.** They share the action contract.
 - **Code rollback to 330c7e2:**

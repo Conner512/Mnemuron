@@ -29,7 +29,7 @@ export class ConsoleModels {
     if(row){if(!manual&&row.used>=row.total)fail('BUDGET_EXHAUSTED');this.db.prepare('UPDATE console_vector_budget SET used=used+1 WHERE user_id=?').run(user);}
     return build?true:manual?'manual':false;
   }
-  budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:row.total-row.used}:null;}
+  budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:Math.max(0,row.total-row.used)}:null;}
   /** Calls left today for a query on this embedder profile: the cap and counters the query reserve checks. Manifest
    * build calls are outside the daily cap. Null when no configuration for the profile is known or no daily limit is set. */
   dailyRemaining(user,profile){

@@ -102,7 +102,7 @@ test('QUOTA-02: the deployed shape (103 manifest, 105 used of 150, daily 25, not
   await f.act('vector.activate',{generation:p.generation});
   for(let n=0;n<50;n++){const r=await f.hybrid();assert.equal(r.retrieval.effective_mode,'hybrid',`query ${n+1}`);assert.equal(r.results[0].memory_id,network);}
   assert.equal(f.calls.length,155);q=f.view('embedder');assert.equal(q.total.used,155);assert.equal(q.daily.used,52,'2 probes + 50 queries; build calls stay outside the daily count');
-  assert.equal(f.status().first_run.budget.used,155,'the first-run audit counter keeps counting past its old total');
+  assert.deepEqual([f.status().first_run.budget.used,f.status().first_run.budget.remaining],[155,0],'the first-run record keeps counting past its old total; remaining never goes negative');
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memory_vector_documents WHERE memory_id=?').get(later).n,0,'new record not indexed: no catch-up');
   const usage=f.service.features.read(f.a.auth,'model-usage',{}).models.find(m=>m.kind==='embedder');
   assert.deepEqual([usage.limit_mode,usage.limit,usage.remaining,usage.total.used,usage.total.limit,usage.first_run_build_calls],['manual',null,null,155,null,103]);
@@ -157,7 +157,7 @@ test('QUOTA-04: organizer limits replace the model daily ceiling; a blocked job 
   assert.ok(f.service.processing(f.a.auth.user_id).summary.blockers.includes('TOTAL_BUDGET_EXHAUSTED'));
 });
 
-test('QUOTA-05: concurrent in-flight queries cannot overshoot an enabled daily or total cap',async t=>{
+test('QUOTA-05: overlapping in-flight queries are reserved before sending, so they cannot overshoot an enabled daily or total cap',async t=>{
   const f=await setup(t);await f.create('Synthetic network router decision.');
   await f.save('embedder');await f.firstRun(20);const start=f.calls.length;
   await f.quota('embedder',null,start+3);
@@ -196,4 +196,18 @@ test('QUOTA-07: with a manual embedder total, prepare checks that total instead 
   await f.quota('embedder',null,null);
   const p=await f.act('vector.prepare',{budget_calls:3});assert.equal(p.status,'prepared');assert.equal(p.manifest.count,5);
   assert.equal(f.calls.length,0);assert.equal(f.status().first_run.state,'building');assert.equal(f.status().first_run.serving,false);
+});
+
+test('QUOTA-08: upgrading a database that already has 105 of 150 first-run calls seeds 105 and today\'s calls once, without double counting',async t=>{
+  const f=await setup(t);for(let n=0;n<103;n++)await f.create(`Synthetic acceptance note ${n}.`);
+  await f.save('embedder',{daily_requests:25});await f.firstRun(150,{activate:false});assert.equal(f.calls.length,105);
+  // The deployed state before this change: the first-run record exists, the new counters do not.
+  for(const table of ['console_model_usage','console_model_usage_daily'])f.store.db.prepare(`DELETE FROM ${table}`).run();
+  let q=f.view('embedder');assert.deepEqual([q.mode,q.total.used,q.total.limit],['legacy',105,150]);
+  const before=sideState(f.store.db);await f.quota('embedder',null,null);assert.deepEqual(sideState(f.store.db),before);
+  q=f.view('embedder');assert.deepEqual([q.total.used,q.daily.used],[105,2],'105 in total; today only the 2 probes (build calls stay outside the daily count)');
+  assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM console_model_usage').get().n,0,'reading never creates or seeds a counter');
+  // The first real call seeds once and counts once.
+  await f.act('models.test',{kind:'embedder'});q=f.view('embedder');
+  assert.deepEqual([q.total.used,q.daily.used,f.status().first_run.budget.used,f.calls.length],[106,3,106,106]);
 });
