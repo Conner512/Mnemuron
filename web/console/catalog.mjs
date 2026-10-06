@@ -663,7 +663,7 @@ Object.assign(catalog['zh-CN'],{
  connCountsNote:'已授权连接按有效 OAuth 授权或可用的 MCP／Agent 凭证统计，不代表在线或已验证。授权失败的配置仍保留在列表中；只有记忆工具调用成功才算验证通过。',
  connStatus_callback:'还缺有效配置：点「修改配置」，核对 ChatGPT 显示的回调地址。',connStatus_provisioning:'正在等待服务器发布连接身份，尚不能授权。页面将短时自动刷新；长期未完成时请联系管理员。',
  connStatus_ready:'已就绪：在 ChatGPT 中点击「连接」完成授权。',connStatus_authorized:'已授权：在 ChatGPT 中使用一次记忆功能即可完成验证。',connStatus_verified:'已验证：此连接已有成功的记忆工具调用记录。',
- connTechnical:'技术参数',connChatGPTAddHint:'要在 ChatGPT 新建插件或需要读写权限，可以直接在网页上生成专属凭证：',
+ connTechnical:'技术参数',connChatGPTAddHint:'需要新建 ChatGPT 插件，或需要读写权限时，可以在这里生成专属凭证。现有授权不受影响。',
  connChatGPTNote:'在网页上生成专属的 OAuth 凭证，按步骤填到 ChatGPT 的「新建插件」里。',
  featSYS01:'平台开关',featSYS01Note:'服务器当前生效的控制台写操作、账户管理、连接管理和恢复策略。',
  featSYS02:'服务健康',featSYS02Note:'核心服务、网页网关、认证服务、整理 Worker 和向量索引的就绪状态。',
@@ -787,7 +787,7 @@ Object.assign(catalog.en,{
  connCountsNote:'Authorized connections counts current OAuth grants or usable MCP/agent credentials, not online or verified clients. Failed authorization does not delete saved configurations; verification requires a successful memory tool call.',
  connStatus_callback:'Configuration incomplete: choose Configure and check the callback shown by ChatGPT.',connStatus_provisioning:'Waiting for the server to publish the connection identity; authorization is not available yet. Status refreshes briefly; contact the administrator if it remains pending.',
  connStatus_ready:'Ready: choose Connect in ChatGPT to authorize.',connStatus_authorized:'Authorized: use a memory feature once in ChatGPT to verify.',connStatus_verified:'Verified: this connection has a successful memory tool call on record.',
- connTechnical:'Technical details',connChatGPTAddHint:'To set up a new ChatGPT plugin or get read-write access, generate dedicated credentials here:',
+ connTechnical:'Technical details',connChatGPTAddHint:'To add a new ChatGPT plugin, or to get read & write access, generate dedicated credentials here. Existing grants are not affected.',
  connChatGPTNote:'Generate dedicated OAuth credentials on the web and fill them into ChatGPT’s “New plugin” form step by step.',
  featSYS01:'Platform switches',featSYS01Note:'Which console writes, account management, connection management and recovery policy the server has in effect.',
  featSYS02:'Service health',featSYS02Note:'Readiness of the core service, web gateway, auth service, organizer worker and vector index.',
@@ -1201,3 +1201,19 @@ Object.assign(catalog.en,{'models.quota':'Set call limits',setCallLimits:'Call l
  FIRST_RUN_BUDGET_EXHAUSTED:'The first-run total call budget is used up; semantic search is unavailable. This budget is never reset; a manual total under “Call limits” can replace it.',
  firstRunBudgetField:'Total call budget (1–150, covering tests, build, retries and queries; a manual total limit, when set, applies instead)',
  firstRunSendNote:'The build sends the text of each listed record to the configured embedding service; secret records are never sent. When a call limit is reached, every embedding call stops: nothing retries or catches up automatically.'});
+
+// Connection management: named wizard steps, guided choices and explicit destructive actions.
+Object.assign(catalog['zh-CN'],{
+ connNewChatGPT:'新建 ChatGPT 连接',connManageTitle:'管理连接',connApplyFilters:'应用筛选',
+ connStepsLabel:'新建连接的步骤',connStepApp:'选择应用',connStepDetails:'填写信息',connStepVerify:'验证身份',connStepSave:'保存凭证',
+ connRecommended:'推荐',connNeedLabel:'需要准备',
+ connChatGPTNeed:'可以添加自定义插件（连接器）的 ChatGPT 账户',connGenericNeed:'支持 Streamable HTTP 和自定义请求头的 MCP 客户端',
+ connDangerZone:'停用或撤销',connDangerNote:'以下操作会立即切断这个连接的访问。停用后可以重新启用；撤销不能恢复。已保存的记忆不会被删除。',
+ connConfirm_disable:'确认停用',connConfirm_revoke:'确认撤销连接',connConfirm_grant:'确认撤销授权'});
+Object.assign(catalog.en,{
+ connNewChatGPT:'New ChatGPT connection',connManageTitle:'Manage connection',connApplyFilters:'Apply filters',
+ connStepsLabel:'New connection steps',connStepApp:'Choose app',connStepDetails:'Details',connStepVerify:'Verify',connStepSave:'Save credential',
+ connRecommended:'Recommended',connNeedLabel:'You need',
+ connChatGPTNeed:'A ChatGPT account that can add custom plugins (connectors)',connGenericNeed:'An MCP client with Streamable HTTP and custom request headers',
+ connDangerZone:'Disable or revoke',connDangerNote:'These actions cut off this connection immediately. A disabled connection can be enabled again; revocation cannot be undone. Saved memories are not deleted.',
+ connConfirm_disable:'Disable connection',connConfirm_revoke:'Revoke connection',connConfirm_grant:'Revoke grant'});

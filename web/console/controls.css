@@ -115,7 +115,64 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 .connection-content h3{margin:4px 0 8px}
 .connection-content>section+section{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
 .connection-copy-status{font-size:12.5px;color:var(--good)}
+/* ChatGPT summary: three plain facts, then one quiet line of history; actions sit in the card footer. */
+.connection-title{display:flex;align-items:center;gap:10px}
+.connection-title>.icon{width:20px;height:20px;color:var(--accent)}
+.connection-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 0 12px;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.connection-fact{min-width:0;padding:10px 14px}
+.connection-fact+.connection-fact{border-left:1px solid var(--border)}
+.connection-fact dt{color:var(--muted);font-size:12px}
+.connection-fact dd{margin:2px 0 0;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.connection-fact dd a{margin-left:4px;font-size:12.5px;font-weight:400;text-decoration:underline;text-underline-offset:3px}
+.connection-meta{display:flex;flex-wrap:wrap;gap:4px 24px;margin:0 0 10px;font-size:12.5px;color:var(--muted)}
+.connection-meta>div{display:flex;gap:6px}
+.connection-meta dd{margin:0;color:var(--text);font-variant-numeric:tabular-nums}
+.connection-grants>p{margin:8px 0;color:var(--muted);font-size:12.5px}
+.connection-card-actions{display:flex;align-items:center;justify-content:space-between;gap:12px 20px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.connection-card-actions>p{margin:0;color:var(--muted);font-size:13px}
+.connection-card-actions>button{flex:none;display:inline-flex;align-items:center;gap:6px}
+.connection-card-actions .icon{width:15px;height:15px}
+.connection-filter-actions{display:flex;gap:8px;align-items:end}
+.connection-filter-actions>button{flex:1;white-space:nowrap}
+.connection-table td small{display:block;margin-top:3px;color:var(--muted);font-size:12px}
+/* Wizard: numbered named steps; done steps tick, the current one is solid. */
+.connection-steps{display:flex;flex-wrap:wrap;gap:6px 18px;margin:0 0 16px;padding:0 0 12px;list-style:none;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--muted)}
+.connection-steps li{display:flex;align-items:center;gap:7px}
+.connection-step-number{display:inline-grid;place-items:center;width:20px;height:20px;border:1px solid var(--line);border-radius:50%;font-family:var(--font-mono);font-size:11px}
+.connection-steps li[data-done] .connection-step-number{border-color:var(--good);color:var(--good)}
+.connection-steps li[aria-current]{color:var(--text);font-weight:600}
+.connection-steps li[aria-current] .connection-step-number{border-color:var(--text);background:var(--text);color:var(--bg)}
+.connection-type-head{display:flex;align-items:center;gap:8px;width:100%}
+.connection-type-head>.icon{width:18px;height:18px;flex:none;color:var(--accent)}
+.connection-types [aria-disabled=true] .connection-type-head>.icon{color:var(--muted)}
+.connection-tag{margin-left:auto;padding:1px 7px;border:1px solid var(--good);border-radius:var(--radius-sm);color:var(--good);font-size:11.5px;font-weight:500}
+.connection-types small{color:var(--muted);line-height:1.55}
+.connection-types .connection-need{margin-top:4px;color:var(--text)}
+.connection-types>button.card[aria-pressed="true"]{border-color:var(--text);box-shadow:inset 3px 0 0 var(--accent)}
+.connection-content>.connection-form-actions{justify-content:flex-end;margin-top:16px;padding-top:14px;border-top:1px solid var(--border)}
+.connection-kind-line{margin:0 0 12px;color:var(--muted);font-size:13px}
+.connection-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 14px}
+.connection-chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--bg);font-size:12.5px}
+.connection-chip[data-state]::before{content:"";width:7px;height:7px;background:var(--good)}
+.connection-chip[data-state="review_required"]::before{background:transparent;box-shadow:inset 0 0 0 1.5px var(--warn)}
+.connection-chip:is([data-state="disabled"],[data-state="revoked"],[data-state="expired"])::before{background:var(--bad)}
+/* Destructive actions: separated, explained, and confirmed with a red, explicitly worded button. */
+.connection-content>section.connection-danger{margin-top:18px;padding:14px 16px;border:1px solid var(--bad);border-radius:var(--radius-sm)}
+.connection-danger h3{color:var(--bad)}
+.connection-danger>p{margin:0 0 12px;color:var(--muted);font-size:13px}
+.connection-warning{display:flex;align-items:flex-start;gap:10px;margin:0 0 14px;padding:10px 12px;border-left:3px solid var(--bad);background:var(--bg);font-size:13.5px}
+.connection-warning>.icon{flex:none;width:18px;height:18px;color:var(--bad)}
+.connection-content form>.actions button.danger:not(:disabled){border-color:var(--bad);background:var(--bad);color:var(--on-accent)}
+.connection-content form>.actions button.danger:not(:disabled):hover{filter:brightness(.92)}
 @media(max-width:960px){.connection-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.connection-intro{flex-direction:column;align-items:flex-start}}
+@media(max-width:640px){
+ .connection-facts{grid-template-columns:minmax(0,1fr)}.connection-fact+.connection-fact{border-left:0;border-top:1px solid var(--border)}
+ .connection-card-actions{flex-direction:column;align-items:stretch}
+ .connection-list .toolbar{grid-template-columns:minmax(0,1fr)}
+ .plugin-field{grid-template-columns:minmax(0,1fr);gap:4px}
+ .connection-content{padding:16px}#connection-dialog>.dialog-header{padding:12px 16px}
+ .connection-stat{padding:10px 12px}.connection-stat strong{font-size:24px}
+}
 @keyframes rise{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
 #feature-dialog ins{background:var(--hover);text-decoration:underline;text-underline-offset:4px}
 #feature-dialog del{background:var(--hover);text-decoration:line-through}

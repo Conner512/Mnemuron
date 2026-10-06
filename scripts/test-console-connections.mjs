@@ -63,8 +63,24 @@ try{
    check(`${label} survives ${key}`,page.url()===url&&await dialog.isVisible()&&await locator.inputValue()===value&&mutations===before);
   }
  };
- await goto('connections');check('Real empty logical list retains legacy authorization separately',await page.locator('.connection-table [data-connection-detail]').count()===0&&await page.locator('.connection-system').count()===1);
+ const viewMutations=mutations;await goto('connections');check('Real empty logical list retains legacy authorization separately',await page.locator('.connection-table [data-connection-detail]').count()===0&&await page.locator('.connection-system').count()===1);
  const existingAuthorized=Number(await page.locator('.connection-stat').first().locator('strong').innerText());
+ // The pre-existing synthetic ChatGPT authorization: visible, unchanged by viewing, and compared again at the end.
+ const gpt=page.locator('.connection-chatgpt'),gptState=async()=>({authorized:await gpt.locator('.state-dot[data-state=enabled]').count(),grants:await gpt.locator('.connection-meta dd').first().innerText(),revokes:await gpt.locator('[data-console-action="oauth.revoke"]').count()});
+ const gptBefore=await gptState();
+ check('Existing ChatGPT authorization is shown as authorized with its grants',gptBefore.authorized===1&&Number(gptBefore.grants)>=1&&gptBefore.revokes===Number(gptBefore.grants));
+ check('Viewing connections sends no write request',mutations===viewMutations);
+ // Header: the account caret is drawn like the language chevron, same size and vertical centre.
+ const chevrons=await page.evaluate(()=>{const box=s=>{const r=document.querySelector(s).getBoundingClientRect();return {w:r.width,h:r.height,cy:r.top+r.height/2}};const style=s=>{const c=getComputedStyle(document.querySelector(s));return [c.borderRightWidth,c.borderBottomWidth,c.transform].join('|')};
+  return {account:box('.account-chevron'),language:box('.language-control .select-chevron'),accountButton:box('.account-menu>summary'),accountStyle:style('.account-chevron'),languageStyle:style('.language-control .select-chevron'),glyph:/[⌄∨▾]/.test(document.querySelector('.account-menu>summary').textContent)};});
+ console.log('Header chevron geometry '+JSON.stringify(chevrons));
+ check('Account caret matches the language chevron size, stroke and rotation',!chevrons.glyph&&chevrons.accountStyle===chevrons.languageStyle&&Math.abs(chevrons.account.w-chevrons.language.w)<0.5&&Math.abs(chevrons.account.h-chevrons.language.h)<0.5);
+ // Only the lower "V" of the rotated square is drawn, so its optical centre is a quarter-height below the box centre.
+ check('Account and language chevrons share one vertical centre, and the drawn V is centred in the account button',Math.abs(chevrons.account.cy-chevrons.language.cy)<=1&&Math.abs(chevrons.account.cy+chevrons.account.h/4-chevrons.accountButton.cy)<=1);
+ await page.locator('.account-menu>summary').click();check('Open account menu rotates the caret and shows the panel',await page.locator('.account-menu-panel').isVisible()&&(await page.locator('.account-chevron').evaluate(el=>getComputedStyle(el).transform))!==chevrons.accountStyle.split('|')[2]);
+ await page.locator('.account-menu>summary').click();
+ await page.locator('.topbar').screenshot({path:path.join(evidence,'header-account-caret.png')});
+ await page.screenshot({path:path.join(evidence,'connections-desktop-zh-CN.png'),fullPage:true});
  await openNew('generic_mcp');check('Readonly profile cannot select a write-time disclosure grant',await dialog.locator('[name=allow_submitted_revision_grant]').isDisabled());await dialog.locator('[name=label]').fill('Synthetic portable reader');await pick('#connection-dialog [name=profile]','memory_readwrite');
  await guardShortcut('Connection draft',dialog.locator('[name=label]'));
  const beforeAppearance=mutations;
@@ -131,13 +147,47 @@ try{
   await authPage.screenshot({path:path.join(evidence,writing?'oauth-readwrite-consent.png':'oauth-underscoped-warning.png'),fullPage:true});await authPage.close();
  }
  await page.locator('#connection-filters [name=search]').fill('portable');await page.locator('#connection-filters button[type=submit]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor({state:'detached'});check('Backend filter returns one logical connection',await page.locator('.connection-list .connection-table tbody tr').count()===1);await page.locator('[data-connection-reset]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor();
+ // Back from a destructive confirmation returns to the unchanged connection without any request.
+ await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).click();
+ check('Managing an existing connection is titled as such, not as adding one',await dialog.locator('#connection-title [data-i18n=connManageTitle]').count()===1);
+ check('Routine actions and disable/revoke are in separate groups',await dialog.locator('.connection-danger [data-connection-action=revoke]').count()===1&&await dialog.locator('.connection-danger [data-connection-action=rotate]').count()===0&&await dialog.locator('.connection-danger [data-connection-action=disable]').count()===1);
+ let held=mutations;await dialog.locator('[data-connection-action=revoke]').click();await proof();await dialog.locator('[data-connection-back=detail]').click();await dialog.locator('[data-connection-refresh]').waitFor();
+ check('Back from revoke keeps the connection and sends nothing',mutations===held&&await dialog.locator('.connection-chips [data-state=ready]').count()===1&&await dialog.locator('[name=current_password]').count()===0);
+ await close();
  for(const action of ['disable','enable','revoke']){
-  await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).click();await dialog.locator(`[data-connection-action=${action}]`).click();await proof();await dialog.locator('button[type=submit]').click();
+  await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).click();await dialog.locator(`[data-connection-action=${action}]`).click();
+  if(action!=='enable'){check(`${action} confirmation states the consequence and uses an explicit red button`,await dialog.locator('.connection-warning').isVisible()&&await dialog.locator(`button.danger[type=submit] [data-i18n=connConfirm_${action}]`).count()===1);if(action==='revoke')await dialog.screenshot({path:path.join(evidence,'revoke-confirmation.png')});}
+  await proof();await dialog.locator('button[type=submit]').click();
   if(action==='enable'){await dialog.locator('#connection-secret').waitFor();await saveSecret();}else await dialog.locator('[data-connection-refresh]').waitFor();await close();check('Real connection lifecycle '+action);
  }
  await pick('#connection-filters [name=section]','history');await page.locator('#connection-filters button[type=submit]').click();await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).waitFor();check('Revoked record moves to history, preserving the logical record');
  await page.locator('[data-connection-reset]').click();await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).waitFor();
  const bContext=await browser.newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await bp.goto(cfg.url+'/app/connections');await bp.locator('[data-connection-new]').first().waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
+ // Cancel, back and repeated clicks never create, duplicate or lose anything.
+ held=mutations;await page.locator('[data-connection-new]').first().dblclick();await dialog.locator('[data-connection-kind=generic_mcp]').waitFor();
+ check('Double-clicking Add opens one wizard at the first named step',await page.locator('#connection-dialog').count()===1&&await dialog.locator('.connection-steps li[aria-current=step] [data-i18n=connStepApp]').count()===1&&await dialog.locator('#connection-title [data-i18n=addConnection]').count()===1);
+ await dialog.screenshot({path:path.join(evidence,'wizard-choose-app.png')});
+ await dialog.locator('.connection-content [data-connection-close]').click();await dialog.waitFor({state:'hidden'});check('Cancel on the first step closes without a request',mutations===held);
+ await openNew('generic_mcp');await dialog.locator('[name=label]').fill('Synthetic back draft');await dialog.locator('[data-connection-back=type]').click();
+ check('Back to the app choice marks the chosen app',await dialog.locator('[data-connection-kind=generic_mcp][aria-pressed=true]').count()===1);
+ await dialog.locator('[data-connection-kind=generic_mcp]').dblclick();await dialog.locator('[name=label]').waitFor();
+ check('Re-choosing the same app keeps the draft, even on a double click',await dialog.locator('[name=label]').inputValue()==='Synthetic back draft'&&await dialog.locator('[name=label]').count()===1);
+ await dialog.locator('form [data-connection-close]').click();await dialog.waitFor({state:'hidden'});check('Cancelled draft sends nothing',mutations===held);
+ await openNew('generic_mcp');await basic('Synthetic double submit');held=mutations;await dialog.locator('button[type=submit]').dblclick();await dialog.locator('#connection-secret').waitFor();await page.waitForTimeout(300);
+ check('Double-clicking Generate creates exactly one credential',mutations===held+1);
+ await dialog.screenshot({path:path.join(evidence,'wizard-save-credential.png')});
+ page.once('dialog',prompt=>prompt.accept());await dialog.locator('[data-connection-close]').first().click();await dialog.waitFor({state:'hidden'});
+ await goto('connections');check('Only one connection exists for the double-submitted draft',await page.getByRole('button',{name:'Synthetic double submit',exact:true}).count()===1);
+ // Narrow layout: no page overflow, readable dialog, both languages.
+ for(const locale of ['zh-CN','en']){
+  await page.setViewportSize({width:390,height:844});await goto('connections');await pick('#locale',locale);
+  check(`Narrow connections page ${locale} has no horizontal overflow`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:path.join(evidence,`connections-narrow-${locale}.png`),fullPage:true});
+  await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-copy=url]').waitFor();
+  check(`Narrow ChatGPT detail ${locale} fits the dialog`,await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1)&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await page.screenshot({path:path.join(evidence,`connection-detail-narrow-${locale}.png`)});await close();
+ }
+ await page.setViewportSize({width:1440,height:1080});await goto('connections');await pick('#locale','zh-CN');
  for(const width of [1280,1440,1920]){
   await page.setViewportSize({width,height:1080});
   for(const locale of ['zh-CN','en']){
@@ -213,6 +263,7 @@ try{
  // Signing in again: the connection exists, its one-time secret is never shown again; rotation is the way forward.
  await signInAgain();await page.getByRole('button',{name:'Synthetic background revoke',exact:true}).click();await dialog.locator('[data-connection-action=rotate]').waitFor();
  check('After signing in again the connection remains and its secret is not re-displayed',await dialog.locator('#connection-secret').count()===0&&!(await page.content()).includes(secondSecret));
+ await goto('connections');check('The pre-existing ChatGPT authorization is unchanged after every flow',JSON.stringify(await gptState())===JSON.stringify(gptBefore));
  check('No JavaScript or CSP errors',errors.length===0);
  fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,count:checks.length,production_data_used:false,external_client_acceptance:false},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
 }catch(error){fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'failed',checks,error:error.stack},null,2),{mode:0o600});console.error(JSON.stringify({status:'failed',checks:checks.length,evidence,error:error.message}));process.exitCode=1;}

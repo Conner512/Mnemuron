@@ -41,7 +41,7 @@ function consoleShell({title,body,account,csrf,page}) {
   <div class="workspace">
     <header class="topbar"><div class="breadcrumb">${label(groupOf(page))}<span aria-hidden="true">/</span><strong>${label(title)}</strong></div>
       <div class="topbar-tools"><a class="top-search" href="/app/memories" data-search-shortcut>${icon('search')}${label('shortcutSearch')}<kbd aria-hidden="true">/</kbd></a>${languageControl()}
-        <details class="account-menu"><summary data-i18n-title="accountMenu" title="${text('accountMenu')}"><span class="account-name">${username}</span><span aria-hidden="true">⌄</span></summary>
+        <details class="account-menu"><summary data-i18n-title="accountMenu" title="${text('accountMenu')}"><span class="account-name">${username}</span><span class="account-chevron" aria-hidden="true"></span></summary>
           <div class="account-menu-panel">${label('identity','small')}<strong>${username}</strong><form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet">${icon('logout')}${label('signOut')}</button></form></div></details></div></header>
     <main id="main" tabindex="-1"><div id="console-root">${body||loading}</div></main>
     <footer><span class="footer-mark">Mnemuron</span></footer>

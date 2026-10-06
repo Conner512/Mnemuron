@@ -99,3 +99,52 @@ test('C-04: the ChatGPT plugin form lists every field to copy, shows the secret 
  const card=connectionsView({connections:[],counts:{},legacy_connections:[{grants:[{grant_id:'g',client_id:'system',created:1,expires:2,scopes:[]}]}],system_chatgpt:{configured:true}},{allowed_actions:['connections.create']},{});
  assert.match(card,/data-connection-new data-connection-start="chatgpt_oauth"/);
 });
+test('C-07: an existing ChatGPT authorization stays visible and intact; adding a connection is a separate explicit action',async()=>{
+ const {connectionInventory}=await import('../../../web/console/connections.mjs');
+ const data={connections:[],counts:{},total:0,system_chatgpt:{configured:true,last_token_at:1759214539},
+  legacy_connections:[{grants:[{grant_id:'synthetic-grant',client_id:'synthetic-system-client',created:1757490455,expires:1791000000,scopes:['openid','memory:read']}]}]};
+ const caps={allowed_actions:['oauth.revoke','connections.create'],connection_management:{enabled:true}};
+ const before=JSON.stringify(data);const html=connectionsView(data,caps,{});
+ assert.equal(JSON.stringify(data),before,'rendering never mutates the inventory');
+ assert.equal(connectionInventory(data,caps).counts.active,1);
+ const card=html.match(/<section class="card connection-chatgpt">[\s\S]*?<\/section>/)[0];
+ assert.match(card,/data-state="enabled"[^>]*><span data-i18n="connAuthorized"/);
+ assert.match(card,/<dl class="connection-facts">/);assert.match(card,/data-i18n="readOnly"/);assert.match(card,/data-i18n="connWriteOff"/);
+ assert.match(card,/<dt><span data-i18n="connGrantsLabel">[^<]*<\/span><\/dt><dd>1<\/dd>/);
+ // The only state-changing control is the explicit per-grant revoke, inside the folded grant list, with its consequence stated.
+ assert.equal((card.match(/data-console-action=/g)||[]).length,1);
+ const grants=card.match(/<details class="connection-grants">[\s\S]*?<\/details>/)[0];
+ assert.match(grants,/data-console-action="oauth.revoke" data-id="synthetic-grant"/);assert.match(grants,/data-i18n="connRevokeGrantNote"/);
+ // Creating a new ChatGPT connection is a labelled button in the card footer, not an inline quiet link.
+ assert.match(card,/<div class="connection-card-actions">[\s\S]*<button type="button" data-connection-new data-connection-start="chatgpt_oauth">[\s\S]*data-i18n="connNewChatGPT"/);
+ assert.doesNotMatch(card,/class="quiet" data-connection-new/);
+ assert.ok(html.indexOf('data-connection-new')<html.indexOf('connection-chatgpt'),'the general Add button stays first on the page');
+ const viewer=connectionsView(data,{allowed_actions:[]},{}).match(/<section class="card connection-chatgpt">[\s\S]*?<\/section>/)[0];
+ assert.doesNotMatch(viewer,/data-connection-new|data-console-action|connRevokeGrantNote/);assert.match(viewer,/data-i18n="connAuthorized"/);
+});
+test('C-08: list rows show a toned state; wizard steps are named; destructive confirmations are explicit',async()=>{
+ const {connectionSteps,connectionFormActions}=await import('../../../web/console/connections.mjs');
+ const row=c=>connectionsView({connections:[{connection_id:'x',label:'Synthetic',kind:'chatgpt_oauth',profile:'readonly',health:'never_used',...c}],counts:{},total:1},{},{}).match(/<td><span class="state-dot" data-state="([^"]+)"><span data-i18n="([^"]+)"/).slice(1);
+ assert.deepEqual(row({configuration_state:'ready',active_grant_count:0}),['review_required','connAwaitingAuthorization']);
+ assert.deepEqual(row({configuration_state:'ready',active_grant_count:1}),['ready','connState_ready']);
+ assert.deepEqual(row({configuration_state:'draft'}),['review_required','connState_draft']);
+ assert.deepEqual(row({configuration_state:'disabled'}),['disabled','connState_disabled']);
+ assert.deepEqual(row({configuration_state:'revoked'}),['revoked','connState_revoked']);
+ assert.deepEqual(row({configuration_state:'ready',active_grant_count:1,expired:true}),['expired','connExpired']);
+ const steps=connectionSteps(3);
+ assert.equal((steps.match(/<li/g)||[]).length,4);assert.equal((steps.match(/data-done/g)||[]).length,2);
+ assert.match(steps,/<li aria-current="step"><span class="connection-step-number" aria-hidden="true">3<\/span><span data-i18n="connStepVerify"/);
+ assert.match(steps,/data-i18n-aria-label="connStepsLabel"/);
+ const danger=connectionFormActions('connConfirm_revoke','detail',{danger:true});
+ assert.match(danger,/data-connection-back="detail"/);assert.match(danger,/<button type="submit" class="primary danger"><span data-i18n="connConfirm_revoke"/);
+ assert.doesNotMatch(connectionFormActions('confirm','detail'),/danger/);
+ const filters=connectionsView({connections:[],counts:{},total:0},{},{});
+ assert.match(filters,/<form id="connection-filters"[\s\S]*<button type="submit"><span data-i18n="connApplyFilters"/);
+});
+test('C-09: the detail view separates routine actions from disable/revoke, and the wizard has Cancel at every step',()=>{
+ const source=fs.readFileSync(new URL('../../../web/console/connections.mjs',import.meta.url),'utf8');
+ assert.match(source,/\['update','rotate',\.\.\.\(c\.configuration_state==='disabled'\?\['enable'\]:\[\]\)\]/);
+ assert.match(source,/<section class="connection-danger">[\s\S]*?\[\.\.\.\(c\.configuration_state==='disabled'\?\[\]:\['disable'\]\),'revoke'\]/);
+ assert.match(source,/function selectType\(\)[^\n]*data-connection-close/);
+ assert.match(source,/back==='detail'/);
+});

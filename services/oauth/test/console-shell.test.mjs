@@ -197,3 +197,13 @@ test('html template escapes interpolations, joins arrays and only trusts explici
  const out=String(html`<p title="${user}">${user}${[html`<b>${1}</b>`,null,false,undefined,2]}${trusted('<i></i>')}</p>`);
  assert.equal(out,'<p title="&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;<b>1</b>2<i></i></p>');
 });
+test('Shell: the account menu caret is the same drawn chevron as the language select, not a text glyph',async()=>{
+ const {renderPage}=await import('../../../web/console/render.mjs');
+ const page=renderPage({title:'overview',account:{username:'Synthetic',account_id:'synthetic-account'},csrf:'synthetic',page:'overview'});
+ const summary=page.match(/<summary[^>]*>([\s\S]*?)<\/summary>/)[1];
+ assert.doesNotMatch(summary,/⌄|∨|▾|v<\/span>/);assert.match(summary,/<span class="account-chevron" aria-hidden="true"><\/span>/);
+ const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8'),controls=fs.readFileSync(new URL('../../../web/console/controls.css',import.meta.url),'utf8');
+ const geometry=rule=>rule.replace(/^[^{]+/,'');
+ assert.equal(geometry(css.match(/\.account-chevron\{[^}]+\}/)[0]),geometry(controls.match(/\.select-chevron\{[^}]+\}/)[0]));
+ assert.match(css,/\.account-menu\[open\] \.account-chevron\{transform:translateY\(2px\) rotate\(225deg\)\}/);
+});
