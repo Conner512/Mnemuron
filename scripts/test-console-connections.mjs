@@ -156,7 +156,7 @@ try{
  await close();
  for(const action of ['disable','enable','revoke']){
   await page.getByRole('button',{name:'Synthetic portable reader',exact:true}).click();await dialog.locator(`[data-connection-action=${action}]`).click();
-  if(action!=='enable'){check(`${action} confirmation states the consequence and uses an explicit red button`,await dialog.locator('.connection-warning').isVisible()&&await dialog.locator(`button.danger[type=submit] [data-i18n=connConfirm_${action}]`).count()===1);if(action==='revoke')await dialog.screenshot({path:path.join(evidence,'revoke-confirmation.png')});}
+  if(action!=='enable'){check(`${action} confirmation states the consequence and uses an explicit red button`,await dialog.locator('.connection-warning').isVisible()&&await dialog.locator(`button.danger[type=submit] [data-i18n=connConfirm_${action}]`).count()===1);if(action==='revoke')await dialog.screenshot({path:path.join(evidence,'revoke-confirmation.png'),animations:'disabled'});}
   await proof();await dialog.locator('button[type=submit]').click();
   if(action==='enable'){await dialog.locator('#connection-secret').waitFor();await saveSecret();}else await dialog.locator('[data-connection-refresh]').waitFor();await close();check('Real connection lifecycle '+action);
  }
@@ -166,7 +166,7 @@ try{
  // Cancel, back and repeated clicks never create, duplicate or lose anything.
  held=mutations;await page.locator('[data-connection-new]').first().dblclick();await dialog.locator('[data-connection-kind=generic_mcp]').waitFor();
  check('Double-clicking Add opens one wizard at the first named step',await page.locator('#connection-dialog').count()===1&&await dialog.locator('.connection-steps li[aria-current=step] [data-i18n=connStepApp]').count()===1&&await dialog.locator('#connection-title [data-i18n=addConnection]').count()===1);
- await dialog.screenshot({path:path.join(evidence,'wizard-choose-app.png')});
+ await dialog.screenshot({path:path.join(evidence,'wizard-choose-app.png'),animations:'disabled'});
  await dialog.locator('.connection-content [data-connection-close]').click();await dialog.waitFor({state:'hidden'});check('Cancel on the first step closes without a request',mutations===held);
  await openNew('generic_mcp');await dialog.locator('[name=label]').fill('Synthetic back draft');await dialog.locator('[data-connection-back=type]').click();
  check('Back to the app choice marks the chosen app',await dialog.locator('[data-connection-kind=generic_mcp][aria-pressed=true]').count()===1);
@@ -184,8 +184,9 @@ try{
   check(`Narrow connections page ${locale} has no horizontal overflow`,await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await page.screenshot({path:path.join(evidence,`connections-narrow-${locale}.png`),fullPage:true});
   await page.getByRole('button',{name:'Synthetic browser ChatGPT',exact:true}).click();await dialog.locator('[data-connection-copy=url]').waitFor();
+  check(`Narrow ChatGPT detail ${locale} shows the same state as its list row`,await dialog.locator('.connection-chips [data-state=review_required] [data-i18n=connAwaitingAuthorization]').count()===1);
   check(`Narrow ChatGPT detail ${locale} fits the dialog`,await dialog.evaluate(el=>el.scrollWidth<=el.clientWidth+1)&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
-  await page.screenshot({path:path.join(evidence,`connection-detail-narrow-${locale}.png`)});await close();
+  await page.screenshot({path:path.join(evidence,`connection-detail-narrow-${locale}.png`),animations:'disabled'});await close();
  }
  await page.setViewportSize({width:1440,height:1080});await goto('connections');await pick('#locale','zh-CN');
  for(const width of [1280,1440,1920]){
