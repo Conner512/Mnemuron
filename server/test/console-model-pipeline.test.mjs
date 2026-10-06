@@ -115,7 +115,7 @@ test('MOD-09: remote failures surface a fixed diagnostic, never upstream content
  assert.equal((await f.read()).models[0].verification.error_code,'REMOTE_UNAVAILABLE');
 });
 
-test('MOD-09: the summary capability probe sends the production summary schema, with only string enums on the wire',async t=>{
+test('MOD-10: the summary capability probe sends the production summary schema; the wire carries structure only',async t=>{
  const f=await setup(t);await f.save('organizer');
  const r=await f.act('models.test',{kind:'organizer',mode:'capabilities'});assert.deepEqual(r.checks,['classification','summary']);
  const summary=f.calls.find(c=>JSON.parse(c.messages[1].content).input.operation==='summary');
@@ -124,7 +124,9 @@ test('MOD-09: the summary capability probe sends the production summary schema, 
  assert.ok(enums(wire).length>0&&enums(wire).every(m=>typeof m==='string'),'only string enum members reach the provider');
  // Bounded multi-span shape: exact revision range and quote/offset limits from the actual synthetic source.
  const source=JSON.parse(summary.messages[1].content).input.sources[0];
- assert.deepEqual([item.properties.revision.minimum,item.properties.revision.maximum],[source.revision,source.revision]);
- assert.equal(item.properties.quote.maxLength,source.content.length);assert.equal(item.properties.end.maximum,Buffer.byteLength(source.content));
+ assert.doesNotMatch(JSON.stringify(wire),/"(maxItems|minItems|minimum|maximum)"/);assert.equal(item.properties.quote.maxLength,source.content.length);
+ // The prompt states the full bounded schema, including the exact revision and offset limits.
+ const stated=JSON.parse(summary.messages[1].content).schema.properties.results;
+ assert.equal(stated.maxItems,1);assert.equal(stated.items.properties.end.maximum,Buffer.byteLength(source.content));
  assert.deepEqual(JSON.parse(summary.messages[1].content).schema.properties.results.items.properties.revision.enum,[source.revision],'the prompt still states the exact revision');
 });

@@ -59,21 +59,21 @@ export function validateProfile(input, {kind,synthetic=false}={}) {
   return Object.freeze(p);
 }
 
-// The schema sent to a provider. Some OpenAI-compatible gateways (Gemini-backed ones) reject any
-// non-string enum member with HTTP 400, e.g. the exact source revisions of a bounded summary.
-// Such enums are left out of the request and expressed as the tightest numeric range instead;
-// the reply is still validated locally against the full schema, enum included.
+// The schema sent to a provider: its structure only (types, properties, required fields, string enums).
+// Gemini-backed gateways reject non-string enum members, and reject schemas over an internal complexity
+// budget with a bare INVALID_ARGUMENT; array length limits and numeric minimum/maximum bounds are the
+// documented main contributors, and they grow with the batch (a bounded summary of 8 sources asks for
+// 17 items, each with three ranged integers). These constraints are therefore left out of the request.
+// The reply is still validated locally against the full schema (all bounds and enums), then by the
+// exact source revision and span checks; the full schema is also stated in the prompt.
+const WIRE_OMITTED=new Set(['minItems','maxItems','minimum','maximum']);
 export function providerSchema(schema) {
   if(Array.isArray(schema))return schema.map(providerSchema);
   if(!schema || typeof schema!=='object')return schema;
   const out={};
   for(const [k,v] of Object.entries(schema)) {
-    if(k==='enum' && Array.isArray(v) && v.some(m=>typeof m!=='string'))continue;
+    if(WIRE_OMITTED.has(k) || k==='enum' && Array.isArray(v) && v.some(m=>typeof m!=='string'))continue;
     out[k]=k==='properties'?Object.fromEntries(Object.entries(v).map(([name,s])=>[name,providerSchema(s)])):providerSchema(v);
-  }
-  if(Array.isArray(schema.enum) && schema.enum.length && schema.enum.every(m=>Number.isFinite(m))) {
-    out.minimum=Math.max(schema.minimum ?? -Infinity,Math.min(...schema.enum));
-    out.maximum=Math.min(schema.maximum ?? Infinity,Math.max(...schema.enum));
   }
   return out;
 }

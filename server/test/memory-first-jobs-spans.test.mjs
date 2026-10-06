@@ -106,22 +106,21 @@ const stringEnumGateway=reply=>async(p,route,body)=>{
   const {input}=JSON.parse(body.messages[1].content);
   return {choices:[{finish_reason:'stop',message:{content:JSON.stringify(reply(input))}}]};
 };
-test('Q-07: the bounded summary schema reaches the provider without its integer revision enum; local validation keeps the exact revisions',()=>{
+test('Q-07: the bounded summary schema reaches the provider as structure only; local validation keeps the exact revisions and bounds',()=>{
   const sources=[{memory_id:'short',revision:2,content:'Not approved.'},{memory_id:'long',revision:5,content}];
   const schema=outputSchema('summary',sources,{multiSpan:true,bounded:true}),before=JSON.stringify(schema),wire=providerSchema(schema);
   assert.equal(JSON.stringify(schema),before,'the validation schema is not modified');
   assert.deepEqual(nonStringEnums(schema),['schema.properties.results.items.properties.revision.enum']);
   assert.deepEqual(nonStringEnums(wire),[]);
   const revision=wire.properties.results.items.properties.revision;
-  assert.deepEqual([revision.type,revision.minimum,revision.maximum],['integer',2,5]);
+  assert.deepEqual(revision,{type:'integer'},'no enum or range on the wire');
   assert.deepEqual(wire.properties.results.items.properties.memory_id.enum,['short','long'],'string enums are still sent');
-  const expected=structuredClone(schema);delete expected.properties.results.items.properties.revision.enum;
-  assert.deepEqual(wire,expected,'nothing else in the provider schema changes');
+  const expected=structuredClone(schema),item=expected.properties.results.items.properties;delete expected.properties.results.maxItems;delete expected.properties.results.minItems;
+  for(const k of ['revision','start','end'])for(const bound of ['enum','minimum','maximum'])delete item[k][bound];
+  assert.deepEqual(wire,expected,'only enums of numbers, array lengths and numeric ranges are left out');
   const reply=r=>({results:[{memory_id:'short',revision:r,start:0,end:13,quote:'Not approved.'}]});
   assert.doesNotThrow(()=>validateStructured(reply(2),schema));
   assert.throws(()=>validateStructured(reply(3),schema),{code:'INVALID_MODEL_OUTPUT'},'in range but not an actual source revision');
-  const single=providerSchema(outputSchema('summary',[sources[0]],{multiSpan:true,bounded:true})).properties.results.items.properties.revision;
-  assert.deepEqual([single.minimum,single.maximum,single.enum],[2,2,undefined],'one revision is still pinned exactly');
 });
 test('Q-07: a real summary job succeeds through a string-enum-only provider, and a wrong revision is still rejected',async t=>{
   for(const wrongRevision of [false,true]){
@@ -136,4 +135,48 @@ test('Q-07: a real summary job succeeds through a string-enum-only provider, and
     if(!wrongRevision){assert.equal(result.state,'succeeded');const [summary]=f.s.memorySummaries(f.auth,{scope:'user'}).results;assert.ok(summary.claims.every(c=>c.revision===1));}
     else {assert.notEqual(result.state,'succeeded');assert.equal(result.last_error_code,'INVALID_MODEL_OUTPUT');assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,0);}
   }
+});
+
+// The failed production request (job 1bc26cbc…): 8 sources with these UTF-16/UTF-8 lengths, all revision 1. Synthetic text only.
+const failedShape=[[884,1004],[620,644],[568,592],[854,886],[1325,1461],[603,627],[1289,1513],[1104,1278]];
+const syntheticSource=([u16,u8],i)=>{const cjk=(u8-u16)/2;return {memory_id:`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`,revision:1,content:'中'.repeat(cjk)+'a'.repeat(u16-cjk)};};
+test('Q-08: the failed 8-source request is reconstructed exactly, and its provider schema no longer grows with the batch',()=>{
+  const sources=failedShape.map(syntheticSource);
+  assert.deepEqual(sources.map(s=>[s.content.length,Buffer.byteLength(s.content)]),failedShape);
+  const schema=outputSchema('summary',sources,{multiSpan:true,bounded:true}),results=schema.properties.results,item=results.items.properties;
+  // Matches the operator's read-only reconstruction of the rejected request (local 875 bytes, wire 864 before this change).
+  assert.equal(JSON.stringify(schema).length,875);
+  assert.deepEqual([results.maxItems,item.start.maximum,item.end.maximum,item.quote.maxLength],[17,1512,1513,1325]);
+  const wire=providerSchema(schema),text=JSON.stringify(wire);
+  assert.doesNotMatch(text,/"(maxItems|minItems|minimum|maximum)"/);assert.deepEqual(nonStringEnums(wire),[]);
+  // Same structure as a one-source request apart from the memory_id list: the batch no longer adds constraints.
+  const one=providerSchema(outputSchema('summary',[syntheticSource([79,79],0)],{multiSpan:true,bounded:true}));
+  const shape=w=>{const c=structuredClone(w),i=c.properties.results.items.properties;delete i.memory_id.enum;delete i.quote.maxLength;return c;};
+  assert.deepEqual(shape(wire),shape(one));
+  // Local validation still enforces every bound and the exact revision.
+  const s=sources[4],ok={memory_id:s.memory_id,revision:1,start:0,end:20,quote:s.content.slice(0,20)};
+  assert.doesNotThrow(()=>validateStructured({results:[ok]},schema));
+  for(const bad of [{...ok,revision:2},{...ok,start:1513},{...ok,end:1514},{...ok,quote:'a'.repeat(1326)},{...ok,memory_id:'00000000-0000-4000-8000-999999999999'}])
+    assert.throws(()=>validateStructured({results:[bad]},schema),{code:'INVALID_MODEL_OUTPUT'});
+  assert.throws(()=>validateStructured({results:Array(18).fill(ok)},schema),{code:'INVALID_MODEL_OUTPUT'},'18 > 17 items');
+});
+// Emulates the documented Gemini complexity limit only as far as the evidence goes: every successful
+// production request had at most 8 bounded object items; the rejected one asked for 17.
+const complexityGateway=reply=>async(p,route,body)=>{
+  const schema=body.response_format.json_schema.schema,results=schema.properties.results;
+  if(nonStringEnums(schema).length || results.maxItems>8 && /"(minimum|maximum)"/.test(JSON.stringify(results.items)))throw new ModelError('HTTP_REJECTED');
+  const {input}=JSON.parse(body.messages[1].content);
+  return {choices:[{finish_reason:'stop',message:{content:JSON.stringify(reply(input))}}]};
+};
+test('Q-08: an 8-source summary with three long sources completes through the emulated limit with exact spans',async t=>{
+  const f=fixture(t);for(const [i,shape] of failedShape.entries())f.save(syntheticSource(shape,i).content);
+  const whole=s=>s.content.length<=1024?[quote(s,0,s.content.length)]:[quote(s,0,300),quote(s,s.content.length-300,s.content.length)];
+  const model=new Organizer(profile('organizer',{protocol:'openai_compatible',base_url:'https://model.example.test',capabilities:{native_schema:true}}),
+    {transport:complexityGateway(input=>({results:input.sources.flatMap(whole)}))}),jobs=new MemoryJobs(f.s);
+  scheduleLibrary(f.s,jobs,{userId:f.auth.user_id,organizer:model,taxonomy,type:'summary',periods:['daily'],includeOpen:true});
+  const result=await new MemoryWorker(f.s,jobs,model).runOne();
+  assert.equal(result.state,'succeeded',result.last_error_code);
+  const [summary]=f.s.memorySummaries(f.auth,{scope:'user'}).results;
+  assert.equal(summary.selected_source_count,8);assert.equal(summary.omitted_source_count,0);assert.equal(summary.claims.length,11);
+  assert.ok(summary.claims.every(c=>c.revision===1&&c.independently_fact_checked===false));
 });
