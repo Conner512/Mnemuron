@@ -148,3 +148,16 @@ test('C-09: the detail view separates routine actions from disable/revoke, and t
  assert.match(source,/function selectType\(\)[^\n]*data-connection-close/);
  assert.match(source,/back==='detail'/);
 });
+test('C-10: the existing connection is named as a plugin connection in both locales, never as browser-only ChatGPT web',async()=>{
+ const {catalog}=await import('../../../web/console/catalog.mjs');
+ const keys=['connChatGPTWeb','connChatGPTWebNote','connChatGPT','connChatGPTNote','connChatGPTAddHint','connNewChatGPT','connPersonalNote','connManagedNote','agent_chatgpt_web','featCON01','featCON01Note'];
+ for(const locale of ['zh-CN','en'])for(const key of keys)assert.doesNotMatch(catalog[locale][key],/网页版|ChatGPT Web\b|ChatGPT on the web|ChatGPT web/,`${locale} ${key}`);
+ assert.equal(catalog['zh-CN'].connChatGPTWeb,'插件连接');assert.equal(catalog.en.connChatGPTWeb,'Plugin connection');
+ assert.match(catalog['zh-CN'].connChatGPTWebNote,/不限于浏览器/);assert.match(catalog.en.connChatGPTWebNote,/not limited to a browser/);
+ // The setup flow remains honestly ChatGPT-specific: it names ChatGPT and its "New plugin" form, not arbitrary clients.
+ assert.equal(catalog['zh-CN'].connChatGPT,'ChatGPT 插件');assert.equal(catalog.en.connChatGPT,'ChatGPT plugin');
+ for(const locale of ['zh-CN','en']){assert.match(catalog[locale].connChatGPTNote,/ChatGPT/);assert.match(catalog[locale].connChatGPTWebNote,/ChatGPT/);assert.match(catalog[locale].connPluginTitle,/ChatGPT/);}
+ // Internal identifiers stay as they are: the card class, kind value and agent id are unchanged.
+ const html=connectionsView({connections:[],counts:{},legacy_connections:[{grants:[{grant_id:'g',client_id:'synthetic',created:1,expires:2,scopes:['memory:read']}]}],system_chatgpt:{configured:true}},{allowed_actions:['connections.create']},{});
+ assert.match(html,/<section class="card connection-chatgpt">/);assert.match(html,/data-connection-start="chatgpt_oauth"/);assert.match(html,/data-i18n="connChatGPTWeb"/);
+});

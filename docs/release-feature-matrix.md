@@ -42,7 +42,7 @@ render/contract tests alone are not functional acceptance.
 | JOB-01 | 任务队列与执行状态 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/memory-first-jobs.test.mjs` | functional + models |
 | JOB-02 | 创建与定期计划 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/memory-first-jobs.test.mjs` | functional + models |
 | JOB-03 | 取消与重试 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/memory-first-jobs.test.mjs` | functional + models |
-| CON-01 | ChatGPT 网页版与应用授权 | live | `services/oauth/test/connections.test.mjs`; `adapters/chatgpt-web/test/connections.test.mjs`; `server/test/console-completion.test.mjs` | connections + completion |
+| CON-01 | 插件连接与应用授权 | live | `services/oauth/test/connections.test.mjs`; `adapters/chatgpt-web/test/connections.test.mjs`; `server/test/console-completion.test.mjs` | connections + completion |
 | CON-02 | 个人连接 | live | `services/oauth/test/connections.test.mjs`; `adapters/chatgpt-web/test/connections.test.mjs`; `server/test/console-completion.test.mjs` | connections + completion |
 | CON-03 | Agent 实例与设备 | live | `services/oauth/test/connections.test.mjs`; `adapters/chatgpt-web/test/connections.test.mjs`; `server/test/console-completion.test.mjs` | connections + completion |
 | CON-04 | 捕获健康度 | live | `services/oauth/test/connections.test.mjs`; `adapters/chatgpt-web/test/connections.test.mjs`; `server/test/console-completion.test.mjs` | connections + completion |

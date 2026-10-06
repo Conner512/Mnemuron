@@ -70,7 +70,7 @@ until rotation/revocation, independently of access-token/PAT/invitation lifetime
 
 ## Using the console
 
-1. Open Connections, choose Add connection, then ChatGPT Web or Generic MCP.
+1. Open Connections, choose Add connection, then ChatGPT plugin or Generic MCP.
 2. Enter its purpose/name and readonly or memory-readwrite profile (readonly is
    the default). For ChatGPT, compare the prefilled callback with the exact URI
    shown in ChatGPT and replace it if needed. Read the per-version disclosure
