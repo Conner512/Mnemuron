@@ -14,7 +14,7 @@ export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(co
 // ChatGPT per-memory visibility (memory.visibility, memory.web_policy) was removed from the console; the
 // account read policy is an operator runtime setting (memory.agent_read_policy).
 export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity',...CONSOLE_ORGANIZE_ACTIONS,
-  'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
+  'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.disable','models.quota','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
   'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
   'memory.batch_classify','memory.batch_retract','taxonomy.save','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate']);
 export const CONSOLE_FEATURE_VIEWS = Object.freeze(['attention','capture-status','model-usage','taxonomy','privacy-defaults','retention','task-branches','project-context','task-checkpoints','task-reconciliation','system-health','system-version','backups','memory-versions']);

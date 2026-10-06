@@ -1175,3 +1175,29 @@ Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other age
  readPolicyLegacyReadAll:'Not enabled yet, but this account earlier turned on “ChatGPT may read all memories”: ChatGPT can read all memories except secret ones and those you explicitly kept private. The console can no longer change that setting; ask an operator to turn it off.',
  readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (public memories and memories allowed one by one). Enabling it needs a separate operator confirmation.',
  MANIFEST_EXCEEDS_BUDGET:'The budget cannot cover the probe and one call per listed record.',FIRST_RUN_EXISTS:'This first run already embedded records; activate it again. A new first run needs a separate approval.'});
+
+// Owner call limits per model kind: explicit "no limit" or a whole-number cap for today and in total.
+Object.assign(catalog['zh-CN'],{'models.quota':'设置调用次数限制',setCallLimits:'调用次数限制',callLimits:'调用次数限制',
+ callLimitsNote:'为这个模型设置每日和累计的调用次数上限。“不限制”时仍然记录每次调用；“限制”填 0 表示不允许任何调用。修改限制不会清零计数，不会启用或重建索引，也不会自动重试或安排任务。',
+ callLimitsBoundary:'不限制只针对次数，不代表新的数据外发授权：发送哪些数据、发往哪里仍由模型设置中的外发授权决定。',
+ dailyCallLimit:'每日调用（UTC）',totalCallLimit:'累计调用',dailyCallLimitMode:'每日调用',totalCallLimitMode:'累计调用',callLimitValue:'上限（整数，0 表示不允许调用）',
+ limit_unlimited:'不限制',limit_limited:'限制为',limitMode_manual:'手动设置',limitMode_legacy:'模型默认（每日上限与首次建立预算）',limitSource:'限制来源',
+ noLimit:'不限制',usedOfLimit:'已用',supersededByCallLimits:'（仅作记录：已由手动调用次数限制取代）',callLimitsSaved:'调用次数限制已保存。计数没有清零。',
+ QUOTA_INVALID:'上限必须选择“不限制”，或填写 0 到允许最大值之间的整数。',QUOTA_VERSION_CHANGED:'调用次数限制已被修改，请刷新后重试。',
+ TOTAL_BUDGET_EXHAUSTED:'已达到累计调用上限。提高或取消上限后才能继续调用；计数不会重置。',
+ BUDGET_EXHAUSTED:'已达到模型调用上限（每日或累计）。',
+ FIRST_RUN_BUDGET_EXHAUSTED:'首次建立的调用总预算已用完，语义检索不可用。这个预算不会重置；可以在“调用次数限制”中改用手动设置的累计上限。',
+ firstRunBudgetField:'调用总预算（1–150，包括测试、建立、重试和查询；已设置手动累计上限时以手动上限为准）',
+ firstRunSendNote:'建立时，清单中每条记录的正文会发送到已配置的向量模型服务；机密记录从不发送。达到调用上限后所有向量调用都会停止，不会自动重试或补充。'});
+Object.assign(catalog.en,{'models.quota':'Set call limits',setCallLimits:'Call limits',callLimits:'Call limits',
+ callLimitsNote:'Set this model’s daily and total call limits. With no limit, every call is still counted; a limit of 0 allows no calls. Changing a limit never resets a count, never activates or rebuilds an index, and never retries or schedules work.',
+ callLimitsBoundary:'“No limit” is about counts only and is not a new data egress approval: what is sent and where is still governed by the model’s egress approval.',
+ dailyCallLimit:'Daily calls (UTC)',totalCallLimit:'Total calls',dailyCallLimitMode:'Daily calls',totalCallLimitMode:'Total calls',callLimitValue:'Limit (whole number; 0 allows no calls)',
+ limit_unlimited:'No limit',limit_limited:'Limit to',limitMode_manual:'Set manually',limitMode_legacy:'Model default (daily ceiling and first-run budget)',limitSource:'Limit source',
+ noLimit:'No limit',usedOfLimit:'used',supersededByCallLimits:'(record only: replaced by manual call limits)',callLimitsSaved:'Call limits saved. No count was reset.',
+ QUOTA_INVALID:'Choose “No limit” or enter a whole number from 0 to the allowed maximum.',QUOTA_VERSION_CHANGED:'The call limits changed; refresh and try again.',
+ TOTAL_BUDGET_EXHAUSTED:'The total call limit is reached. Raise or remove it to continue; the count is never reset.',
+ BUDGET_EXHAUSTED:'Model call limit reached (daily or total).',
+ FIRST_RUN_BUDGET_EXHAUSTED:'The first-run total call budget is used up; semantic search is unavailable. This budget is never reset; a manual total under “Call limits” can replace it.',
+ firstRunBudgetField:'Total call budget (1–150, covering tests, build, retries and queries; a manual total limit, when set, applies instead)',
+ firstRunSendNote:'The build sends the text of each listed record to the configured embedding service; secret records are never sent. When a call limit is reached, every embedding call stops: nothing retries or catches up automatically.'});

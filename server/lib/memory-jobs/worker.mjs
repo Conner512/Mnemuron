@@ -47,7 +47,7 @@ export function validateSummary(sources,results,multiSpan){
   return sources.flatMap(source=>(selected.get(source.memory_id) || []).sort((a,b)=>a.start-b.start));
 }
 export class MemoryWorker {
-  constructor(store,jobs,organizer,{workerId='local-memory-worker',userId=null,profileFilter=null}={}){this.store=store;this.jobs=jobs;this.organizer=organizer;this.workerId=workerId;this.userId=userId;this.profileFilter=profileFilter;}
+  constructor(store,jobs,organizer,{workerId='local-memory-worker',userId=null,profileFilter=null,quota=null}={}){this.store=store;this.jobs=jobs;this.organizer=organizer;this.workerId=workerId;this.userId=userId;this.profileFilter=profileFilter;this.quota=quota;}
   async runOne(){
     const job=this.jobs.claim(this.workerId,{userId:this.userId,profile:this.profileFilter});if(!job)return null;
     const profile=this.organizer?.profile,retry=profile?.retry || {max_attempts:1,base_ms:1000,max_ms:1000};
@@ -72,7 +72,7 @@ export class MemoryWorker {
             current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})),
           instruction:job.job_type==='summary'?summaryInstruction:classificationInstruction};
         const reply=await this.organizer.generateStructured(input,outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2'}),{sensitivity:sources.some(s=>s.sensitivity==='sensitive')?'sensitive':sources.some(s=>s.sensitivity==='internal')?'internal':'public',
-          reserve:()=>this.jobs.reserve(job,profile.limits.daily_requests)});
+          reserve:()=>this.jobs.reserve(job,profile.limits.daily_requests,this.quota)});
         let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
         else if(new Set(results.map(r=>r.memory_id)).size!==results.length)fail('INVALID_SOURCE_SET');

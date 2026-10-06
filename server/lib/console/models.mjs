@@ -6,6 +6,7 @@ import {validateProfile,fail} from '../model-providers/contracts.mjs';
 import {ConflictError,ValidationError} from '../errors.mjs';
 import {object,number,fingerprint} from './state.mjs';
 import {outputSchema,validateSummary} from '../memory-jobs/worker.mjs';
+import {ConsoleQuotas} from './quotas.mjs';
 
 // A browser may configure its own HTTPS service and its own key, never an env/file
 // reference, a proxy, or another user's model. Private destinations need operator approval.
@@ -17,17 +18,22 @@ export class ConsoleModels {
         config_json TEXT NOT NULL,secret_cipher TEXT,created_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS console_vector_budget(user_id TEXT PRIMARY KEY,total INTEGER NOT NULL CHECK(total BETWEEN 1 AND 150),used INTEGER NOT NULL DEFAULT 0,opened_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
-        state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);}
-  /** Counts one embedder call against an open first-run budget. Returns true when it replaces the daily cap (manifest build only). */
-  budgetReserve(user,purpose){
-    const row=this.db.prepare('SELECT total,used FROM console_vector_budget WHERE user_id=?').get(user);if(!row)return false;
-    if(row.used>=row.total)fail('BUDGET_EXHAUSTED');
-    this.db.prepare('UPDATE console_vector_budget SET used=used+1 WHERE user_id=?').run(user);return purpose==='manifest';
+        state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);
+    this.quotas=new ConsoleQuotas(store,this);}
+  /** Counts one embedder call: the owner's limits (if set) and an open first-run budget. Returns true for a manifest
+   * build call (outside the daily cap), 'manual' when the owner's daily limit was already enforced, else false. */
+  budgetReserve(user,purpose,day){
+    const row=this.db.prepare('SELECT total,used FROM console_vector_budget WHERE user_id=?').get(user),build=!!row&&purpose==='manifest';
+    const {manual}=this.quotas.reserve(user,'embedder',{daily:!build,...(day?{day}:{})});
+    // The first-run total stays recorded; a manual total replaces it as the enforced cap.
+    if(row){if(!manual&&row.used>=row.total)fail('BUDGET_EXHAUSTED');this.db.prepare('UPDATE console_vector_budget SET used=used+1 WHERE user_id=?').run(user);}
+    return build?true:manual?'manual':false;
   }
   budget(user){const row=this.db.prepare('SELECT total,used,opened_at FROM console_vector_budget WHERE user_id=?').get(user);return row?{...row,remaining:row.total-row.used}:null;}
   /** Calls left today for a query on this embedder profile: the cap and counters the query reserve checks. Manifest
-   * build calls are outside the daily cap. Null when no configuration for the profile is known. */
+   * build calls are outside the daily cap. Null when no configuration for the profile is known or no daily limit is set. */
   dailyRemaining(user,profile){
+    const quota=this.quotas.view(user,'embedder');if(quota.mode==='manual')return quota.daily.remaining;
     const row=this.raw(user,'embedder'),current=row&&JSON.parse(row.config_json);
     // The current configuration serves its own fingerprint; otherwise the first retained snapshot does (see vector()).
     const config=current?.enabled&&this.profile(user,'embedder',current).fingerprint===profile?current
@@ -141,10 +147,10 @@ export class ConsoleModels {
     const reserve=()=>this.store.memoryTransaction(()=>{
       const day=new Date().toISOString().slice(0,10),profile=provider.profile.fingerprint;
       // A synthetic probe call also counts against an open first-run budget (and still against the daily cap).
-      if(p.kind==='embedder')this.budgetReserve(auth.user_id,'probe');
+      const manual=p.kind==='embedder'?this.budgetReserve(auth.user_id,'probe',day)==='manual':this.quotas.reserve(auth.user_id,'organizer',{day}).manual;
       this.db.prepare('INSERT OR IGNORE INTO memory_model_budget VALUES(?,?,0)').run(profile,day);
       const vectorCalls=p.kind==='embedder'&&this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_calls'").get()?this.db.prepare('SELECT count n FROM memory_vector_calls WHERE profile=? AND day=?').get(profile,day)?.n||0:0;
-      if(vectorCalls+this.db.prepare('SELECT reserved_calls n FROM memory_model_budget WHERE profile=? AND day=?').get(profile,day).n>=provider.profile.limits.daily_requests)fail('BUDGET_EXHAUSTED');
+      if(!manual&&vectorCalls+this.db.prepare('SELECT reserved_calls n FROM memory_model_budget WHERE profile=? AND day=?').get(profile,day).n>=provider.profile.limits.daily_requests)fail('BUDGET_EXHAUSTED');
       this.db.prepare('UPDATE memory_model_budget SET reserved_calls=reserved_calls+1 WHERE profile=? AND day=?').run(profile,day);
       this.db.prepare('INSERT INTO memory_owner_model_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day) DO UPDATE SET reserved_calls=reserved_calls+1').run(auth.user_id,profile,day);
     });

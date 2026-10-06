@@ -60,7 +60,9 @@ export class ConsoleFeatures {
         const vectorCalls=hasVectors?db.prepare('SELECT count n FROM memory_owner_vector_usage WHERE user_id=? AND profile=? AND day=?').get(user,profile,day)?.n||0:0;
         // First-run build calls are real requests but are bounded by the first-run total, not the daily limit.
         const buildCalls=hasBuild?db.prepare('SELECT count n FROM memory_owner_vector_build_usage WHERE user_id=? AND profile=? AND day=?').get(user,profile,day)?.n||0:0;
-        return {kind:m.kind,configured:true,used:calls+vectorCalls,limit:m.config.daily_requests,remaining:Math.max(0,m.config.daily_requests-calls-vectorCalls),
+        // The enforced limits: the owner's call limits when set (null = no limit), otherwise the model's daily requests.
+        const quota=service.models.quotas.view(user,m.kind),daily=quota.mode==='manual'?quota.daily:{limit:m.config.daily_requests,used:calls+vectorCalls,remaining:Math.max(0,m.config.daily_requests-calls-vectorCalls)};
+        return {kind:m.kind,configured:true,used:daily.used,limit:daily.limit,remaining:daily.remaining,limit_mode:quota.mode,total:quota.total,
           first_run_build_calls:buildCalls,total_requests:calls+vectorCalls+buildCalls};
       });return result({day,unit:'reserved_requests',cost:null,cost_status:'not_metered',models});
     }

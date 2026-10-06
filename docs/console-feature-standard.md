@@ -153,7 +153,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 - `RES-01～04` 继续延后；`TSK-05` 的 bootstrap 确认及 `TSK-06` 的协调写操作依赖现有 handoff 门禁，因此不绕过门禁开放。任务、项目、检查点和协调提案只能查看。
 - `CON-04` 仅反映服务器实际收到的事件和处理状态。本机 Hook 超时、未发送队列没有可信上报入口，保持 `not_observable`，不是健康通过。
-- `MOD-04` 显示当前个人模型配置的当日预留请求及预算，包含失败尝试；没有计费金额数据，不推算费用。
+- `MOD-04` 显示当前个人模型配置的当日预留请求及预算，包含失败尝试；没有计费金额数据，不推算费用。`models.quota` 让账户所有者为整理模型和向量模型分别设置每日与累计调用次数上限（`null` 为明确的不限制，0 为不允许调用）；修改不清零计数，不改模型配置、索引、启用状态或任务。
 - `SYS-02` 可验证当前 Core 数据库及搜索状态；worker、向量和 MCP 的配置/进程健康分开显示，没有探测证据时为 `not_probed`。`SYS-03` 的数据库版本是实际 SQLite `user_version`，不是完整的迁移审计报告。
 - `SYS-04` 已有状态读取入口和说明，但可信备份记录源尚未接入，最近备份、大小及恢复验证仍为环境缺口。返回 `not_configured/verified:false`，不能算备份验收通过；不会启用自动备份或扫描整库文件。
 - `policy` 项继续关闭。上线还需经授权部署代码、升级相应写凭证、核对新视图的精确 ingress 规则；本地代码和合成验收不会自动修改生产环境。
@@ -216,7 +216,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MOD-01 | 模型配置 | 整理模型与向量模型 | live | models | models.save, models.disable |
 | MOD-02 | 模型配置 | 连通性测试 | live | — | models.test |
 | MOD-03 | 模型配置 | 个人向量索引（含首次建立：冻结清单、总预算、手动启用与回滚） | live | — | vector.schedule, vector.prepare, vector.activate, vector.deactivate |
-| MOD-04 | 模型配置 | 用量与预算 | live | model-usage | — |
+| MOD-04 | 模型配置 | 用量与预算（含手动调用次数限制） | live | model-usage | models.quota |
 | PRV-01 | 隐私与保留 | 外发许可总览 | live | models | — |
 | PRV-02 | 隐私与保留 | 新记忆默认设置 | live | privacy-defaults | privacy.defaults |
 | PRV-03 | 隐私与保留 | 数据保留策略 | live | retention | retention.save |

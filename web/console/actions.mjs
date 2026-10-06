@@ -37,7 +37,8 @@ export function actionPage(page,data,caps,connectionQuery={}) {
     const firstRun=step=>{const fr=step.first_run||{},b=fr.budget;
       const facts=fr.generation?kv([['vectorCollection',`<code>${esc(fr.collection)}</code>`],['dimensions',esc(fr.dimensions)],['manifestCount',esc(fr.manifest.count)],['manifestDigest',`<code class="digest">${esc(fr.manifest.digest)}</code>`],
         ['manifestProgress',`${esc(fr.manifest.indexed)} ${l('indexedShort')} · ${esc(fr.manifest.pending)} ${l('pendingShort')} · ${esc(fr.manifest.stale)} ${l('staleShort')}`],['state',l('firstRunState_'+fr.build)+(fr.error_code?` · ${esc(t(fr.error_code))}`:'')],['serving',l(fr.serving?'yes':'no')]]):'';
-      const budget=b?kv([['firstRunBudget',`${esc(b.used)} / ${esc(b.total)}`]]):'';
+      // With manual call limits the first-run total is a record that keeps counting, not the enforced cap.
+      const budget=b?kv([['firstRunBudget',`${esc(b.used)} / ${esc(b.total)}`+(p.quotas?.embedder?.mode==='manual'?` <small class="muted">${l('supersededByCallLimits')}</small>`:'')]]):'';
       // Once a first run embedded records its budget belongs to it: re-activate it instead of preparing again.
       const embedded=!!(fr.manifest?.indexed||fr.manifest?.stale||fr.manifest?.excluded);
       const actions=[...(embedded?[]:[launch('vector.prepare','prepareFirstRun',step.ready===true&&!fr.serving)]),
@@ -46,10 +47,13 @@ export function actionPage(page,data,caps,connectionQuery={}) {
         ...(fr.generation&&fr.serving?[launch('vector.deactivate','deactivateIndex',true,{generation:fr.generation})]:[])];
       return `<div class="first-run" data-first-run><h4>${l('firstRun')}</h4><p class="muted">${l('firstRunNote')}</p>${budget}${facts}${buttons(actions)}</div>`;};
     const verification=v=>`<div class="model-verification" role="status"><strong>${l(!v?'probeNotRun':v.state==='verified'?'probeVerified':v.state==='running'?'probeRunning':'probeFailed')}</strong>${v?`<p>${esc(time(v.updated_at))}${v.error_code?` · ${esc(t(v.error_code))}`:''}</p>${v.checks?.length?`<p>${v.checks.map(c=>esc(t(c))).join(' · ')}</p>`:''}${v.skipped?.length?`<p>${l('probeSkipped')}: ${v.skipped.map(c=>esc(t(c))).join(' · ')}</p>`:''}`:''}</div>`;
+    // Enforced call limits as the server reports them: "No limit" is shown as such, never as a number.
+    const limit=x=>x?`${esc(x.used)} ${l('usedOfLimit')} / ${x.limit===null?l('noLimit'):esc(x.limit)}`:'—';
+    const limits=q=>q?`<div class="call-limits" data-call-limits="${esc(q.kind)}"><h4>${l('callLimits')}</h4>`+kv([['limitSource',l('limitMode_'+q.mode)],['dailyCallLimit',limit(q.daily)],['totalCallLimit',limit(q.total)]])+blocked(q.exhausted)+`</div>`:'';
     return `<div class="card-grid">${(data.models||[]).map(m=>section(m.kind,
       `<p>${l(m.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p>`+
-      kv([['modelName',esc(m.config.model||t('modelNotConfigured'))],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',esc(m.config.daily_requests??'—')],['hasKey',l(m.has_key?'yes':'no')],...(m.kind==='embedder'?[['dimensions',esc(m.config.dimensions??'—')]]:[])])+verification(m.verification)+
-      buttons([...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testCapabilities',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.disable')?[actionButton('models.disable','disable',{kind:m.kind})]:[]),inspect('models',m.kind)])+(!can('models.save')?onlyRead():''),
+      kv([['modelName',esc(m.config.model||t('modelNotConfigured'))],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',esc(m.config.daily_requests??'—')+(p.quotas?.[m.kind]?.mode==='manual'?` <small class="muted">${l('supersededByCallLimits')}</small>`:'')],['hasKey',l(m.has_key?'yes':'no')],...(m.kind==='embedder'?[['dimensions',esc(m.config.dimensions??'—')]]:[])])+verification(m.verification)+limits(p.quotas?.[m.kind])+
+      buttons([...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(can('models.quota')?[actionButton('models.quota','setCallLimits',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testCapabilities',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.disable')?[actionButton('models.disable','disable',{kind:m.kind})]:[]),inspect('models',m.kind)])+(!can('models.save')?onlyRead():''),
       {aside:state(m.config.enabled?'enabled':'disabled'),className:'model-card'})).join('')}</div>`+
       section('modelPipeline',`<p>${l('modelPipelineNote')}</p><div class="card-grid model-pipeline">${['classification','summary','vector'].map(kind=>{
         const step=p[kind]||{},vector=kind==='vector';return `<div data-model-stage="${kind}"><h3>${l(kind)}</h3>${state(step.ready?'ready':'notReady')}${blocked(step.blockers)}${vector?kv([['indexedDocuments',esc(step.indexed_documents??0)],['state',esc(t(step.state||'not_started'))],['semanticReadiness',l(step.search_ready?'ready':'notReady')]])+blocked(step.search_blockers)+blocked(step.error_code?[step.error_code]:[]):''}${vector?firstRun(step):''}${buttons([...(vector&&step.first_run?.budget?[]:[launch(vector?'vector.schedule':'jobs.schedule',vector?'rebuildIndex':kind==='summary'?'summarize':'organize',step.ready===true,vector?{}:{type:kind})])])}</div>`;
@@ -157,6 +161,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
       const message=document.createElement('p');message.className='policy-box';message.textContent=t(data.status==='verified'?'modelProbePassed':data.status==='saved'?'modelSavedNext':data.status==='no_work'?'modelNoWork':
         data.status==='prepared'?'firstRunPrepared':data.status==='activated'?'indexActivated':data.status==='deactivated'?'indexDeactivated':'modelQueued');content.prepend(message);
     }
+    if(intent?.action==='models.quota'){const message=document.createElement('p');message.className='policy-box';message.setAttribute('role','status');message.textContent=t('callLimitsSaved');content.prepend(message);}
     if(intent?.action==='jobs.retry'){
       const message=document.createElement('p');message.className='policy-box';message.setAttribute('role','status');
       message.textContent=data.status==='rescheduled'?`${t('rescheduledResult')} ${data.jobs.length} · ${t('supersededResult')} ${data.superseded}`:data.status==='no_work'?t('rescheduledNoWork'):t('modelQueued');content.prepend(message);
@@ -342,6 +347,12 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
           field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100,min:1,upper:10000,step:1})+field('batch_size','batchSize',{type:'number',value:c.batch_size||5,min:1,upper:20,step:1})+
           (intent.kind==='organizer'?field('output_tokens','outputTokens',{type:'number',value:c.output_tokens||4096,min:128,upper:32768,step:1}):`<input type="hidden" name="output_tokens" value="${esc(c.output_tokens||4096)}">`)+field('profile_revision','modelRevision',{value:c.profile_revision||'1',max:160})+
           (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+select('sensitivity','modelSensitivity',['public','internal','sensitive'],c.sensitivities?.includes('sensitive')?'sensitive':c.sensitivities?.includes('internal')?'internal':'public')+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
+      } else if(action==='models.quota'){
+        const q=(data.processing??getData().processing)?.quotas?.[intent.kind];if(!q)throw new Error('unavailable');intent.revision=q.mode==='manual'?q.revision:0;
+        // Each limit is an explicit choice; the number only applies with "Limit to". A legacy limit is offered as the starting value.
+        const choice=(name,key,x)=>select(`${name}_mode`,key,['limit_unlimited','limit_limited'],x.limit===null?'limit_unlimited':'limit_limited')+
+          field(name,'callLimitValue',{type:'number',value:x.limit??'',required:false,min:0,upper:name==='daily_limit'?1000000:1000000000,step:1});
+        fields=`<p>${l('callLimitsNote')}</p>`+choice('daily_limit','dailyCallLimitMode',q.daily)+choice('total_limit','totalCallLimitMode',q.total)+`<p class="policy-box">${l('callLimitsBoundary')}</p>`;
       } else if(action==='models.test'){
         fields=`<p>${l('probeCostNote')}</p><p>${l(intent.kind==='organizer'?'organizerProbeNote':'embedderProbeNote')}</p>`;
       } else if(action==='vector.prepare'){
@@ -380,6 +391,9 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     else if(a==='jobs.cancel'||a==='jobs.retry')p.job_id=intent.id;
     else if(a==='models.save'){
       p.kind=intent.kind;p.expected_revision=intent.revision;const sensitivity=fd.get('sensitivity');p.config={enabled:fd.has('enabled'),protocol:fd.get('protocol'),base_url:fd.get('base_url'),model:fd.get('model'),profile_revision:fd.get('profile_revision'),daily_requests:Number(fd.get('daily_requests')),output_tokens:Number(fd.get('output_tokens')),batch_size:Number(fd.get('batch_size')),sensitivities:sensitivity==='public'?['public']:sensitivity==='internal'?['public','internal']:['public','internal','sensitive'],egress_approved:fd.has('egress_approved'),query_approved:fd.has('query_approved'),native_schema:intent.kind==='organizer'?fd.has('native_schema'):true};if(intent.kind==='embedder')p.config.dimensions=Number(fd.get('dimensions'));if(fd.get('api_key'))p.api_key=fd.get('api_key');if(fd.has('remove_key'))p.remove_key=true;
+    } else if(a==='models.quota'){p.kind=intent.kind;p.expected_revision=intent.revision;
+      // "No limit" is sent as null. Anything but plain digits is sent as typed, so the server refuses it rather than reading 0 or null.
+      for(const name of ['daily_limit','total_limit']){const raw=String(fd.get(name)??'').trim();p[name]=fd.get(`${name}_mode`)==='limit_unlimited'?null:/^\d{1,16}$/.test(raw)?Number(raw):raw;}
     } else if(a==='vector.prepare')p.budget_calls=Number(fd.get('budget_calls'));
     else if(a==='vector.schedule'&&intent.generation)Object.assign(p,{generation:intent.generation,expected_count:Number(fd.get('expected_count')),expected_digest:intent.digest});
     else if(a==='vector.activate'||a==='vector.deactivate')p.generation=intent.generation;

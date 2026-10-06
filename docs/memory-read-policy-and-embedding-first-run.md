@@ -123,7 +123,7 @@ force, but they can no longer be edited from the console. The operator CLI
 | Model | `<embedding-model>` |
 | Model revision | an operator label, for example `site-2026-10` |
 | Vector dimensions | the configured size, for example `768` (sent as `dimensions`; the probe verifies the actual length) |
-| Daily requests | unchanged (for example 25); the first-run budget replaces it for build calls only |
+| Daily requests | unchanged (for example 25); the first-run budget replaces it for build calls only. Owner call limits, once set, replace it (see below). |
 | Batch size | at least 1. Each record usually needs one call. |
 | Highest allowed sensitivity | the highest class among the records to embed. Records without a classification count as `sensitive`. |
 | Approve egress / approve queries | explicit choices |
@@ -177,6 +177,46 @@ bundled approval.
 - Progress and the used/total figures are shown on the Models page and in
   `processing.vector.first_run`.
 
+### Owner call limits (console → Models → Call limits, action `models.quota`)
+
+Each account sets a daily and a total call limit for each model kind (`organizer`, `embedder`):
+
+```json
+{"kind":"embedder","expected_revision":0,"daily_limit":null,"total_limit":null}
+```
+
+- `null` is an explicit **no limit**. A whole number is a cap: `0` allows no call. Daily is at
+  most 1,000,000 and total at most 1,000,000,000. A missing key, a string, a fraction, a negative
+  number or anything out of range is refused with `QUOTA_INVALID` and nothing is stored. A stale
+  `expected_revision` is refused with `QUOTA_VERSION_CHANGED`.
+- **Before a kind has a saved setting, nothing changes**: the model's daily requests and the
+  first-run budget are enforced as described above (`processing.quotas.<kind>.mode: "legacy"`).
+- **Once saved, the owner's limits are the only call-count caps for that kind** (`mode: "manual"`):
+  the model's daily requests and the first-run total (150 at most) are no longer enforced. The
+  first-run budget row stays as a record, keeps counting, and still marks first-run mode (no
+  catch-up, no ordinary rebuild).
+- **Counting never stops or resets.** Every reserved call is counted, limited or not. The embedder
+  total starts from the first-run calls already used (for example 105). Calls already counted
+  today under the account's model profiles carry into the daily count. The organizer total counts
+  from the deployment of this change (`counting_since`).
+- **Daily is per UTC day, per account and kind**, across model changes. First-run manifest build
+  calls stay outside the daily count and inside the total.
+- **Transitions.** A new or lower limit applies to the next call, against the existing counts.
+  Lowering below the current usage is accepted and shown as exhausted (`DAILY_BUDGET_EXHAUSTED`,
+  `TOTAL_BUDGET_EXHAUSTED`). The next call is then refused with `BUDGET_EXHAUSTED` before
+  anything is sent. Re-enabling a limit counts the calls made while there was none.
+- **A limit change has no side effects.** It does not change the model configuration or its probe
+  result, retry or resume jobs (a `blocked_budget` job waits for an explicit retry), activate,
+  rebuild or catch up an index, or widen egress. "No limit" is about counts only: what is sent
+  and where is still governed by the model's egress approvals and the manifest.
+- Each check and increment runs in the same `BEGIN IMMEDIATE` transaction as the existing
+  reservation, so concurrent calls cannot exceed an enabled cap.
+- Readiness: `processing.quotas.<kind>` shows mode, limits, used and remaining (`null` means no
+  limit), plus the exhausted codes. They also appear as classification/summary blockers and as
+  semantic-search blockers. The `model-usage` view reports the enforced daily limit (`limit:
+  null` when there is none) and the total.
+- Every change is audited (`console.models.quota.change`, with the previous and new limits).
+
 ### No catch-up
 
 While a first-run budget exists for the account:
@@ -221,7 +261,8 @@ The retained profile still follows current consent:
   record (`MANIFEST_EXCEEDS_BUDGET`). Leave headroom for retries and queries.
 - **An exhausted budget is final.** Once it is used up, every embedding call for the account,
   queries included, fails with `BUDGET_EXHAUSTED`, and search falls back to keywords. Closing or
-  replacing the budget for ordinary operation is a separate, later approval and change.
+  replacing the budget for ordinary operation is a separate, later approval and change. An
+  owner call limit (`models.quota`) replaces it as the enforced total, without resetting it.
 - **One first run per account.** After a first run has embedded records, a new prepare is
   refused (`FIRST_RUN_EXISTS`); the existing index can be activated again at any time.
 - **Pre-created collections are not reclaimed.** A generation keeps its pre-created collection
@@ -240,7 +281,10 @@ The retained profile still follows current consent:
 ### Schema, compatibility and rollback
 
 - **Additive tables only**, created idempotently at start: `console_vector_budget`,
-  `console_vector_profiles` and `memory_vector_manifest`. The schema version is unchanged and no
+  `console_vector_profiles` and `memory_vector_manifest`, and for owner call limits
+  `console_model_quotas`, `console_model_usage` and `console_model_usage_daily`. Rolling the
+  code back ignores the call-limit tables, so the legacy caps apply again (for example 25 per day
+  and 150 in total). The schema version is unchanged and no
   existing row is rewritten.
 - **Deploy Core and the console BFF together.** They share the action contract.
 - **Code rollback to 330c7e2:**

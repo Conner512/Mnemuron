@@ -380,7 +380,7 @@ export const featureMap = {
     {id: 'MOD-01', status: 'live', read: ['models'], write: ['models.save', 'models.disable']},
     {id: 'MOD-02', status: 'live', write: ['models.test']},
     {id: 'MOD-03', status: 'live', write: ['vector.schedule']},
-    {id: 'MOD-04', status: 'live', read: ['model-usage']},
+    {id: 'MOD-04', status: 'live', read: ['model-usage'], write: ['models.quota']},
   ],
   privacy: [
     {id: 'PRV-01', status: 'live', read: ['models']},
@@ -547,7 +547,7 @@ function featureBody(t,id,data,caps){
   if(id==='TSK-04')return table(data.features?.['task-branches']?.tasks,[['taskTitle',r=>r.title],['actions',r=>html`${inspect('task-checkpoints',{task_id:r.task_id},'checkpoint')} ${inspect('task-reconciliation',{task_id:r.task_id},'proposal')}`]]);
   if(id==='CON-04')return html`${sectionNote(t,'captureObservationNote')}${table(d.agents,[['agentId',r=>r.agent_id],['agentInstance',r=>r.agent_instance_id],['sourceCount',r=>r.events],['lastUsed',r=>formatDate(r.last_received_at)]])}`;
   if(id==='CON-05')return html`${sectionNote(t,'agentKeyBoundary')}${act('devices.register','registerAgent')}${table((data.core_connections||[]).filter(c=>c.console_revocable),[['label',r=>r.label],['agentInstance',r=>r.agent_instance_id],['actions',r=>act('devices.rotate','rotateAgent',{id:r.credential_id})]])}`;
-  if(id==='MOD-04')return html`<p>${d.day} UTC · ${i18n(t,'usageReservationNote')}</p>${table(d.models,[['modelKind',r=>t(r.kind)],['usedRequests',r=>r.used??'—'],['dailyRequests',r=>r.limit??'—'],['remainingRequests',r=>r.remaining??'—'],['firstRunBuildRequests',r=>r.first_run_build_calls??'—']])}`;
+  if(id==='MOD-04')return html`<p>${d.day} UTC · ${i18n(t,'usageReservationNote')}</p>${table(d.models,[['modelKind',r=>t(r.kind)],['usedRequests',r=>r.used??'—'],['dailyRequests',r=>!r.configured?'—':r.limit??t('noLimit')],['remainingRequests',r=>!r.configured?'—':r.remaining??t('noLimit')],['totalCallLimit',r=>r.total?`${r.total.used} / ${r.total.limit??t('noLimit')}`:'—'],['firstRunBuildRequests',r=>r.first_run_build_calls??'—']])}`;
   if(id==='PRV-02')return html`<p>${i18n(t,'sensitivity')}: ${t(d.sensitivity)}</p>${sectionNote(t,'privacyDefaultsBoundary')}${act('privacy.defaults','configure')}`;
   if(id==='PRV-03')return html`<p>${i18n(t,'eventRetentionDays')}: ${d.raw_retention_days==='permanent'?t('permanent'):d.raw_retention_days}</p>${sectionNote(t,'retentionBoundary')}${act('retention.save','configure')}`;
   if(id==='PRV-04')return html`${sectionNote(t,'pruneBoundary')}${act('retention.prune','pruneNow')}`;

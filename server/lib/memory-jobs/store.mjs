@@ -47,11 +47,13 @@ export class MemoryJobs {
     && ['user_id','scope_key','profile','input_hash','group_key','job_type'].every(key=>row[key]===job[key]) && JSON.stringify(row.metadata)===JSON.stringify(job.metadata);}
   renew(job){if(!this.owns(job))fail('LEASE_LOST');this.db.prepare('UPDATE memory_jobs SET lease_expires=? WHERE job_id=? AND fence=?').run(this.clock()+this.leaseMs,job.job_id,job.fence);}
   items(job){return this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? ORDER BY ordinal').all(job.job_id);}
-  reserve(job,limit){return this.store.memoryTransaction(()=>{
+  /** quota(job,day): an optional owner limit checked and counted first in this transaction; {manual:true} replaces `limit`. */
+  reserve(job,limit,quota=null){return this.store.memoryTransaction(()=>{
     if(!this.owns(job))fail('LEASE_LOST');const day=new Date(this.clock()).toISOString().slice(0,10);
+    const manual=quota?quota(job,day).manual===true:false;
     this.db.prepare('INSERT OR IGNORE INTO memory_model_budget VALUES (?,?,0)').run(job.profile,day);
     const current=this.db.prepare('SELECT reserved_calls FROM memory_model_budget WHERE profile=? AND day=?').get(job.profile,day);
-    if(current.reserved_calls>=limit)fail('BUDGET_EXHAUSTED');
+    if(!manual&&current.reserved_calls>=limit)fail('BUDGET_EXHAUSTED');
     this.db.prepare('UPDATE memory_model_budget SET reserved_calls=reserved_calls+1 WHERE profile=? AND day=?').run(job.profile,day);
     // Account attribution is not a new cost allocation policy; the existing global ceiling still applies.
     this.db.prepare(`INSERT INTO memory_owner_model_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day)

@@ -44,7 +44,8 @@ export class ConsoleService {
   processing(user){
     const models=this.models.list(user),worker=this.store.memoryConfig.console?.worker_enabled===true;
     const blockers=kind=>{const c=models.find(m=>m.kind===kind).config;return [...(!c.enabled?['NOT_CONFIGURED']:[]),...(c.enabled&&!c.egress_approved?['EGRESS_DENIED']:[])];};
-    const organizer=[...blockers('organizer'),...(!worker?['WORKER_DISABLED']:[])],vector=[...blockers('embedder'),...(!worker?['WORKER_DISABLED']:[]),...(!this.store.memoryConfig.vector_store?.enabled?['VECTOR_DISABLED']:[])];
+    const quotas={organizer:this.models.quotas.view(user,'organizer'),embedder:this.models.quotas.view(user,'embedder')};
+    const organizer=[...blockers('organizer'),...(!worker?['WORKER_DISABLED']:[]),...quotas.organizer.exhausted],vector=[...blockers('embedder'),...(!worker?['WORKER_DISABLED']:[]),...(!this.store.memoryConfig.vector_store?.enabled?['VECTOR_DISABLED']:[])];
     const active=this.db.prepare('SELECT generation,profile FROM memory_vector_owner_active WHERE user_id=?').get(user);
     const request=this.db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||{};
     const embedder=models.find(m=>m.kind==='embedder').config,search=[...blockers('embedder'),...(!this.store.memoryConfig.vector_store?.enabled?['VECTOR_DISABLED']:[]),...(!embedder.query_approved?['QUERY_EGRESS_DENIED']:[])];
@@ -53,14 +54,15 @@ export class ConsoleService {
     const retained=active&&this.models.retainedServes(user,active.generation);
     if(!active)search.push('VECTOR_NOT_READY');
     else if(embedder.enabled&&configured!==active.profile&&!retained)search.push('VECTOR_PROFILE_MISMATCH');
-    // A query also needs a call left in an open first-run total and in today's allowance of the serving profile.
-    if(this.models.budget(user)?.remaining<=0)search.push('FIRST_RUN_BUDGET_EXHAUSTED');
-    if(active&&this.models.dailyRemaining(user,active.profile)===0)search.push('DAILY_BUDGET_EXHAUSTED');
+    // A query also needs a call left in the total (owner's or open first-run) and in today's allowance.
+    if(quotas.embedder.mode==='manual')search.push(...quotas.embedder.exhausted.filter(code=>active||code!=='DAILY_BUDGET_EXHAUSTED'));
+    else{if(this.models.budget(user)?.remaining<=0)search.push('FIRST_RUN_BUDGET_EXHAUSTED');
+      if(active&&this.models.dailyRemaining(user,active.profile)===0)search.push('DAILY_BUDGET_EXHAUSTED');}
     const hasDocuments=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_documents'").get();
     const indexed=active&&hasDocuments?this.db.prepare("SELECT COUNT(*) n FROM memory_vector_documents WHERE user_id=? AND generation=? AND state='indexed'").get(user,active.generation).n:0;
     return {classification:{ready:!organizer.length,blockers:organizer},summary:{ready:!organizer.length,blockers:organizer},
       vector:{ready:!vector.length,blockers:vector,state:request.state||'not_started',error_code:request.error_code||null,updated_at:request.updated_at||null,indexed_documents:indexed,search_ready:!search.length,search_blockers:search,
-        serving_generation:active?.generation||null,serving_profile_differs:!!active&&!!configured&&configured!==active.profile,first_run:this.firstRun(user,active)},settings:this.settings(user)};
+        serving_generation:active?.generation||null,serving_profile_differs:!!active&&!!configured&&configured!==active.profile,first_run:this.firstRun(user,active)},settings:this.settings(user),quotas};
   }
   /** Truthful first-run state: frozen manifest, build progress, budget and whether it is serving. Counts only. */
   firstRun(user,active){
@@ -147,6 +149,7 @@ export class ConsoleService {
       this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(job.profile);
       this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL,fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE job_id=? AND user_id=?").run(Date.now(),Date.now(),job.job_id,auth.user_id);return {status:'queued',job_id:job.job_id};}
     if(action==='models.save')return this.models.save(auth,p);
+    if(action==='models.quota')return this.models.quotas.save(auth,p);
     if(action==='models.disable'){object(p,['kind','expected_revision']);const row=this.models.raw(auth.user_id,p.kind);if(!row||row.revision!==p.expected_revision)throw new ConflictError('Model changed.','MODEL_VERSION_CHANGED');const config=JSON.parse(row.config_json);return this.models.save(auth,{kind:p.kind,expected_revision:row.revision,config:{...config,enabled:false}});}
     if(action.startsWith('vector.'))return this.vectorAction(auth,action,p);
     if(action==='connections.create'){
@@ -188,8 +191,9 @@ export class ConsoleService {
       const {items,excluded}=this.manifestCandidates(user,profile);
       if(!items.length)throw new ConflictError('No active record is approved for embedding.','MANIFEST_EMPTY');
       // The build needs at least one call per record plus the two probe calls; a smaller budget could only strand it.
-      const remaining=budget?budget.remaining:p.budget_calls;
-      if(items.length+2>remaining)throw new ConflictError('The budget cannot cover the probe and one call per listed record.','MANIFEST_EXCEEDS_BUDGET');
+      // With the owner's own total set, that total (null: no limit) is the one enforced, not budget_calls.
+      const quota=this.models.quotas.view(user,'embedder'),remaining=quota.mode==='manual'?quota.total.remaining:budget?budget.remaining:p.budget_calls;
+      if(remaining!==null&&items.length+2>remaining)throw new ConflictError('The budget cannot cover the probe and one call per listed record.','MANIFEST_EXCEEDS_BUDGET');
       if(!budget)this.db.prepare('INSERT INTO console_vector_budget VALUES(?,?,0,?)').run(user,p.budget_calls,Date.now());
       const generation=index.begin(profile.fingerprint,{manifest:items});this.models.snapshot(user,generation);
       const g=owned(generation);
@@ -285,7 +289,7 @@ export class ConsoleService {
     const embedders=new Map(this.models.snapshotProviders(user).map(e=>[e.profile.fingerprint,e]));
     let current=null;try{current=this.models.provider(user,'embedder');}catch(error){if(!embedders.size)throw error;}
     if(current)embedders.set(current.profile.fingerprint,current);
-    return new VectorIndex(this.store,this.vectorBackend(config),embedders,{ownerId:user,prefix:config.collection_prefix,budget:purpose=>this.models.budgetReserve(user,purpose)});}
+    return new VectorIndex(this.store,this.vectorBackend(config),embedders,{ownerId:user,prefix:config.collection_prefix,budget:(purpose,day)=>this.models.budgetReserve(user,purpose,day)});}
   async tick(){if(this.busy||this.store.memoryConfig.console?.worker_enabled!==true)return;this.busy=true;
     try{
       const users=this.db.prepare("SELECT user_id FROM console_models WHERE kind='organizer' AND json_extract(config_json,'$.enabled')=1 ORDER BY updated_at").all();
@@ -294,7 +298,8 @@ export class ConsoleService {
           for(const type of ['classification','summary'])scheduleLibrary(this.store,this.store.memoryJobs,{userId:user,organizer,taxonomy:this.taxonomy(user),type,timezone:settings.timezone,periods:settings.periods});
           this.db.prepare("UPDATE console_settings SET settings_json=json_set(settings_json,'$.next_scan_at',?) WHERE user_id=?").run(Date.now()+60000,user);
         }
-        await new MemoryWorker(this.store,this.store.memoryJobs,organizer,{workerId:`console-${process.pid}`,userId:user,profileFilter:organizer.profile.fingerprint}).drain({maxJobs:1});
+        await new MemoryWorker(this.store,this.store.memoryJobs,organizer,{workerId:`console-${process.pid}`,userId:user,profileFilter:organizer.profile.fingerprint,
+          quota:(job,day)=>this.models.quotas.reserve(job.user_id,'organizer',{day})}).drain({maxJobs:1});
       }catch{/* Persistent job state reports failures; never log source text or keys. */}}
       // Catch up successful personal indices as memories evolve, without reviving a disabled account.
       // Never for an account in first-run mode: its index covers only the frozen manifest until a separate approval.
