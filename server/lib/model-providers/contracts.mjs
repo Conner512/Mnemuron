@@ -59,6 +59,25 @@ export function validateProfile(input, {kind,synthetic=false}={}) {
   return Object.freeze(p);
 }
 
+// The schema sent to a provider. Some OpenAI-compatible gateways (Gemini-backed ones) reject any
+// non-string enum member with HTTP 400, e.g. the exact source revisions of a bounded summary.
+// Such enums are left out of the request and expressed as the tightest numeric range instead;
+// the reply is still validated locally against the full schema, enum included.
+export function providerSchema(schema) {
+  if(Array.isArray(schema))return schema.map(providerSchema);
+  if(!schema || typeof schema!=='object')return schema;
+  const out={};
+  for(const [k,v] of Object.entries(schema)) {
+    if(k==='enum' && Array.isArray(v) && v.some(m=>typeof m!=='string'))continue;
+    out[k]=k==='properties'?Object.fromEntries(Object.entries(v).map(([name,s])=>[name,providerSchema(s)])):providerSchema(v);
+  }
+  if(Array.isArray(schema.enum) && schema.enum.length && schema.enum.every(m=>Number.isFinite(m))) {
+    out.minimum=Math.max(schema.minimum ?? -Infinity,Math.min(...schema.enum));
+    out.maximum=Math.min(schema.maximum ?? Infinity,Math.max(...schema.enum));
+  }
+  return out;
+}
+
 // A deliberately small closed JSON-Schema subset; unsupported schemas fail closed.
 export function validateStructured(value,schema,depth=0) {
   if(depth>12)fail('INVALID_MODEL_OUTPUT');

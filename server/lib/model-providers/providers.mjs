@@ -1,4 +1,4 @@
-import {validateProfile,validateStructured,fail,ModelError} from './contracts.mjs';
+import {validateProfile,validateStructured,providerSchema,fail,ModelError} from './contracts.mjs';
 import {requestJSON} from './transport.mjs';
 
 class Provider {
@@ -28,8 +28,9 @@ export class Organizer extends Provider {
         let value,usage={};
         if(p.protocol==='mock'){if(!this.mock)fail('MOCK_NOT_CONFIGURED');value=await this.mock(input,schema);}
         else {
-          const body=p.protocol==='ollama'?{model:p.model,messages,stream:false,format:p.capabilities.native_schema?schema:'json',options:{num_predict:p.limits.output_tokens}}
-            :{model:p.model,messages,max_tokens:p.limits.output_tokens,...(p.capabilities.native_schema?{response_format:{type:'json_schema',json_schema:{name:'memory_output',strict:true,schema}}}:{response_format:{type:'json_object'}})};
+          const wire=providerSchema(schema);
+          const body=p.protocol==='ollama'?{model:p.model,messages,stream:false,format:p.capabilities.native_schema?wire:'json',options:{num_predict:p.limits.output_tokens}}
+            :{model:p.model,messages,max_tokens:p.limits.output_tokens,...(p.capabilities.native_schema?{response_format:{type:'json_schema',json_schema:{name:'memory_output',strict:true,schema:wire}}}:{response_format:{type:'json_object'}})};
           const reply=await this.transport(p,p.paths?.chat || (p.protocol==='ollama'?'/api/chat':'/chat/completions'),body);
           value=p.protocol==='ollama'?reply.message?.content:reply.choices?.[0]?.message?.content;
           usage={input_tokens:reply.usage?.prompt_tokens ?? reply.prompt_eval_count ?? null,output_tokens:reply.usage?.completion_tokens ?? reply.eval_count ?? null};

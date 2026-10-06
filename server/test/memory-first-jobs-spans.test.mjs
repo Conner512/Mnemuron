@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {MemoryJobs} from '../lib/memory-jobs/store.mjs';
 import {MemoryWorker,scheduleLibrary,outputSchema} from '../lib/memory-jobs/worker.mjs';
 import {fixture,organizer,taxonomy,profile} from './helpers/memory-models.mjs';
-import {ModelError} from '../lib/model-providers/contracts.mjs';
+import {ModelError,providerSchema,validateStructured} from '../lib/model-providers/contracts.mjs';
 import {Organizer} from '../lib/model-providers/providers.mjs';
 
 const opening='Only isolated tests are approved; production is NOT approved.\n';
@@ -93,5 +93,47 @@ test('L-03 S-05: explicit JSON compatibility keeps the same local source and spa
     scheduleLibrary(f.s,jobs,{userId:f.auth.user_id,organizer:model,taxonomy,type:'summary',periods:['daily'],includeOpen:true});
     assert.equal((await new MemoryWorker(f.s,jobs,model).runOne()).state,corrupt?'review_required':'succeeded');
     assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,corrupt?0:1);
+  }
+});
+
+// Emulates the Gemini-backed gateway that answered HTTP 400 "TYPE_STRING ... revision ... enum[0]":
+// it accepts only string enum members anywhere in the requested schema.
+const nonStringEnums=(schema,at='schema')=>!schema||typeof schema!=='object'?[]:Object.entries(schema).flatMap(([k,v])=>
+  k==='enum'&&Array.isArray(v)&&v.some(m=>typeof m!=='string')?[`${at}.enum`]:typeof v==='object'?nonStringEnums(v,`${at}.${k}`):[]);
+const stringEnumGateway=reply=>async(p,route,body)=>{
+  const schema=body.response_format?.json_schema?.schema;assert.ok(schema,'the native schema is requested');
+  if(nonStringEnums(schema).length)throw new ModelError('HTTP_REJECTED');
+  const {input}=JSON.parse(body.messages[1].content);
+  return {choices:[{finish_reason:'stop',message:{content:JSON.stringify(reply(input))}}]};
+};
+test('Q-07: the bounded summary schema reaches the provider without its integer revision enum; local validation keeps the exact revisions',()=>{
+  const sources=[{memory_id:'short',revision:2,content:'Not approved.'},{memory_id:'long',revision:5,content}];
+  const schema=outputSchema('summary',sources,{multiSpan:true,bounded:true}),before=JSON.stringify(schema),wire=providerSchema(schema);
+  assert.equal(JSON.stringify(schema),before,'the validation schema is not modified');
+  assert.deepEqual(nonStringEnums(schema),['schema.properties.results.items.properties.revision.enum']);
+  assert.deepEqual(nonStringEnums(wire),[]);
+  const revision=wire.properties.results.items.properties.revision;
+  assert.deepEqual([revision.type,revision.minimum,revision.maximum],['integer',2,5]);
+  assert.deepEqual(wire.properties.results.items.properties.memory_id.enum,['short','long'],'string enums are still sent');
+  const expected=structuredClone(schema);delete expected.properties.results.items.properties.revision.enum;
+  assert.deepEqual(wire,expected,'nothing else in the provider schema changes');
+  const reply=r=>({results:[{memory_id:'short',revision:r,start:0,end:13,quote:'Not approved.'}]});
+  assert.doesNotThrow(()=>validateStructured(reply(2),schema));
+  assert.throws(()=>validateStructured(reply(3),schema),{code:'INVALID_MODEL_OUTPUT'},'in range but not an actual source revision');
+  const single=providerSchema(outputSchema('summary',[sources[0]],{multiSpan:true,bounded:true})).properties.results.items.properties.revision;
+  assert.deepEqual([single.minimum,single.maximum,single.enum],[2,2,undefined],'one revision is still pinned exactly');
+});
+test('Q-07: a real summary job succeeds through a string-enum-only provider, and a wrong revision is still rejected',async t=>{
+  for(const wrongRevision of [false,true]){
+    const f=fixture(t);f.save(content);
+    const spans=s=>[quote(s,0,opening.length),quote(s,s.content.length-closing.length,s.content.length)].map(r=>wrongRevision?{...r,revision:r.revision+1}:r);
+    const model=new Organizer(profile('organizer',{protocol:'openai_compatible',base_url:'https://model.example.test',capabilities:{native_schema:true}}),
+      {transport:stringEnumGateway(input=>({results:input.sources.flatMap(spans)}))}),jobs=new MemoryJobs(f.s);
+    const plan=scheduleLibrary(f.s,jobs,{userId:f.auth.user_id,organizer:model,taxonomy,type:'summary',periods:['daily'],includeOpen:true});
+    assert.equal(jobs.get(plan.jobs[0]).metadata.schema_version,'memory-derived-spans-v2');
+    const result=await new MemoryWorker(f.s,jobs,model).runOne();
+    assert.notEqual(result.last_error_code,'HTTP_REJECTED','the provider accepts the request');
+    if(!wrongRevision){assert.equal(result.state,'succeeded');const [summary]=f.s.memorySummaries(f.auth,{scope:'user'}).results;assert.ok(summary.claims.every(c=>c.revision===1));}
+    else {assert.notEqual(result.state,'succeeded');assert.equal(result.last_error_code,'INVALID_MODEL_OUTPUT');assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,0);}
   }
 });
