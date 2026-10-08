@@ -13,7 +13,7 @@ The project is experimental and licensed under the [Apache License, Version 2.0]
 
 ## Development setup
 
-Use Node.js 24 LTS (see `.node-version`) with `node:sqlite` and SQLite FTS5, Python 3, and a full Git clone. The core uses built-in runtime libraries, so there is no root dependency installation step.
+Use Node.js 24 LTS (see `.node-version`) with `node:sqlite` and SQLite FTS5, Python 3, and Git. The core uses built-in runtime libraries, so there is no root dependency installation step.
 
 ```bash
 git clone https://github.com/Conner512/Mnemuron.git
@@ -21,7 +21,7 @@ cd Mnemuron
 npm test
 ```
 
-The migration and paired-store upgrade suites read historical source revisions through Git. If your checkout is shallow, retrieve its history before running the full suite. A source ZIP does not contain that history.
+The migration and old-reader suites use checked-in, byte-exact historical reader fixtures, so Core tests also work from shallow clones and source snapshots. See [fixture provenance and integrity checks](server/test/fixtures/historical-readers/README.md). Publication checks that inspect Git history still require a full clone.
 
 Focused checks:
 

@@ -1,13 +1,12 @@
 // Schema v10: the first fully enforcing build (reads 5B, writes 5C, jobs 5D). It removes the open-time refusal of
-// deleted/merged projects. Every earlier reader is the exact saved source from Git history (never a changed constant)
+// deleted/merged projects. Every earlier reader is the exact saved source in verified fixtures (never a changed constant)
 // and must refuse a v10 database holding real non-active state before touching any record. Synthetic databases only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
-import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {copyFileSync,mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {loadHistoricalReader} from './helpers/historical-readers.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {MnemuronStore} from '../lib/store.mjs';
 import {CORE_SCHEMA_VERSION} from '../lib/store/schema.mjs';
@@ -15,21 +14,12 @@ import {MemoryJobs} from '../lib/memory-jobs/store.mjs';
 import {scheduleLibrary} from '../lib/memory-jobs/worker.mjs';
 import {organizer,taxonomy} from './helpers/memory-models.mjs';
 
-const ROOT=path.resolve(import.meta.dirname,'../..');
 // The last fenced v9 build (5C reviews complete, 5D), the earlier v9 candidate without generation guards, v8 and v7.
 const READERS={v9_final:['e63249f9847ee9c62620290e9f3210bc063fad9f',9],v9_candidate:['343cecdfd9c6a9ad64800bebbdf1f1f2e0289bc8',9],
   v8:['e3ced0cf5b1d7c9041d7af3b44191b224d13ae93',8],v7:['ffbd18b5f21269ecfae01e801a480953a93ca271',7]};
 const A='synthetic-lv-a',B='synthetic-lv-b';
 function temp(t,label){const dir=mkdtempSync(path.join(os.tmpdir(),`mnemuron-lv-${label}-`));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir;}
-const modules=new Map();
-async function reader(t,name){
-  if(modules.has(name))return modules.get(name);
-  const [commit]=READERS[name],dir=mkdtempSync(path.join(os.tmpdir(),`mnemuron-lv-${name}-source-`));
-  // A shallow checkout cannot run this test: the readers come byte-exact from history.
-  const tar=execFileSync('git',['archive','--format=tar',commit,'server','shared','package.json'],{cwd:ROOT,maxBuffer:64*1024*1024});
-  writeFileSync(path.join(dir,'source.tar'),tar);execFileSync('tar',['-xf',path.join(dir,'source.tar'),'-C',dir]);
-  const module=await import(pathToFileURL(path.join(dir,'server/lib/store.mjs')).href);modules.set(name,module);return module;
-}
+const reader=(t,name)=>loadHistoricalReader(t,READERS[name][0]);
 const owner=(store,user)=>store.authenticate(store.issueCredential({userId:user,deviceId:`device-${user}`,agentId:'synthetic',agentInstanceId:`agent-${user}`,scopes:['memory:read','memory:write','admin:tasks','resume:read','resume:confirm']}).api_key);
 const snapshot=file=>{const db=new DatabaseSync(file,{readOnly:true});try{return JSON.stringify([db.prepare('PRAGMA user_version').get().user_version,
   ...db.prepare("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map(r=>[r.name,r.sql]),
@@ -85,7 +75,7 @@ test('LV-02: every saved earlier reader refuses the current database with real n
     assert.equal(snapshot(file),before,`${name}: the refused open left every record and schema object unchanged`);
   }
   // Defense in depth, on a copy relabelled v9: the final fenced v9 reader would still refuse the non-active state itself.
-  const copy=path.join(temp(t,'relabelled'),'core.sqlite3');writeFileSync(copy,execFileSync('cat',[file]));
+  const copy=path.join(temp(t,'relabelled'),'core.sqlite3');copyFileSync(file,copy);
   const raw=new DatabaseSync(copy);raw.exec('PRAGMA user_version = 9');raw.close();
   const relabelled=snapshot(copy);const {MnemuronStore:V9}=await reader(t,'v9_final');
   assert.throws(()=>new V9(copy),{code:'PROJECT_LIFECYCLE_UNSUPPORTED'});assert.equal(snapshot(copy),relabelled);

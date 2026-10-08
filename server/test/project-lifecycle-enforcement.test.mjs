@@ -1,18 +1,16 @@
 // Lifecycle enforcement groundwork (introduced in schema v9, LE-01..LE-10). These tests create deleted or
 // merged rows at runtime in a disposable synthetic database to exercise
-// the authoritative view and scope API. The v8 reader is the exact accepted foundation (e3ced0c) from Git history.
+// the authoritative view and scope API. The v8 reader is the exact accepted foundation (e3ced0c) preserved in byte-exact fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
-import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {loadHistoricalReader} from './helpers/historical-readers.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {MnemuronStore} from '../lib/store.mjs';
 import {CORE_SCHEMA_VERSION} from '../lib/store/schema.mjs';
 
-const ROOT=path.resolve(import.meta.dirname,'../..');
 const V8_SOURCE='e3ced0cf5b1d7c9041d7af3b44191b224d13ae93';
 // The earlier fenced v9 candidate: schema v9 without generation guards or their initialization marker.
 const V9_CANDIDATE='343cecdfd9c6a9ad64800bebbdf1f1f2e0289bc8';
@@ -109,10 +107,7 @@ test('LE-05: the owner lifecycle generation starts at 0, moves only through the 
 });
 
 test('LE-06: the exact accepted v8 foundation refuses this schema before touching any record',async t=>{
-  const dir=temp(t,'v8-source');
-  const tar=execFileSync('git',['archive','--format=tar',V8_SOURCE,'server','shared','package.json'],{cwd:ROOT,maxBuffer:64*1024*1024});
-  writeFileSync(path.join(dir,'source.tar'),tar);execFileSync('tar',['-xf',path.join(dir,'source.tar'),'-C',dir]);
-  const {MnemuronStore:V8}=await import(pathToFileURL(path.join(dir,'server/lib/store.mjs')).href);
+  const {MnemuronStore:V8}=await loadHistoricalReader(t,V8_SOURCE);
   const file=path.join(temp(t,'db'),'core.sqlite3');
   const store=new MnemuronStore(file);owner(store,A);store.close();
   const snapshot=()=>{const db=new DatabaseSync(file,{readOnly:true});try{return JSON.stringify([db.prepare('PRAGMA user_version').get().user_version,
@@ -226,10 +221,7 @@ test('LE-10: once initialized, a lost or altered generation guard is refused bef
   }
   // Legitimate first install: a v9 database written by the exact earlier fenced candidate (343cecd), which had no
   // guards and never exposed lifecycle authority, opens and is guarded from then on with its generation preserved.
-  const dir=temp(t,'v9-candidate');
-  const tar=execFileSync('git',['archive','--format=tar',V9_CANDIDATE,'server','shared','package.json'],{cwd:ROOT,maxBuffer:64*1024*1024});
-  writeFileSync(path.join(dir,'source.tar'),tar);execFileSync('tar',['-xf',path.join(dir,'source.tar'),'-C',dir]);
-  const {MnemuronStore:Candidate}=await import(pathToFileURL(path.join(dir,'server/lib/store.mjs')).href);
+  const {MnemuronStore:Candidate}=await loadHistoricalReader(t,V9_CANDIDATE);
   const file=path.join(temp(t,'candidate-db'),'core.sqlite3');
   const old=new Candidate(file);owner(old,A);
   old.db.prepare('INSERT INTO owner_lifecycle_generation VALUES (?,3)').run(A);old.db.prepare('UPDATE owner_lifecycle_generation SET generation=2 WHERE user_id=?').run(A);

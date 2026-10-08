@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {world} from './helpers/lifecycle-world.mjs';
+import {loadHistoricalReader} from './helpers/historical-readers.mjs';
 import {CONSOLE_WRITE_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_READ_SCOPES} from '../../shared/console-contract.mjs';
 import {MemoryJobs} from '../lib/memory-jobs/store.mjs';
 import {MemoryWorker,scheduleLibrary} from '../lib/memory-jobs/worker.mjs';
@@ -204,11 +205,8 @@ test('LM-08: the read-only pre-check reports staleness without writing; restore 
 test('LM-09: the exact earlier readers refuse the database state a real lifecycle mutation produced',async t=>{
   const w=await world(t),{store}=w,{act,preview,project}=setup(w);project('lm-old','LM Old Reader');
   const p=await preview('delete','lm-old');await act('projects.lifecycle_delete',{preview_id:p.preview_id,confirm_name:'LM Old Reader'});
-  const {execFileSync}=await import('node:child_process'),{mkdtempSync,writeFileSync,rmSync}=await import('node:fs'),os=await import('node:os'),path=await import('node:path'),{pathToFileURL}=await import('node:url');
-  const ROOT=path.resolve(import.meta.dirname,'../..'),dir=mkdtempSync(path.join(os.tmpdir(),'mnemuron-lm-v9-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
-  writeFileSync(path.join(dir,'s.tar'),execFileSync('git',['archive','--format=tar','e63249f9847ee9c62620290e9f3210bc063fad9f','server','shared','package.json'],{cwd:ROOT,maxBuffer:64*1024*1024}));
-  execFileSync('tar',['-xf',path.join(dir,'s.tar'),'-C',dir]);
-  const {MnemuronStore:V9}=await import(pathToFileURL(path.join(dir,'server/lib/store.mjs')).href);
+  const {mkdtempSync,rmSync}=await import('node:fs'),os=await import('node:os'),path=await import('node:path');
+  const {MnemuronStore:V9}=await loadHistoricalReader(t,'e63249f9847ee9c62620290e9f3210bc063fad9f');
   // A consistent copy of the live database (checkpointed through the backup API).
   const dbDir=mkdtempSync(path.join(os.tmpdir(),'mnemuron-lm-db-'));t.after(()=>rmSync(dbDir,{recursive:true,force:true}));
   const {backup}=await import('node:sqlite'),copy=path.join(dbDir,'copy.sqlite3');await backup(store.db,copy);

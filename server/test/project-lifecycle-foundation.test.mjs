@@ -1,13 +1,12 @@
 // Project lifecycle foundation (LF-01..LF-09): schema v8, old-reader refusals, owner-first resolution,
 // idempotent operations, the owner/global mutation epoch, protection loss and append-only history.
-// Disposable synthetic databases only. The v7 reader is the exact phase 3 source (ffbd18b) exported from Git.
+// Disposable synthetic databases only. The v7 reader is the exact phase 3 source (ffbd18b) preserved in byte-exact fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {execFileSync} from 'node:child_process';
-import {mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {loadHistoricalReader} from './helpers/historical-readers.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {MnemuronStore} from '../lib/store.mjs';
 import {VectorIndex} from '../lib/vector-stores/index.mjs';
@@ -21,16 +20,7 @@ const V7_SOURCE='ffbd18b5f21269ecfae01e801a480953a93ca271';
 const A='synthetic-lf-a',B='synthetic-lf-b';
 
 function temp(t,label){const dir=mkdtempSync(path.join(os.tmpdir(),`mnemuron-lf-${label}-`));t.after(()=>rmSync(dir,{recursive:true,force:true}));return dir;}
-let v7Module=null;
-async function v7Store(t){
-  if(v7Module)return v7Module;
-  // The accepted phase 3 release (schema v7), byte-exact from history; a shallow checkout cannot run this test.
-  const dir=mkdtempSync(path.join(os.tmpdir(),'mnemuron-lf-v7-source-'));
-  const tar=execFileSync('git',['archive','--format=tar',V7_SOURCE,'server','shared','package.json'],{cwd:ROOT,maxBuffer:64*1024*1024});
-  writeFileSync(path.join(dir,'source.tar'),tar);execFileSync('tar',['-xf',path.join(dir,'source.tar'),'-C',dir]);
-  v7Module=await import(pathToFileURL(path.join(dir,'server/lib/store.mjs')).href);
-  return v7Module;
-}
+const v7Store=t=>loadHistoricalReader(t,V7_SOURCE);
 function open(file,options={}){return new MnemuronStore(file,options);}
 function owner(store,user){
   const c=store.issueCredential({userId:user,deviceId:`device-${user}`,agentId:'synthetic',agentInstanceId:`agent-${user}`,scopes:['memory:read','memory:write','admin:tasks']});

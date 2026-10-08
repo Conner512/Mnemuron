@@ -1,0 +1,3 @@
+# Preserve the exact original Git blob bytes, including on autocrlf checkouts.
+blobs/* -text
+manifest.json -text
