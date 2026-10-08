@@ -35,8 +35,15 @@ export class IdentityMaintenance {
   }finally{this.busy=false;}}
   async setState(accountId,action){if(!this.enabled())throw new BoundaryError(503,'IDENTITY_MAINTENANCE_REQUIRED');const a=this.ids.byId(accountId);if(!a)throw new BoundaryError(404,'ACCOUNT_NOT_FOUND');
     if(action==='disable'){
-      if(!['active','disabled'].includes(a.status))throw new BoundaryError(409,'ACCOUNT_STATE_CONFLICT');
-      this.ids.store.transaction(()=>{if(a.status==='active')this.ids.db.prepare("UPDATE identity_accounts SET status='disabled',binding_ready=0,security_version=security_version+1 WHERE account_id=?").run(accountId);
+      this.ids.store.transaction(()=>{
+        // Re-read and protect the last active operator under the same write lock as the state change.
+        // A concurrent CLI role revocation or account disable must not invalidate a preflight count.
+        const current=this.ids.byId(accountId);if(!current)throw new BoundaryError(404,'ACCOUNT_NOT_FOUND');
+        if(!['active','disabled'].includes(current.status))throw new BoundaryError(409,'ACCOUNT_STATE_CONFLICT');
+        if(current.status==='active'){
+          this.ids.console.protectLastOperator(accountId);
+          this.ids.db.prepare("UPDATE identity_accounts SET status='disabled',binding_ready=0,security_version=security_version+1 WHERE account_id=?").run(accountId);
+        }
         this.ids.db.prepare('DELETE FROM identity_sessions WHERE account_id=?').run(accountId);
         this.ids.db.prepare("INSERT OR IGNORE INTO identity_operations(operation_id,account_id,kind,state,created) VALUES(?,?,?,'revocation_pending',?)").run(randomUUID(),accountId,`console-disable:${this.ids.byId(accountId).security_version}`,seconds());
         this.ids.audit(accountId,'account.disabled');});

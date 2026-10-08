@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {pages,renderPage} from '../../../web/console/render.mjs';
+import {pages,removedPages,renderPage} from '../../../web/console/render.mjs';
 import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
@@ -92,14 +92,14 @@ test('Placeholders render every feature and never trigger a request',()=>{
   for(const f of featureMap[page].filter(f=>f.status==='planned'))assert.ok(html.includes(`console-feature-standard.md`)&&html.includes(`${f.id}</summary>`),`${page}: ${f.id} has developer notes`);
  }
  assert.equal(roadmapCard(t,'jobs'),'','a page with nothing planned shows no roadmap');
- assert.deepEqual(prototypePages.map(pageState),['partial','planned','live','live']);
+ assert.deepEqual(prototypePages.map(pageState),['partial','planned','live']);
 });
 
 test('Live cards on prototype pages escape data and degrade on their own',()=>{
  const tasks=prototypeView(t,'tasks',{data:{projects:[{project_id:'p"1',name:'<img src=x onerror=alert(1)>'}]}});
  assert.ok(tasks.includes('&lt;img src=x onerror=alert(1)&gt;'));assert.ok(tasks.includes('p&quot;1'));
  assert.doesNotMatch(tasks,/<img/);
- for(const page of ['tasks','privacy']){
+ for(const page of ['tasks']){
   const html=prototypeView(t,page,{data:{unavailable:true}});
   assert.match(html,/data-i18n="unavailable"/,page);
   assert.equal((html.match(/data-status="planned" data-feature=/g)||[]).length,featureMap[page].filter(f=>f.status==='planned').length,page);
@@ -116,19 +116,17 @@ test('The development standard lists every feature with its current status and e
  for(const page of pages)assert.match(doc,new RegExp(`\\| \`/app/${page}\` \\| \`${featureMap[page][0].id.slice(0,3)}\` \\|`),page);
 });
 
-test('The ingress example routes every menu page',()=>{
- assert.deepEqual([...ingressGroup('app')].sort(),[...pages].sort());
+test('The ingress example routes every menu page and the removed pages it redirects',()=>{
+ assert.deepEqual([...ingressGroup('app')].sort(),[...pages,...removedPages].sort());
+ for(const page of removedPages)assert.ok(!pages.includes(page)&&!featureMap[page],`${page} is no longer a Console page`);
 });
 
-test('PRV-06: the ChatGPT read scope card shows the operator policy read-only and offers no switch',()=>{
- // Even a credential that still lists the removed action gets no control.
- const caps={allowed_actions:['memory.web_policy']};
- const card=(data,c=caps)=>prototypeView(t,'privacy',{data,caps:c}).match(/<section class="card feature-card" data-status="live" data-feature="PRV-06">[\s\S]*?<\/section>/)[0];
- const off=card({read_policy:{policy:'web-memory-visibility-v1',active_records_uniform:false}});
- assert.match(off,/data-state="disabled"/);assert.match(off,/data-i18n="readPolicyUniformOff"/);assert.match(off,/data-i18n="readPolicyOperator"/);
- const on=card({read_policy:{policy:'web-memory-active-uniform-v1',active_records_uniform:true}});
- assert.match(on,/data-state="enabled"/);assert.match(on,/data-i18n="readPolicyUniformOn"/);
- for(const html of [off,on])assert.doesNotMatch(html,/data-console-action/);
- assert.match(card({}),/data-i18n="unavailable"/);
- assert.deepEqual(prototypeOrder('privacy').map(f=>f.id),['PRV-01','PRV-02','PRV-03','PRV-04','PRV-06','PRV-05'],'implemented features come before policy-disabled features');
+test('TSK-01 shows the Deleted view and lifecycle actions only when the server grants them',()=>{
+ const projects=[{project_id:'synthetic-p',name:'Synthetic P',archived:false}];
+ const all=['projects.update','projects.archive','projects.restore','projects.lifecycle_preview','projects.lifecycle_delete','projects.lifecycle_restore','projects.merge'];
+ const full=prototypeView(t,'tasks',{data:{view:'active',projects,active_count:1,archived_count:0,deleted_count:0},caps:{allowed_actions:all}});
+ assert.match(full,/data-project-view="deleted"/);assert.match(full,/data-console-action="projects.lifecycle_delete"/);assert.match(full,/data-console-action="projects.merge"/);
+ // A read-only or basic credential gets no deleted count from the server: no Deleted tab and no lifecycle actions.
+ const narrow=prototypeView(t,'tasks',{data:{view:'active',projects,active_count:1,archived_count:0},caps:{allowed_actions:['projects.update']}});
+ assert.doesNotMatch(narrow,/data-project-view="deleted"/);assert.doesNotMatch(narrow,/projects\.lifecycle_|projects\.merge/);
 });

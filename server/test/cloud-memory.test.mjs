@@ -27,7 +27,7 @@ test('A-T07/09/10/11/12/16: durable exact receipts, concurrent retries and resta
   const receipt=attempts[0].body;assert.equal(receipt.status,'committed');assert.equal(receipt.saved,true);assert.equal(receipt.capture_mode,'tool_only');
   assert.equal(receipt.evidence_kind,'model_submitted');assert.equal(receipt.revision,1);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);
-  for(const [table,count] of [['memory_revisions',1],['memory_sources',1],['memory_source_links',1],['memory_processing_outbox',2],['memory_index_outbox',1],['cloud_memory_operations',1]])
+  for(const [table,count] of [['memory_revisions',1],['memory_sources',1],['memory_source_links',1],['memory_processing_outbox',3],['memory_index_outbox',1],['cloud_memory_operations',1]])
     assert.equal(f.store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,count,table);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM audit_events WHERE target_id=?').get(receipt.memory_id).n,2);
   const childSource=`import {MnemuronStore} from ${JSON.stringify(new URL('../lib/store.mjs',import.meta.url).href)};

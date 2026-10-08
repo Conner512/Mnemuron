@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {AuthorizationError,ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
 import {memoryContent,memoryType,memoryTopic,memoryOperationId} from '../memory-validation.mjs';
 import {isWebReader} from './web-visibility.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
 
 export const CLOUD_CORE_SCOPES=Object.freeze(['memory:read','resume:read','memory:write']);
 const sameScopes=(a,b)=>Array.isArray(a)&&a.length===b.length&&new Set(a).size===a.length&&b.every(s=>a.includes(s));
@@ -20,6 +21,7 @@ export class CloudMemory {
       user_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,operation_id TEXT NOT NULL,
       request_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,credential_id TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(user_id,connection_id,action,operation_id),UNIQUE(user_id,connection_id,operation_id));`);
+    protectGroup(this.db,'cloud');
     this.store.webVisibility.migrateCloudPrivateChoices();
   }
   // Local provisioning only: this function is never exposed as an HTTP route.
@@ -67,7 +69,9 @@ export class CloudMemory {
       let prior;
       if(!saving){
         prior=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,payload.memory_id);
-        if(!prior||!this.store.webVisibility.visible(auth,payload.memory_id))throw missing();
+        // Inside the operation transaction: a memory of a deleted (or dangling/foreign) project is not writable and,
+        // for this narrow cloud credential, reads exactly like any memory it cannot see.
+        if(!prior||!this.store.webVisibility.visible(auth,payload.memory_id)||!this.store.lifecycle.liveProject(auth.user_id,prior.project_id))throw missing();
         if(this.store.revisions.latest(auth.user_id,payload.memory_id)?.revision!==payload.expected_revision)throw new ConflictError('Memory changed.','MEMORY_VERSION_CHANGED');
         if(prior.status!=='active')throw new ConflictError('Memory is no longer active.','MEMORY_VERSION_CHANGED');
       }

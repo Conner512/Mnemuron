@@ -30,6 +30,9 @@ export class ReadonlyCoreClient {
       if(result.status===400)throw new BoundaryError(400,'INVALID_CORE_QUERY');
       if(result.status>=500 && body)throw new BoundaryError(503,'OPERATION_STATUS_UNKNOWN');
     }
+    // A project the owner deleted: not an outage and not worth retrying. One non-retryable code for reads and writes
+    // (it does not name the lifecycle state; other accounts get Core's generic not found for unknown IDs).
+    if (result.status === 409 && result.data?.error_code === 'PROJECT_DELETED') throw new BoundaryError(409, 'PROJECT_UNAVAILABLE');
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
       const error=new BoundaryError(503, result.data.error_code);

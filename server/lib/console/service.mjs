@@ -1,14 +1,18 @@
+import {ConsoleEntities,ENTITY_ACTIONS} from './entities.mjs';
 import {randomUUID} from 'node:crypto';
 import {ConsoleState,object,id,number,fingerprint} from './state.mjs';
 import {ConsoleModels} from './models.mjs';
 import {credentialView} from './credentials.mjs';
-import {consoleActionWritable,CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {consoleActionWritable,CONSOLE_ACTIONS,CONSOLE_LIFECYCLE_CONFIRMS} from '../../../shared/console-contract.mjs';
+import {ProjectLifecycleMutations} from '../lifecycle/mutations.mjs';
 import {AuthorizationError,ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
 import {MemoryWorker,scheduleLibrary} from '../memory-jobs/worker.mjs';
 import {VectorIndex} from '../vector-stores/index.mjs';
 import {QdrantStore} from '../vector-stores/qdrant.mjs';
 import {ConsoleFeatures,FEATURE_ACTIONS} from './features.mjs';
 import {ConsoleOrganizer} from './organize.mjs';
+import {ConsoleProjects} from './projects.mjs';
+const PROJECT_ACTIONS=['projects.update','projects.archive','projects.restore','tasks.update'];
 import {ModelError} from '../model-providers/contracts.mjs';
 import {AGENT_READ_POLICIES} from '../memory/web-visibility.mjs';
 import {memoryPresentation} from '../../../shared/memory-display.mjs';
@@ -21,7 +25,7 @@ export const manifestDigest=items=>fingerprint(items.map(i=>[i.memory_id,i.revis
 const taxonomyDefault={version:'console-default-v1',categories:['uncategorized','preferences','projects','technical','personal','decisions']};
 const receipt=result=>({status:result.status,memory_id:result.replacement_memory?.memory_id||result.memory?.memory_id||result.memory_id,physically_deleted:false});
 export class ConsoleService {
-  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.busy=false;}
+  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;}
   require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;return user?this.features.taxonomy(user,fallback):fallback;}
   capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),
@@ -32,6 +36,10 @@ export class ConsoleService {
   readPolicy(auth){const key=this.store.runtime.agentReadPolicy||'chatgpt_per_memory_v1';
     return {policy:AGENT_READ_POLICIES[key],setting:key,active_records_uniform:key==='active_uniform_v1',legacy_read_all:this.store.webVisibility.policy(auth).read_all,history_and_secret_filtered:true,configured_by:'operator'};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    // Normal Console reads and memory actions are live-only; the owner learns a deleted project, nothing else does.
+    const state=this.store.lifecycle.projectState(auth.user_id,row.project_id);
+    if(state==='unavailable')throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
   meta(auth,p){object(p,['memory_id']);const {row,current}=this.memory(auth,p.memory_id);
     const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,row.memory_id)?.sensitivity||'sensitive';
@@ -94,10 +102,18 @@ export class ConsoleService {
     if(Buffer.byteLength(JSON.stringify(input))>56*1024)throw new ValidationError('Request too large.','CONSOLE_INPUT_TOO_LARGE');
     object(p,Object.keys(p||{}));
     if(action==='models.test')return this.probe(auth,p,operation);
+    if(action==='models.discover')return this.discover(auth,p,operation);
+    // Lifecycle confirms carry the operation ID into the lifecycle operation record and history.
+    if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){const kind={'projects.lifecycle_delete':'delete','projects.lifecycle_restore':'restore','projects.merge':'merge'}[action];
+      return this.state.sync(auth,action,p,operation,()=>this.lifecycleMutations.confirm(auth,kind,p,operation));}
     return this.state.sync(auth,action,p,operation,()=>this.apply(auth,action,p),{secret:['connections.create','connections.rotate','devices.register','devices.rotate'].includes(action)});
   }
   apply(auth,action,p){const store=this.store;
+    if(ENTITY_ACTIONS.includes(action))return this.entities.apply(auth,action,p);
     if(FEATURE_ACTIONS.includes(action))return this.features.apply(auth,action,p);
+    // Runs inside state.sync's transaction (SAVEPOINT when nested): never a second BEGIN.
+    if(PROJECT_ACTIONS.includes(action))return this.projects.apply(auth,action,p);
+    if(action==='projects.lifecycle_preview')return this.lifecycleMutations.preview(auth,p);
     if(action.startsWith('memory.')&&!['memory.create','memory.organize','memory.organize_undo'].includes(action))number(p.revision,1,2147483647);
     if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id','sensitivity']);
       const defaults=this.features.privacy(auth.user_id),{sensitivity=defaults.sensitivity,...input}=p;this.sensitivity(sensitivity);const result=store.saveMemory(auth,{...input,source:'console_explicit'});
@@ -139,13 +155,27 @@ export class ConsoleService {
       const result=scheduleLibrary(store,store.memoryJobs,{userId:auth.user_id,organizer,taxonomy:this.taxonomy(auth.user_id),type:p.type,timezone:p.timezone,periods:p.periods,includeOpen:p.include_open===true});
       return {status:result.jobs.length?'queued':'no_work',...result,worker_enabled:store.memoryConfig.console?.worker_enabled===true};
     }
-    if(action==='jobs.cancel'){object(p,['job_id']);const job=this.job(auth,p.job_id);if(job.state==='succeeded')throw new ConflictError('A completed job cannot be cancelled.','JOB_TERMINAL');store.memoryJobs.cancel(job.job_id);return {status:'cancelled',job_id:job.job_id};}
+    if(action==='jobs.cancel'){object(p,['job_id']);const job=this.job(auth,p.job_id);if(job.state==='succeeded')throw new ConflictError('A completed job cannot be cancelled.','JOB_TERMINAL');store.memoryJobs.cancel(job.job_id);
+      if(job.job_type==='entities')this.db.prepare(`UPDATE memory_processing_outbox AS o SET state='cancelled' WHERE o.user_id=? AND o.job_type='entities'
+        AND EXISTS(SELECT 1 FROM memory_job_items i WHERE i.job_id=? AND i.user_id=o.user_id AND i.memory_id=o.memory_id AND i.revision=o.revision)
+        AND NOT EXISTS(SELECT 1 FROM memory_job_items i JOIN memory_jobs j ON j.job_id=i.job_id WHERE i.user_id=o.user_id AND i.memory_id=o.memory_id AND i.revision=o.revision
+          AND j.job_type='entities' AND j.rowid>(SELECT rowid FROM memory_jobs WHERE job_id=?)))`).run(auth.user_id,job.job_id,job.job_id);
+      return {status:'cancelled',job_id:job.job_id};}
     if(action==='jobs.retry'){object(p,['job_id']);const job=this.job(auth,p.job_id);
       if(!['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(job.state)||job.last_error_code==='RESCHEDULED')throw new ConflictError('Job is not retryable.','JOB_NOT_RETRYABLE');
       // A job planned with an outdated category list cannot run as is; retrying it re-plans the same work
       // under the current categories. Existing classifications stay; the stale job is kept as superseded.
+      if(job.job_type==='entities'){
+        const provider=this.models.provider(auth.user_id,'organizer');if(!provider.profile.egress.approved)throw new ConflictError('Model egress must be explicitly approved.','EGRESS_DENIED');
+        if(provider.profile.fingerprint!==job.profile||job.metadata.configuration_revision!==this.models.raw(auth.user_id,'organizer')?.revision||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i))){
+          this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(provider.profile.fingerprint);
+          store.entities.enqueue(auth.user_id,store.memoryJobs.items(job).map(i=>i.memory_id));const scheduled=store.entities.schedule(auth.user_id,provider);
+          this.db.prepare("UPDATE memory_jobs SET state='cancelled',last_error_code='RESCHEDULED',fence=fence+1,lease_owner=NULL,lease_expires=NULL WHERE user_id=? AND job_id=?").run(auth.user_id,job.job_id);
+          return {status:'rescheduled',job_id:job.job_id,jobs:scheduled.jobs,job_type:'entities',truncated:scheduled.truncated};
+        }
+      }
       if(job.metadata.taxonomy&&job.metadata.taxonomy.version!==this.taxonomy(auth.user_id).version)return this.reschedule(auth,job);
-      const provider=this.models.provider(auth.user_id,'organizer');if(provider.profile.fingerprint!==job.profile||job.metadata.taxonomy?.version!==this.taxonomy(auth.user_id).version||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i)))throw new ConflictError('Inputs/model/taxonomy changed; schedule a new job.','STALE_INPUT');
+      const provider=this.models.provider(auth.user_id,'organizer');if(provider.profile.fingerprint!==job.profile||(job.job_type!=='entities'&&job.metadata.taxonomy?.version!==this.taxonomy(auth.user_id).version)||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i)))throw new ConflictError('Inputs/model/taxonomy changed; schedule a new job.','STALE_INPUT');
       this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(job.profile);
       this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL,fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE job_id=? AND user_id=?").run(Date.now(),Date.now(),job.job_id,auth.user_id);return {status:'queued',job_id:job.job_id};}
     if(action==='models.save')return this.models.save(auth,p);
@@ -250,7 +280,9 @@ export class ConsoleService {
   sensitivity(value){if(!['public','internal','sensitive','secret'].includes(value))throw new ValidationError('Invalid sensitivity.');}
   export(auth,p){this.require(auth);object(p,['after','highwater','limit']);const after=number(Number(p.after||0),0,Number.MAX_SAFE_INTEGER),limit=number(Number(p.limit||10),1,20);
     const highwater=p.highwater===undefined?this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(auth.user_id).n:number(Number(p.highwater),0,Number.MAX_SAFE_INTEGER);
-    const rows=this.db.prepare('SELECT rowid AS position,* FROM memories WHERE user_id=? AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?').all(auth.user_id,after,highwater,limit+1);
+    // A live export: records of deleted projects are retained history and are not exported by this normal path.
+    const live=this.store.lifecycle.live(auth.user_id).sql('project_id');
+    const rows=this.db.prepare(`SELECT rowid AS position,* FROM memories WHERE user_id=? AND rowid>? AND rowid<=? AND ${live.sql} ORDER BY rowid LIMIT ?`).all(auth.user_id,after,highwater,...live.params,limit+1);
     const records=[];let size=0;
     for(const row of rows.slice(0,limit)){
       const revision=this.store.revisions.latest(auth.user_id,row.memory_id);const item={original_id:row.memory_id,revision:revision.revision,content:row.content,memory_type:row.memory_type,status:row.status,topic:row.topic,
@@ -283,6 +315,17 @@ export class ConsoleService {
     catch(error){this.db.prepare("UPDATE console_operations SET state='failed',error_code=? WHERE user_id=? AND operation_id=?").run(/^[A-Z_]{1,80}$/.test(error.code||'')?error.code:'MODEL_TEST_FAILED',auth.user_id,operation);
       if(error instanceof ModelError&&error.statusCode>=500)throw new ConflictError('Model test could not complete.',error.code);throw error;}
   }
+  /** Model-list discovery: no receipt is stored (each request is a new, explicit lookup; nothing is replayed) and the
+   * audit records only the kind, the outcome and a count, never the address, a key or a provider reply. */
+  async discover(auth,p,operation){
+    const kind=['organizer','embedder'].includes(p?.kind)?p.kind:null;
+    try{const result=await this.models.discover(auth,p);
+      this.store.audit({auth,action:'console.models.discover',targetType:'console_operation',targetId:operation,metadata:{kind,count:result.count,truncated:result.truncated}});
+      return {...result,operation_id:operation,replayed:false};}
+    catch(error){const code=/^[A-Z_]{1,80}$/.test(error.errorCode||error.code||'')?error.errorCode||error.code:'MODEL_DISCOVERY_FAILED';
+      this.store.audit({auth,action:'console.models.discover',targetType:'console_operation',targetId:operation,outcome:'failure',metadata:{kind,error_code:code}});
+      if(error instanceof ModelError&&error.statusCode>=500)throw new ConflictError('Model list could not be fetched.',error.code);throw error;}
+  }
   vectorBackend(config){return new QdrantStore(config);}
   vector(user){const config=this.store.memoryConfig.vector_store;if(!config?.enabled)throw new ConflictError('Configure the vector backend before rebuilding.','VECTOR_DISABLED');
     // Every retained generation profile can keep serving; the current configuration wins for its own fingerprint.
@@ -294,6 +337,7 @@ export class ConsoleService {
     try{
       const users=this.db.prepare("SELECT user_id FROM console_models WHERE kind='organizer' AND json_extract(config_json,'$.enabled')=1 ORDER BY updated_at").all();
       for(const {user_id:user} of users){try{const organizer=this.models.provider(user,'organizer'),settings=this.settings(user);
+        this.store.entities.schedule(user,organizer,{taxonomy:this.taxonomy(user)});
         if(settings.schedule_enabled&&(settings.next_scan_at||0)<=Date.now()){
           for(const type of ['classification','summary'])scheduleLibrary(this.store,this.store.memoryJobs,{userId:user,organizer,taxonomy:this.taxonomy(user),type,timezone:settings.timezone,periods:settings.periods});
           this.db.prepare("UPDATE console_settings SET settings_json=json_set(settings_json,'$.next_scan_at',?) WHERE user_id=?").run(Date.now()+60000,user);

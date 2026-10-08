@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs";
 import { migrateCoreSchema } from "./store/schema.mjs";
 import { storageDoctor, realDestination } from "./storage-policy.mjs";
 import { memoryRuntime, privateStoragePaths } from "./memory-runtime.mjs";
+import {MemoryEntities} from './memory-entities/store.mjs';
 import { DerivedMemory,scopeKey } from './memory-derived/store.mjs';
 import {MemoryJobs} from './memory-jobs/store.mjs';
 import {Organizer,Embedder} from './model-providers/providers.mjs';
@@ -20,19 +21,23 @@ import { MemoryService } from "./memory/service.mjs";
 import {WebMemoryVisibility,isWebReader,webMemorySql,webMemoryProjection,webSourceProjection,webReadPolicy,AGENT_READ_POLICIES,WEB_READ_POLICY} from './memory/web-visibility.mjs';
 import {CloudMemory} from './memory/cloud.mjs';
 import {ConsoleService} from './console/service.mjs';
+import {assertGenerationGuards,assertProtection,protectPresentOptional} from './lifecycle/protection.mjs';
+import {ProjectLifecycle} from './lifecycle/resolver.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "./errors.mjs";
+import { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError, isDeterministicReadError } from "./errors.mjs";
 export { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError } from "./errors.mjs";
 import { MEMORY_TYPES as STRUCTURED_MEMORY_TYPES, memoryPayload, memoryContent, memoryType as validateMemoryType, memoryTopic, memoryIntent, memoryOperationId } from "./memory-validation.mjs";
-import { resolveMemoryScope } from "./memory-scope.mjs";
+import { resolveMemoryScope, SCOPE_LIFECYCLE } from "./memory-scope.mjs";
 import { INDEX_VERSION, MemorySearch, lexicalScore } from "./memory-retrieval.mjs";
 import { memorySummary, boundMemoryResponse, unicodeSlice, MEMORY_RESPONSE_BYTES } from "./memory-projection.mjs";
 import { readTaskContext } from './task-context-read.mjs';
 import { TASK_READ_OPTIONS, TASK_FIELD_NOTE, taskFieldAvailability } from '../../shared/task-read-contract.mjs';
+import { AUDIT_QUERY_REFS } from '../../shared/console-queries.mjs';
 import {
   RESOLVER_VERSION,
+  explicitIdentifier,
   normalizeResolverText,
   resolveProjectCandidates,
   resolveTaskCandidates,
@@ -113,6 +118,10 @@ import {
   retentionExpiry,
 } from "./store/helpers.mjs";
 
+function identifierUnavailable() {
+  return new ConflictError("Identifier is unavailable.", "IDENTIFIER_UNAVAILABLE");
+}
+
 export class MnemuronStore {
   constructor(databasePath, options = {}) {
     this.databasePath = realDestination(path.isAbsolute(databasePath) ? databasePath : process.cwd() + path.sep + databasePath);
@@ -132,6 +141,7 @@ export class MnemuronStore {
       this.memoryTransaction(() => this.revisions.migrate());
       this.derivedMemory = new DerivedMemory(this);
       this.webVisibility = new WebMemoryVisibility(this);
+      this.entities = new MemoryEntities(this);
       this.cloudMemory = new CloudMemory(this);
       this.memorySources = new MemorySources(this);
       this.memoryConfig = options.memoryConfig || {};
@@ -145,8 +155,14 @@ export class MnemuronStore {
       this.memoryService = new MemoryService({db:this.db,revisions:this.revisions,
         conversation:this.memoryConfig.memory?.capture_extraction?.conversation,
         transaction:callback=>this.memoryTransaction(callback),project:row=>this.memoryFromRow(row),audit:event=>this.audit(event)});
-      this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false});
+      this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false,entities:this.entities});
       this.consoleService = new ConsoleService(this);
+      // Every module has installed its own protection right after creating its tables; refuse to serve unless
+      // all required material tables exist with exactly their epoch triggers (optional groups when present).
+      protectPresentOptional(this.db);
+      assertProtection(this.db);
+      assertGenerationGuards(this.db);
+      this.lifecycle = new ProjectLifecycle(this);
       this.db.prepare(`
         INSERT OR IGNORE INTO settings (key, value_json, updated_at)
         VALUES ('raw_retention_days', ?, ?)
@@ -591,23 +607,54 @@ export class MnemuronStore {
     };
   }
 
-  listProjects(userId) {
-    return this.db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC")
-      .all(userId)
-      .map((row) => this.projectFromRow(row));
+  // Normal project list: canonical live projects only. A deleted project (and every member merged into it) is
+  // absent; a merged source leaves the list and its own identity signals travel with its canonical target as
+  // origin-labelled `merged_sources` (the target's own name and aliases are never rewritten).
+  listProjects(userId, live = this.lifecycle.live(userId)) {
+    const rows = this.db.prepare("SELECT * FROM projects WHERE user_id = ? ORDER BY updated_at DESC").all(userId)
+      .filter((row) => live.has(row.project_id)).map((row) => this.projectFromRow(row));
+    const byId = new Map(rows.map((project) => [project.project_id, project]));
+    for (const project of rows) {
+      const target = byId.get(live.canonical[project.project_id]);
+      if (!target) continue;
+      const { created_at, updated_at, ...signals } = project;
+      (target.merged_sources ||= []).push(signals);
+    }
+    for (const project of rows) project.merged_sources?.sort((a, b) => a.project_id.localeCompare(b.project_id));
+    return rows.filter((project) => !live.canonical[project.project_id]);
   }
 
+  // Project and Task IDs are globally unique keys but always owner-bound. An ID held by
+  // another owner is refused generically, without revealing that owner.
+  assertIdentifiersAvailable(auth, { projectId = null, taskId = null } = {}) {
+    const checks = [
+      [projectId, "SELECT user_id FROM projects WHERE project_id = ?"],
+      [taskId, "SELECT user_id FROM tasks WHERE task_id = ?"],
+    ];
+    for (const [id, sql] of checks) {
+      if (id === null) continue;
+      const row = this.db.prepare(sql).get(id);
+      if (row && row.user_id !== auth.user_id) throw identifierUnavailable();
+    }
+  }
+
+  // Creates the caller's project when it does not exist yet. An existing project keeps its formal name: the
+  // name a task carries is that task's own snapshot and may be stale, so a task upsert never renames its
+  // parent. Projects are renamed only through upsertProject (POST /v1/projects) or the Console.
   ensureProject(auth, projectId, name) {
+    this.assertIdentifiersAvailable(auth, { projectId });
     const timestamp = nowIso();
-    this.db.prepare(`
+    const result = this.db.prepare(`
       INSERT INTO projects (
         project_id, user_id, name, aliases_json, git_remotes_json,
         repo_fingerprints_json, path_hints_json, created_at, updated_at
       ) VALUES (?, ?, ?, '[]', '[]', '[]', '[]', ?, ?)
-      ON CONFLICT(project_id) DO UPDATE SET
-        name = excluded.name,
-        updated_at = excluded.updated_at
+      ON CONFLICT(project_id) DO NOTHING
     `).run(projectId, auth.user_id, name, timestamp, timestamp);
+    if (result.changes === 1) return;
+    // Nothing inserted: the row must already be the caller's (another owner's row is refused generically).
+    const owner = this.db.prepare("SELECT user_id FROM projects WHERE project_id = ?").get(projectId);
+    if (owner?.user_id !== auth.user_id) throw identifierUnavailable();
   }
 
   upsertProject(auth, project) {
@@ -633,8 +680,16 @@ export class MnemuronStore {
     assertStringArray(gitRemotes, "git_remotes");
     assertStringArray(repoFingerprints, "repo_fingerprints");
     assertStringArray(pathHints, "path_hints");
+    return this.memoryTransaction(() => {
+    this.assertIdentifiersAvailable(auth, { projectId: project.project_id });
+    // Inside the write: a deleted ID stays reserved (PROJECT_DELETED, never recreated or edited); a merged source is
+    // history, so its identity is not edited through its old ID (the canonical project is edited by its own ID).
+    const target = this.lifecycle.writeProject(auth.user_id, project.project_id, { entityType: "project", entityId: project.project_id, origin: project.project_id });
+    if (this.lifecycle.projectState(auth.user_id, target.project_id) === "live" && this.lifecycle.resolve(auth.user_id, target.project_id).routed) {
+      throw new ConflictError("This project was merged into another project.", "PROJECT_NOT_CANONICAL");
+    }
     const timestamp = nowIso();
-    this.db.prepare(`
+    const result = this.db.prepare(`
       INSERT INTO projects (
         project_id, user_id, name, aliases_json, git_remotes_json,
         repo_fingerprints_json, path_hints_json, created_at, updated_at
@@ -646,6 +701,7 @@ export class MnemuronStore {
         repo_fingerprints_json = excluded.repo_fingerprints_json,
         path_hints_json = excluded.path_hints_json,
         updated_at = excluded.updated_at
+      WHERE projects.user_id = excluded.user_id
     `).run(
       project.project_id,
       auth.user_id,
@@ -657,6 +713,7 @@ export class MnemuronStore {
       existing?.created_at || timestamp,
       timestamp,
     );
+    if (result.changes !== 1) throw identifierUnavailable();
     this.audit({ auth, action: "project.upsert", targetType: "project", targetId: project.project_id });
     return {
       status: "saved",
@@ -664,6 +721,7 @@ export class MnemuronStore {
         "SELECT * FROM projects WHERE project_id = ? AND user_id = ?",
       ).get(project.project_id, auth.user_id)),
     };
+    });
   }
 
   upsertTask(auth, task) {
@@ -674,7 +732,33 @@ export class MnemuronStore {
     if (!task.title || !task.project_name || !task.goal) {
       throw new ValidationError("task title, project_name, and goal are required.");
     }
-    this.ensureProject(auth, task.project_id, task.project_name);
+    // The owner checks, project ensure, unchanged decision and canonical write share one
+    // transaction: a later failure or a competing writer cannot leave a partial project write.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.assertIdentifiersAvailable(auth, { projectId: task.project_id, taskId: task.task_id });
+      // Lifecycle, inside the write transaction: a Task of a deleted project and a deleted requested ID are refused
+      // (deleted IDs stay reserved); naming any member of the Task's canonical group keeps its origin project; a new
+      // Task through a merged ID is created under the canonical project with requested-ID provenance.
+      const existing = this.db.prepare("SELECT project_id FROM tasks WHERE task_id = ? AND user_id = ?").get(task.task_id, auth.user_id);
+      if (existing && this.lifecycle.projectState(auth.user_id, existing.project_id) === "deleted") {
+        throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+      }
+      const target = this.lifecycle.writeProject(auth.user_id, task.project_id, { entityType: "task", entityId: task.task_id, origin: existing?.project_id ?? null });
+      task = { ...task, project_id: target.project_id };
+      this.ensureProject(auth, task.project_id, task.project_name);
+      const result = this.writeUpsertedTask(auth, task);
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  // Canonical body of upsertTask; only called inside an open transaction (the caller owns it).
+  // `decision` labels an update of an existing task (admin upsert, or a console edit).
+  writeUpsertedTask(auth, task, { decision = "admin_upsert" } = {}) {
     const timestamp = nowIso();
     const existingRow = this.db.prepare(
       "SELECT * FROM tasks WHERE task_id = ? AND user_id = ?",
@@ -709,101 +793,94 @@ export class MnemuronStore {
 
     const beforeVersion = existing?.canonical_version || 0;
     const afterVersion = beforeVersion + 1;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      if (existing) {
-        const result = this.db.prepare(`
-          UPDATE tasks SET
-            project_id = ?, project_name = ?, title = ?, aliases_json = ?,
-            goal = ?, status = ?, progress_json = ?, decisions_json = ?,
-            blockers_json = ?, next_steps_json = ?, resources_json = ?,
-            workstreams_json = ?, conflicts_json = ?, canonical_version = ?,
-            updated_at = ?
-          WHERE task_id = ? AND user_id = ? AND canonical_version = ?
-        `).run(
-          candidate.project_id,
-          candidate.project_name,
-          candidate.title,
-          asJson(candidate.aliases),
-          candidate.goal,
-          candidate.status,
-          asJson(candidate.progress),
-          asJson(candidate.decisions),
-          asJson(candidate.blockers),
-          asJson(candidate.next_steps),
-          asJson(candidate.resources),
-          asJson(candidate.workstreams),
-          asJson(candidate.conflicts),
-          afterVersion,
-          timestamp,
-          candidate.task_id,
-          auth.user_id,
-          beforeVersion,
-        );
-        if (result.changes !== 1) throw new ConflictError("Canonical Task changed during update.");
-      } else {
-        this.db.prepare(`
-          INSERT INTO tasks (
-            task_id, user_id, project_id, project_name, title, aliases_json,
-            goal, status, progress_json, decisions_json, blockers_json,
-            next_steps_json, resources_json, workstreams_json, conflicts_json,
-            canonical_version, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-          candidate.task_id,
-          auth.user_id,
-          candidate.project_id,
-          candidate.project_name,
-          candidate.title,
-          asJson(candidate.aliases),
-          candidate.goal,
-          candidate.status,
-          asJson(candidate.progress),
-          asJson(candidate.decisions),
-          asJson(candidate.blockers),
-          asJson(candidate.next_steps),
-          asJson(candidate.resources),
-          asJson(candidate.workstreams),
-          asJson(candidate.conflicts),
-          afterVersion,
-          timestamp,
-          timestamp,
-        );
-      }
-      const changedFields = Object.keys(canonicalTaskSnapshot(candidate)).filter((field) =>
-        JSON.stringify(existing?.[field]) !== JSON.stringify(candidate[field]));
-      this.insertCanonicalRevision({
-        auth,
-        task: candidate,
-        canonicalVersionBefore: beforeVersion,
-        canonicalVersionAfter: afterVersion,
-        proposalId: null,
-        operations: [{ op: existing ? "admin_upsert" : "task_create", fields: changedFields }],
-        beforeHash,
-        afterHash,
-        sourceCheckpointIds: [],
-        sourceEventIds: [],
-        decision: existing ? "admin_upsert" : "task_create",
-        createdAt: timestamp,
-      });
+    if (existing) {
+      const result = this.db.prepare(`
+        UPDATE tasks SET
+          project_id = ?, project_name = ?, title = ?, aliases_json = ?,
+          goal = ?, status = ?, progress_json = ?, decisions_json = ?,
+          blockers_json = ?, next_steps_json = ?, resources_json = ?,
+          workstreams_json = ?, conflicts_json = ?, canonical_version = ?,
+          updated_at = ?
+        WHERE task_id = ? AND user_id = ? AND canonical_version = ?
+      `).run(
+        candidate.project_id,
+        candidate.project_name,
+        candidate.title,
+        asJson(candidate.aliases),
+        candidate.goal,
+        candidate.status,
+        asJson(candidate.progress),
+        asJson(candidate.decisions),
+        asJson(candidate.blockers),
+        asJson(candidate.next_steps),
+        asJson(candidate.resources),
+        asJson(candidate.workstreams),
+        asJson(candidate.conflicts),
+        afterVersion,
+        timestamp,
+        candidate.task_id,
+        auth.user_id,
+        beforeVersion,
+      );
+      if (result.changes !== 1) throw new ConflictError("Canonical Task changed during update.");
+    } else {
       this.db.prepare(`
-        UPDATE task_reconciliation_proposals
-        SET status = 'stale', resolved_at = ?
-        WHERE user_id = ? AND task_id = ? AND status = 'awaiting_confirmation'
-          AND base_canonical_version <> ?
-      `).run(timestamp, auth.user_id, task.task_id, afterVersion);
-      this.audit({
-        auth,
-        action: "task.upsert",
-        targetType: "task",
-        targetId: task.task_id,
-        metadata: { canonical_version_before: beforeVersion, canonical_version_after: afterVersion },
-      });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
+        INSERT INTO tasks (
+          task_id, user_id, project_id, project_name, title, aliases_json,
+          goal, status, progress_json, decisions_json, blockers_json,
+          next_steps_json, resources_json, workstreams_json, conflicts_json,
+          canonical_version, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        candidate.task_id,
+        auth.user_id,
+        candidate.project_id,
+        candidate.project_name,
+        candidate.title,
+        asJson(candidate.aliases),
+        candidate.goal,
+        candidate.status,
+        asJson(candidate.progress),
+        asJson(candidate.decisions),
+        asJson(candidate.blockers),
+        asJson(candidate.next_steps),
+        asJson(candidate.resources),
+        asJson(candidate.workstreams),
+        asJson(candidate.conflicts),
+        afterVersion,
+        timestamp,
+        timestamp,
+      );
     }
+    const changedFields = Object.keys(canonicalTaskSnapshot(candidate)).filter((field) =>
+      JSON.stringify(existing?.[field]) !== JSON.stringify(candidate[field]));
+    this.insertCanonicalRevision({
+      auth,
+      task: candidate,
+      canonicalVersionBefore: beforeVersion,
+      canonicalVersionAfter: afterVersion,
+      proposalId: null,
+      operations: [{ op: existing ? decision : "task_create", fields: changedFields }],
+      beforeHash,
+      afterHash,
+      sourceCheckpointIds: [],
+      sourceEventIds: [],
+      decision: existing ? decision : "task_create",
+      createdAt: timestamp,
+    });
+    this.db.prepare(`
+      UPDATE task_reconciliation_proposals
+      SET status = 'stale', resolved_at = ?
+      WHERE user_id = ? AND task_id = ? AND status = 'awaiting_confirmation'
+        AND base_canonical_version <> ?
+    `).run(timestamp, auth.user_id, task.task_id, afterVersion);
+    this.audit({
+      auth,
+      action: "task.upsert",
+      targetType: "task",
+      targetId: task.task_id,
+      metadata: { canonical_version_before: beforeVersion, canonical_version_after: afterVersion },
+    });
     return {
       status: "saved",
       task_id: task.task_id,
@@ -814,6 +891,9 @@ export class MnemuronStore {
 
   createProjectBootstrapPreview(auth, payload) {
     this.handoffPolicy.requireNew();
+    // Authority binds the lifecycle generation observed before any of the reads this record is built from (a change
+    // between those reads and the insert must leave it stale, not freshly bound).
+    const observedGeneration = this.lifecycle.generation(auth.user_id);
     this.requireScope(auth, "project:bootstrap:preview");
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new ValidationError("Project Bootstrap payload is required.");
@@ -923,7 +1003,10 @@ export class MnemuronStore {
         AND status = 'pending_confirmation' AND expires_at > ?
       ORDER BY created_at DESC
     `).all(auth.user_id, now);
-    const pending = pendingRows.map((row) => ({ row, preview: fromJson(row.preview_json) }));
+    // Pending previews are reused (and compared) only while their lifecycle binding is current; a stale one never is.
+    const pending = pendingRows
+      .filter((row) => this.authorityCurrent(auth.user_id, "project_bootstrap", row.bootstrap_id))
+      .map((row) => ({ row, preview: fromJson(row.preview_json) }));
     const exactPending = pending.find(({ row, preview }) =>
       row.requested_by_credential_id === auth.credential_id
       && preview.target_session_id === sessionId
@@ -997,6 +1080,8 @@ export class MnemuronStore {
         historical_events_rebound: false,
       },
     };
+    // The frozen preview and its lifecycle binding are written together.
+    this.memoryTransaction(() => {
     this.db.prepare(`
       INSERT INTO task_bootstrap_previews (
         bootstrap_id, user_id, requested_by_credential_id, bootstrap_kind,
@@ -1015,6 +1100,8 @@ export class MnemuronStore {
       preview.created_at,
       preview.expires_at,
     );
+    this.bindAuthority(auth.user_id, "project_bootstrap", bootstrapId, observedGeneration);
+    });
     this.audit({
       auth,
       action: "project.bootstrap.preview",
@@ -1053,6 +1140,9 @@ export class MnemuronStore {
       throw new ConflictError("Project Bootstrap Preview belongs to a different session.");
     }
     if (row.status === "confirmed" && confirmed) {
+      // An earlier confirmation is acknowledged, but its binding packet is delivered again only while its authority is
+      // current (no lifecycle change since) and its project is not deleted.
+      this.assertBootstrapAuthority(auth, row);
       return {
         status: "confirmed",
         idempotent: true,
@@ -1172,6 +1262,8 @@ export class MnemuronStore {
     };
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      // Under the write lock: lifecycle binding current; a deleted (reserved) project ID is never recreated.
+      this.assertBootstrapAuthority(auth, row);
       const projectCollision = projectBootstrapCandidates(
         preview.project,
         this.listProjects(auth.user_id),
@@ -1289,6 +1381,9 @@ export class MnemuronStore {
 
   createTaskBootstrapPreview(auth, payload) {
     this.handoffPolicy.requireNew();
+    // Authority binds the lifecycle generation observed before any of the reads this record is built from (a change
+    // between those reads and the insert must leave it stale, not freshly bound).
+    const observedGeneration = this.lifecycle.generation(auth.user_id);
     this.requireScope(auth, "task:bootstrap:preview");
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new ValidationError("Task Bootstrap payload is required.");
@@ -1335,7 +1430,7 @@ export class MnemuronStore {
     if (!project) throw new NotFoundError("Resolved Project no longer exists.");
 
     const similarTasks = this.listTasks(auth.user_id)
-      .filter((task) => task.project_id === project.project_id)
+      .filter((task) => (task.canonical_project_id || task.project_id) === project.project_id)
       .map((task) => ({ task, similarity: taskBootstrapSimilarity(title, task) }))
       .filter(({ similarity }) => similarity >= 0.6)
       .sort((left, right) => right.similarity - left.similarity
@@ -1373,7 +1468,9 @@ export class MnemuronStore {
         AND expires_at > ?
       ORDER BY created_at DESC
     `).all(auth.user_id, project.project_id, nowIso());
+    // Pending previews are reused (and compared) only while their lifecycle binding is current; a stale one never is.
     const pendingMatches = pendingBootstrapRows
+      .filter((row) => this.authorityCurrent(auth.user_id, "task_bootstrap", row.bootstrap_id))
       .map((row) => ({ row, preview: fromJson(row.preview_json) }))
       .map((entry) => ({
         ...entry,
@@ -1465,6 +1562,8 @@ export class MnemuronStore {
         historical_events_rebound: false,
       },
     };
+    // The frozen preview and its lifecycle binding are written together.
+    this.memoryTransaction(() => {
     this.db.prepare(`
       INSERT INTO task_bootstrap_previews (
         bootstrap_id, user_id, requested_by_credential_id, bootstrap_kind, project_id,
@@ -1483,6 +1582,8 @@ export class MnemuronStore {
       preview.created_at,
       preview.expires_at,
     );
+    this.bindAuthority(auth.user_id, "task_bootstrap", bootstrapId, observedGeneration);
+    });
     this.audit({
       auth,
       action: "task.bootstrap.preview",
@@ -1521,6 +1622,9 @@ export class MnemuronStore {
       throw new ConflictError("Task Bootstrap Preview belongs to a different session.");
     }
     if (row.status === "confirmed" && confirmed) {
+      // An earlier confirmation is acknowledged, but its binding packet is delivered again only while its authority is
+      // current (no lifecycle change since) and its project is not deleted.
+      this.assertBootstrapAuthority(auth, row);
       return {
         status: "confirmed",
         idempotent: true,
@@ -1605,6 +1709,8 @@ export class MnemuronStore {
     };
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      // Under the write lock: lifecycle binding current and the resolved project not deleted.
+      this.assertBootstrapAuthority(auth, row);
       const projectRow = this.db.prepare(`
         SELECT project_id, name FROM projects WHERE project_id = ? AND user_id = ?
       `).get(task.project_id, auth.user_id);
@@ -1617,8 +1723,9 @@ export class MnemuronStore {
       if (existingTask) {
         throw new ConflictError("Proposed Task ID already exists; create and show a fresh preview.");
       }
+      // Same canonical project: a similar Task of a merged source counts as an existing Task of the target.
       const similarTask = this.listTasks(auth.user_id).find((candidate) =>
-        candidate.project_id === task.project_id
+        (candidate.canonical_project_id || candidate.project_id) === task.project_id
         && taskBootstrapSimilarity(task.title, candidate) >= 0.6);
       if (similarTask) {
         throw new ConflictError(
@@ -1706,10 +1813,16 @@ export class MnemuronStore {
     };
   }
 
-  listTasks(userId) {
+  // Normal task list: Tasks of deleted projects are absent. A Task of a merged source keeps its origin project_id
+  // and also names its canonical project; ownership by agent, session and workstream is unchanged.
+  listTasks(userId, live = this.lifecycle.live(userId)) {
     return this.db.prepare("SELECT * FROM tasks WHERE user_id = ? ORDER BY updated_at DESC")
       .all(userId)
-      .map((row) => this.taskFromRow(row));
+      .filter((row) => live.has(row.project_id))
+      .map((row) => {
+        const task = this.taskFromRow(row), canonical = live.canonical[row.project_id];
+        return canonical ? { ...task, canonical_project_id: canonical } : task;
+      });
   }
 
   taskFromRow(row) {
@@ -1853,31 +1966,59 @@ export class MnemuronStore {
     };
   }
 
+  // Task-keyed normal reads: a Task of an owned deleted project is PROJECT_DELETED for its owner; a Task whose parent is
+  // dangling or another owner's is a generic TASK_NOT_FOUND (lists omit it too). An unknown Task keeps each read's
+  // existing behavior.
+  assertTaskLive(userId, taskId) {
+    const task = this.db.prepare("SELECT project_id FROM tasks WHERE user_id = ? AND task_id = ?").get(userId, taskId);
+    if (!task) return;
+    const state = this.lifecycle.projectState(userId, task.project_id);
+    if (state === "deleted") throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+    if (state === "unavailable") throw new NotFoundError("Task not found.", "TASK_NOT_FOUND");
+  }
+
+  // A resume records no project of its own: it is judged by its Task's current project (PROJECT_DELETED, or a generic
+  // TASK_NOT_FOUND for a dangling or foreign parent). Its frozen preview content was built from live records at the time.
+  assertResumeLive(userId, resumeId, taskId) {
+    this.assertTaskLive(userId, taskId);
+  }
+  // SQL for resumes (alias r) that the individual status readers accept: the Task's current project live when the Task
+  // still exists. Aggregates use it so one deleted project's resume never breaks the whole summary.
+  liveResumeSql(userId) {
+    const current = this.lifecycle.live(userId).sql("t.project_id");
+    return { sql: `NOT EXISTS (SELECT 1 FROM tasks t WHERE t.user_id = r.user_id AND t.task_id = r.task_id AND NOT ${current.sql})`,
+      params: [...current.params] };
+  }
+
   listCheckpoints(auth, taskId, workstreamId = null, limit = 20) {
     this.requireScope(auth, "memory:read");
     assertIdentifier(taskId, "task_id");
+    this.assertTaskLive(auth.user_id, taskId);
     if (workstreamId !== null) assertIdentifier(workstreamId, "workstream_id");
     const safeLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+    // Each historical record is checked on its own project (a Task moved from P to Q keeps P's checkpoints), before the limit.
+    const live = this.lifecycle.live(auth.user_id).sql("project_id");
     const rows = workstreamId === null
       ? this.db.prepare(`
           SELECT * FROM checkpoints
-          WHERE user_id = ? AND task_id = ?
+          WHERE user_id = ? AND task_id = ? AND ${live.sql}
           ORDER BY created_at DESC LIMIT ?
-        `).all(auth.user_id, taskId, safeLimit)
+        `).all(auth.user_id, taskId, ...live.params, safeLimit)
       : this.db.prepare(`
           SELECT * FROM checkpoints
-          WHERE user_id = ? AND task_id = ? AND workstream_id = ?
+          WHERE user_id = ? AND task_id = ? AND workstream_id = ? AND ${live.sql}
           ORDER BY version DESC LIMIT ?
-        `).all(auth.user_id, taskId, workstreamId, safeLimit);
+        `).all(auth.user_id, taskId, workstreamId, ...live.params, safeLimit);
     return rows.map((row) => this.checkpointFromRow(row));
   }
 
   latestCheckpoints(userId, taskId) {
+    const live = this.lifecycle.live(userId).sql("project_id");
     const rows = this.db.prepare(`
       SELECT * FROM checkpoints
-      WHERE user_id = ? AND task_id = ?
+      WHERE user_id = ? AND task_id = ? AND ${live.sql}
       ORDER BY created_at DESC
-    `).all(userId, taskId);
+    `).all(userId, taskId, ...live.params);
     const seen = new Set();
     return rows.filter((row) => {
       if (seen.has(row.workstream_id)) return false;
@@ -1939,7 +2080,8 @@ export class MnemuronStore {
         SELECT * FROM checkpoints
         WHERE user_id = ? AND task_id = ? AND checkpoint_id = ?
       `).get(auth.user_id, taskId, checkpointId);
-      if (!row) throw new NotFoundError(`Checkpoint not found for Task: ${checkpointId}.`);
+      // A named checkpoint of a deleted project (a moved Task's earlier history) is not a reconciliation input.
+      if (!row || !this.lifecycle.liveProject(auth.user_id, row.project_id)) throw new NotFoundError(`Checkpoint not found for Task: ${checkpointId}.`);
       checkpoints.push(this.checkpointFromRow(row));
     }
     return checkpoints;
@@ -1950,17 +2092,22 @@ export class MnemuronStore {
     const upperBound = until ? "AND created_at <= ?" : "";
     if (until) params.push(until);
     const sourceCheckpointIds = new Set(proposal.source_checkpoint_ids || []);
+    // Deferred checkpoints of a deleted project (an earlier project of a moved Task) are not reported as pending input.
+    const live = this.lifecycle.live(userId).sql("project_id");
     return this.db.prepare(`
       SELECT checkpoint_id FROM checkpoints
-      WHERE user_id = ? AND task_id = ? AND created_at > ? ${upperBound}
+      WHERE user_id = ? AND task_id = ? AND created_at > ? ${upperBound} AND ${live.sql}
       ORDER BY created_at ASC, checkpoint_id ASC
-    `).all(...params)
+    `).all(...params, ...live.params)
       .map((row) => row.checkpoint_id)
       .filter((checkpointId) => !sourceCheckpointIds.has(checkpointId));
   }
 
   runReconciliation(auth, taskId, payload = {}, { internal = false } = {}) {
     this.handoffPolicy.requireNew();
+    // Authority binds the lifecycle generation observed before any of the reads this record is built from (a change
+    // between those reads and the insert must leave it stale, not freshly bound).
+    const observedGeneration = this.lifecycle.generation(auth.user_id);
     if (!internal) this.requireScope(auth, "task:reconcile:read");
     assertIdentifier(taskId, "task_id");
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -1970,6 +2117,8 @@ export class MnemuronStore {
       "SELECT * FROM tasks WHERE user_id = ? AND task_id = ?",
     ).get(auth.user_id, taskId);
     if (!taskRow) throw new NotFoundError("Task not found.");
+    // No proposal for a Task of a deleted (or dangling/foreign) project.
+    this.assertTaskLive(auth.user_id, taskId);
     const task = this.taskFromRow(taskRow);
     const requestedOperations = payload.operations ?? [];
     if (!Array.isArray(requestedOperations) || requestedOperations.length > 50) {
@@ -2112,6 +2261,8 @@ export class MnemuronStore {
       material_changes_require_confirmation: true,
       conflict_auto_resolution_performed: false,
     };
+    // The proposal and its lifecycle binding are written together (the stored proposal itself is unchanged).
+    this.memoryTransaction(() => {
     this.db.prepare(`
       INSERT INTO task_reconciliation_proposals (
         proposal_id, user_id, task_id, project_id, proposal_version,
@@ -2137,6 +2288,8 @@ export class MnemuronStore {
       initialStatus,
       createdAt,
     );
+    this.bindAuthority(auth.user_id, "reconciliation", proposalId, observedGeneration);
+    });
     if (initialStatus === "awaiting_confirmation") {
       this.db.prepare(`
         UPDATE task_reconciliation_proposals
@@ -2183,6 +2336,7 @@ export class MnemuronStore {
       "SELECT * FROM tasks WHERE user_id = ? AND task_id = ?",
     ).get(auth.user_id, proposal.task_id);
     if (!taskRow) throw new NotFoundError("Task not found.");
+    this.assertProposalAuthority(auth, proposal);
     const task = this.taskFromRow(taskRow);
     if (task.canonical_version !== proposal.base_canonical_version) {
       this.db.prepare(`
@@ -2224,6 +2378,8 @@ export class MnemuronStore {
     let revisionId;
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      // Re-checked under the write lock: Task live and the proposal's lifecycle binding current.
+      this.assertProposalAuthority(auth, proposal);
       const result = this.db.prepare(`
         UPDATE tasks SET
           title = ?, goal = ?, status = ?, progress_json = ?, decisions_json = ?,
@@ -2339,6 +2495,9 @@ export class MnemuronStore {
         || proposal.base_canonical_version !== payload.base_canonical_version) {
       throw new ConflictError("Reconciliation proposal version changed; show a fresh proposal.");
     }
+    // Every decision and replay requires the Task to be live; confirmation also checks the lifecycle binding (apply).
+    // An explicit reject of a proposal whose binding went stale stays allowed for a live Task.
+    this.assertTaskLive(auth.user_id, proposal.task_id);
     if (proposal.status === "applied" && payload.decision === "confirm") {
       const revisionRow = this.db.prepare(`
         SELECT * FROM task_canonical_revisions
@@ -2407,12 +2566,14 @@ export class MnemuronStore {
       "SELECT * FROM tasks WHERE user_id = ? AND task_id = ?",
     ).get(auth.user_id, taskId);
     if (!taskRow) throw new NotFoundError("Task not found.");
+    this.assertTaskLive(auth.user_id, taskId);
     const task = this.taskFromRow(taskRow);
+    const live = this.lifecycle.live(auth.user_id).sql("project_id");
     const rows = this.db.prepare(`
       SELECT * FROM task_reconciliation_proposals
-      WHERE user_id = ? AND task_id = ?
+      WHERE user_id = ? AND task_id = ? AND ${live.sql}
       ORDER BY created_at DESC LIMIT 50
-    `).all(auth.user_id, taskId);
+    `).all(auth.user_id, taskId, ...live.params);
     const proposals = rows.map((row) => this.reconciliationProposalFromRow(row));
     const pending = proposals.filter((proposal) => proposal.status === "awaiting_confirmation");
     const conflictCount = pending.reduce((sum, proposal) => sum + proposal.conflicts.length, 0);
@@ -2420,9 +2581,9 @@ export class MnemuronStore {
       this.reconciliationDeferredCheckpointIds(auth.user_id, proposal)))];
     const latestRevisionRow = this.db.prepare(`
       SELECT * FROM task_canonical_revisions
-      WHERE user_id = ? AND task_id = ?
+      WHERE user_id = ? AND task_id = ? AND ${live.sql}
       ORDER BY canonical_version_after DESC LIMIT 1
-    `).get(auth.user_id, taskId);
+    `).get(auth.user_id, taskId, ...live.params);
     return {
       schema_version: RECONCILIATION_SCHEMA_VERSION,
       task_id: taskId,
@@ -2455,12 +2616,14 @@ export class MnemuronStore {
   listCanonicalRevisions(auth, taskId, limit = 50) {
     this.requireScope(auth, "task:reconcile:read");
     assertIdentifier(taskId, "task_id");
+    this.assertTaskLive(auth.user_id, taskId);
     const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+    const live = this.lifecycle.live(auth.user_id).sql("project_id");
     return this.db.prepare(`
       SELECT * FROM task_canonical_revisions
-      WHERE user_id = ? AND task_id = ?
+      WHERE user_id = ? AND task_id = ? AND ${live.sql}
       ORDER BY canonical_version_after DESC LIMIT ?
-    `).all(auth.user_id, taskId, safeLimit).map((row) => this.canonicalRevisionFromRow(row));
+    `).all(auth.user_id, taskId, ...live.params, safeLimit).map((row) => this.canonicalRevisionFromRow(row));
   }
 
   createCheckpoint(auth, sessionId, payload = {}) {
@@ -2511,6 +2674,12 @@ export class MnemuronStore {
       ORDER BY version DESC LIMIT 1
     `).get(auth.user_id, eventId);
     if (existingForTrigger) {
+      // A replay is a read of the stored checkpoint: its own project and its Task's current project must both be live
+      // (PROJECT_DELETED for the owner; a dangling or foreign project is a generic not found) before any content returns.
+      const replayState = this.lifecycle.projectState(auth.user_id, existingForTrigger.project_id);
+      if (replayState === "deleted") throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+      if (replayState === "unavailable") throw new NotFoundError("Checkpoint trigger event not found.");
+      this.assertTaskLive(auth.user_id, existingForTrigger.task_id);
       const checkpoint = this.checkpointFromRow(existingForTrigger);
       const structuredMemories = this.deriveStructuredMemories(
         auth,
@@ -2534,7 +2703,12 @@ export class MnemuronStore {
     if (!taskRow) {
       return { status: "skipped", reason: "task_not_found", trigger_event_id: eventId };
     }
+    if (this.lifecycle.projectState(auth.user_id, taskRow.project_id) === "deleted") {
+      throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+    }
     const task = this.taskFromRow(taskRow);
+    // Source events are taken per record only from live projects (a moved Task keeps an earlier project's events).
+    const liveSource = this.lifecycle.live(auth.user_id).sql("project_id");
     const previous = this.db.prepare(`
       SELECT c.*, e.rowid AS trigger_rowid
       FROM checkpoints c
@@ -2550,7 +2724,7 @@ export class MnemuronStore {
              device_id, agent_id, agent_instance_id
       FROM events
       WHERE user_id = ? AND task_id = ? AND workstream_id = ? AND session_id = ?
-        AND rowid > ? AND rowid <= ?
+        AND rowid > ? AND rowid <= ? AND ${liveSource.sql}
       ORDER BY rowid DESC LIMIT ?
     `).all(
       auth.user_id,
@@ -2559,6 +2733,7 @@ export class MnemuronStore {
       trigger.session_id,
       lowerRowId,
       trigger.event_rowid,
+      ...liveSource.params,
       CHECKPOINT_EVENT_LIMIT,
     ).reverse();
     const meaningfulEvents = events.filter((event) =>
@@ -2691,6 +2866,12 @@ export class MnemuronStore {
         canonical_task_state_overwritten: false,
       },
     };
+    // The lifecycle decision and the insert share one transaction: a deleted project refuses (no checkpoint); a merged
+    // trigger project lands in the canonical project with requested-ID provenance; the trigger event itself is unchanged.
+    this.memoryTransaction(() => {
+    // The Task's current project is rechecked under the write lock as well (a moved Task can differ from the trigger's).
+    this.assertTaskLive(auth.user_id, trigger.task_id);
+    const destination = this.lifecycle.writeProject(auth.user_id, trigger.project_id, { entityType: "checkpoint", entityId: checkpointId }).project_id;
     this.db.prepare(`
       INSERT INTO checkpoints (
         checkpoint_id, user_id, task_id, project_id, workstream_id, session_id,
@@ -2703,7 +2884,7 @@ export class MnemuronStore {
       checkpointId,
       auth.user_id,
       trigger.task_id,
-      trigger.project_id,
+      destination,
       trigger.workstream_id,
       trigger.session_id,
       version,
@@ -2722,6 +2903,7 @@ export class MnemuronStore {
       asJson(warnings),
       createdAt,
     );
+    });
     this.audit({
       auth,
       action: "checkpoint.create",
@@ -2812,6 +2994,18 @@ export class MnemuronStore {
         const capturedAt = Number.isFinite(Date.parse(event.captured_at))
           ? new Date(event.captured_at).toISOString()
           : receivedAt;
+        // Lifecycle for a new event, inside the capture transaction: an event of a Task whose project was deleted, or
+        // naming a deleted project, refuses the (atomic) batch, so no event or route record of it remains. A new event
+        // through a merged ID lands in the canonical project with requested-ID provenance (the Task row keeps its origin;
+        // the retained raw payload is never rewritten). A replayed event ID stays an ignored duplicate.
+        let projectId = event.project_id || null;
+        if (!this.db.prepare("SELECT 1 FROM events WHERE event_id = ?").get(event.event_id)) {
+          const taskRow = event.task_id ? this.db.prepare("SELECT project_id FROM tasks WHERE user_id = ? AND task_id = ?").get(auth.user_id, event.task_id) : null;
+          if (taskRow && this.lifecycle.projectState(auth.user_id, taskRow.project_id) === "deleted") {
+            throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+          }
+          projectId = this.lifecycle.writeProject(auth.user_id, projectId, { entityType: "event", entityId: event.event_id }).project_id;
+        }
         const result = insert.run(
           event.event_id,
           auth.user_id,
@@ -2819,7 +3013,7 @@ export class MnemuronStore {
           auth.device_id,
           auth.agent_id,
           auth.agent_instance_id,
-          event.project_id || null,
+          projectId,
           event.task_id || null,
           event.workstream_id || null,
           event.session_id || null,
@@ -2919,11 +3113,16 @@ export class MnemuronStore {
         const row = this.db.prepare("SELECT * FROM memories WHERE user_id = ? AND memory_id = ?")
           .get(auth.user_id, existing.memory_id);
         if (!row) throw new ConflictError("Original Memory is unavailable.", "IDEMPOTENCY_RESULT_UNAVAILABLE");
+        // An earlier success never returns stored content of a project deleted since; a dangling or foreign project
+        // reference is answered like an unavailable result.
+        const replayState = this.lifecycle.projectState(auth.user_id, row.project_id);
+        if (replayState === "deleted") throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+        if (replayState === "unavailable") throw new ConflictError("Original Memory is unavailable.", "IDEMPOTENCY_RESULT_UNAVAILABLE");
         return { status: "saved", memory: this.memoryFromRow(row), idempotent: true,
           operation: { operation_id: operationId, replayed: true, original_memory_id: row.memory_id } };
       }
       // Resolve only a new intent. Replaying a completed operation must not retarget it.
-      const scope = resolveMemoryScope(this.db, auth.user_id, intent, { write: true });
+      const scope = resolveMemoryScope(this.db, auth.user_id, intent, { write: true, route: true, lifecycle: this.lifecycle });
       const memoryId = randomUUID();
       const createdAt = nowIso();
       this.db.prepare(
@@ -2940,6 +3139,8 @@ export class MnemuronStore {
         createdAt, createdAt,
       );
       const row = this.db.prepare("SELECT * FROM memories WHERE memory_id=?").get(memoryId);
+      const routedFrom = scope[SCOPE_LIFECYCLE].routedFrom;
+      if (routedFrom) this.lifecycle.logRoute(auth.user_id, routedFrom, scope.project_id, "memory", memoryId);
       const revision = this.revisions.record(row,"explicit_save");
       this.revisions.linkExplicit(row,revision);
       this.audit({ auth, action: "memory.create", targetType: "memory", targetId: memoryId });
@@ -2963,8 +3164,15 @@ export class MnemuronStore {
   memorySummaries(auth,payload) {
     this.requireScope(auth,'memory:read');
     if(!payload || !['user','project','task','workstream','session'].includes(payload.scope))throw new ValidationError('Exact summary scope is required.');
-    const effective=resolveMemoryScope(this.db,auth.user_id,payload,{write:true});
-    const result=this.derivedMemory.summaries(auth.user_id,scopeKey({user_id:auth.user_id,scope:payload.scope,...effective}),
+    const effective=resolveMemoryScope(this.db,auth.user_id,payload,{write:true,lifecycle:this.lifecycle});
+    // Every project-bound exact scope (project, task, workstream, session) requested through any member of a merged project
+    // covers that same scope under each member's origin project key: only the project slot varies, the task, workstream
+    // and session fields stay exactly as resolved, so unrelated Tasks or workstreams never blend. Each summary keeps its
+    // own key and every dependency is still revalidated. Unmerged or project-less scopes read their single key as before.
+    const members=effective.project_id?effective[SCOPE_LIFECYCLE].members||[]:[];
+    const keys=members.length>1?members.map(projectId=>scopeKey({user_id:auth.user_id,scope:payload.scope,...effective,project_id:projectId}))
+      :scopeKey({user_id:auth.user_id,scope:payload.scope,...effective});
+    const result=this.derivedMemory.summaries(auth.user_id,keys,
       {offset:payload.offset,limit:payload.limit,cursor:payload.cursor,category:payload.category,auth,budget:isWebReader(auth)?48*1024:128*1024});
     const {offset,cursor,...request}=payload;
     return {...result,next_request:result.next_cursor?{...request,cursor:result.next_cursor}:null,production_ready:false};
@@ -2983,6 +3191,8 @@ export class MnemuronStore {
     if(ownEmbedder||payload?.personal_model_only===true){
       try{if(!ownEmbedder)throw new ModelError('NOT_CONFIGURED');return await this.consoleService.vector(auth.user_id).search(auth,{...payload,mode});}
       catch(error){
+        // Lifecycle, validation and authorization outcomes are answers, not provider degradation (e.g. PROJECT_DELETED).
+        if(isDeterministicReadError(error))throw error;
         const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
@@ -3033,13 +3243,14 @@ export class MnemuronStore {
     const effectiveScope = resolveMemoryScope(this.db, auth.user_id, payload, { workstreamIds });
     const selection = this.memorySearch.candidates(auth.user_id, payload.query, effectiveScope,
       {workstreamIds, includeShared, statuses, memoryTypes, auth});
-    const rows = selection.rows;
+    const rows = selection.rows,entityMatches=new Map(rows.map(row=>[row.memory_id,row._entity_match]));
     const currentTime = Date.now();
     const candidates = rows
       .map((row) => this.memoryFromRow(row))
       .map((memory) => {
         const lexical = lexicalScore(payload.query, memory);
-        if (lexical <= 0) return null;
+        const match=entityMatches.get(memory.memory_id)||{match_kind:'original_terms'};
+        if (lexical <= 0 && match.match_kind!=='alias') return null;
         const confidence = Number.isFinite(memory.generation.confidence)
           ? memory.generation.confidence
           : 0.5;
@@ -3056,6 +3267,7 @@ export class MnemuronStore {
           ranking: {
             score,
             lexical_score: Number(lexical.toFixed(6)),
+            ...match,
             confidence_score: Number(confidence.toFixed(6)),
             scope_score: Number(scope.toFixed(6)),
             recency_score: Number(recency.toFixed(6)),
@@ -3065,7 +3277,8 @@ export class MnemuronStore {
       })
       .filter(Boolean)
       .sort((left, right) =>
-        right.ranking.score - left.ranking.score
+        ({raw_query:0,original_terms:1,alias:2}[left.ranking.match_kind]-{raw_query:0,original_terms:1,alias:2}[right.ranking.match_kind])
+        || right.ranking.score - left.ranking.score
         || right.updated_at.localeCompare(left.updated_at)
         || left.memory_id.localeCompare(right.memory_id));
     const topicGroups = new Map();
@@ -3123,6 +3336,7 @@ export class MnemuronStore {
       retrieval: {
         engine: 'sqlite_fts5', index_version: INDEX_VERSION, coverage: 'authorized_scope',
         execution_complete: true, degraded: false, candidate_limit: 500,
+        aliases:selection.aliases,
         candidate_truncated: selection.truncated, result_truncated: candidates.length > limit,
         conflict_truncated: selection.truncated || potentialConflicts.length > 20,
         conflict_coverage: 'ranked_candidates_only', total_matching_count: null,
@@ -3169,6 +3383,11 @@ export class MnemuronStore {
         result_count: result.result_count,
         matched_candidate_count: result.matched_candidate_count,
         potential_conflict_count: potentialConflicts.length,
+        // IDs this lexical query returned (bounded). Under semantic/hybrid search this is one subquery, not the
+        // final delivered result set, and several rows may belong to one user search. No query text is recorded.
+        result_refs_kind: "lexical_subquery",
+        result_refs: result.results.slice(0, AUDIT_QUERY_REFS).map((memory) => memory.memory_id),
+        result_refs_truncated: result.results.length > AUDIT_QUERY_REFS,
       },
     });
     return result;
@@ -3183,6 +3402,12 @@ export class MnemuronStore {
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 8192) throw new ValidationError('Invalid content_offset/content_limit.');
     const row = this.db.prepare(`SELECT * FROM memories WHERE user_id=? AND memory_id=? ${includeHistory ? '' : "AND status='active'"}`).get(auth.user_id,memoryId);
     if (!row || !this.webVisibility.visible(auth,memoryId)) throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    // include_history never reaches a deleted project's records: retained history is an owner Console view only.
+    // Only the full owner credential learns the reason; a narrow web reader sees the generic not found. A dangling or
+    // unowned project reference is never readable and is answered generically.
+    const projectState = this.lifecycle.projectState(auth.user_id,row.project_id);
+    if (projectState === 'unavailable' || (projectState === 'deleted' && isWebReader(auth))) throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    if (projectState === 'deleted') throw new ConflictError('This project was deleted.','PROJECT_DELETED');
     const revision=this.revisions.latest(auth.user_id,memoryId)?.revision;
     if(payload.revision!==undefined && (!Number.isSafeInteger(payload.revision) || payload.revision!==revision))throw new ConflictError('Memory changed; restart reading.','MEMORY_VERSION_CHANGED');
     if(isWebReader(auth) && (offset>0 || (payload.source_offset ?? 0)>0) && payload.revision===undefined)throw new ValidationError('Continuation requires revision.');
@@ -3225,6 +3450,49 @@ export class MnemuronStore {
     return result;
   }
 
+  // Pending authority (bootstrap and resume previews, reconciliation proposals) is bound to the owner's monotonic
+  // lifecycle generation when produced and checked again inside the confirming transaction. A row without a binding
+  // (created before this build) is current only while the owner never had a lifecycle change (generation 0); it is
+  // never upgraded to the current generation. An unchanged Task hash or epoch cannot stand in for this check.
+  // Binds the current generation to a newly produced record (inside the producing write; the record itself is unchanged).
+  bindAuthority(userId, kind, recordId, observedGeneration) {
+    if (!Number.isInteger(observedGeneration)) throw new Error("bindAuthority requires the generation observed before the preview reads.");
+    this.db.prepare("INSERT OR IGNORE INTO lifecycle_authority_bindings VALUES (?, ?, ?, ?, ?)")
+      .run(userId, kind, recordId, observedGeneration, nowIso());
+  }
+  authorityCurrent(userId, kind, recordId) {
+    const bound = this.db.prepare("SELECT generation FROM lifecycle_authority_bindings WHERE user_id = ? AND kind = ? AND record_id = ?")
+      .get(userId, kind, recordId)?.generation;
+    const current = this.lifecycle.generation(userId);
+    return bound === undefined ? current === 0 : bound === current;
+  }
+  assertAuthorityCurrent(userId, kind, recordId) {
+    if (!this.authorityCurrent(userId, kind, recordId)) {
+      throw new ConflictError("A project lifecycle change happened after this preview; create and show a fresh preview.", "LIFECYCLE_AUTHORITY_STALE");
+    }
+  }
+  // Reconciliation authority: the proposal's Task must be live and its bound lifecycle generation current (re-read; an
+  // unchanged canonical Task hash never stands in for it).
+  assertProposalAuthority(auth, proposal) {
+    this.assertTaskLive(auth.user_id, proposal.task_id);
+    this.assertAuthorityCurrent(auth.user_id, "reconciliation", proposal.proposal_id);
+  }
+  // Bootstrap authority (re-read under the caller's lock): the bound lifecycle generation must be current, and the bound
+  // project (an existing one, or the ID a project bootstrap reserved) must not be deleted. Deleted IDs stay reserved.
+  assertBootstrapAuthority(auth, row) {
+    const current = this.db.prepare("SELECT * FROM task_bootstrap_previews WHERE bootstrap_id = ? AND user_id = ?").get(row.bootstrap_id, auth.user_id) || row;
+    if (this.lifecycle.projectState(auth.user_id, current.project_id) === "deleted") throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+    this.assertAuthorityCurrent(auth.user_id, current.bootstrap_kind === "task" ? "task_bootstrap" : "project_bootstrap", current.bootstrap_id);
+  }
+
+  // Writes on an existing memory (and their idempotent replies, which return content) require its own project to be
+  // live: PROJECT_DELETED for an owned deleted project, the generic not found for a dangling or foreign reference.
+  assertMemoryWritable(auth, row) {
+    const state = this.lifecycle.projectState(auth.user_id, row.project_id);
+    if (state === "deleted") throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+    if (state === "unavailable") throw new NotFoundError("Memory not found.", "MEMORY_NOT_FOUND");
+  }
+
   supersedeMemory(auth, memoryId, payload, {evidenceKind} = {}) {
     this.requireScope(auth, "memory:write");
     if (!this.runtime.memory) throw new ConflictError("New memory writes are disabled.", "MEMORY_DISABLED");
@@ -3238,10 +3506,13 @@ export class MnemuronStore {
         && (typeof payload.reason !== "string" || !reason)) {
       throw new ValidationError("reason must be a non-empty string.");
     }
+    // Target, status, lifecycle and the idempotent reply are all decided inside the write transaction, under the lock.
+    return this.memoryTransaction(() => {
     const targetRow = this.db.prepare(
       "SELECT * FROM memories WHERE user_id = ? AND memory_id = ?",
     ).get(auth.user_id, memoryId);
     if (!targetRow) throw new NotFoundError("Memory not found.", "MEMORY_NOT_FOUND");
+    this.assertMemoryWritable(auth, targetRow);
     const memoryType = validateMemoryType(payload.memory_type ?? targetRow.memory_type ?? "fact");
     const topic = memoryTopic(payload.topic === undefined ? targetRow.topic : payload.topic);
     if (targetRow.status === "superseded" && targetRow.superseded_by_memory_id) {
@@ -3252,6 +3523,8 @@ export class MnemuronStore {
           && exactText(existingRow.content) === exactText(payload.content)
           && existingRow.memory_type === memoryType
           && exactText(existingRow.topic) === exactText(topic)) {
+        // Both returned records carry content: each must be currently permitted on its own project.
+        this.assertMemoryWritable(auth, existingRow);
         return {
           schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
           status: "existing",
@@ -3268,7 +3541,10 @@ export class MnemuronStore {
     const replacementId = randomUUID();
     const timestamp = nowIso();
     const actor = this.publicIdentity(auth);
-    return this.memoryTransaction(() => {
+    {
+      // The replacement is a new record: it lands in the canonical project of the original (which itself keeps its
+      // origin project), with the origin ID as provenance; inside this same transaction.
+      const replacementProject = this.lifecycle.writeProject(auth.user_id, targetRow.project_id, { entityType: "memory", entityId: replacementId }).project_id;
       this.db.prepare(`
         INSERT INTO memories (
           memory_id, user_id, credential_id, device_id, agent_id, agent_instance_id,
@@ -3289,7 +3565,7 @@ export class MnemuronStore {
         auth.agent_instance_id,
         payload.content.trim(),
         targetRow.scope,
-        targetRow.project_id,
+        replacementProject,
         targetRow.task_id,
         targetRow.workstream_id,
         targetRow.session_id,
@@ -3335,6 +3611,7 @@ export class MnemuronStore {
       idempotent: false,
       canonical_task_state_overwritten: false,
     };
+    }
     });
   }
 
@@ -3350,10 +3627,13 @@ export class MnemuronStore {
         && (typeof payload.reason !== "string" || !reason)) {
       throw new ValidationError("reason must be a non-empty string.");
     }
+    // Target, status, lifecycle and the idempotent reply are all decided inside the write transaction, under the lock.
+    return this.memoryTransaction(() => {
     const row = this.db.prepare(
       "SELECT * FROM memories WHERE user_id = ? AND memory_id = ?",
     ).get(auth.user_id, memoryId);
     if (!row) throw new NotFoundError("Memory not found.", "MEMORY_NOT_FOUND");
+    this.assertMemoryWritable(auth, row);
     if (row.status === "retracted") {
       return {
         schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
@@ -3367,7 +3647,6 @@ export class MnemuronStore {
     }
     const timestamp = nowIso();
     const actor = this.publicIdentity(auth);
-    return this.memoryTransaction(() => {
     this.db.prepare(`
       UPDATE memories
       SET status = 'retracted', lifecycle_reason = ?, retracted_at = ?,
@@ -3401,12 +3680,16 @@ export class MnemuronStore {
 
   resolverHistory(userId, query) {
     const fingerprint = this.resolverFingerprint(query);
+    // Each confirmation counts only while its own recorded project is live (a Task moved from P to Q keeps P's old
+    // confirmations; after P is deleted they no longer rank anything). Merged sources stay live and are inherited by
+    // their canonical project in the resolver.
+    const live = this.lifecycle.live(userId).sql("project_id");
     const rows = this.db.prepare(`
       SELECT project_id, task_id, COUNT(*) AS confirmations
       FROM resolver_selections
-      WHERE user_id = ? AND query_fingerprint = ?
+      WHERE user_id = ? AND query_fingerprint = ? AND ${live.sql}
       GROUP BY project_id, task_id
-    `).all(userId, fingerprint);
+    `).all(userId, fingerprint, ...live.params);
     const historyByProject = new Map();
     const historyByTask = new Map();
     for (const row of rows) {
@@ -3423,6 +3706,9 @@ export class MnemuronStore {
     const agentInstanceId = signals.agent_instance_id || auth.agent_instance_id;
     const deviceId = signals.device_id || auth.device_id;
     const agentId = signals.agent_id || auth.agent_id;
+    // Agent, device and recency evidence counts only for captured events whose own project is live (deleted-project history of
+    // a moved Task never ranks or explains it); the owner and agent matching rules are unchanged.
+    const live = this.lifecycle.live(auth.user_id).sql("project_id");
     const rows = this.db.prepare(`
       SELECT task_id,
              SUM(CASE WHEN agent_instance_id = ? THEN 1 ELSE 0 END) AS agent_instance_hits,
@@ -3430,9 +3716,9 @@ export class MnemuronStore {
              SUM(CASE WHEN agent_id = ? THEN 1 ELSE 0 END) AS agent_hits,
              MAX(captured_at) AS recent_activity_at
       FROM events
-      WHERE user_id = ? AND task_id IS NOT NULL
+      WHERE user_id = ? AND task_id IS NOT NULL AND ${live.sql}
       GROUP BY task_id
-    `).all(agentInstanceId, deviceId, agentId, auth.user_id);
+    `).all(agentInstanceId, deviceId, agentId, auth.user_id, ...live.params);
     return new Map(rows.map((row) => [row.task_id, {
       agent_instance_hits: Number(row.agent_instance_hits || 0),
       device_hits: Number(row.device_hits || 0),
@@ -3441,9 +3727,21 @@ export class MnemuronStore {
     }]));
   }
 
+  // An explicit project or task ID of the owner that is effectively deleted is PROJECT_DELETED for that owner
+  // (normal candidate lists simply omit it). Unknown and foreign IDs keep their generic not-found behavior.
+  // Explicit IDs are the signals and, exactly as the resolver reads them, `project-…`/`task-…` identifiers in the query.
+  assertExplicitLive(auth, signals = {}, query = "") {
+    const deleted = (projectId) => projectId && this.lifecycle.projectState(auth.user_id, projectId) === "deleted";
+    const projectIds = signals.project_id ? [signals.project_id] : explicitIdentifier(query, "project").slice(0, 1);
+    const taskIds = signals.task_id ? [signals.task_id] : explicitIdentifier(query, "task");
+    const taskProject = (taskId) => this.db.prepare("SELECT project_id FROM tasks WHERE user_id = ? AND task_id = ?").get(auth.user_id, taskId)?.project_id;
+    if (projectIds.some(deleted) || taskIds.some((taskId) => deleted(taskProject(taskId)))) throw new ConflictError("This project was deleted.", "PROJECT_DELETED");
+  }
+
   resolveProject(auth, payload) {
     this.requireScope(auth, "resume:read");
     const request = resolverRequest(payload);
+    this.assertExplicitLive(auth, request.signals, request.query);
     const history = this.resolverHistory(auth.user_id, request.query);
     return resolveProjectCandidates({
       projects: this.listProjects(auth.user_id),
@@ -3460,7 +3758,11 @@ export class MnemuronStore {
       const id=payload?.project_id || payload?.query;
       const unavailable={status:'project_context_unavailable',read_only:true,read_capabilities:{task_field_details:false},next_action:{type:'search_memory',tool:'mnemuron_search_memories'}};
       if(typeof id!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(id))return unavailable;
-      const rows=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.project_id=? AND m.status='active' AND ${webMemorySql(auth)} ORDER BY m.created_at DESC,m.memory_id LIMIT ?`).all(auth.user_id,id,PROJECT_CONTEXT_MEMORY_LIMIT);
+      // Only a live owned project has context; a deleted, unknown or foreign ID is the same generic unavailable answer.
+      // A merged project reads its canonical project's members; per-record web visibility is unchanged.
+      if(this.lifecycle.projectState(auth.user_id,id)!=='live')return unavailable;
+      const members=this.lifecycle.scope(auth.user_id,id).members;
+      const rows=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.project_id IN (SELECT value FROM json_each(?)) AND m.status='active' AND ${webMemorySql(auth)} ORDER BY m.created_at DESC,m.memory_id LIMIT ?`).all(auth.user_id,JSON.stringify(members),PROJECT_CONTEXT_MEMORY_LIMIT);
       if(!rows.length)return unavailable;
       return {schema_version:PROJECT_CONTEXT_SCHEMA_VERSION,status:'project_context_preview',read_only:true,project:{project_id:id},tasks:[],
         structured_memories:rows.map(row=>this.webVisibility.project(auth,memorySummary(this.memoryFromRow(row),160))),
@@ -3475,12 +3777,15 @@ export class MnemuronStore {
     const request = resolverRequest(payload, { requireQuery: true, allowProjectId: true });
     const resolution = this.resolveProject(auth, request);
     if (resolution.status !== "resolved") return resolution;
-    const project = this.listProjects(auth.user_id)
+    const live = this.lifecycle.live(auth.user_id);
+    const project = this.listProjects(auth.user_id, live)
       .find((candidate) => candidate.project_id === resolution.match.project_id);
     if (!project) throw new NotFoundError("Resolved Project no longer exists.");
+    // The canonical project and every project merged into it; each item keeps its own origin project_id.
+    const members = this.lifecycle.scope(auth.user_id, project.project_id).members;
 
-    const allTasks = this.listTasks(auth.user_id)
-      .filter((task) => task.project_id === project.project_id);
+    const allTasks = this.listTasks(auth.user_id, live)
+      .filter((task) => (task.canonical_project_id || task.project_id) === project.project_id);
     const tasks = allTasks.slice(0, PROJECT_CONTEXT_TASK_LIMIT);
     let sourceCheckpointCount = 0;
     const taskContexts = tasks.map((task) => {
@@ -3511,22 +3816,24 @@ export class MnemuronStore {
       };
       context.field_availability = taskFieldAvailability(task, context);
       context.detail_request = { project_id: project.project_id, task_id: task.task_id, canonical_version: task.canonical_version };
+      // A Task of a merged project keeps its origin; it is listed under the canonical project.
+      if (task.project_id !== project.project_id) context.origin_project_id = task.project_id;
       return context;
     });
     const memories = this.db.prepare(`
       SELECT *
       FROM memories
-      WHERE user_id = ? AND project_id = ? AND status = 'active'
+      WHERE user_id = ? AND project_id IN (SELECT value FROM json_each(?)) AND status = 'active'
       ORDER BY created_at DESC LIMIT ?
-    `).all(auth.user_id, project.project_id, PROJECT_CONTEXT_MEMORY_LIMIT)
+    `).all(auth.user_id, JSON.stringify(members), PROJECT_CONTEXT_MEMORY_LIMIT)
       .map((memory) => this.memoryFromRow(memory));
     const events = this.db.prepare(`
-      SELECT event_id, task_id, workstream_id, session_id, event_type,
+      SELECT event_id, project_id, task_id, workstream_id, session_id, event_type,
              captured_at, expires_at, expired_at, content, device_id, agent_id, agent_instance_id
       FROM events
-      WHERE user_id = ? AND project_id = ?
+      WHERE user_id = ? AND project_id IN (SELECT value FROM json_each(?))
       ORDER BY captured_at DESC LIMIT ?
-    `).all(auth.user_id, project.project_id, PROJECT_CONTEXT_ACTIVITY_LIMIT);
+    `).all(auth.user_id, JSON.stringify(members), PROJECT_CONTEXT_ACTIVITY_LIMIT);
     const checkpoints = taskContexts
       .flatMap((task) => task.latest_checkpoints)
       .sort((left, right) => right.created_at.localeCompare(left.created_at))
@@ -3554,6 +3861,7 @@ export class MnemuronStore {
         name: compactText(project.name, 200),
         aliases: boundedStrings(project.aliases, { limit: 10, textLimit: 120 }),
         updated_at: project.updated_at,
+        ...(members.length > 1 ? { merged_project_ids: members.filter((id) => id !== project.project_id).sort() } : {}),
       },
       tasks: taskContexts,
       structured_memories: memories.map((memory) => ({
@@ -3566,6 +3874,7 @@ export class MnemuronStore {
         const text = content === null ? null : textContent(content);
         return {
           event_id: event.event_id,
+          ...(event.project_id !== project.project_id ? { origin_project_id: event.project_id } : {}),
           task_id: event.task_id,
           workstream_id: event.workstream_id,
           session_id: event.session_id,
@@ -3627,12 +3936,14 @@ export class MnemuronStore {
     const checkpointsByWorkstream = new Map(
       checkpoints.map((checkpoint) => [checkpoint.workstream_id, checkpoint]),
     );
+    // Activity of deleted projects (a Task moved from P to Q keeps P's events) is filtered per event before the sample cut.
+    const liveEvents = this.lifecycle.live(auth.user_id).sql("project_id");
     const activityRows = this.db.prepare(`
       SELECT workstream_id, session_id, captured_at, device_id, agent_id, agent_instance_id
       FROM events
-      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL
+      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL AND ${liveEvents.sql}
       ORDER BY captured_at DESC LIMIT 500
-    `).all(auth.user_id, task.task_id);
+    `).all(auth.user_id, task.task_id, ...liveEvents.params);
     const activityByWorkstream = new Map();
     for (const row of activityRows) {
       const current = activityByWorkstream.get(row.workstream_id) || {
@@ -3700,7 +4011,8 @@ export class MnemuronStore {
       query: request.query,
       resolver_request: request,
       resolution,
-      project: { project_id: task.project_id, name: compactText(task.project_name, 200) },
+      project: { project_id: task.project_id, name: compactText(task.project_name, 200),
+        ...(task.canonical_project_id ? { canonical_project_id: task.canonical_project_id } : {}) },
       task: {
         task_id: task.task_id,
         title: compactText(task.title, 240),
@@ -3757,10 +4069,44 @@ export class MnemuronStore {
     });
   }
 
+  // Bounded preview projection of a (canonical) project, including up to 20 merged sources with their origin labels.
+  // Stored values are never changed; every list reports its full count and `metadata_truncated` says when anything was
+  // cut, so a large legitimate merged group stays within the read budget without implying it is complete.
+  projectPreviewProjection(project) {
+    if (!project) return null;
+    let truncated = false;
+    const FIELDS = ["aliases", "git_remotes", "repo_fingerprints", "path_hints"];
+    // The project itself: up to 5 values of 200 characters per list. Each merged source: its name, 3 aliases of
+    // 120 characters and counts for its other lists (about 1 KiB per source, 20 sources at most).
+    const view = (p, { lists, limit, textLimit }) => {
+      const out = { project_id: p.project_id, name: compactText(p.name, 200) };
+      if (textContent(p.name).length > 200) truncated = true;
+      for (const field of FIELDS) {
+        const values = Array.isArray(p[field]) ? p[field] : [];
+        out[`${field}_count`] = values.length;
+        if (!lists.includes(field)) { if (values.length) truncated = true; continue; }
+        out[field] = boundedStrings(values, { limit, textLimit });
+        if (values.length > limit || values.some((value) => typeof value !== "string" || value.length > textLimit)) truncated = true;
+      }
+      return out;
+    };
+    const sources = project.merged_sources || [];
+    const projected = { ...view(project, { lists: FIELDS, limit: 5, textLimit: 200 }), updated_at: project.updated_at };
+    if (sources.length) {
+      projected.merged_sources = sources.slice(0, 20).map((source) => ({ ...view(source, { lists: ["aliases"], limit: 3, textLimit: 120 }), inherited_from: source.project_id }));
+      projected.merged_source_count = sources.length;
+      if (sources.length > 20) truncated = true;
+    }
+    projected.metadata_truncated = truncated;
+    return projected;
+  }
+
   resolveTask(auth, payload) {
     this.requireScope(auth, "resume:read");
     const request = resolverRequest(payload);
-    const projects = this.listProjects(auth.user_id);
+    this.assertExplicitLive(auth, request.signals, request.query);
+    const live = this.lifecycle.live(auth.user_id);
+    const projects = this.listProjects(auth.user_id, live);
     const projectResolution = resolveProjectCandidates({
       projects,
       query: request.query,
@@ -3782,10 +4128,18 @@ export class MnemuronStore {
       ? projectResolution.match.project_id
       : null;
     const history = this.resolverHistory(auth.user_id, request.query);
-    const tasks = this.listTasks(auth.user_id);
+    const tasks = this.listTasks(auth.user_id, live);
+    // Project identity is never Task evidence: for every Task of a canonical group (target or merged origin) the names
+    // and aliases of the whole group are excluded from task scoring, so a project-only query still forces no Task and
+    // no member's Task wins merely by repeating another member's project name. Same-named Tasks stay separate.
+    const projectsById = new Map(projects.flatMap((project) => {
+      const sources = project.merged_sources || [];
+      const identity = { name: project.name, aliases: [...(project.aliases || []), ...sources.flatMap((source) => [source.name, ...(source.aliases || [])])] };
+      return [project.project_id, ...sources.map((source) => source.project_id)].map((id) => [id, identity]);
+    }));
     const taskResolution = resolveTaskCandidates({
       tasks,
-      projectsById: new Map(projects.map((project) => [project.project_id, project])),
+      projectsById,
       query: request.query,
       signals: request.signals,
       selectedProjectId,
@@ -3800,7 +4154,7 @@ export class MnemuronStore {
     const candidates = taskResolution.candidates.map(publicCandidate);
     const match = taskResolution.match ? publicCandidate(taskResolution.match) : undefined;
     const selectedProject = match
-      ? projects.find((project) => project.project_id === match.project_id) || null
+      ? projects.find((project) => project.project_id === live.canonicalOf(match.project_id)) || null
       : selectedProjectId
         ? projects.find((project) => project.project_id === selectedProjectId) || null
         : null;
@@ -3809,7 +4163,7 @@ export class MnemuronStore {
       candidates,
       ...(match ? { match } : {}),
       project_resolution: projectResolution,
-      selected_project: selectedProject,
+      selected_project: this.projectPreviewProjection(selectedProject),
       resolver_request: request,
     };
   }
@@ -3848,6 +4202,9 @@ export class MnemuronStore {
 
   createPreview(auth, payload) {
     this.handoffPolicy.requireNew();
+    // Authority binds the lifecycle generation observed before any of the reads this record is built from (a change
+    // between those reads and the insert must leave it stale, not freshly bound).
+    const observedGeneration = this.lifecycle.generation(auth.user_id);
     this.requireScope(auth, "resume:read");
     const requestedWorkstreamIds = requestedSourceWorkstreamIds(payload);
     const request = resolverRequest(payload, { requireQuery: true });
@@ -3857,15 +4214,18 @@ export class MnemuronStore {
       .find((candidate) => candidate.task_id === resolution.match.task_id);
     if (!task) throw new NotFoundError("Resolved Task no longer exists.");
     const checkpoints = this.latestCheckpoints(auth.user_id, task.task_id);
+    // Resume inputs are checked per historical record (a Task moved from P to Q keeps P's events and memories), before
+    // every limit; deleted-project records never become resume content.
+    const liveRecord = this.lifecycle.live(auth.user_id).sql("project_id");
     const observedWorkstreamRows = this.db.prepare(`
       SELECT DISTINCT workstream_id
       FROM events
-      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL
+      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL AND ${liveRecord.sql}
       UNION
       SELECT DISTINCT workstream_id
       FROM memories
-      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL
-    `).all(auth.user_id, task.task_id, auth.user_id, task.task_id);
+      WHERE user_id = ? AND task_id = ? AND workstream_id IS NOT NULL AND ${liveRecord.sql}
+    `).all(auth.user_id, task.task_id, ...liveRecord.params, auth.user_id, task.task_id, ...liveRecord.params);
     const availableWorkstreamIds = [...new Set([
       ...task.workstreams.map((workstream) => workstream.workstream_id).filter(Boolean),
       ...checkpoints.map((checkpoint) => checkpoint.workstream_id).filter(Boolean),
@@ -3897,26 +4257,26 @@ export class MnemuronStore {
         SELECT event_id, event_type, captured_at, expires_at, expired_at, content,
                device_id, agent_id, agent_instance_id, workstream_id
         FROM events
-        WHERE user_id = ? AND task_id = ? AND workstream_id IN (${workstreamPlaceholders})
+        WHERE user_id = ? AND task_id = ? AND ${liveRecord.sql} AND workstream_id IN (${workstreamPlaceholders})
         ORDER BY captured_at DESC LIMIT 20
       `
       : `
       SELECT event_id, event_type, captured_at, expires_at, expired_at, content,
              device_id, agent_id, agent_instance_id, workstream_id
       FROM events
-      WHERE user_id = ? AND task_id = ?
+      WHERE user_id = ? AND task_id = ? AND ${liveRecord.sql}
       ORDER BY captured_at DESC LIMIT 20
     `;
     const events = this.db.prepare(eventSql)
-      .all(auth.user_id, task.task_id, ...(requestedWorkstreamIds || []))
+      .all(auth.user_id, task.task_id, ...liveRecord.params, ...(requestedWorkstreamIds || []))
       .reverse();
     const memorySql = requestedWorkstreamIds
       ? `
         SELECT *
         FROM memories
         WHERE user_id = ?
-          AND (task_id = ? OR (scope = 'project' AND project_id = ?))
-          AND status = 'active'
+          AND (task_id = ? OR (scope = 'project' AND project_id IN (SELECT value FROM json_each(?))))
+          AND status = 'active' AND ${liveRecord.sql}
           AND (workstream_id IS NULL OR workstream_id IN (${workstreamPlaceholders}))
         ORDER BY created_at DESC LIMIT 20
       `
@@ -3924,11 +4284,13 @@ export class MnemuronStore {
       SELECT *
       FROM memories
       WHERE user_id = ? AND status = 'active'
-        AND (task_id = ? OR (scope = 'project' AND project_id = ?))
+        AND (task_id = ? OR (scope = 'project' AND project_id IN (SELECT value FROM json_each(?)))) AND ${liveRecord.sql}
       ORDER BY created_at DESC LIMIT 20
     `;
+    // Project-level memories of the Task's canonical project and of every project merged into it.
+    const projectMembers = this.lifecycle.scope(auth.user_id, task.project_id).members;
     const memories = this.db.prepare(memorySql)
-      .all(auth.user_id, task.task_id, task.project_id, ...(requestedWorkstreamIds || []))
+      .all(auth.user_id, task.task_id, JSON.stringify(projectMembers), ...liveRecord.params, ...(requestedWorkstreamIds || []))
       .reverse()
       .map((memory) => this.memoryFromRow(memory));
     const selectedCheckpoints = checkpoints.filter((checkpoint) =>
@@ -4039,6 +4401,8 @@ export class MnemuronStore {
         ])],
       },
     };
+    // The frozen preview and its lifecycle binding are written together.
+    this.memoryTransaction(() => {
     this.db.prepare(`
       INSERT INTO resumes (
         resume_id, user_id, requested_by_credential_id, task_id, preview_version,
@@ -4055,6 +4419,8 @@ export class MnemuronStore {
       preview.created_at,
       preview.expires_at,
     );
+    this.bindAuthority(auth.user_id, "resume", preview.resume_id, observedGeneration);
+    });
     this.audit({ auth, action: "resume.preview", targetType: "resume", targetId: preview.resume_id, metadata: { task_id: task.task_id } });
     return preview;
   }
@@ -4066,16 +4432,26 @@ export class MnemuronStore {
     if (!Number.isInteger(previewVersion) || typeof confirmed !== "boolean") {
       throw new ValidationError("preview_version and confirmed are required.");
     }
+    // Everything below is decided inside one write transaction under the lock: the row, its Task's lifecycle and the
+    // lifecycle binding are re-read there, so no validation-to-use gap remains.
+    return this.memoryTransaction(() => {
     const row = this.db.prepare("SELECT * FROM resumes WHERE resume_id = ? AND user_id = ?")
       .get(resumeId, auth.user_id);
     if (!row) throw new NotFoundError("Resume Preview not found.");
     if (row.preview_version !== previewVersion) {
       throw new ConflictError("Resume Preview version changed; create and show a fresh preview.");
     }
+    const stored = fromJson(row.preview_json);
+    // An explicit cancel of a still-pending preview stays allowed whatever happened since.
+    const pendingCancel = !confirmed && row.status === "pending_confirmation";
+    if (!pendingCancel) {
+      this.assertTaskLive(auth.user_id, row.task_id);
+      this.assertAuthorityCurrent(auth.user_id, "resume", resumeId);
+    }
     if (row.status === "confirmed" && confirmed) {
-      const confirmedPreview = fromJson(row.preview_json);
-      if (confirmedPreview?.project?.project_id && confirmedPreview?.task?.task_id) {
-        this.recordResolverSelection(auth, confirmedPreview);
+      // Replay re-delivers the saved packet (and records the selection) only while its authority is still current.
+      if (stored?.project?.project_id && stored?.task?.task_id) {
+        this.recordResolverSelection(auth, stored);
       }
       return { status: "confirmed", resume_packet: fromJson(row.packet_json) };
     }
@@ -4092,7 +4468,7 @@ export class MnemuronStore {
       this.audit({ auth, action: "resume.cancel", targetType: "resume", targetId: resumeId });
       return { status: "cancelled", resume_id: resumeId };
     }
-    const preview = fromJson(row.preview_json);
+    const preview = stored;
     const packet = {
       resume_id: preview.resume_id,
       preview_version: preview.preview_version,
@@ -4115,20 +4491,14 @@ export class MnemuronStore {
       provenance: preview.source_summary,
       injection_authorized_at: nowIso(),
     };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
-      this.db.prepare(`
-        UPDATE resumes SET status = 'confirmed', packet_json = ?, confirmed_at = ?
-        WHERE resume_id = ?
-      `).run(asJson(packet), packet.injection_authorized_at, resumeId);
-      this.recordResolverSelection(auth, preview);
-      this.audit({ auth, action: "resume.confirm", targetType: "resume", targetId: resumeId, metadata: { preview_version: previewVersion } });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    this.db.prepare(`
+      UPDATE resumes SET status = 'confirmed', packet_json = ?, confirmed_at = ?
+      WHERE resume_id = ?
+    `).run(asJson(packet), packet.injection_authorized_at, resumeId);
+    this.recordResolverSelection(auth, preview);
+    this.audit({ auth, action: "resume.confirm", targetType: "resume", targetId: resumeId, metadata: { preview_version: previewVersion } });
     return { status: "confirmed", resume_packet: packet };
+    });
   }
 
   injectionStatus(auth, resumeId) {
@@ -4139,6 +4509,7 @@ export class MnemuronStore {
       FROM resumes WHERE resume_id = ? AND user_id = ?
     `).get(resumeId, auth.user_id);
     if (!resume) throw new NotFoundError("Resume not found.");
+    this.assertResumeLive(auth.user_id, resume.resume_id, resume.task_id);
     const rows = this.db.prepare(`
       SELECT event_id, attempt_id, phase, device_id, agent_id, agent_instance_id,
              session_id, turn_id, workstream_id, injection_method, occurred_at,
@@ -4376,6 +4747,7 @@ export class MnemuronStore {
       FROM resumes WHERE resume_id = ? AND user_id = ?
     `).get(resumeId, auth.user_id);
     if (!resume) throw new NotFoundError("Resume not found.");
+    this.assertResumeLive(auth.user_id, resume.resume_id, resume.task_id);
     const rows = this.db.prepare(`
       SELECT receipt_event_id, receipt_id, phase, device_id, agent_id,
              agent_instance_id, session_id, turn_id, workstream_id,
@@ -4644,10 +5016,12 @@ export class MnemuronStore {
 
   deliveryReceiptSummary(auth) {
     this.requireScope(auth, "memory:read");
+    // Only resumes the individual status reader accepts (live own and current Task project) are counted.
+    const liveResumes = this.liveResumeSql(auth.user_id);
     const confirmed = this.db.prepare(`
-      SELECT resume_id FROM resumes
-      WHERE user_id = ? AND status = 'confirmed'
-    `).all(auth.user_id);
+      SELECT resume_id FROM resumes r
+      WHERE r.user_id = ? AND r.status = 'confirmed' AND ${liveResumes.sql}
+    `).all(auth.user_id, ...liveResumes.params);
     const summary = {
       protocol: "chatgpt-mcp-delivery-receipt-v0.1.4",
       confirmed: confirmed.length,
@@ -4666,10 +5040,12 @@ export class MnemuronStore {
 
   injectionSummary(auth) {
     this.requireScope(auth, "memory:read");
+    // Only resumes the individual status reader accepts (live own and current Task project) are counted.
+    const liveResumes = this.liveResumeSql(auth.user_id);
     const confirmed = this.db.prepare(`
-      SELECT resume_id FROM resumes
-      WHERE user_id = ? AND status = 'confirmed'
-    `).all(auth.user_id);
+      SELECT resume_id FROM resumes r
+      WHERE r.user_id = ? AND r.status = 'confirmed' AND ${liveResumes.sql}
+    `).all(auth.user_id, ...liveResumes.params);
     const summary = {
       confirmed: confirmed.length,
       unreported: 0,
@@ -4716,12 +5092,19 @@ export class MnemuronStore {
       && rawAvailability.total_events
         === rawAvailability.raw_events_available + rawAvailability.expired_events
     ) ? "accounted" : "degraded";
-    const tasks = this.listTasks(auth.user_id);
+    // Raw event availability above is account-wide storage/retention accounting (a reviewed exception); task,
+    // reconciliation and memory figures below are live-only.
+    const live = this.lifecycle.live(auth.user_id), liveMemories = live.sql("project_id");
+    const tasks = this.listTasks(auth.user_id, live);
+    const liveTaskIds = JSON.stringify(tasks.map((task) => task.task_id));
+    // Per proposal: its Task is live now and its own recorded project is live (a Task moved from P to Q keeps P's
+    // proposals; after P is deleted they are hidden here exactly as in reconciliationState).
+    const liveProposals = live.sql("project_id");
     const reconciliationRows = this.db.prepare(`
       SELECT status, conflicts_json, policy_json, created_at
       FROM task_reconciliation_proposals
-      WHERE user_id = ?
-    `).all(auth.user_id);
+      WHERE user_id = ? AND task_id IN (SELECT value FROM json_each(?)) AND ${liveProposals.sql}
+    `).all(auth.user_id, liveTaskIds, ...liveProposals.params);
     const pendingReconciliations = reconciliationRows.filter((row) =>
       row.status === "awaiting_confirmation");
     const reconciliationConflicts = pendingReconciliations.reduce((sum, row) =>
@@ -4729,8 +5112,8 @@ export class MnemuronStore {
     const deferredReconciliationCheckpointIds = [...new Set(
       this.db.prepare(`
         SELECT * FROM task_reconciliation_proposals
-        WHERE user_id = ? AND status = 'awaiting_confirmation'
-      `).all(auth.user_id).flatMap((row) => this.reconciliationDeferredCheckpointIds(
+        WHERE user_id = ? AND status = 'awaiting_confirmation' AND task_id IN (SELECT value FROM json_each(?)) AND ${liveProposals.sql}
+      `).all(auth.user_id, liveTaskIds, ...liveProposals.params).flatMap((row) => this.reconciliationDeferredCheckpointIds(
         auth.user_id,
         this.reconciliationProposalFromRow(row),
       )),
@@ -4738,9 +5121,9 @@ export class MnemuronStore {
     const memoryRows = this.db.prepare(`
       SELECT memory_type, status, source, COUNT(*) AS count
       FROM memories
-      WHERE user_id = ?
+      WHERE user_id = ? AND ${liveMemories.sql}
       GROUP BY memory_type, status, source
-    `).all(auth.user_id);
+    `).all(auth.user_id, ...liveMemories.params);
     const memorySummary = {
       schema_version: STRUCTURED_MEMORY_LIFECYCLE_SCHEMA_VERSION,
       active: memoryRows

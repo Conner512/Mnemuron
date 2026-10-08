@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { protectGroup } from '../lifecycle/protection.mjs';
 
 export const hash = value => createHash('sha256').update(value).digest('hex');
 export const FINGERPRINT_VERSION = 'structured-memory-exact-v2';
@@ -42,6 +43,8 @@ export class MemoryRevisions {
     const columns = new Set(this.db.prepare('PRAGMA table_info(memory_source_links)').all().map(column=>column.name));
     if (!columns.has('text_selector')) this.db.exec('ALTER TABLE memory_source_links ADD COLUMN text_selector TEXT');
     if (!columns.has('span_unit')) this.db.exec("ALTER TABLE memory_source_links ADD COLUMN span_unit TEXT NOT NULL DEFAULT 'unknown'");
+    // Lifecycle epoch protection before this module's first write (the legacy revision backfill below).
+    protectGroup(this.db, 'revisions');
     let after = 0;
     for (;;) {
       const rows = this.db.prepare('SELECT rowid AS cursor_id,* FROM memories WHERE rowid>? ORDER BY rowid LIMIT 100').all(after);
@@ -76,8 +79,8 @@ export class MemoryRevisions {
     if (previous) this.db.prepare(`INSERT INTO memory_source_links SELECT user_id,memory_id,?,source_id,span_start,span_end,extraction_version,text_selector,span_unit
       FROM memory_source_links WHERE user_id=? AND memory_id=? AND revision=?`).run(revision,row.user_id,row.memory_id,previous.revision);
     if (enqueue) {
-      for (const job of ['classification','summary']) this.db.prepare('INSERT INTO memory_processing_outbox VALUES (?,?,?,?,?,?,?)')
-        .run(row.user_id,row.memory_id,revision,job,'blocked_config',contentHash,new Date().toISOString());
+      for (const job of ['classification','summary','entities']) this.db.prepare('INSERT INTO memory_processing_outbox VALUES (?,?,?,?,?,?,?)')
+        .run(row.user_id,row.memory_id,revision,job,job==='entities'?'pending':'blocked_config',contentHash,new Date().toISOString());
       this.db.prepare('INSERT INTO memory_index_outbox VALUES (?,?,?,?,?,?)').run(row.user_id,row.memory_id,revision,row.status==='active'?'upsert':'hide',contentHash,'disabled');
     }
     return revision;

@@ -1,0 +1,590 @@
+{
+ "schema_version": "project-lifecycle-coverage-v1",
+ "note": "Literal SQL site counts; see project-lifecycle-coverage.md. Supplementary to behavior tests.",
+ "tables": [
+  "projects",
+  "tasks",
+  "memories",
+  "checkpoints",
+  "events",
+  "memory_revisions",
+  "memory_summaries",
+  "memory_summary_dependencies",
+  "memory_vector_documents",
+  "task_reconciliation_proposals",
+  "task_canonical_revisions",
+  "task_bootstrap_previews",
+  "resumes",
+  "resolver_selections",
+  "console_project_state",
+  "project_lifecycle",
+  "memory_entities",
+  "memory_entity_names",
+  "memory_entity_members",
+  "memory_entity_proposals",
+  "memory_entity_tombstones",
+  "memory_entity_queue_cursor"
+ ],
+ "sites": {
+  "server/bin/mnemuron-capacity-harness.mjs": {
+   "events": {
+    "read": 10,
+    "write": 1
+   }
+  },
+  "server/bin/mnemuron-failure-recovery-harness.mjs": {
+   "tasks": {
+    "read": 1,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 2,
+    "write": 0
+   },
+   "events": {
+    "read": 2,
+    "write": 0
+   },
+   "resolver_selections": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-fr01-reconcile.mjs": {
+   "events": {
+    "read": 3,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-fr03-reconcile.mjs": {
+   "events": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-private-tls-harness.mjs": {
+   "tasks": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 5,
+    "write": 0
+   },
+   "resumes": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-private-tls-reconcile.mjs": {
+   "events": {
+    "read": 4,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-restore-check.mjs": {
+   "tasks": {
+    "read": 2,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 2,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   },
+   "resumes": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/bin/mnemuron-scheduled-backup.mjs": {
+   "tasks": {
+    "read": 1,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   },
+   "resumes": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console-read.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "tasks": {
+    "read": 1,
+    "write": 0
+   },
+   "memories": {
+    "read": 7,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_summaries": {
+    "read": 3,
+    "write": 0
+   },
+   "memory_summary_dependencies": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/audit.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/entities.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "tasks": {
+    "read": 1,
+    "write": 0
+   },
+   "memories": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_entities": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_entity_names": {
+    "read": 5,
+    "write": 4
+   },
+   "memory_entity_members": {
+    "read": 3,
+    "write": 2
+   },
+   "memory_entity_proposals": {
+    "read": 3,
+    "write": 4
+   }
+  },
+  "server/lib/console/features.mjs": {
+   "projects": {
+    "read": 2,
+    "write": 0
+   },
+   "tasks": {
+    "read": 2,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_summaries": {
+    "read": 1,
+    "write": 1
+   },
+   "task_reconciliation_proposals": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/organize.mjs": {
+   "memories": {
+    "read": 10,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 3,
+    "write": 0
+   },
+   "memory_summaries": {
+    "read": 0,
+    "write": 2
+   },
+   "memory_summary_dependencies": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/console/projects.mjs": {
+   "projects": {
+    "read": 9,
+    "write": 1
+   },
+   "tasks": {
+    "read": 3,
+    "write": 0
+   },
+   "console_project_state": {
+    "read": 4,
+    "write": 1
+   },
+   "project_lifecycle": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/service.mjs": {
+   "memories": {
+    "read": 4,
+    "write": 0
+   },
+   "memory_vector_documents": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/state.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/handoff-policy.mjs": {
+   "resumes": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/lifecycle/mutations.mjs": {
+   "projects": {
+    "read": 5,
+    "write": 0
+   },
+   "tasks": {
+    "read": 3,
+    "write": 0
+   },
+   "memories": {
+    "read": 5,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_summary_dependencies": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_vector_documents": {
+    "read": 1,
+    "write": 0
+   },
+   "task_reconciliation_proposals": {
+    "read": 1,
+    "write": 0
+   },
+   "task_bootstrap_previews": {
+    "read": 1,
+    "write": 0
+   },
+   "resumes": {
+    "read": 1,
+    "write": 0
+   },
+   "console_project_state": {
+    "read": 1,
+    "write": 0
+   },
+   "project_lifecycle": {
+    "read": 0,
+    "write": 1
+   }
+  },
+  "server/lib/lifecycle/protection.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_vector_documents": {
+    "read": 1,
+    "write": 0
+   },
+   "project_lifecycle": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/lifecycle/resolver.mjs": {
+   "projects": {
+    "read": 4,
+    "write": 0
+   },
+   "project_lifecycle": {
+    "read": 10,
+    "write": 0
+   }
+  },
+  "server/lib/memory-derived/pagination.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_summaries": {
+    "read": 5,
+    "write": 0
+   },
+   "memory_summary_dependencies": {
+    "read": 3,
+    "write": 0
+   }
+  },
+  "server/lib/memory-derived/store.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_summaries": {
+    "read": 1,
+    "write": 7
+   },
+   "memory_summary_dependencies": {
+    "read": 10,
+    "write": 1
+   }
+  },
+  "server/lib/memory-entities/store.mjs": {
+   "memories": {
+    "read": 4,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 3,
+    "write": 0
+   },
+   "memory_entities": {
+    "read": 2,
+    "write": 1
+   },
+   "memory_entity_names": {
+    "read": 2,
+    "write": 1
+   },
+   "memory_entity_members": {
+    "read": 1,
+    "write": 1
+   },
+   "memory_entity_proposals": {
+    "read": 4,
+    "write": 1
+   },
+   "memory_entity_tombstones": {
+    "read": 1,
+    "write": 1
+   },
+   "memory_entity_queue_cursor": {
+    "read": 1,
+    "write": 1
+   }
+  },
+  "server/lib/memory-evaluation/joint.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/memory-evaluation/quality.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/memory-jobs/worker.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/memory-retrieval.mjs": {
+   "memories": {
+    "read": 5,
+    "write": 0
+   }
+  },
+  "server/lib/memory-scope.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "tasks": {
+    "read": 2,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "checkpoints": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/memory/cloud.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/memory/revisions.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 3,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 1,
+    "write": 1
+   }
+  },
+  "server/lib/memory/service.mjs": {
+   "memories": {
+    "read": 4,
+    "write": 1
+   }
+  },
+  "server/lib/memory/sources.mjs": {
+   "memories": {
+    "read": 3,
+    "write": 0
+   },
+   "events": {
+    "read": 4,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_summary_dependencies": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/memory/web-visibility.mjs": {
+   "memories": {
+    "read": 7,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 5,
+    "write": 0
+   }
+  },
+  "server/lib/store.mjs": {
+   "projects": {
+    "read": 8,
+    "write": 4
+   },
+   "tasks": {
+    "read": 18,
+    "write": 5
+   },
+   "memories": {
+    "read": 19,
+    "write": 4
+   },
+   "checkpoints": {
+    "read": 10,
+    "write": 1
+   },
+   "events": {
+    "read": 18,
+    "write": 2
+   },
+   "task_reconciliation_proposals": {
+    "read": 11,
+    "write": 8
+   },
+   "task_canonical_revisions": {
+    "read": 4,
+    "write": 2
+   },
+   "task_bootstrap_previews": {
+    "read": 5,
+    "write": 8
+   },
+   "resumes": {
+    "read": 7,
+    "write": 3
+   },
+   "resolver_selections": {
+    "read": 1,
+    "write": 1
+   }
+  },
+  "server/lib/task-context-read.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "tasks": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/vector-stores/index.mjs": {
+   "memories": {
+    "read": 6,
+    "write": 0
+   },
+   "memory_vector_documents": {
+    "read": 3,
+    "write": 3
+   }
+  }
+ }
+}

@@ -147,12 +147,12 @@ test('Console completion: scheduled worker uses the owning account taxonomy with
   await f.create();await f.create(f.other);await f.act('taxonomy.save',{expected_revision:0,categories:['uncategorized','synthetic']});
   const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic',profile_revision:'1',daily_requests:10,output_tokens:1024,batch_size:1,sensitivities:['public'],egress_approved:false,query_approved:false};
   await f.act('models.save',{kind:'organizer',expected_revision:0,config});
-  const model=organizer(input=>({results:input.sources.map(s=>({memory_id:s.memory_id,category:'synthetic',tags:[]}))}));
+  const model=organizer(input=>({results:input.sources.map(s=>input.operation==='entities'?{memory_id:s.memory_id,revision:s.revision,objects:[]}:{memory_id:s.memory_id,category:'synthetic',tags:[]})}));
   service.models.provider=(owner,kind)=>{assert.equal(owner,user);assert.equal(kind,'organizer');return model;};
   f.store.db.prepare('INSERT INTO console_settings VALUES(?,?,?,?)').run(user,JSON.stringify({schedule_enabled:true,timezone:'UTC',periods:['daily']}),1,Date.now());
   f.store.memoryConfig.console.worker_enabled=true;await service.tick();
   const jobs=f.store.db.prepare('SELECT * FROM memory_jobs WHERE user_id=?').all(user);assert.ok(jobs.length>0);
-  assert.ok(jobs.every(j=>JSON.parse(j.metadata_json).taxonomy.version===service.taxonomy(user).version));
+  assert.ok(jobs.every(j=>j.job_type==='entities'?JSON.parse(j.metadata_json).prompt_version==='entities-grounded-v1':JSON.parse(j.metadata_json).taxonomy.version===service.taxonomy(user).version));
   assert.ok(jobs.some(j=>j.state==='succeeded'));
   assert.equal(f.store.db.prepare('SELECT count(*) n FROM memory_jobs WHERE user_id=?').get(f.other.auth.user_id).n,0);
 });

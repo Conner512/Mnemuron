@@ -1,6 +1,9 @@
+import {migrateEntities} from '../memory-entities/schema.mjs';
 // Core database schema as ordered, versioned migrations (PRAGMA user_version).
 // Every step is idempotent so databases created before versioning adopt it safely.
-import { applyMigrations } from "./migrations.mjs";
+import { applyMigrations, schemaVersion, SchemaVersionError } from "./migrations.mjs";
+import { LIFECYCLE_TABLES, LIFECYCLE_ENFORCEMENT_TABLES, protectGroup, assertInitializedGenerationGuards } from "../lifecycle/protection.mjs";
+import { assertLifecycleConsistent } from "../lifecycle/resolver.mjs";
 
 const CORE_TABLES = `
       CREATE TABLE IF NOT EXISTS credentials (
@@ -421,7 +424,34 @@ export const CORE_MIGRATIONS = Object.freeze([
       CREATE TABLE IF NOT EXISTS memory_web_denials (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,
         revision INTEGER NOT NULL,state_hash TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
     `) },
+  // Additive lifecycle foundation: no project gets a row (no row means active), no history is rewritten.
+  // Repeatable: the tables and the Core epoch triggers are re-ensured (and repaired) on every open.
+  { version: 8, repeatable: true, name: "project-lifecycle-foundation", up: (db) => { db.exec(LIFECYCLE_TABLES); protectGroup(db, "core"); } },
+  // Enforcement groundwork (still fenced: this schema refuses deleted/merged projects at open). Additive only.
+  { version: 9, repeatable: true, name: "project-lifecycle-enforcement-groundwork", up: (db) => db.exec(LIFECYCLE_ENFORCEMENT_TABLES) },
+  // The first fully enforcing schema: reads, writes and jobs enforce deleted and merged projects, so this build opens
+  // such databases. The version itself is the boundary: every earlier reader (including the fenced v9 builds) refuses
+  // a v10 database before reading or writing a record. The marker records when full enforcement first applied.
+  { version: 10, repeatable: true, name: "project-lifecycle-enforced", up: (db) => db.exec(`
+      CREATE TABLE IF NOT EXISTS project_lifecycle_enforcement (id INTEGER PRIMARY KEY CHECK (id = 1), enforced_since TEXT NOT NULL);
+      INSERT OR IGNORE INTO project_lifecycle_enforcement (id, enforced_since) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    `) },
+  // Derived identity and tombstones affect retrieval. Older readers must not silently ignore this boundary.
+  {version:11,repeatable:true,name:'source-grounded-entities',up:migrateEntities},
 ]);
 
 export const CORE_SCHEMA_VERSION = CORE_MIGRATIONS.at(-1).version;
-export const migrateCoreSchema = (db) => applyMigrations(db, CORE_MIGRATIONS);
+// Order matters for a refused open to write nothing: first the version boundary (a newer database is refused), then
+// the read-only lifecycle consistency check, then the generation-guard check, and only then any migration, repeatable
+// ensure or repair write. From v10 on, consistent deleted and merged projects are enforced and open normally (the fenced
+// v8/v9 builds refused every one of them here); inconsistent lifecycle metadata is still refused at open.
+export const migrateCoreSchema = (db) => {
+  const version = schemaVersion(db);
+  if (version > CORE_SCHEMA_VERSION) throw new SchemaVersionError(`Database schema version ${version} is newer than this release supports (${CORE_SCHEMA_VERSION}).`);
+  // Consistent deleted/merged state opens; inconsistent lifecycle metadata still refuses the open, read-only, here.
+  assertLifecycleConsistent(db);
+  // Initialized generation guards that went missing or were altered are refused here, before the repeatable v9 step
+  // could silently reinstall them over a generation that may have been reset while unguarded.
+  assertInitializedGenerationGuards(db);
+  return applyMigrations(db, CORE_MIGRATIONS);
+};

@@ -42,3 +42,8 @@ export class ConflictError extends Error {
     this.errorCode = errorCode;
   }
 }
+
+// Deterministic request outcomes (validation, authentication, authorization, not found, conflicts such as
+// PROJECT_DELETED). Retrieval fallbacks must re-throw these instead of reporting them as provider degradation.
+export const isDeterministicReadError = (error) => [ValidationError, AuthenticationError, AuthorizationError, NotFoundError, ConflictError]
+  .some((type) => error instanceof type);

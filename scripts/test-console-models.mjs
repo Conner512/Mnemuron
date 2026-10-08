@@ -14,7 +14,7 @@ const log=fs.openSync(path.join(evidence,'fixture.stderr'),'wx',0o600);
 const fixture=spawn(process.execPath,['services/oauth/test/helpers/console-functional-preview.mjs'],{cwd:root,stdio:['pipe','pipe',log]});
 const queue=[],waiters=[];createInterface({input:fixture.stdout}).on('line',line=>{if(!line.startsWith('{'))return;const value=JSON.parse(line);if(waiters.length)waiters.shift()(value);else queue.push(value);});
 async function read(){let timer;try{return await Promise.race([queue.length?Promise.resolve(queue.shift()):new Promise(r=>waiters.push(r)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Fixture timeout')),30000);})]);}finally{clearTimeout(timer);}}
-async function command(command){fixture.stdin.write(JSON.stringify({command})+'\n');const r=await read();assert.ok(!r.fixture_error);return r;}
+async function command(command,extra={}){fixture.stdin.write(JSON.stringify({command,...extra})+'\n');const r=await read();assert.ok(!r.fixture_error);return r;}
 const checks=[],check=(name,pass=true)=>{assert.ok(pass,name);checks.push(name);console.log('PASS '+name);};let browser;
 try{
  const cfg=await read();assert.equal(cfg.fixture,true);assert.match(cfg.url,/^http:\/\/127\.0\.0\.1:/);
@@ -41,10 +41,10 @@ try{
  check('The saved secret never appears in page text',!(await page.locator('#console-root').innerText()).includes('synthetic-local-only-key'));
  await command('enable-synthetic-processing');await goto('models');check('Ready pipelines have enabled actions',await page.locator('.model-pipeline button:enabled').count()===4);
 check('The vector stage offers the bounded first-run preparation',await page.locator('.model-pipeline [data-first-run] [data-console-action="vector.prepare"]:enabled').count()===1);
- await page.locator('[data-model-stage=classification] [data-console-action]').click();await op.locator('form').waitFor();check('Classification submits to the worker',(await submit()).status==='queued');await close();await command('tick');
+ await page.locator('[data-model-stage=classification] [data-console-action]').click();await op.locator('form').waitFor();const classification=await submit();check('Classification submits to the worker',classification.status==='queued');await close();await command('tick',{job_ids:classification.jobs});
  await goto('memories');check('LLM classifications are visible in the memory library',(await page.locator('.memory-table').innerText()).includes('技术'));
  await goto('jobs');await page.locator('[data-console-action="jobs.schedule"][data-type=summary]').click();await op.locator('form').waitFor();await op.locator('[name=include_open]').check();await pick('periods','daily');
- check('Daily summary submits explicitly',(await submit()).status==='queued');await close();await command('tick');await goto('summaries');check('LLM grounded summaries have inspectable records',await page.locator('[data-summary]').count()>0);
+ const summary=await submit();check('Daily summary submits explicitly',summary.status==='queued');await close();await command('tick',{job_ids:summary.jobs});await goto('summaries');check('LLM grounded summaries have inspectable records',await page.locator('[data-summary]').count()>0);
  await command('enable-synthetic-processing');await goto('models');await begin('vector.schedule');check('Vector indexing is explicitly queued',(await submit()).status==='queued');await close();await command('tick');await goto('models');
  const data=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Personal index completes with real HTTP embeddings',data.processing.vector.state==='succeeded'&&data.processing.vector.indexed_documents===2&&data.processing.vector.search_ready===true);
  const search=await page.evaluate(()=>fetch('/console-api/memories?query=network&mode=semantic').then(r=>r.json()));check('Semantic retrieval returns only this account',search.results.length===2&&!JSON.stringify(search).includes('private B sentinel'));

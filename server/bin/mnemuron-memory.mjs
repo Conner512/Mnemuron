@@ -77,9 +77,10 @@ export async function memoryCommand(args){
     const worker=new MemoryWorker(store,store.memoryJobs,store.organizer,{workerId:'local-'+process.pid,userId:auth.user_id});
     const schedule=type=>scheduleLibrary(store,store.memoryJobs,{userId:auth.user_id,organizer:store.organizer,taxonomy,type,periods:config.jobs.periods,timezone:config.jobs.timezone});
     if(command==='organize')return schedule(options['--type'] || 'classification');
+    if(command==='worker-once')store.entities.schedule(auth.user_id,store.organizer,{taxonomy});
     if(command==='worker-once')return await worker.drain({maxJobs:Number(options['--max-jobs'] || 100)});
     let stopping=false;const stop=()=>{stopping=true;};process.once('SIGINT',stop);process.once('SIGTERM',stop);
-    try{while(!stopping){schedule('classification');await worker.drain();schedule('summary');await worker.drain();
+    try{while(!stopping){store.entities.schedule(auth.user_id,store.organizer,{taxonomy});schedule('classification');await worker.drain();schedule('summary');await worker.drain();
       if(store.vectorIndex?.state().active)await store.vectorIndex.sync(store.vectorIndex.snapshot().generation);
       await new Promise(resolve=>setTimeout(resolve,config.jobs.poll_ms || 60000));}}
     finally{process.removeListener('SIGINT',stop);process.removeListener('SIGTERM',stop);}

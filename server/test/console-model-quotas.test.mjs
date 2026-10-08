@@ -24,7 +24,7 @@ async function setup(t){
     res.setHeader('content-type','application/json');
     if(body.input){res.end(JSON.stringify({data:body.input.map((text,index)=>({index,embedding:/network/i.test(text)?[1,0,0]:[0,0,1]}))}));return;}
     const input=JSON.parse(body.messages[1].content).input;
-    const data=input?.sources?{results:input.sources.map(s=>input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:s.content})}:{ok:true};
+    const data=input?.sources?{results:input.sources.map(s=>input.operation==='entities'?{memory_id:s.memory_id,revision:s.revision,objects:[]} :input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:s.content})}:{ok:true};
     res.end(JSON.stringify({choices:[{finish_reason:'stop',message:{content:JSON.stringify(data)}}]}));
   });await new Promise(r=>model.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>model.close(r)));
   const origin=`http://127.0.0.1:${model.address().port}`;

@@ -22,20 +22,25 @@ export function searchTokens(value) {
 }
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
-export function lexicalScore(query, memory) {
-  const text = normalizeSearch(`${memory.content}\n${memory.topic || ''}`), normalized = normalizeSearch(query.trim());
-  if (text.includes(normalized)) return 1;
-  const tokens = searchTokens(query), present = new Set(searchTokens(text));
-  return tokens.length ? tokens.filter(token => present.has(token)).length / tokens.length * 0.8 : 0;
+export function originalMatchKind(query,memory){
+  const text=normalizeSearch(`${memory.content}\n${memory.topic||''}`),normalized=normalizeSearch(query.trim()),tokens=searchTokens(query),present=new Set(searchTokens(text));
+  if(tokens.length&&text.includes(normalized)&&tokens.every(token=>present.has(token)))return 'raw_query';
+  return tokens.some(token=>present.has(token))?'original_terms':null;
+}
+export function lexicalScore(query,memory){
+  if(originalMatchKind(query,memory)==='raw_query')return 1;
+  const tokens=searchTokens(query),present=new Set(searchTokens(`${memory.content}\n${memory.topic||''}`));
+  return tokens.length?tokens.filter(token=>present.has(token)).length/tokens.length*0.8:0;
 }
 export const searchUnavailable = () => Object.assign(new Error('Memory search index is unavailable; rebuild or enable it before querying.'), {statusCode:503,errorCode:'SEARCH_UNAVAILABLE'});
 export function transientSql(error){return [5,6,9].includes(Number(error?.errcode)&255) || ['SQLITE_BUSY','SQLITE_LOCKED','SQLITE_INTERRUPT'].includes(error?.code);}
 const searchBusy=()=>Object.assign(new Error('Memory search is temporarily busy; retry the read.'),{statusCode:503,errorCode:'SEARCH_RETRYABLE'});
 
 export class MemorySearch {
-  constructor(db, { enabled = true } = {}) {
+  constructor(db, { enabled = true, entities = null } = {}) {
     this.db = db;
     this.enabled = enabled;
+    this.entities = entities;
     db.function('memory_search_tokens', {deterministic:true}, indexText);
     db.function('memory_search_normalize', {deterministic:true}, normalizeSearch);
     this.state = 'unavailable';
@@ -124,7 +129,12 @@ export class MemorySearch {
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})
         ORDER BY (instr(d.normalized,?)>0) DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
       ).all(tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes,normalizeSearch(query.trim()));
-      return {rows:rows.slice(0,500),truncated:rows.length>500};
-    } catch(error) { if(transientSql(error))throw searchBusy();this.state='unavailable'; throw searchUnavailable(); }
+      const expansion=this.entities?.expand(options.auth||{user_id:userId},query,scope,options);
+      const matches=new Map(rows.map(row=>[row.memory_id,{row,kind:originalMatchKind(query,row)||'original_terms'}]));
+      for(const [id,match] of expansion?.matches||[])if(!matches.has(id))matches.set(id,{row:match.row,kind:'alias',explanation:match.explanation});
+      const priority={raw_query:0,original_terms:1,alias:2},ordered=[...matches.values()].sort((a,b)=>priority[a.kind]-priority[b.kind]||lexicalScore(query,b.row)-lexicalScore(query,a.row)||String(b.row.updated_at||b.row.created_at).localeCompare(String(a.row.updated_at||a.row.created_at))||a.row.memory_id.localeCompare(b.row.memory_id));
+      return {rows:ordered.slice(0,500).map(x=>({...x.row,_entity_match:{match_kind:x.kind,...(x.explanation?{alias:x.explanation}:{})}})),truncated:rows.length>500||ordered.length>500||expansion?.truncated===true,
+        aliases:{expanded:!!expansion?.matches.size,truncated:expansion?.truncated===true,ambiguous:expansion?.ambiguous===true,ambiguity_complete:expansion?.ambiguity_complete!==false},dependency_token:expansion?.dependency_token||null};
+    } catch(error) { if(transientSql(error))throw searchBusy();if(error?.errorCode==='ENTITY_PROOF_INVALID'||error?.errorCode?.startsWith('PROJECT_'))throw error;this.state='unavailable'; throw searchUnavailable(); }
   }
 }

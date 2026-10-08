@@ -15,7 +15,7 @@ async function setup(t){
  const model=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const body=JSON.parse(raw);calls.push(body);if(release)await release;
   const input=body.messages?JSON.parse(body.messages[1].content).input:null;
   if(remoteStatus!==200){res.writeHead(remoteStatus,{'content-type':'application/json'});res.end(JSON.stringify({error:'Synthetic upstream-private-error-body'}));return;}
-  const data=input?.sources?{results:input.sources.map(s=>input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:invalid?'Invented quote':s.content})}:{ok:true};
+  const data=input?.sources?{results:input.sources.map(s=>input.operation==='entities'?{memory_id:s.memory_id,revision:s.revision,objects:[]} :input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:invalid?'Invented quote':s.content})}:{ok:true};
   res.setHeader('content-type','application/json');res.end(JSON.stringify(body.input?{data:body.input.map((_,index)=>({index,embedding:invalid?[1,0]:[1,0,0]}))}:{choices:[{finish_reason:'stop',message:{content:JSON.stringify(data)}}]}));
  });await new Promise(r=>model.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>model.close(r)));
  const origin=`http://127.0.0.1:${model.address().port}`;f.store.memoryConfig.console={key_file:key,worker_enabled:false,allowed_private_origins:[origin]};
@@ -78,9 +78,12 @@ test('MOD-06: configured HTTP LLM classifies and summarizes, embeddings index on
  await f.act('memory.create',{scope:'user',content:'Synthetic FOREIGN exclusion'},f.b);
  f.store.memoryConfig.console.worker_enabled=true;
  const schedule=type=>f.act('jobs.schedule',{type,timezone:'UTC',periods:['daily'],include_open:true});
- const jobs=await schedule('classification');await f.service.tick();assert.equal(f.store.memoryJobs.get(jobs.jobs[0]).state,'succeeded');
+ const runJob=async job=>{for(let n=0;n<4&&f.store.memoryJobs.get(job).state==='pending';n++)await f.service.tick();assert.equal(f.store.memoryJobs.get(job).state,'succeeded');};
+ const jobs=await schedule('classification');await runJob(jobs.jobs[0]);
  assert.equal(f.service.meta(f.a.auth,{memory_id:own.memory_id}).category,'technical');
- const summary=await schedule('summary');await f.service.tick();assert.equal(f.store.memoryJobs.get(summary.jobs[0]).state,'succeeded');
+ const summary=await schedule('summary');await runJob(summary.jobs[0]);
+ assert.equal(f.store.db.prepare("SELECT state FROM memory_jobs WHERE job_type='entities' AND user_id=?").get(f.a.auth.user_id).state,'succeeded');
+ assert.ok(f.calls.filter(c=>c.messages).map(c=>JSON.parse(c.messages[1].content).input).filter(i=>i.operation==='entities').every(i=>i.sources.length<=10));
  const backend=new MockVectorStore();f.store.memoryConfig.vector_store={enabled:true};
  f.service.vector=user=>{const e=f.service.models.provider(user,'embedder');return new VectorIndex(f.store,backend,new Map([[e.profile.fingerprint,e]]),{ownerId:user});};
  await f.act('vector.schedule',{});await f.service.tick();const p=(await f.read()).processing;

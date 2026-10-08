@@ -66,9 +66,10 @@ function roundScore(value) {
   return Number(Math.min(1, Math.max(0, value)).toFixed(4));
 }
 
-function addReason(reasons, signal, weight, detail) {
+// inheritedFrom labels a signal that came from a project merged into the candidate (absent otherwise).
+function addReason(reasons, signal, weight, detail, inheritedFrom = null) {
   if (!(weight > 0)) return 0;
-  reasons.push({ signal, weight: roundScore(weight), detail });
+  reasons.push({ signal, weight: roundScore(weight), detail, ...(inheritedFrom ? { inherited_from: inheritedFrom } : {}) });
   return weight;
 }
 
@@ -119,7 +120,7 @@ function finalize(query, candidates, {
   });
 }
 
-function explicitIdentifier(query, prefix) {
+export function explicitIdentifier(query, prefix) {
   const expression = new RegExp(`\\b${prefix}-[a-zA-Z0-9][a-zA-Z0-9_-]*\\b`, "giu");
   return [...String(query ?? "").matchAll(expression)].map((match) => match[0].toLowerCase());
 }
@@ -133,14 +134,20 @@ export function resolveProjectCandidates({
   const explicitId = signals.project_id || explicitIdentifier(query, "project")[0] || null;
   if (explicitId) {
     const match = projects.find((project) => project.project_id === explicitId);
-    if (!match) return finalize(query, [], { threshold: PROJECT_THRESHOLD, hardMiss: true });
+    // An explicit ID of a merged source resolves to its canonical project, labelled with the requested ID.
+    const routed = match ? null : projects.find((project) => (project.merged_sources || []).some((source) => source.project_id === explicitId));
+    if (!match && !routed) return finalize(query, [], { threshold: PROJECT_THRESHOLD, hardMiss: true });
+    const target = match || routed;
     return finalize(query, [{
-      id: match.project_id,
-      project_id: match.project_id,
-      name: match.name,
+      id: target.project_id,
+      project_id: target.project_id,
+      name: target.name,
       score: 1,
       strong: true,
-      reasons: [{ signal: "project_id_exact", weight: 1, detail: "explicit project_id" }],
+      reasons: [match
+        ? { signal: "project_id_exact", weight: 1, detail: "explicit project_id" }
+        : { signal: "project_id_routed", weight: 1, detail: `explicit project_id of merged project ${explicitId}`, inherited_from: explicitId }],
+      ...(routed ? { routed_from: explicitId } : {}),
     }], { threshold: PROJECT_THRESHOLD });
   }
 
@@ -153,40 +160,61 @@ export function resolveProjectCandidates({
     const reasons = [];
     let score = 0;
     let strong = false;
-    const names = normalizedArray([project.name, ...(project.aliases || [])]);
-    if (normalizedQuery && names.includes(normalizedQuery)) {
-      score += addReason(reasons, "project_name_exact", 0.8, "project name or alias");
+    // The project's own signals first, then those of projects merged into it. An inherited match keeps the same
+    // weight and is labelled with the merged project it came from; the target's own names are never rewritten.
+    const origins = [{ origin: null, ...project }, ...(project.merged_sources || []).map((source) => ({ origin: source.project_id, ...source }))];
+    const firstMatch = (test) => origins.find(test);
+    const add = (signal, weight, detail, match) => addReason(reasons, signal, weight, match?.origin ? `${detail} (inherited from merged project ${match.origin})` : detail, match?.origin);
+    const namesOf = (source) => normalizedArray([source.name, ...(source.aliases || [])]);
+    const exactName = normalizedQuery && firstMatch((source) => namesOf(source).includes(normalizedQuery));
+    const phraseName = !exactName && normalizedQuery && firstMatch((source) => namesOf(source).some((name) => normalizedQuery.includes(name)));
+    if (exactName) {
+      score += add("project_name_exact", 0.8, "project name or alias", exactName);
       strong = true;
-    } else if (normalizedQuery && names.some((name) => normalizedQuery.includes(name))) {
-      score += addReason(reasons, "project_name_phrase", 0.6, "project name or alias in query");
+    } else if (phraseName) {
+      score += add("project_name_phrase", 0.6, "project name or alias in query", phraseName);
     } else {
-      const overlap = overlapRatio(queryTokens, names);
-      score += addReason(reasons, "project_name_tokens", overlap * 0.35, "project token overlap");
+      // Overlap is measured per origin (never across a mix of origins) and the best one counts, so the reason names
+      // the project whose names produced it; the project's own names win a tie. Unmerged projects score as before.
+      const best = origins.map((source) => ({ source, overlap: overlapRatio(queryTokens, namesOf(source)) }))
+        .reduce((left, right) => right.overlap > left.overlap ? right : left);
+      score += add("project_name_tokens", best.overlap * 0.35, "project token overlap", best.source);
     }
 
-    if (inputRemote && (project.git_remotes || []).map(normalizedRemote).includes(inputRemote)) {
-      score += addReason(reasons, "git_remote_exact", 0.9, "repository remote");
+    const remote = inputRemote && firstMatch((source) => (source.git_remotes || []).map(normalizedRemote).includes(inputRemote));
+    if (remote) {
+      score += add("git_remote_exact", 0.9, "repository remote", remote);
       strong = true;
     }
-    if (inputFingerprint && normalizedArray(project.repo_fingerprints).includes(inputFingerprint)) {
-      score += addReason(reasons, "repo_fingerprint_exact", 0.95, "repository fingerprint");
+    const fingerprint = inputFingerprint && firstMatch((source) => normalizedArray(source.repo_fingerprints).includes(inputFingerprint));
+    if (fingerprint) {
+      score += add("repo_fingerprint_exact", 0.95, "repository fingerprint", fingerprint);
       strong = true;
     }
     if (inputPath) {
-      const pathMatch = (project.path_hints || [])
+      const pathMatch = firstMatch((source) => (source.path_hints || [])
         .map(normalizedPath)
         .filter(Boolean)
-        .some((hint) => inputPath === hint || inputPath.startsWith(`${hint}/`) || hint.startsWith(`${inputPath}/`));
-      if (pathMatch) score += addReason(reasons, "path_hint", 0.25, "cwd/path hint; never sufficient alone");
+        .some((hint) => inputPath === hint || inputPath.startsWith(`${hint}/`) || hint.startsWith(`${inputPath}/`)));
+      if (pathMatch) score += add("path_hint", 0.25, "cwd/path hint; never sufficient alone", pathMatch);
     }
-    const priorSelections = Number(historyByProject.get(project.project_id) || 0);
+    // Confirmations recorded for a merged project count toward its canonical project, and the reason says where each
+    // came from: `confirmation_origins` whenever any were inherited, `inherited_from` when all came from one merged project.
+    const confirmations = origins.map((source) => ({ project_id: source.project_id, inherited: Boolean(source.origin),
+      confirmations: Number(historyByProject.get(source.project_id) || 0) })).filter((entry) => entry.confirmations > 0);
+    const priorSelections = confirmations.reduce((sum, entry) => sum + entry.confirmations, 0);
     if (priorSelections > 0) {
+      const inherited = confirmations.filter((entry) => entry.inherited);
+      const onlyFrom = inherited.length === 1 && inherited.length === confirmations.length ? inherited[0].project_id : null;
       score += addReason(
         reasons,
         "prior_confirmation",
         Math.min(0.9, 0.75 + (priorSelections - 1) * 0.05),
-        `${priorSelections} matching confirmation(s)`,
+        `${priorSelections} matching confirmation(s)${inherited.length
+          ? ` (${inherited.reduce((sum, entry) => sum + entry.confirmations, 0)} inherited from merged project(s) ${inherited.map((entry) => entry.project_id).join(", ")})` : ""}`,
+        onlyFrom,
       );
+      if (inherited.length) reasons.at(-1).confirmation_origins = confirmations;
     }
     return {
       id: project.project_id,
@@ -242,8 +270,10 @@ export function resolveTaskCandidates({
   const explicitIds = signals.task_id
     ? [signals.task_id]
     : explicitIdentifier(query, "task");
+  // Canonical equivalence: a Task of a merged source belongs to the selected canonical project (it keeps its own
+  // origin project_id); listTasks names the canonical project only for such Tasks.
   const scopedTasks = selectedProjectId
-    ? tasks.filter((task) => task.project_id === selectedProjectId)
+    ? tasks.filter((task) => (task.canonical_project_id || task.project_id) === selectedProjectId)
     : tasks;
   if (explicitIds.length) {
     const matches = scopedTasks.filter((task) => explicitIds.includes(task.task_id));

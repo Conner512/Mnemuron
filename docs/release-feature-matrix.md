@@ -5,11 +5,12 @@ It reconciles `web/console/visuals.mjs` with the feature standard. The inherited
 working copy already implements 18 of the historical 24 planned entries; those
 changes are retained, not claimed as newly authored in this release review.
 
-Current inventory: **63 entries: 54 live, 6 planned, 3 policy exclusions**.
+Current inventory: **51 entries: 44 live, 6 planned, 1 policy exclusion**.
 
 Browser suites: `functional` = `scripts/test-console-browser.py`; `completion` =
 `scripts/test-console-completion.mjs`; `models` = `scripts/test-console-models.mjs`;
-`connections` = `scripts/test-console-connections.mjs`. All use disposable synthetic
+`connections` = `scripts/test-console-connections.mjs`; `entities` =
+`scripts/test-console-entities.mjs`. All use disposable synthetic
 Core/OAuth accounts and loopback HTTP. The model and vector fixtures do not certify
 an external provider or real Qdrant. API tests include negative authorization;
 render/contract tests alone are not functional acceptance.
@@ -23,9 +24,10 @@ render/contract tests alone are not functional acceptance.
 | MEM-02 | 详情、来源与修订历史 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-03 | 新建记忆 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-04 | 修订与撤回 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
-| MEM-05 | 分类、敏感级别与 ChatGPT 可见性 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
+| MEM-05 | 分类与敏感级别 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-06 | 批量整理 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-07 | 版本对比 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
+| MEM-08 | 对象、别名与候选审阅 | live | `server/test/entity-alias.test.mjs`; `services/oauth/test/console-entities-ui.test.mjs` | entities (real synthetic BFF writes, source integrity, homonyms, stale evidence, 4 widths × 2 locales, keyboard focus, delayed navigation) |
 | SUM-01 | 分类索引与派生摘要 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models |
 | SUM-02 | 生成分类与摘要 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models |
 | SUM-03 | 自定义分类体系 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models |
@@ -51,12 +53,6 @@ render/contract tests alone are not functional acceptance.
 | MOD-02 | 连通性测试 | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
 | MOD-03 | 个人向量索引 | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
 | MOD-04 | 用量与预算 | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
-| PRV-01 | 外发许可总览 | live | `server/test/cloud-memory-privacy.test.mjs`; `server/test/console-completion.test.mjs` | completion |
-| PRV-02 | 新记忆默认设置 | live | `server/test/cloud-memory-privacy.test.mjs`; `server/test/console-completion.test.mjs` | completion |
-| PRV-03 | 数据保留策略 | live | `server/test/cloud-memory-privacy.test.mjs`; `server/test/console-completion.test.mjs` | completion |
-| PRV-04 | 清理过期数据 | live | `server/test/cloud-memory-privacy.test.mjs`; `server/test/console-completion.test.mjs` | completion |
-| PRV-05 | 删除账户与全部数据 | policy | `services/oauth/test/console-feature-map.test.mjs` | disabled / policy rendering; no successful operation claimed |
-| PRV-06 | ChatGPT 读取范围 | live | `server/test/cloud-memory-privacy.test.mjs`; `server/test/console-completion.test.mjs` | completion |
 | SEC-01 | 修改密码 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
 | SEC-02 | 更换验证器 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
 | SEC-03 | 轮换恢复码 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
@@ -68,13 +64,6 @@ render/contract tests alone are not functional acceptance.
 | STO-02 | 导入为新记忆 | live | `server/test/console-actions.test.mjs`; `services/oauth/test/release-upgrade.test.mjs` | functional |
 | STO-03 | 存储用量 | live | `server/test/console-actions.test.mjs`; `services/oauth/test/release-upgrade.test.mjs` | functional |
 | STO-04 | 整库备份与恢复 | policy | `services/oauth/test/console-feature-map.test.mjs` | disabled / policy rendering; no successful operation claimed |
-| INV-01 | 注册码清单 | live | `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/registration-console.test.mjs` | functional |
-| INV-02 | 批量签发 | live | `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/registration-console.test.mjs` | functional |
-| INV-03 | 撤销 | live | `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/registration-console.test.mjs` | functional |
-| ACC-01 | 账户清单 | live | `services/oauth/test/identity-boundaries.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
-| ACC-02 | 停用与启用 | live | `services/oauth/test/identity-boundaries.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
-| ACC-03 | 平台管理员角色 | live | `services/oauth/test/identity-boundaries.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
-| ACC-04 | 查看他人记忆 | policy | `services/oauth/test/console-feature-map.test.mjs` | disabled / policy rendering; no successful operation claimed |
 | SYS-01 | 平台开关 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
 | SYS-02 | 服务健康 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
 | SYS-03 | 版本与迁移 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
@@ -112,3 +101,18 @@ capability design and separate permission for any production credential changes.
 
 No one host's pass is substituted for another. Freeze the supported host/version
 list before public claims; retain the existing seven-day stability gate.
+
+The privacy/retention (`PRV`), registration-code (`INV`) and account-management (`ACC`) pages were removed from the
+web Console (old `/app/privacy`, `/app/invitations` and `/app/accounts` URLs redirect to the overview; see
+`services/oauth/test/console-removed-pages.test.mjs`). Their IDs are retired. The Core/BFF privacy, retention and
+account endpoints are unchanged by that removal. Operator tools: `services/oauth/bin/identity.mjs invite-*`
+(registration codes), `console-operator.mjs grant-operator|revoke-operator` (roles) and the new
+`console-operator.mjs disable-account|enable-account` (multi-account lockout, same local maintenance path as the
+removed web action; `HTTP-CON-09-CLI`). Account privacy defaults and retention now have no web page or CLI: they are
+reachable only through the Console action API (`privacy.defaults`, `retention.save`, `retention.prune`).
+
+Session details (SEC-04): a new Console sign-in stores only coarse device-type, browser-family and OS-family values
+in `identity_session_clients` (deleted with its session by trigger). No raw User-Agent, IP address or location is
+stored; sessions created before this table existed show "not recorded". Like earlier additive OAuth tables, an older
+strict OAuth build refuses to open a database containing this table, so a code rollback needs a build whose allowlist
+recognizes it. Tests: `services/oauth/test/console-sessions.test.mjs` (SES-01..03).

@@ -1,4 +1,5 @@
 import { ConflictError } from './errors.mjs';
+import { protectGroup } from './lifecycle/protection.mjs';
 
 export class HandoffPolicy {
   constructor(db, runtime) {
@@ -6,6 +7,8 @@ export class HandoffPolicy {
     db.exec(`CREATE TABLE IF NOT EXISTS handoff_module_state (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS handoff_drain_resumes (user_id TEXT NOT NULL, resume_id TEXT NOT NULL, preview_version INTEGER NOT NULL,
         PRIMARY KEY(user_id,resume_id));`);
+    // Protected before the drain snapshot below writes to it.
+    protectGroup(db, 'handoff');
     if (!runtime.legacy) {
       db.exec('BEGIN IMMEDIATE');
       try {

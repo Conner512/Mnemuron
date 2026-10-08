@@ -70,9 +70,13 @@ try{
   check('Version comparison loads both complete sides',(await detail.locator('[data-comparison] pre').first().innerText()).length>0);await shot('version-comparison',false);
   await detail.locator('[data-feature-close]').click();await page.locator('#memory-dialog [data-close]').click();
   await page.locator('[data-batch-memory]').first().check();await begin('memory.batch_retract');check('Batch retract reports a real outcome',(await submit()).results[0].ok===true);await close();await shot('memory-library');
-  await goto('privacy');await begin('privacy.defaults');await pick('#operation-dialog [name=sensitivity]','secret');check('Private defaults are persisted',(await submit()).status==='saved');await close();
-  await begin('retention.save');await op.locator('[name=raw_retention_days]').fill('7');check('Retention saves own future default',(await submit()).raw_retention_days===7);await close();
-  await begin('retention.prune');await op.locator('[name=confirmed]').check();await proof();check('Confirmed prune uses real empty fixture, not fake success',(await submit()).expired_events===0);await close();await shot('privacy');
+  // The privacy/retention page was removed from the web Console; its backend stays. Set the account default through the
+  // same Console action endpoint (session + CSRF) so the memory form below still proves the default is honored.
+  const backend=await page.evaluate(async()=>{const me=await (await fetch('/console-api/me',{credentials:'same-origin'})).json(),current=await (await fetch('/console-api/privacy-defaults',{credentials:'same-origin'})).json();
+    const body=new URLSearchParams({csrf:me.csrf,account_id:me.account_id,action:'privacy.defaults',operation_id:crypto.randomUUID(),payload:JSON.stringify({expected_revision:current.revision,sensitivity:'secret',cloud_readable:false})});
+    const r=await fetch('/console-api/action',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/x-www-form-urlencoded'},body});return {status:r.status,data:await r.json()};});
+  check('Private defaults are persisted through the retained backend',backend.status===200&&backend.data.status==='saved');
+  check('No privacy page remains in the navigation',await page.locator('a[href="/app/privacy"]').count()===0);
   await goto('memories');await begin('memory.create');check('New form honors account sensitivity default',await op.locator('[name=sensitivity]').inputValue()==='secret');await op.locator('[name=content]').fill('Synthetic private default acceptance.');const created=await submit();check('Private memory saved',created.status==='saved');await close();
   const metadata=await (await ctx.request.get(cfg.url+'/console-api/memory-meta?memory_id='+created.memory_id)).json();check('Default sensitivity applied; no per-memory ChatGPT flag is exposed',metadata.sensitivity==='secret'&&metadata.web_allowed===undefined);
   await goto('connections');await begin('devices.register');await op.locator('[name=label]').fill('Synthetic browser Agent');await op.locator('[name=agent_id]').fill('synthetic-console-agent');await op.locator('[name=device_id]').fill('synthetic-device');await proof();
@@ -80,16 +84,23 @@ try{
   await begin('devices.rotate');await proof();const rotated=await submit();check('Agent rotation changes actual key',rotated.api_key!==registered.api_key);await close();
   check('Server observations do not claim local hooks are healthy',(await page.locator('[data-feature="CON-04"]').innerText()).includes('Hook'));await shot('connections');
   await goto('security');check('Authentication history shows real proof activity',await page.locator('[data-feature="SEC-05"] tbody tr').count()>0);await shot('security');
-  await goto('audit');await page.locator('#audit-filter [name=action]').fill('console.taxonomy.save');await page.locator('#audit-filter button[type=submit]').click();
+  await goto('audit');await page.locator('.audit-filter-panel summary').click();await page.locator('#audit-filter [name=action]').fill('console.taxonomy.save');await page.locator('#audit-filter button[type=submit]').click();
   await page.waitForFunction(()=>{const rows=[...document.querySelectorAll('.timeline-item strong')];return rows.length>0&&rows.every(n=>n.textContent==='console.taxonomy.save');});
   check('Audit filter returns only selected action',(await page.locator('.timeline-item strong').allInnerTexts()).every(s=>s==='console.taxonomy.save'));
   const download=page.waitForEvent('download');await page.locator('[data-audit-export]').click();const file=await download;await file.saveAs(path.join(evidence,'synthetic-audit.json'));
   const exported=JSON.parse(fs.readFileSync(path.join(evidence,'synthetic-audit.json'),'utf8'));check('Audit export uses real filtered metadata',exported.entries.length>0&&exported.entries.every(e=>e.action==='console.taxonomy.save'));await shot('audit');
   await goto('models');check('Unconfigured usage is not fabricated',await page.locator('[data-feature="MOD-04"] table').count()===1);
-  await goto('tasks');check('Task page does not expose handoff writes',await page.locator('[data-console-action^="tasks."],[data-console-action^="projects."]').count()===0);
-  for(const view of ['task-branches','project-context','task-checkpoints','task-reconciliation']){
+  // Project/task editing and Console archive are offered (phase 3); handoff bootstrap and reconciliation writes are not.
+  await goto('tasks');check('Task page does not expose handoff bootstrap or reconciliation writes',await page.locator('[data-console-action$=".bootstrap"],[data-console-action="tasks.reconcile"]').count()===0);
+  for(const view of ['task-branches','task-checkpoints','task-reconciliation']){
     await page.locator(`[data-feature-read="${view}"]`).first().click();await detail.locator('.operation-result').waitFor();const data=JSON.parse(await detail.locator('.operation-result').innerText());check('Real owner task inspector '+view,data.read_only===true);await detail.locator('[data-feature-close]').click();
-  }await shot('tasks');
+  }
+  // Project context now opens inside its project row instead of the detached inspector.
+  const contextButton=page.locator('[data-project-context]').first(),contextRegion=page.locator('#'+await contextButton.getAttribute('aria-controls'));
+  await contextButton.click();await contextRegion.locator('.context-provenance').waitFor();
+  const detachedOpen=await detail.count()?await detail.evaluate(d=>d.open):false;
+  check('Real owner project context opens inline and read-only',await contextButton.getAttribute('aria-expanded')==='true'&&(await contextRegion.innerText()).trim().length>0&&!detachedOpen);
+  await shot('tasks');
   await goto('system');check('Unknown backup status is explicit',(await page.locator('[data-feature="SYS-04"]').innerText()).includes('无法确认'));await shot('system');
   await page.locator('#locale').selectOption({value:'en'},{force:true});check('English translation includes new features',(await page.locator('[data-feature="SYS-04"]').innerText()).includes('No trusted backup-status source'));await shot('system-en');
   const member=await browser.newContext();await member.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const mp=await member.newPage();await mp.goto(cfg.url+'/app/system');await mp.locator('#console-root h1').waitFor();

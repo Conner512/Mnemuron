@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {consoleMemoryWritable} from '../../../shared/console-contract.mjs';
 import {ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
 
 export const WEB_READ_POLICY = 'web-memory-visibility-v1';
 // Activated only by the runtime config key memory.agent_read_policy (see memory-runtime.mjs).
@@ -56,6 +57,7 @@ export class WebMemoryVisibility {
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_change AFTER UPDATE ON memories BEGIN
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;`);
+    protectGroup(this.db,'web');
   }
   denied(user,id){return !!this.db.prepare('SELECT 1 FROM memory_web_denials WHERE user_id=? AND memory_id=?').get(user,id);}
   // Called inside the owning memory transaction; grants and denials cannot disagree at commit.
@@ -122,7 +124,11 @@ export class WebMemoryVisibility {
   list(auth,{limit=20,after}={}) {
     if(!consoleMemoryWritable(auth))this.store.requireScope(auth,'admin:tasks');
     if(!Number.isSafeInteger(limit) || limit<1 || limit>100 || (after!==undefined && (typeof after!=='string' || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(after))))throw new ValidationError('Invalid grant inventory page.');
-    const rows=this.db.prepare('SELECT memory_id FROM memory_web_grants WHERE user_id=? AND memory_id>? ORDER BY memory_id LIMIT ?').all(auth.user_id,after || '',limit+1);
+    // Normal inventory: grants of deleted-project (or dangling/foreign-project) memories are not listed, consistent with
+    // inspect() and with what a web reader can read; the filter applies before the page is cut.
+    const live=this.store.lifecycle.live(auth.user_id).sql('m.project_id');
+    const rows=this.db.prepare(`SELECT g.memory_id FROM memory_web_grants g JOIN memories m ON m.user_id=g.user_id AND m.memory_id=g.memory_id
+      WHERE g.user_id=? AND g.memory_id>? AND ${live.sql} GROUP BY g.memory_id ORDER BY g.memory_id LIMIT ?`).all(auth.user_id,after || '',...live.params,limit+1);
     const grants=rows.slice(0,limit).map(row=>this.inspect(auth,row.memory_id));
     return {grants,selection:'explicit_grants_only',public_records_not_listed:true,content_returned:false,
       next_request:rows.length>limit?{limit,after:grants.at(-1).memory_id}:null};
@@ -131,6 +137,10 @@ export class WebMemoryVisibility {
     if(!consoleMemoryWritable(auth))this.store.requireScope(auth,'admin:tasks');
     const current=this.store.revisions.latest(auth.user_id,id);
     if(!current)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    const project=this.db.prepare('SELECT project_id FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id);
+    const state=project?this.store.lifecycle.projectState(auth.user_id,project.project_id):'unavailable';
+    if(state==='unavailable')throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+    if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
     const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';
     return {memory_id:id,revision:current.revision,state_hash:current.state_hash,sensitivity,
       allowed:this.visible(this.reader(auth),id),content_returned:false,policy:webReadPolicy(this.reader(auth))};
@@ -141,6 +151,11 @@ export class WebMemoryVisibility {
     return this.store.memoryTransaction(()=>{
       const current=this.store.revisions.latest(auth.user_id,id);
       if(!current)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+      // Inside the grant write: a memory of a deleted (or dangling/foreign) project gets no new grant or denial.
+      const record=this.db.prepare('SELECT project_id FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id);
+      const state=record?this.store.lifecycle.projectState(auth.user_id,record.project_id):'unavailable';
+      if(state==='unavailable')throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
+      if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
       if(!Number.isSafeInteger(revision) || current.revision!==revision || current.state_hash!==state_hash)
         throw new ConflictError('Approval must match the reviewed revision and state hash.','MEMORY_VERSION_CHANGED');
       const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';

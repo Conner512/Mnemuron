@@ -33,10 +33,7 @@ const paths = {
   storage: '<path d="M3.5 4.5h17V9h-17z"/><path d="M5 9v10.5h14V9"/><path d="M10 13h4"/>',
   tasks: '<path d="M3.5 6h6.5l2 2.5h8.5v11h-17z"/><path d="M8 13h8M8 16h5"/>',
   resume: '<path d="M4 8.5h14.5M15 5l3.5 3.5L15 12"/><path d="M20 15.5H5.5M9 12l-3.5 3.5L9 19"/>',
-  privacy: '<path d="M3 12s3.2-5.5 9-5.5S21 12 21 12s-3.2 5.5-9 5.5S3 12 3 12z"/><circle cx="12" cy="12" r="2.5"/><path d="M4.5 19.5 19.5 4.5"/>',
   system: '<rect x="4" y="4.5" width="16" height="6"/><rect x="4" y="13.5" width="16" height="6"/><path d="M7.5 7.5h1M7.5 16.5h1M11.5 7.5h5M11.5 16.5h5"/>',
-  invitations: '<path d="M3.5 6.5h17v3.7a1.8 1.8 0 0 0 0 3.6v3.7h-17v-3.7a1.8 1.8 0 0 0 0-3.6z"/><path d="M14.5 8.5v1M14.5 11.5v1M14.5 14.5v1"/>',
-  accounts: '<circle cx="9" cy="8.5" r="3.5"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M15.5 5.2a3.5 3.5 0 0 1 0 6.6"/><path d="M17.5 14.6A6 6 0 0 1 21 20"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4.5 4.5"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   back: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
@@ -73,6 +70,11 @@ export const memoryText = m => {
   return html`${m.title ? html`<span class="memory-title" data-title-source="${m.title_source || ''}">${m.title}</span>` : ''}${m.path && m.body
     ? html`<span class="memory-path" title="${m.path}">${m.path}</span>` : ''}${repeats ? '' : html`<span class="memory-text">${body}</span>`}`;
 };
+/** The explanation comes from the original-query rank, never inferred from expanded text. */
+export function entityMatch(t,m){
+ const rank=m.ranking,keys={raw_query:'entityMatchExact',original_terms:'entityMatchTerms',alias:'entityMatchAlias'},key=keys[rank?.match_kind];
+ return key?html`<span class="entity-match" data-match-kind="${rank.match_kind}">${i18n(t,key)}${rank.match_kind==='alias'&&rank.alias?.matched_name?html` · ${rank.alias.matched_name}`:''}</span>`:'';
+}
 const ORIGIN_KEYS = {imported: 'importedOrigin', console: 'originConsole', model_tool: 'originModelTool', agent: 'originAgent'};
 /** An imported or namespace topic: a filterable tag, never a title or a file path. */
 const tagChip = (t, tag) => tag ? html`<button type="button" class="topic-chip tag-chip" data-facet="topic" data-value="${tag}" title="${t('originalTagNote')}"><span class="chip-label">${t('originalTag')}</span>${tag}</button>` : '';
@@ -222,7 +224,7 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   const meta = m => html`${topicChip(m)}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'category')}</th><th>${i18n(t, 'status')}</th><th>${i18n(t, 'created')}</th></tr></thead>
-    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${typeChip(t, m.memory_type || 'fact')}</button></div>${(m.topic && m.title_source !== 'topic') || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
+    <tbody>${rows.map(m => html`<tr${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${typeChip(t, m.memory_type || 'fact')}${entityMatch(t,m)}</button></div>${(m.topic && m.title_source !== 'topic') || m.imported ? html`<div class="memory-extra">${meta(m)}</div>` : ''}</td>
       <td><span class="category-pill" data-category="${m.category || 'uncategorized'}">${categoryName(t, labels, m.category || 'uncategorized')}</span></td><td>${statusTag(t, m.status || 'active')}</td><td class="memory-date"><time>${formatDate(m.created_at)}</time></td></tr>`)}</tbody></table></div>`
     : emptyState(t, query || category || topic || origin || (status && status !== 'all') ? 'emptyFiltered' : 'empty');
   const chips = [['topic', topic, topic], ['origin', origin, origin ? t(origin === 'imported' ? 'importedOrigin' : 'otherOrigin') : '']].filter(([, value]) => value);
@@ -236,8 +238,33 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   ${chips.length ? html`<div class="filter-chips">${chips.map(([facet, , label]) => html`<span class="filter-chip">${label}<button type="button" class="quiet" data-clear-facet="${facet}" data-i18n-aria-label="clearFilter" aria-label="${t('clearFilter')}">×</button></span>`)}</div>` : ''}
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
+    ${data.retrieval?.aliases?.truncated?html`<p class="policy-box library-note">${i18n(t,'entitySearchTruncated')}</p>`:''}
+    ${data.retrieval?.aliases?.ambiguous?html`<p class="policy-box library-note">${i18n(t,'entitySearchAmbiguous')}</p>`:''}
     ${selection}<div id="memory-rows">${table}</div>
     <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section></div></div>`);
+}
+
+/** The facts that tell same-category summaries apart: window, time zone, scope, sources and version.
+ * Names lead; internal IDs follow as secondary text. Missing facts say "unknown", never a guess. */
+// Readable chain from the outermost known level (project → task → workstream, or session). Names are
+// current names, not history; when one is missing its ID stands in. The IDs themselves follow on the
+// secondary line, so same-named tasks in different projects never read identically.
+const SCOPE_LEVELS = [['project', 'project_name', 'project_id'], ['task', 'task_title', 'task_id'], ['workstream', 'workstream_name', 'workstream_id'], ['session', null, 'session_id']];
+function summaryScope(t, scope) {
+  const kind = scope?.kind || 'unknown';
+  if (kind === 'unknown') return html`<span class="summary-scope">${i18n(t, 'summaryScope_unknown')}</span>`;
+  if (kind === 'user') return html`<span class="summary-scope">${i18n(t, 'summaryScope_user')}</span>`;
+  const levels = SCOPE_LEVELS.filter(([, , id]) => scope[id]);
+  return html`<span class="summary-scope">${levels.map(([level, name, id], index) => html`${index ? ' › ' : ''}${i18n(t, `summaryScope_${level}`)} ${name && scope[name] ? html`<span class="summary-name">${scope[name]}</span>` : html`<code>${scope[id]}</code>`}`)}</span>`;
+}
+const scopeIds = scope => SCOPE_LEVELS.map(([, , id]) => scope?.[id]).filter(Boolean);
+function summaryWindow(t, window) {
+  if (!window) return i18n(t, 'summaryWindowUnknown');
+  return html`<span class="summary-window">${i18n(t, `summaryPeriod_${window.period}`)}${window.period === 'weekly' ? html` · ${i18n(t, 'summaryWeekFrom')}` : ''} <time>${window.local_start || '—'}</time> <span class="summary-tz">(${window.timezone || '—'})</span></span>`;
+}
+export function summaryFacts(t, s) {
+  const omitted = safeCount(s.omitted);
+  return html`<span class="summary-facts">${summaryWindow(t, s.window)}${summaryScope(t, s.scope)}<span>${i18n(t, 'sourceCount')} ${s.coverage}</span>${omitted ? html`<span>${i18n(t, 'summaryOmitted')} ${omitted}</span>` : ''}<span>${i18n(t, 'revisions')} ${s.revision}</span></span>`;
 }
 
 export function summariesView(t, {data, pagination = '', labels = {}}) {
@@ -248,17 +275,48 @@ export function summariesView(t, {data, pagination = '', labels = {}}) {
   <section class="index-panel">${i18n(t, 'summaryIndex', 'h2')}${cats.length ? html`<ul class="category-index">${cats.map(c => html`<li><a class="category-link" href="/app/memories?category=${encodeURIComponent(c.category)}&amp;status=active"><span>${categoryName(t, labels, c.category)}</span>
     <svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${fixed(Math.max(3, c.count / max * 100))}" height="4" rx="2"/></svg><strong>${c.count}</strong></a></li>`)}</ul>` : emptyState(t)}</section>
   <section class="list-panel">${i18n(t, 'summaryList', 'h2')}${summaries.length ? html`<ol class="summary-list">${summaries.map(s => {
-    const body = html`<span class="summary-title">${categoryName(t, labels, s.category)}</span><span class="memory-meta"><span>${i18n(t, 'revisions')} ${s.revision}</span><span>${i18n(t, 'sourceCount')} ${s.coverage}</span><code>${s.summary_id}</code></span>`;
+    const ids = scopeIds(s.scope);
+    const body = html`<span class="summary-title">${categoryName(t, labels, s.category)}</span>${summaryFacts(t, s)}<small class="summary-id">${ids.length ? html`${i18n(t, 'summaryScopeIds')} <code>${ids.join(' / ')}</code><br>` : ''}${i18n(t, 'summaryId')} <code>${s.summary_id}</code></small>`;
     return html`<li class="summary-row">${s.status === 'current'
       ? html`<button type="button" class="memory-link" data-summary="${s.summary_id}" data-revision="${s.revision}">${body}</button>`
       : html`<div class="memory-link">${body}<small>${i18n(t, 'summaryNotCurrent')} · <a href="/app/memories?category=${encodeURIComponent(s.category)}">${i18n(t, 'browseMemories')}</a></small></div>`}${html`<span class="tag">${t(s.status)}</span>`}</li>`;
   })}</ol>` : emptyState(t)}${trusted(pagination)}</section></div>`);
 }
 
-export function auditView(t, {entries = [], pagination = '',filters={}}) {
-  return String(html`<form id="audit-filter" class="toolbar">${[['action','auditAction','text'],['outcome','auditOutcome','text'],['from','auditFrom','datetime-local'],['to','auditTo','datetime-local']].map(([key,label,type])=>html`<label>${i18n(t,label)}<input name="${key}" type="${type}" value="${filters[key]||''}" maxlength="100"></label>`)}<button type="submit">${i18n(t,'filterAudit')}</button></form><section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>${!entries.length?emptyState(t):''}
-    <ol class="timeline">${entries.map(e => html`<li class="timeline-item" data-outcome="${e.outcome || ''}"><span class="timeline-dot" aria-hidden="true"></span>
-      <div><strong>${e.action}</strong><span class="memory-meta"><span class="tag">${e.outcome || '—'}</span><time>${formatDate(e.created)}</time>${e.audit_id ? html`<code>${e.audit_id}</code>` : ''}</span></div></li>`)}</ol>${trusted(pagination)}</section>`);
+// Audit (AUD-01/02, Console item 7). One stream at a time with its own paging. Recorded references (credential,
+// target and query result IDs) are shown as recorded; labels, connection state and memory titles are marked current.
+const auditCredential = (t, id, c) => {
+  if (!id) return html`<span class="muted">${i18n(t, 'auditActorUnknown')}</span>`;
+  const conn = c?.connection, revoked = c?.revoked ? html` <span class="tag">${i18n(t, 'auditRevokedNow')}</span>` : '';
+  const connection = !conn ? '' : conn.type === 'personal' ? html`<span>${i18n(t, 'auditConnectionCurrent')}: ${conn.missing ? i18n(t, 'auditConnectionMissing') : html`<strong>${conn.label}</strong> · ${conn.kind} · ${t(conn.state)}`} <code>${conn.connection_id}</code> · ${i18n(t, 'auditCredentialVersion')} ${conn.credential_version}</span>`
+    : conn.type === 'system' ? html`<span>${i18n(t, 'auditConnectionCurrent')}: ${i18n(t, conn.purpose === 'web' ? 'auditSystemWeb' : conn.purpose==='console'?'auditSystemConsole':'unknown')}</span>`
+    : html`<span class="muted">${i18n(t, 'auditConnectionUnmapped')}</span>`;
+  return html`<span>${i18n(t, 'auditCredential')} <code>${id}</code>${revoked}</span>${c ? html`<span>${c.label} · ${i18n(t, 'agentId')} <code>${c.agent_id||t('unknown')}</code> · ${i18n(t, 'agentInstance')} <code>${c.agent_instance_id||t('unknown')}</code> · ${i18n(t, 'deviceId')} <code>${c.device_id||t('unknown')}</code></span>${connection}` : html`<span class="muted">${i18n(t, 'auditCredentialGone')}</span>`}`;
+};
+const auditMemory = (t, id, memories) => {
+  const m = Object.hasOwn(memories,id)?memories[id]:null;
+  return m ? html`<button type="button" class="audit-memory" data-memory="${id}">${m.title || id} <small><code>${id}</code></small></button>` : html`<span class="audit-memory unavailable"><code>${id}</code> <small>${i18n(t, 'auditMemoryUnavailable')}</small></span>`;
+};
+function auditCoreDetail(t, e, data) {
+  const memories = data.memories || {}, q = e.query, credentials=data.credentials||{};
+  const target = e.target_type === 'memory' && e.target_id ? html`<span>${i18n(t, 'auditTarget')}: ${auditMemory(t, e.target_id, memories)}</span>`
+    : e.target_id ? html`<span>${i18n(t, 'auditTarget')}: ${e.target_type} <code>${e.target_id}</code></span>` : '';
+  const query = !q ? '' : !Array.isArray(q.result_refs) ? html`<span class="muted">${i18n(t, 'auditRefsNotRecorded')}</span>`
+    : html`<span>${i18n(t, 'auditLexicalRefs')} ${q.result_refs.length ? q.result_refs.map(id => auditMemory(t, id, memories)) : i18n(t, 'auditRefsEmpty')}${q.result_refs_truncated ? html` <small>${i18n(t, 'auditRefsTruncated')}</small>` : ''}</span>`;
+  return html`<span class="audit-facts">${auditCredential(t, e.credential_id, Object.hasOwn(credentials,e.credential_id)?credentials[e.credential_id]:null)}${target}${query}</span>`;
+}
+export function auditView(t, {data = {}, source = 'core', pagination = '', filters = {}}) {
+  const entries = data.entries || [], core = source === 'core', active=Object.values(filters).filter(Boolean).length;
+  const tab = (key, label) => html`<button type="button" data-audit-source="${key}" aria-pressed="${String(source === key)}">${i18n(t, label)}</button>`;
+  return String(html`<div class="view-switch audit-sources" role="group" data-i18n-aria-label="auditSource" aria-label="${t('auditSource')}">${tab('core', 'auditSourceCore')}${tab('identity', 'auditSourceIdentity')}</div>
+    <p class="muted audit-scope">${i18n(t, core ? 'auditScopeCore' : 'auditScopeIdentity')}</p>
+    <details class="audit-filter-panel" ${active?trusted('open'):''}><summary>${i18n(t,'filterAudit')}${active?html` <small>(${active})</small>`:''}</summary>
+    <form id="audit-filter" class="audit-filters">${[['action','auditAction','text'],['outcome','auditOutcome','text'],['from','auditFrom','datetime-local'],['to','auditTo','datetime-local']].map(([key,label,type])=>html`<label>${i18n(t,label)}<input name="${key}" type="${type}" value="${filters[key]||''}" ${type==='text'?trusted('maxlength="100"'):''}></label>`)}<button type="submit">${i18n(t,'applyFilters')}</button><small class="audit-filter-zone">${i18n(t,'auditLocalTime')}</small></form></details>
+    <section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>${!entries.length?emptyState(t):''}
+    ${core && data.memory_titles_truncated ? html`<p class="muted">${i18n(t, 'auditTitlesTruncated')}</p>` : ''}
+    <ol class="timeline audit-timeline">${entries.map(e => {const date=core?e.created_at:e.created;const stamp=new Date(typeof date==='number'?date*1000:date);return html`<li class="timeline-item" data-outcome="${e.outcome || ''}" data-kind="${e.kind || 'other'}"><span class="timeline-dot" aria-hidden="true"></span>
+      <div><strong>${e.action}</strong><span class="memory-meta"><span class="tag">${i18n(t, `auditKind_${['read','write','auth','credential'].includes(e.kind) ? e.kind : 'other'}`)}</span><span class="tag">${e.outcome || '—'}</span><time datetime="${Number.isFinite(stamp.getTime())?stamp.toISOString():''}">${formatDate(date)}</time>${e.audit_id ? html`<code>${e.audit_id}</code>` : ''}</span>
+      ${core ? auditCoreDetail(t, e, data) : html`<span class="audit-facts"><span class="muted">${i18n(t, 'auditIdentityActor')}</span></span>`}</div></li>`;})}</ol>${trusted(pagination)}</section>`);
 }
 
 /** Memory detail for the side pane. `actions` is markup built from fixed action buttons. */
@@ -304,10 +362,11 @@ export function memoryDetailView(t, data, {actions = '', canGoBack = false, meta
 export function summaryDetailView(t, data, {canGoBack = false}) {
   const summary = data.results?.[0] || {claims: []};
   return String(html`<div class="detail-meta"><span class="tag">${t(summary.category)}</span><span class="tag">${i18n(t, 'revisions')} ${summary.revision}</span></div>
+  ${data.context ? html`<p class="summary-detail-facts">${summaryFacts(t, {...data.context, revision: summary.revision})}${scopeIds(data.context.scope).length ? html`<small class="summary-id">${i18n(t, 'summaryScopeIds')} <code>${scopeIds(data.context.scope).join(' / ')}</code></small>` : ''}</p>` : ''}
   ${summary.claims?.length ? html`<ol class="claim-list">${summary.claims.map(c => html`<li class="detail-source"><p class="body-content">${c.quote}</p>
     <button type="button" class="quiet" data-memory="${c.memory_id}" data-revision="${c.revision}">${svg('source')}${i18n(t, 'sources')} · <code>${c.memory_id}</code></button></li>`)}</ol>` : emptyState(t)}
   ${i18n(t, data.complete ? 'endOfContent' : 'next', 'p')}
-  <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
+  <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : html`<button type="button" data-close>${svg('back')}${i18n(t, 'backToList')}</button>`}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
 }
 
 /* Feature map: every menu page lists what it offers today and what is still planned, so the
@@ -333,6 +392,7 @@ export const featureMap = {
     {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity']},
     {id: 'MEM-06', status: 'live', read: ['memories'], write: ['memory.organize', 'memory.organize_undo', 'memory.batch_classify', 'memory.batch_retract']},
     {id: 'MEM-07', status: 'live', read: ['memory-versions']},
+    {id: 'MEM-08', status: 'live', read: ['entities'], write: ['entity.create','entity.alias','entity.alias_correct','entity.alias_remove','entity.link','entity.unlink','entity.resolve']},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},
@@ -340,8 +400,8 @@ export const featureMap = {
     {id: 'SUM-03', status: 'live', read: ['taxonomy'], write: ['category.create', 'category.rename', 'category.delete', 'taxonomy.save']},
   ],
   tasks: [
-    {id: 'TSK-01', status: 'live', read: ['projects']},
-    {id: 'TSK-02', status: 'live', read: ['task-branches'], core: ['POST /v1/task-branches/preview'], scope: ['resume:read'],
+    {id: 'TSK-01', status: 'live', read: ['projects', 'metadata-values', 'project-context'], write: ['projects.update', 'projects.archive', 'projects.restore', 'projects.lifecycle_preview', 'projects.lifecycle_delete', 'projects.lifecycle_restore', 'projects.merge']},
+    {id: 'TSK-02', status: 'live', read: ['task-branches', 'task-detail', 'metadata-values'], write: ['tasks.update'], core: ['POST /v1/task-branches/preview'], scope: ['resume:read'],
       ui: {table: ['taskTitle', 'sourceBranch', 'lastCheckpoint', 'state']}},
     {id: 'TSK-03', status: 'live', read: ['project-context'], core: ['POST /v1/project-context/preview'], scope: ['resume:read'],
       ui: {form: ['select:project'], submit: 'generatePreview'}},
@@ -382,17 +442,6 @@ export const featureMap = {
     {id: 'MOD-03', status: 'live', write: ['vector.schedule']},
     {id: 'MOD-04', status: 'live', read: ['model-usage'], write: ['models.quota']},
   ],
-  privacy: [
-    {id: 'PRV-01', status: 'live', read: ['models']},
-    {id: 'PRV-02', status: 'live', read: ['privacy-defaults'], write: ['privacy.defaults'],
-      ui: {form: ['select:defaultSensitivity'], submit: 'save'}},
-    {id: 'PRV-03', status: 'live', read: ['retention'], write: ['retention.save'],
-      ui: {form: ['number:eventRetentionDays'], submit: 'save'}},
-    {id: 'PRV-04', status: 'live', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,
-      ui: {actions: ['pruneNow']}},
-    {id: 'PRV-05', status: 'policy'},
-    {id: 'PRV-06', status: 'live', read: ['capabilities']},
-  ],
   security: [
     {id: 'SEC-01', status: 'live', write: ['security.password'], reauth: true},
     {id: 'SEC-02', status: 'live', write: ['security.totp.begin', 'security.totp.complete'], reauth: true},
@@ -410,17 +459,6 @@ export const featureMap = {
     {id: 'STO-03', status: 'live', read: ['storage']},
     {id: 'STO-04', status: 'policy'},
   ],
-  invitations: [
-    {id: 'INV-01', status: 'live', read: ['invitations'], operator: true},
-    {id: 'INV-02', status: 'live', write: ['invitations.issue'], reauth: true, operator: true},
-    {id: 'INV-03', status: 'live', write: ['invitations.revoke', 'invitations.revoke_batch'], reauth: true, operator: true},
-  ],
-  accounts: [
-    {id: 'ACC-01', status: 'live', read: ['accounts'], operator: true},
-    {id: 'ACC-02', status: 'live', write: ['accounts.disable', 'accounts.enable'], reauth: true, operator: true},
-    {id: 'ACC-03', status: 'live', write: ['accounts.role'], reauth: true, operator: true},
-    {id: 'ACC-04', status: 'policy'},
-  ],
   system: [
     {id: 'SYS-01', status: 'live', read: ['capabilities'], operator: true},
     {id: 'SYS-02', status: 'live', read: ['system-health'], core: ['GET /v1/status', 'GET /readyz'], operator: true,
@@ -432,7 +470,7 @@ export const featureMap = {
 /** Catalog keys for a feature: OVW-01 → featOVW01 (title) and featOVW01Note (description). */
 export const featureKey = id => `feat${id.replace('-', '')}`;
 /** Menu destinations whose content is composed from the feature map. */
-export const prototypePages = ['tasks', 'resume', 'privacy', 'system'];
+export const prototypePages = ['tasks', 'resume', 'system'];
 /** Page badge: live when nothing is planned, planned when nothing is live, partial otherwise. */
 export function pageState(page) {
   const states = (featureMap[page] || []).map(f => f.status);
@@ -479,30 +517,82 @@ function featureCard(t, f, body = '') {
     ${i18n(t, `${key}Note`, 'p')}${f.status === 'planned' ? html`${wireframe(t, f.ui)}${devNote(t, f)}` : body}</section>`;
 }
 
-/** TSK-01: the account's projects, name and ID only. */
-function projectList(t, data) {
+/** Previous/next buttons carrying the target offset in a fixed data attribute. */
+const pageButtons = (t, attribute, data) => html`<div class="pagination">${data.offset ? html`<button type="button" ${trusted(attribute)}="${Math.max(0, data.offset - (data.limit || 25))}">${i18n(t, 'previous')}</button>` : ''}${data.next_offset != null ? html`<button type="button" ${trusted(attribute)}="${data.next_offset}">${i18n(t, 'next')}</button>` : ''}</div>`;
+/** TSK-01: the account's projects. Names wrap, IDs are secondary; each row expands its own read-only
+ * context in place. Console archive only hides a project here; edits need full Console write. */
+function projectList(t, data, caps = {}) {
   if (data.unavailable) return sectionNote(t, 'unavailable');
-  const rows = Array.isArray(data.projects) ? data.projects : [];
-  if (!rows.length) return emptyState(t, 'noProjects');
-  return html`<div class="table-scroll"><table><thead><tr><th>${i18n(t, 'projectName')}</th><th>${i18n(t, 'projectId')}</th></tr></thead>
-    <tbody>${rows.map(p => html`<tr><td><strong>${p.name || '—'}</strong></td><td><code>${p.project_id}</code></td></tr>`)}</tbody></table></div>`;
+  const rows = Array.isArray(data.projects) ? data.projects : [], archivedView = data.view === 'archived', deletedView = data.view === 'deleted';
+  const can = action => caps.allowed_actions?.includes(action);
+  // Three server-side views with their own counts and paging: active projects, those hidden in the Console, and the
+  // owner's recoverably deleted projects (retained history, restored only through a re-authenticated restore).
+  const current = deletedView ? 'deleted' : archivedView ? 'true' : 'false';
+  // The Deleted view exists only for credentials the server gives a deleted count (full Console write: owner-only truth).
+  const views = html`<div class="view-switch" role="group" aria-label="${t('projectViews')}">${[['false', 'activeProjects', data.active_count], ['true', 'archivedProjects', data.archived_count], ...(data.deleted_count === undefined ? [] : [['deleted', 'deletedProjects', data.deleted_count]])]
+    .map(([value, key, count]) => html`<button type="button" data-project-view="${value}" aria-pressed="${String(current === value)}">${i18n(t, key)}${count === undefined ? '' : html` <span class="figure">${count}</span>`}</button>`)}</div>`;
+  const note = deletedView ? sectionNote(t, 'deletedProjectsNote') : archivedView ? sectionNote(t, 'consoleArchiveNote') : '';
+  // An emptied later page (its last row archived or restored) keeps Previous.
+  if (!rows.length) return html`${views}${note}${emptyState(t, deletedView ? 'noDeletedProjects' : archivedView ? 'noArchivedProjects' : 'noProjects')}${pageButtons(t, 'data-project-offset', data)}`;
+  if (deletedView) return html`${views}${note}<ul class="project-list">${rows.map(p => html`<li class="project-row" data-deleted data-project-row="${p.project_id}">
+      <div class="project-main"><strong class="project-name">${p.name || '—'}</strong> <span class="tag" data-state="deleted">${i18n(t, 'projectDeletedTag')}</span>${p.archived ? html` <span class="tag" data-state="archived">${i18n(t, 'consoleArchived')}</span>` : ''}
+        ${p.merged_project_ids?.length ? html`<p class="project-members muted">${i18n(t, 'mergedMembers')}: ${p.merged_project_ids.map(id => html`<code>${id}</code> `)}</p>` : ''}
+        <small class="project-meta"><code>${p.project_id}</code> · ${i18n(t, 'taskCount')} ${p.task_count ?? 0}${p.deleted_at ? html` · ${i18n(t, 'deletedAt')} <time>${formatDate(p.deleted_at)}</time>` : ''}</small></div>
+      <div class="actions project-actions">${can('projects.lifecycle_restore') ? html`<button type="button" data-console-action="projects.lifecycle_restore" data-id="${p.project_id}">${i18n(t, 'restoreDeletedProject')}</button>` : ''}</div></li>`)}</ul>${pageButtons(t, 'data-project-offset', data)}`;
+  return html`${views}${note}<ul class="project-list">${rows.map((p, i) => {
+    const region = `project-context-${i}`, aliases = Array.isArray(p.alias_preview) ? p.alias_preview : [], more = (p.counts?.aliases ?? aliases.length) - aliases.length;
+    return html`<li class="project-row"${p.archived ? html` data-archived` : ''} data-project-row="${p.project_id}">
+      <div class="project-main"><strong class="project-name">${p.name || '—'}</strong>${p.archived ? html` <span class="tag" data-state="archived">${i18n(t, 'consoleArchived')}</span>` : ''}
+        ${aliases.length ? html`<p class="project-aliases">${aliases.map(a => html`<span class="tag">${a.text}${a.complete === false ? '…' : ''}</span>`)}${more > 0 ? html`<span class="muted">+${more}</span>` : ''}</p>` : ''}
+        ${p.merged_project_ids?.length ? html`<p class="project-members muted">${i18n(t, 'mergedMembers')}: ${p.merged_project_ids.map(id => html`<code>${id}</code> `)}</p>` : ''}
+        <small class="project-meta"><code>${p.project_id}</code>${p.task_count !== undefined ? html` · ${i18n(t, 'taskCount')} ${p.task_count}` : ''}${p.updated_at ? html` · ${i18n(t, 'updated')} <time>${formatDate(p.updated_at)}</time>` : ''}</small></div>
+      <div class="actions project-actions">
+        <button type="button" data-project-context="${p.project_id}" aria-expanded="false" aria-controls="${region}">${i18n(t, 'projectContext')}</button>
+        ${can('projects.update') ? html`<button type="button" data-console-action="projects.update" data-id="${p.project_id}">${i18n(t, 'editProject')}</button>` : ''}
+        ${can(p.archived ? 'projects.restore' : 'projects.archive') ? html`<button type="button" data-console-action="${p.archived ? 'projects.restore' : 'projects.archive'}" data-id="${p.project_id}">${i18n(t, p.archived ? 'restoreProject' : 'archiveProject')}</button>` : ''}
+        ${can('projects.merge') ? html`<button type="button" data-console-action="projects.merge" data-id="${p.project_id}">${i18n(t, 'mergeProject')}</button>` : ''}
+        ${can('projects.lifecycle_delete') ? html`<button type="button" class="danger" data-console-action="projects.lifecycle_delete" data-id="${p.project_id}">${i18n(t, 'deleteProject')}</button>` : ''}
+      </div>
+      <div class="project-context" id="${region}" role="region" aria-label="${t('projectContext')}" hidden></div></li>`;
+  })}</ul>${pageButtons(t, 'data-project-offset', data)}`;
 }
-/** PRV-01: which models may receive memory content or search queries. Changes stay on the models page. */
-function egressSummary(t, data) {
-  if (data.unavailable) return sectionNote(t, 'unavailable');
-  const models = Array.isArray(data.models) ? data.models : [];
-  const yes = value => i18n(t, value === true ? 'yes' : 'no');
-  return html`<div class="table-scroll"><table><thead><tr><th>${i18n(t, 'modelKind')}</th><th>${i18n(t, 'state')}</th><th>${i18n(t, 'egressAllowed')}</th><th>${i18n(t, 'queryAllowed')}</th></tr></thead>
-    <tbody>${models.map(m => html`<tr><td>${i18n(t, m.kind)}</td><td>${stateDot(t, m.config?.enabled ? 'enabled' : 'disabled')}</td><td>${yes(m.config?.egress_approved)}</td><td>${yes(m.config?.query_approved)}</td></tr>`)}</tbody></table></div>
-    <div class="section-foot"><a href="/app/models">${i18n(t, 'models')} →</a></div>`;
+/** Inline project context: the read-only preview exactly as the Core assembled and bounded it. Task fields,
+ * checkpoints, recent activity and the recorded agent/device identities stay visible in compact sections;
+ * nothing is invented, expanded past the Core's limits or editable here. */
+const contextText = value => typeof value === 'string' ? value : typeof value?.text === 'string' ? value.text : JSON.stringify(value);
+const recorded = source => source ? [source.agent_id, source.agent_instance_id && `${source.agent_instance_id}${source.device_id ? `@${source.device_id}` : ''}`].filter(Boolean).join(' · ') : '';
+// The Core caps each task field (field_availability says how many are stored and whether all were returned),
+// so a capped list reads "4 / 20 · partial", never as if it were complete.
+const shownCount = (t, values, availability) => availability?.returned === 'partial' && Number.isInteger(availability.item_count)
+  ? html`${values.length} / ${availability.item_count} · ${i18n(t, 'contextPartial')}` : html`${values.length}`;
+function contextItems(t, key, values, availability) {
+  return Array.isArray(values) && values.length ? html`<details class="context-section"><summary>${i18n(t, key)} <small>${shownCount(t, values, availability)}</small></summary><ul>${values.map(v => html`<li>${contextText(v)}</li>`)}</ul></details>` : '';
 }
-/** PRV-06: the ChatGPT read policy, read-only. Operators set it in the runtime config; the console cannot change it. */
-function readScope(t, data) {
-  const policy = data.read_policy;
-  if (!policy) return sectionNote(t, 'unavailable');
-  const uniform = policy.active_records_uniform === true;
-  return html`<div class="status-line">${stateDot(t, uniform ? 'enabled' : 'disabled')}${i18n(t, 'readPolicyUniform')}</div>${i18n(t, uniform ? 'readPolicyUniformOn' : policy.legacy_read_all === true ? 'readPolicyLegacyReadAll' : 'readPolicyUniformOff', 'p')}
-    ${sectionNote(t, 'readPolicyOperator')}`;
+function contextCheckpoint(t, c) {
+  return html`<li><p><time>${formatDate(c.created_at)}</time> <span class="tag">${t(c.status || 'unknown')}</span>${c.workstream_id ? html` <code>${c.workstream_id}</code>` : ''}</p>
+    ${c.latest_outcome ? html`<p>${i18n(t, 'contextOutcome')}: ${contextText(c.latest_outcome)}</p>` : ''}
+    ${[['contextCompleted', c.completed_items], ['decisions', c.decisions], ['blockers', c.blockers], ['contextNextSteps', c.recommended_next_steps]].map(([key, values]) => values?.length ? html`<p class="muted">${i18n(t, key)}: ${values.map(contextText).join(' · ')}</p>` : '')}
+    <small>${i18n(t, 'contextRecordedBy')} ${recorded(c.provenance) || '—'}${c.generation?.method ? html` · ${c.generation.method}${c.generation.confidence_label ? html` (${c.generation.confidence_label})` : ''}` : ''}</small></li>`;
+}
+export function projectContextView(t, data) {
+  if (data.status && data.status !== 'project_context_preview') return String(html`<p class="policy-box">${i18n(t, 'contextUnavailable')}</p>`);
+  const s = data.source_summary || {}, p = data.projection || {}, tasks = data.tasks || [], memories = data.structured_memories || [], activity = data.recent_activity || [];
+  const limited = [p.tasks_truncated && 'contextTasksLimited', p.checkpoints_truncated && 'contextCheckpointsLimited', p.fallback_compaction_applied && 'contextCompacted'].filter(Boolean);
+  return String(html`<p class="context-provenance">${i18n(t, 'contextProvenance')} · <time>${formatDate(data.created_at)}</time></p>
+    <dl class="metadata-grid context-counts">${[['taskCount', `${s.included_task_count ?? 0} / ${s.task_count ?? 0}`], ['contextMemories', s.structured_memory_count ?? 0], ['contextCheckpoints', `${s.included_latest_checkpoint_count ?? 0} / ${s.latest_checkpoint_count ?? 0}`], ['contextActivity', s.recent_activity_count ?? 0]]
+      .map(([key, value]) => html`<dt>${i18n(t, key)}</dt><dd>${value}</dd>`)}</dl>
+    ${limited.map(key => html`<p class="muted">${i18n(t, key)}</p>`)}
+    ${s.identities?.length ? html`<p class="context-identities">${i18n(t, 'contextIdentities')}: ${s.identities.map(id => html`<code>${id}</code>`)}</p>` : ''}
+    ${tasks.length ? html`<ul class="context-tasks">${tasks.map(task => html`<li><details class="context-task"><summary><strong>${task.title}</strong> <span class="tag">${t(task.status)}</span> <small>${i18n(t, 'revisions')} ${task.canonical_version}</small></summary>
+      ${task.goal ? html`<p>${task.goal}</p>` : ''}
+      ${[['contextProgress', 'progress'], ['decisions', 'decisions'], ['blockers', 'blockers'], ['contextNextSteps', 'next_steps'], ['contextResources', 'resources'], ['contextConflicts', 'conflicts']]
+        .map(([key, field]) => contextItems(t, key, task[field], task.field_availability?.[field]))}
+      ${task.workstreams?.length ? html`<details class="context-section"><summary>${i18n(t, 'contextWorkstreams')} <small>${shownCount(t, task.workstreams, task.field_availability?.workstreams)}</small></summary><ul>${task.workstreams.map(w => html`<li><strong>${w.name || w.workstream_id}</strong>${w.status ? html` <span class="tag">${t(w.status)}</span>` : ''} <code>${w.workstream_id}</code>${w.description ? html`<p>${w.description}</p>` : ''}${recorded(w) ? html`<small>${i18n(t, 'contextRecordedBy')} ${recorded(w)}</small>` : ''}</li>`)}</ul></details>` : ''}
+      ${task.latest_checkpoints?.length ? html`<details class="context-section"><summary>${i18n(t, 'contextCheckpoints')} <small>${task.latest_checkpoints.length}</small></summary><ul>${task.latest_checkpoints.map(c => contextCheckpoint(t, c))}</ul></details>` : ''}
+    </details></li>`)}</ul>` : emptyState(t, 'contextNoTasks')}
+    ${memories.length ? html`<details class="context-section"><summary>${i18n(t, 'contextMemories')} <small>${memories.length}</small></summary><ol class="context-memories">${memories.map(m => html`<li>${m.content}${m.content_truncated ? '…' : ''} <small><time>${formatDate(m.created_at)}</time>${recorded(m.provenance) ? html` · ${i18n(t, 'contextRecordedBy')} ${recorded(m.provenance)}` : ''}</small></li>`)}</ol></details>` : ''}
+    ${activity.length ? html`<details class="context-section"><summary>${i18n(t, 'contextActivity')} <small>${activity.length}</small></summary><ol>${activity.map(a => html`<li><time>${formatDate(a.captured_at)}</time> <code>${a.event_type}</code> ${a.source_status === 'raw_expired' ? i18n(t, 'contextRawExpired') : a.content ?? '—'}${a.content_truncated ? '…' : ''} <small>${i18n(t, 'contextRecordedBy')} ${recorded(a.provenance) || '—'}</small></li>`)}</ol></details>` : ''}
+    <p class="muted">${i18n(t, 'contextSafety')}</p>`);
 }
 /** SYS-01: platform switches exactly as the server reports them in its capabilities. */
 function platformSwitches(t, caps) {
@@ -523,16 +613,16 @@ function featureProgress(t) {
 export const prototypeOrder = page => [...(featureMap[page] || [])].sort((a, b) => ['live', 'planned', 'policy'].indexOf(a.status) - ['live', 'planned', 'policy'].indexOf(b.status));
 /** New menu destinations: one card per feature. Live cards show real data; planned ones a wireframe. */
 export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
-  const live = {'TSK-01': () => projectList(t, data), 'PRV-01': () => egressSummary(t, data), 'PRV-06': () => readScope(t, data), 'SYS-01': () => platformSwitches(t, caps)};
+  const live = {'TSK-01': () => projectList(t, data, caps), 'SYS-01': () => platformSwitches(t, caps)};
   const cards = prototypeOrder(page).map(f => featureCard(t, f, f.status === 'live' ? live[f.id]?.() ?? featureBody(t,f.id,data,caps) : ''));
-  return String(html`<div class="feature-grid">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
+  return String(html`<div class="feature-grid feature-grid--${page}">${cards}</div>${page === 'system' ? featureProgress(t) : ''}`);
 }
 
-export const completedViews={overview:['attention'],memories:[],summaries:['taxonomy'],tasks:['task-branches'],connections:['capture-status'],models:['model-usage'],privacy:['privacy-defaults','retention'],security:['login-history'],audit:[],system:['system-health','system-version','backups']};
-const completedIds=['OVW-03','MEM-06','MEM-07','SUM-03','TSK-02','TSK-03','TSK-04','CON-04','CON-05','MOD-04','PRV-02','PRV-03','PRV-04','SEC-05','AUD-02','SYS-02','SYS-03','SYS-04'];
+export const completedViews={overview:['attention'],memories:['entities'],summaries:['taxonomy'],tasks:['task-branches'],connections:['capture-status'],models:['model-usage'],security:['login-history'],audit:[],system:['system-health','system-version','backups']};
+const completedIds=['OVW-03','MEM-06','MEM-07','SUM-03','TSK-02','TSK-03','TSK-04','CON-04','CON-05','MOD-04','SEC-05','AUD-02','SYS-02','SYS-03','SYS-04'];
 export function completedFeaturePanels(t,page,data,caps){return String(html`${(featureMap[page]||[]).filter(f=>completedIds.includes(f.id)).map(f=>featureCard(t,f,featureBody(t,f.id,data,caps)))}`);}
 function featureBody(t,id,data,caps){
-  const view={ 'OVW-03':'attention','SUM-03':'taxonomy','TSK-02':'task-branches','CON-04':'capture-status','MOD-04':'model-usage','PRV-02':'privacy-defaults','PRV-03':'retention','SEC-05':'login-history','SYS-02':'system-health','SYS-03':'system-version','SYS-04':'backups'}[id];
+  const view={ 'OVW-03':'attention','SUM-03':'taxonomy','TSK-02':'task-branches','CON-04':'capture-status','MOD-04':'model-usage','SEC-05':'login-history','SYS-02':'system-health','SYS-03':'system-version','SYS-04':'backups'}[id];
   const d=data.features?.[view];
   if(view&&!d)return sectionNote(t,'unavailable');
   const act=(action,label,values={})=>caps.allowed_actions?.includes(action)?html`<button type="button" data-console-action="${action}"${Object.entries(values).map(([k,v])=>html` data-${trusted(k)}="${v}"`)}>${i18n(t,label)}</button>`:'';
@@ -542,15 +632,16 @@ function featureBody(t,id,data,caps){
   if(id==='MEM-06')return sectionNote(t,caps.allowed_actions?.includes('memory.organize')?'organizeNote':caps.allowed_actions?.some(a=>['memory.batch_classify','memory.batch_retract'].includes(a))?'batchNote':'batchUnavailable');
   if(id==='MEM-07')return sectionNote(t,'compareOpenDetail');
   if(id==='SUM-03')return html`<p>${d.categories.map(c=>html`<span class="tag">${categoryName(t,d.labels,c)}</span>`)}</p><p>${i18n(t,'revisions')} ${d.revision}</p><div class="actions">${caps.allowed_actions?.includes('category.create')?html`<button type="button" data-console-action="category.manage">${i18n(t,'manageCategories')}</button>`:''}${act('taxonomy.save','editCategoryIds')}</div>`;
-  if(id==='TSK-02')return html`${table(d.tasks,[['taskTitle',r=>r.title],['status',r=>t(r.status)],['revisions',r=>r.canonical_version],['actions',r=>inspect('task-branches',{task_id:r.task_id},'sourceBranch')]])}${d.next_offset!=null?inspect('task-branches',{offset:d.next_offset},'next'):''}`;
-  if(id==='TSK-03')return table(data.projects,[['projectName',r=>r.name],['actions',r=>inspect('project-context',{project_id:r.project_id},'generatePreview')]]);
+  // Stacked rows rather than a fixed four-column table: titles wrap at full width on phones.
+  if(id==='TSK-02')return html`${d.tasks?.length?html`<ul class="task-list">${d.tasks.map(r=>html`<li class="task-row" data-task-row="${r.task_id}">
+      <div class="task-main"><strong class="task-title">${r.title}</strong><small class="project-meta"><span class="tag">${t(r.status)}</span> ${i18n(t,'revisions')} ${r.canonical_version} · <code>${r.task_id}</code></small></div>
+      <div class="actions task-actions">${act('tasks.update','editTask',{id:r.task_id})}${inspect('task-branches',{task_id:r.task_id},'sourceBranch')}</div></li>`)}</ul>`:emptyState(t)}${pageButtons(t,'data-task-offset',d)}`;
+  // Project context opens inside each project row (TSK-01), next to the project it belongs to.
+  if(id==='TSK-03')return sectionNote(t,'projectContextInline');
   if(id==='TSK-04')return table(data.features?.['task-branches']?.tasks,[['taskTitle',r=>r.title],['actions',r=>html`${inspect('task-checkpoints',{task_id:r.task_id},'checkpoint')} ${inspect('task-reconciliation',{task_id:r.task_id},'proposal')}`]]);
   if(id==='CON-04')return html`${sectionNote(t,'captureObservationNote')}${table(d.agents,[['agentId',r=>r.agent_id],['agentInstance',r=>r.agent_instance_id],['sourceCount',r=>r.events],['lastUsed',r=>formatDate(r.last_received_at)]])}`;
   if(id==='CON-05')return html`${sectionNote(t,'agentKeyBoundary')}${act('devices.register','registerAgent')}${table((data.core_connections||[]).filter(c=>c.console_revocable),[['label',r=>r.label],['agentInstance',r=>r.agent_instance_id],['actions',r=>act('devices.rotate','rotateAgent',{id:r.credential_id})]])}`;
   if(id==='MOD-04')return html`<p>${d.day} UTC · ${i18n(t,'usageReservationNote')}</p>${table(d.models,[['modelKind',r=>t(r.kind)],['usedRequests',r=>r.used??'—'],['dailyRequests',r=>!r.configured?'—':r.limit??t('noLimit')],['remainingRequests',r=>!r.configured?'—':r.remaining??t('noLimit')],['totalCallLimit',r=>r.total?`${r.total.used} / ${r.total.limit??t('noLimit')}`:'—'],['firstRunBuildRequests',r=>r.first_run_build_calls??'—']])}`;
-  if(id==='PRV-02')return html`<p>${i18n(t,'sensitivity')}: ${t(d.sensitivity)}</p>${sectionNote(t,'privacyDefaultsBoundary')}${act('privacy.defaults','configure')}`;
-  if(id==='PRV-03')return html`<p>${i18n(t,'eventRetentionDays')}: ${d.raw_retention_days==='permanent'?t('permanent'):d.raw_retention_days}</p>${sectionNote(t,'retentionBoundary')}${act('retention.save','configure')}`;
-  if(id==='PRV-04')return html`${sectionNote(t,'pruneBoundary')}${act('retention.prune','pruneNow')}`;
   if(id==='SEC-05')return html`${sectionNote(t,'loginHistoryNote')}${table(d.entries,[['created',r=>formatDate(r.created)],['state',r=>t(r.outcome)],['actions',r=>r.action]])}${d.next_offset!=null?inspect('login-history',{offset:d.next_offset},'next'):''}`;
   if(id==='AUD-02')return html`<button type="button" data-audit-export>${i18n(t,'exportAudit')}</button><p>${i18n(t,'auditExportNote')}</p><p data-audit-result role="status"></p>`;
   if(id==='SYS-02')return html`<dl class="metadata-grid">${Object.entries(d.services).map(([k,v])=>html`<dt>${k}</dt><dd>${t(v)}</dd>`)}</dl>${sectionNote(t,'healthObservationNote')}`;

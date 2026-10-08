@@ -9,16 +9,16 @@ const saved=JSON.parse(localStorage.getItem('mnemuron.appearance.v1.'+account)||
 if(['zh-CN','en'].includes(saved?.locale))root.lang=saved.locale;}catch{}})();`;
 const appearanceBootstrapHash=createHash('sha256').update(appearanceBootstrap).digest('base64');
 export const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-import {pages,pageCode} from './routes.mjs';
-export {pages,pageCode};
+import {pages,pageCode,removedPages} from './routes.mjs';
+export {pages,pageCode,removedPages};
 export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pages.find(p=>route===`/app/${p}`)??null;
 export const label=(key,tag='span')=>`<${tag} data-i18n="${key}">${escapeHtml(text(key))}</${tag}>`;
 
-// Navigation: three groups and fifteen destinations, each an icon + label, no route codes.
+// Navigation: three groups and twelve destinations, each an icon + label, no route codes.
 // What each destination offers or will offer is listed in the feature map (visuals.mjs).
 const navGroups=[['workspace',[['overview','home'],['memories','library'],['summaries','summaries'],['tasks','tasks'],['resume','resume'],['jobs','jobs']]],
-  ['settings',[['connections','connections'],['models','models'],['privacy','privacy'],['security','security'],['audit','audit'],['storage','storage']]],
-  ['settingsGroupPlatform',[['invitations','invitations'],['accounts','accounts'],['system','system']]]];
+  ['settings',[['connections','connections'],['models','models'],['security','security'],['audit','audit'],['storage','storage']]],
+  ['settingsGroupPlatform',[['system','system']]]];
 const groupOf=page=>navGroups.find(([,items])=>items.some(([p])=>p===page))?.[0]||'workspace';
 // Logo: a seal inside corner quotes. The quotes cite the source; the seal is the memory kept on record.
 // Quotes follow the text colour, the seal the accent (styles.css). Geometry: docs/console-design.md.
@@ -31,18 +31,16 @@ const languageControl=()=>`<div class="language-control"><label class="sr-only" 
 
 function consoleShell({title,body,account,csrf,page}) {
   const username=escapeHtml(account?.username||'');
-  const initial=escapeHtml([...(account?.username||'·')][0]);
   const nav=navGroups.map(([group,items])=>`<div class="nav-group">${label(group,'h2')}${items.map(([p,glyph])=>`<a href="/app/${p}"${p===page?' aria-current="page"':''}><span class="nav-icon">${icon(glyph)}</span>${label(p)}</a>`).join('')}</div>`).join('');
   const loading=`<div class="page-heading"><div>${label(title,'h1')}${label('loading','p')}</div></div><div class="loading-card" role="status">${label('loading')}</div>`;
   return `<div class="shell">
   <aside class="sidebar"><a class="brand" href="/app">${brandMark}</a><p class="eyebrow" data-i18n="systemLabel">${text('systemLabel')}</p>
-    <nav aria-label="Mnemuron">${nav}</nav>
-    <div class="account-badge"><span class="avatar" aria-hidden="true">${initial}</span><div><strong>${username}</strong>${label('sessionSecure','small')}</div>${icon('security')}</div></aside>
+    <nav aria-label="Mnemuron">${nav}</nav></aside>
   <div class="workspace">
     <header class="topbar"><div class="breadcrumb">${label(groupOf(page))}<span aria-hidden="true">/</span><strong>${label(title)}</strong></div>
       <div class="topbar-tools"><a class="top-search" href="/app/memories" data-search-shortcut>${icon('search')}${label('shortcutSearch')}<kbd aria-hidden="true">/</kbd></a>${languageControl()}
         <details class="account-menu"><summary data-i18n-title="accountMenu" title="${text('accountMenu')}"><span class="account-name">${username}</span><span class="account-chevron" aria-hidden="true"></span></summary>
-          <div class="account-menu-panel">${label('identity','small')}<strong>${username}</strong><form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet">${icon('logout')}${label('signOut')}</button></form></div></details></div></header>
+          <div class="account-menu-panel">${label('identity','small')}<strong>${username}</strong><a class="account-security" href="/app/security">${icon('security')}${label('security')}</a><form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet">${icon('logout')}${label('signOut')}</button></form></div></details></div></header>
     <main id="main" tabindex="-1"><div id="console-root">${body||loading}</div></main>
     <footer><span class="footer-mark">Mnemuron</span></footer>
   </div></div>
@@ -70,7 +68,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
 }
 // Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
 // add a module only together with its ingress route, or fold it into an existing one.
-const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','visuals.mjs','actions.mjs','connections.mjs'];
+const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','entities.mjs','visuals.mjs','actions.mjs','connections.mjs'];
 const STYLESHEETS=['styles.css','controls.css'];
 const stylesheetContent=()=>Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')]));
 // New markup must not reuse a prior release's cached palette; keep the allowlisted path unchanged.

@@ -21,10 +21,10 @@ export async function pendingAccount(f,name='Synthetic_A') {
  await f.identities.verifyEnrollment(session.token,await previousStepCode(setup.secret));
  return {session,setup,account:f.identities.registrationState(session.token)};
 }
-export async function consoleFixture(t,{core}={}) {
+export async function consoleFixture(t,{core,identity={}}={}) {
  const f=await fixture(t,{start:false,mutate:c=>{
    c.identity_mode='multi_account_v1';c.login.registration_enabled=true;
-   c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:10,console_session_ttl_seconds:3600,...(core?{core:{base_url:core.baseUrl}}:{})};
+   c.identity={encryption_key_file:path.join(path.dirname(c.database_file),'identity-key'),invitation_batch_limit:10,console_session_ttl_seconds:3600,...(core?{core:{base_url:core.baseUrl}}:{}),...identity};
  }});
  writePrivate(f.config.identity.encryption_key_file,randomSecret());await f.start();return f;
 }

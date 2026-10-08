@@ -1,3 +1,4 @@
+import {entityOutputSchema,ENTITY_INSTRUCTION,ENTITY_LIMITS} from '../memory-entities/contracts.mjs';
 import {fail,digest} from '../model-providers/contracts.mjs';
 import {calendarWindow} from './windows.mjs';
 
@@ -56,9 +57,10 @@ export class MemoryWorker {
       let pending=this.jobs.items(job).filter(i=>i.state!=='done');
       while(pending.length){
         this.jobs.renew(job);
-        const items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size));
+        const items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size,job.job_type==='entities'?ENTITY_LIMITS.batch:128));
         const sources=items.map(item=>{const row=this.store.derivedMemory.validateItem(item);if(!row)fail('STALE_INPUT');return row;});
         if(sources.some(s=>!profile.egress.sensitivities.includes(s.sensitivity)))fail('SENSITIVITY_DENIED');
+        const entityFence=()=>{if(job.job_type==='entities'&&job.metadata.lifecycle_stamp!==this.store.entities.lifecycleStamp(job.user_id,sources[0].project_id))fail('STALE_INPUT');};entityFence();
         const multiSpan=['grounded-extractive-v4','grounded-extractive-v5'].includes(job.metadata.prompt_version);
         let summaryInstruction=multiSpan?
           `Account for every source, including long or repetitive sources. Select exact, nonempty, non-overlapping source spans in source order, at most ${MAX_SOURCE_SPANS} spans per source. Keep uncertainty, negation, versions, numbers, decisions, role and quoted-data disclaimers. For sources of at most ${WHOLE_ATOM_LIMIT} UTF-16 code units quote the entire content once, start=0 and end=content_length. For longer sources select complete statements retaining all material qualifications and final decisions; separate distant statements into separate spans so redundant observations and background can be omitted. Aim to select less than half of a long source when it has redundant background, but retain faithful meaning over compression. If this cannot be done safely within the span bound, quote the entire source. Never join non-contiguous text inside a quote, invent transitions or omit contradictory evidence. Omit a source only when no faithful quote can represent it. Quotes are not independently verified facts.`:
@@ -69,16 +71,16 @@ export class MemoryWorker {
         if(job.metadata.prompt_version==='grounded-extractive-v5')summaryInstruction+=' Repeated observations may contain an important warning or limitation absent from the opening and final decision. Before dropping repetitive background, retain at least one complete occurrence of each such warning. Include enough surrounding wording to make that occurrence uniquely locatable. Repetition does not make a qualification dispensable.';
         const input={operation:job.job_type,taxonomy:job.metadata.taxonomy,window:job.metadata.window,
           sources:sources.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
-            current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})),
-          instruction:job.job_type==='summary'?summaryInstruction:classificationInstruction};
-        const reply=await this.organizer.generateStructured(input,outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2'}),{sensitivity:sources.some(s=>s.sensitivity==='sensitive')?'sensitive':sources.some(s=>s.sensitivity==='internal')?'internal':'public',
-          reserve:()=>this.jobs.reserve(job,profile.limits.daily_requests,this.quota)});
-        let results=reply.data.results;
+            ...(job.job_type==='entities'?{}:{current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})})),
+          instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction};
+        const reply=await this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2'}),{sensitivity:sources.some(s=>s.sensitivity==='sensitive')?'sensitive':sources.some(s=>s.sensitivity==='internal')?'internal':'public',
+          reserve:()=>{entityFence();return this.jobs.reserve(job,profile.limits.daily_requests,this.quota,items);}});
+        entityFence();let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
         else if(new Set(results.map(r=>r.memory_id)).size!==results.length)fail('INVALID_SOURCE_SET');
         this.jobs.saveChunk(job,items,results);pending=pending.slice(items.length);
       }
-      this.jobs.publish(job,(items,outputs)=>job.job_type==='classification'?this.store.derivedMemory.publishAnnotations(job,items,outputs):this.store.derivedMemory.publishSummary(job,items,outputs,this.jobs.clock()));
+      this.jobs.publish(job,(items,outputs)=>job.job_type==='entities'?this.store.entities.publish(job,items,outputs):job.job_type==='classification'?this.store.derivedMemory.publishAnnotations(job,items,outputs):this.store.derivedMemory.publishSummary(job,items,outputs,this.jobs.clock()));
     }catch(error){this.jobs.failure(job,error,retry);}
     return this.jobs.get(job.job_id);
   }

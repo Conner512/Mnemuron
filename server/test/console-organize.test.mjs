@@ -6,6 +6,7 @@ import {memoryFixture,businessSnapshot} from './helpers/core-memory-fixture.mjs'
 import {CONSOLE_WRITE_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_READ_SCOPES} from '../../shared/console-contract.mjs';
 import {organizer,taxonomy as syntheticTaxonomy} from './helpers/memory-models.mjs';
 import {MemoryWorker} from '../lib/memory-jobs/worker.mjs';
+import {CORE_SCHEMA_VERSION} from '../lib/store/schema.mjs';
 
 // Synthetic accounts and memories only; disposable loopback store per test.
 async function setup(t){
@@ -214,7 +215,7 @@ test('ORG-08: keep_private, secret records, original fields and writes are prese
   const meta=(await f.get('memory-meta',{memory_id:privateId})).body;await f.act('memory.classify',{memory_id:privateId,revision:meta.revision,category:'technical'});
   const corrected=await f.act('memory.correct',{memory_id:privateId,revision:meta.revision,content:'Synthetic keep-private note, corrected',memory_type:'fact'});
   assert.equal(await f.categoryOf(corrected.body.memory_id),'technical');assert.equal(f.store.webVisibility.visible(web,corrected.body.memory_id),false);
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,7,'no schema version change');
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,CORE_SCHEMA_VERSION,'no schema version change');
 });
 
 test('ORG-09: existing classify and batch classify share the write path and are undoable',async t=>{
@@ -261,7 +262,7 @@ test('ORG-10: a job fenced by a category change is rescheduled under the current
     assert.equal(await f.categoryOf(ids.at(-1)),'engineering','the rescheduled job classifies the new memory');
     assert.equal(await f.categoryOf(ids[0]),'engineering');assert.equal(await f.categoryOf(ids[1]),'preferences','manual categories still win');
   }
-  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,7);
+  assert.equal(f.store.db.prepare('PRAGMA user_version').get().user_version,CORE_SCHEMA_VERSION);
 });
 
 test('ORG-11: the library explains why memories are uncategorized: unconfigured, blocked, unscheduled, running, completed',async t=>{

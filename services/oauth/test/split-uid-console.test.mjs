@@ -102,12 +102,16 @@ test('SPLIT-CONFIG: real-UID construction is checked without root: prerequisites
 });
 
 test('SPLIT-REPRO: the owner check that stops the single-process command rejects a private directory owned by another user',async t=>{
- // Deployment stack: console-operator.mjs:36 -> sqlite-adapter.mjs:9 -> oauth-common.mjs privateDirectory. The failing check
- // is called on a 0700 directory owned by another user: the real /root when not root, else a synthetic temporary directory.
- const {privateDirectory}=await import('../../../shared/oauth-common.mjs');let foreign='/root';
- if(process.getuid()===0){foreign=fs.mkdtempSync(path.join(os.tmpdir(),'synthetic-foreign-'));fs.chmodSync(foreign,0o700);fs.chownSync(foreign,65534,65534);t.after(()=>fs.rmSync(foreign,{recursive:true,force:true}));}
- assert.equal(fs.statSync(foreign).mode&0o777,0o700);assert.notEqual(fs.statSync(foreign).uid,process.getuid());
- assert.throws(()=>privateDirectory(foreign),/private directory permissions\/owner/);
+ // Test the unchanged owner guard against a real synthetic 0700 directory. Do not depend on /root's
+ // host-specific mode, inspect private host directories, or require root/chown to exercise this branch.
+ const {privateDirectory}=await import('../../../shared/oauth-common.mjs');
+ const foreign=fs.mkdtempSync(path.join(os.tmpdir(),'synthetic-foreign-'));fs.chmodSync(foreign,0o700);t.after(()=>fs.rmSync(foreign,{recursive:true,force:true}));
+ const owner=fs.statSync(foreign).uid;assert.equal(fs.statSync(foreign).mode&0o777,0o700);
+ assert.doesNotThrow(()=>privateDirectory(foreign));
+ const uid=t.mock.method(process,'getuid',()=>owner+1);
+ try{assert.notEqual(owner,process.getuid());assert.throws(()=>privateDirectory(foreign),/private directory permissions\/owner/);}
+ finally{uid.mock.restore();}
+ assert.doesNotThrow(()=>privateDirectory(foreign));
 });
 
 test('SPLIT-01: enable-console through fixed service phases upgrades exactly the bound console credential, once, with an audit record',async t=>{

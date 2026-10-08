@@ -8,6 +8,7 @@ import {pathToFileURL} from 'node:url';
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import assert from 'node:assert/strict';
+import {CORE_SCHEMA_VERSION} from '../server/lib/store/schema.mjs';
 
 const root=path.resolve(import.meta.dirname,'..'),base=path.resolve(process.env.MNEMURON_UI_EVIDENCE||os.tmpdir());
 assert.ok(!base.startsWith(root+path.sep)&&base!==root);
@@ -42,7 +43,7 @@ try{
   const facets=async(p=page)=>p.evaluate(async()=>(await fetch('/console-api/memories?part=facets',{credentials:'same-origin'})).json());
   const pillTexts=async()=>page.locator('.memory-table .category-pill').allInnerTexts();
   let writes=0;page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/console-api/action'))writes++;});
-  const before=await command('integrity');check('Baseline schema is version 7',before.user_version===7);
+  const before=await command('integrity');check(`Baseline schema is the current version (${CORE_SCHEMA_VERSION})`,before.user_version===CORE_SCHEMA_VERSION);
 
   // Loading state: hold the list read so the shell's loading card is observable.
   let release;const held=new Promise(r=>release=r);
@@ -157,7 +158,7 @@ try{
   await pick('#operation-dialog [name=category]','decisions',other);await other.locator('[data-organize-step="choose"] button[type=submit]').click();
   await other.locator('[data-organize-step="confirm"] button[type=submit]').click();await other.locator('.organize-result').waitFor();await other.close();
   await op.locator('[data-organize-step="confirm"] button[type=submit]').click();await op.locator('.organize-preview .policy-box[role=status]').waitFor();
-  check('A stale preview is refused and refreshed with the new count',(await op.locator('.organize-preview').innerText()).includes('预览之后记忆有变化')&&(await op.locator('.organize-headline').innerText()).startsWith('59'));
+  check('A stale preview is refused and refreshed with the new count',(await op.locator('.organize-preview').innerText()).includes('预览之后数据有变化')&&(await op.locator('.organize-headline').innerText()).startsWith('59'));
   await shot('11-stale-preview',page,false);await page.keyboard.press('Escape');await op.waitFor({state:'hidden'});
 
   // Merge: delete the category, moving members; then undo it from the manager message.
@@ -271,7 +272,7 @@ try{
   await shot('19-account-b',pb);
 
   const after=await command('integrity');
-  check('Schema stays at version 7',after.user_version===7);
+  check(`Schema stays at the current version (${CORE_SCHEMA_VERSION})`,after.user_version===CORE_SCHEMA_VERSION);
   check('No memory was deleted; only imports, the private fixture, synthetic bulk rows, one created memory and one correction were added (A)',after.users[0].memories===before.users[0].memories+301+2010+2+3);
   check('Account B memories and revisions are untouched',JSON.stringify(after.users[1])===JSON.stringify(before.users[1]));
   // A model job fenced by a category change is rescheduled from the Jobs page (account B, synthetic model).

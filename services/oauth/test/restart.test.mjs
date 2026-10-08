@@ -5,7 +5,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout } from "node:timers/promises";
-import { fixture } from "./fixture.mjs";
+import { fixture, releasePortReservation } from "./fixture.mjs";
 import { writePrivate } from "../../../shared/oauth-common.mjs";
 import { AuthStore } from "../src/sqlite-adapter.mjs";
 
@@ -21,12 +21,13 @@ test("TOKEN-06 real child-process SIGKILL and clean restart preserve valid token
   };
   f.stop = stop;
   const start = async () => {
+    await releasePortReservation(f.ports.authPort);
     child = spawn(process.execPath, [new URL("../src/server.mjs", import.meta.url).pathname, "--isolated-fixture"],
       { env: { ...process.env, MNEMURON_OAUTH_CONFIG: configFile }, stdio: ["ignore", "pipe", "pipe"] });
     for (const stream of [child.stdout, child.stderr]) stream.on("data", chunk => { logs = (logs + chunk).slice(-100000); });
     for (let attempt = 0; attempt < 100; attempt++) {
       if (child.exitCode !== null) throw new Error("Synthetic authorization child failed to start");
-      try { if ((await fetch(`${f.config.issuer}/readyz`)).status === 200) return; } catch {}
+      try { if ((await fetch(`${f.config.issuer}/readyz`,{signal:AbortSignal.timeout(250)})).status === 200) return; } catch {}
       await setTimeout(20);
     }
     throw new Error("Synthetic child readiness timeout");

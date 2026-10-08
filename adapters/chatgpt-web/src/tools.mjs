@@ -92,13 +92,13 @@ const toolResult = result => ({ structuredContent: result, content: [{ type: "te
 const errorSchema=z.strictObject({code:z.string().regex(/^[A-Z_]+$/),retryable:z.boolean(),
   next_action:z.enum(["retry_later","restart_read","refine_request","contact_operator","query_same_operation"]),operation_id:identifier.optional(),degradation_code:z.string().regex(/^[A-Z_]+$/).optional()});
 const safeCodes=new Set(["CORE_UNAVAILABLE","CORE_AUTH_UNAVAILABLE","CORE_RESPONSE_INVALID","CORE_ROUTE_DENIED","SEARCH_UNAVAILABLE","SEARCH_RETRYABLE","SEMANTIC_UNAVAILABLE","MEMORY_NOT_FOUND","INVALID_CORE_QUERY","INVALID_TOOL_ARGUMENTS","INVALID_CURSOR","CURSOR_EXPIRED","MEMORY_VERSION_CHANGED","SOURCE_MANIFEST_CHANGED","SUMMARY_VERSION_CHANGED","SUMMARY_DETAIL_TOO_LARGE","DETAIL_METADATA_TOO_LARGE","TOOL_RESPONSE_TOO_LARGE","REQUEST_CANCELLED"]);
-for(const code of ['IDEMPOTENCY_CONFLICT','OPERATION_NOT_FOUND','INVALID_CLOUD_OPERATION','CLOUD_READ_POLICY_DENIED','CLOUD_MEMORY_DISABLED','OPERATION_RESULT_TOO_LARGE','OPERATION_STATUS_UNKNOWN'])safeCodes.add(code);
+for(const code of ['IDEMPOTENCY_CONFLICT','OPERATION_NOT_FOUND','INVALID_CLOUD_OPERATION','CLOUD_READ_POLICY_DENIED','CLOUD_MEMORY_DISABLED','OPERATION_RESULT_TOO_LARGE','OPERATION_STATUS_UNKNOWN','PROJECT_UNAVAILABLE'])safeCodes.add(code);
 function safeError(error) {
   const code=error instanceof BoundaryError && safeCodes.has(error.code)?error.code:"CORE_UNAVAILABLE";
   const retryable=["CORE_UNAVAILABLE","SEARCH_UNAVAILABLE","SEARCH_RETRYABLE"].includes(code);
   return {error:errorSchema.parse({code,retryable,next_action:code==='OPERATION_STATUS_UNKNOWN'?'query_same_operation':retryable?"retry_later":
     ["CURSOR_EXPIRED","MEMORY_VERSION_CHANGED","SOURCE_MANIFEST_CHANGED","SUMMARY_VERSION_CHANGED","INVALID_CURSOR"].includes(code)?"restart_read":
-      ["INVALID_CORE_QUERY","INVALID_TOOL_ARGUMENTS","MEMORY_NOT_FOUND","TOOL_RESPONSE_TOO_LARGE"].includes(code)?"refine_request":"contact_operator",
+      ["INVALID_CORE_QUERY","INVALID_TOOL_ARGUMENTS","MEMORY_NOT_FOUND","TOOL_RESPONSE_TOO_LARGE","PROJECT_UNAVAILABLE"].includes(code)?"refine_request":"contact_operator",
     ...(error?.operation_id?{operation_id:error.operation_id}:{}),
     ...(["EGRESS_DENIED","BUDGET_EXHAUSTED","VECTOR_NOT_READY","VECTOR_DISABLED","VECTOR_STALE","AUTH_FAILED","NOT_CONFIGURED","VECTOR_UNAVAILABLE"].includes(error?.degradation_code)?{degradation_code:error.degradation_code}:{})})};
 }

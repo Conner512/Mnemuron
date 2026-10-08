@@ -32,15 +32,14 @@
 | 我的空间 | 整理任务 | `/app/jobs` | `JOB` |
 | 连接与设置 | 连接管理 | `/app/connections` | `CON` |
 | 连接与设置 | 模型配置 | `/app/models` | `MOD` |
-| 连接与设置 | 隐私与保留 | `/app/privacy` | `PRV` |
 | 连接与设置 | 账户安全 | `/app/security` | `SEC` |
 | 连接与设置 | 审计记录 | `/app/audit` | `AUD` |
 | 连接与设置 | 存储与备份 | `/app/storage` | `STO` |
-| 平台管理 | 注册码管理 | `/app/invitations` | `INV` |
-| 平台管理 | 账户管理 | `/app/accounts` | `ACC` |
 | 平台管理 | 系统状态 | `/app/system` | `SYS` |
 
-「项目与任务」「接续交接」「隐私与保留」「系统状态」是原型页面：整页由清单生成，每个功能一张卡片，已上线的排在前面。已上线的卡片显示真实数据，也可以带真实操作；规划中的卡片显示线框和开发说明，不带任何操作。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
+「项目与任务」「接续交接」「系统状态」是原型页面：整页由清单生成，每个功能一张卡片，已上线的排在前面。已上线的卡片显示真实数据，也可以带真实操作；规划中的卡片显示线框和开发说明，不带任何操作。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
+
+「隐私与保留」（`PRV`）、「注册码管理」（`INV`）、「账户管理」（`ACC`）三个页面已从 Console 移除：不在导航中出现，也不再渲染。旧地址 `/app/privacy`、`/app/invitations`、`/app/accounts` 由 BFF 以 303 重定向到 `/app`（概览），ingress 示例保留这三条路径只为让旧书签能到达重定向。这三个前缀的编号停用，不再复用。本次只移除网页入口，对应的服务端读取视图和写操作没有删除；是否下线由运维单独决定。注册码由 `services/oauth/bin/identity.mjs invite-*` 签发和撤销；平台管理员角色用 `console-operator.mjs grant-operator|revoke-operator`；多账户的停用与启用用 `console-operator.mjs disable-account|enable-account`（与原网页操作走同一条本地维护路径，最后一名平台管理员受保护）。新记忆默认隐私和数据保留没有网页或命令行入口，只能通过 Console 操作接口（`privacy.defaults`、`retention.save`、`retention.prune`）修改；新建记忆表单仍按账户已保存的默认值预填。
 
 ## 3. 状态与流转
 
@@ -104,6 +103,18 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - 状态用形状加文字表达，颜色只作辅助：已上线为实心方块，规划中为空心方块，部分上线为半实心方块，不开放为短横。
 - 表单控件都有 label；对话框可以用 Esc 关闭，关闭后焦点回到触发按钮；键盘能完成所有操作。
 - 规划中的占位只用清单的 `ui` 描述，不手写假数据。
+
+### 8.1 对象与别名（MEM-08）
+
+- 保存/修订只排入本地队列；后台提取复用账户模型的同意、敏感级别与额度，每次最多 10 条来源。搜索只读已存关系，不调用模型；升级不会给历史记忆补建提取意图。
+- 自动接受只支持完整原文中的严格等同声明，且名称限为单个工程标识或连续中文名称。多词名称、引述、条件、否定、附加句子、供应商与主机关系均保守留待确认；模型置信度不代替原文证明。
+- 记忆详情中的对象区与记忆库的待确认卡片使用独立、授权的 `entities` 读取；卡片支持独立分页和刷新，晚到的旧分页/刷新结果不能替换新结果。
+- 同名对象保持独立。优先显示来源、完整范围、项目/任务/会话上下文、日期与修订；内部 ID 只作辅助。没有项目不等于用户范围，只有实际 `user` 范围才标注为用户范围。
+- 锚点正文须同时满足服务端 `current`、活跃状态和完全相同的当前修订；陈旧或不活跃的候选不能确认。拒绝、纠正、停用和解除关联均保留服务端决策边界，不改写记忆正文。
+- 手动名称最多 80 个 Unicode 字符。确认对话框明确列出具体名称与来源；手机上完整换行。对象之间的同一对象关联会停用两个对象的手动别名，不在对象之间搬动手动名称；有证明的名称仍依赖原始证明与桥接，解除后扩展失效。相关关系不作为别名搜索扩展。
+- 详情关闭、返回、较新的详情读取、退出登录均使旧回复失效。结果到达后焦点进入状态提示，确认标题不能被粘性标题栏遮住；关闭时恢复可用的原触发点。
+- 搜索分别标明原始查询完整匹配、原始词匹配和已确认别名匹配；同时显示歧义与截断。混合检索的 top-20 候选再筛选窗口仍如实保留，不把别名扩展描述为解决所有空结果的办法。
+- 回归入口：`services/oauth/test/console-entities-ui.test.mjs`、`server/test/entity-alias.test.mjs`、`scripts/test-console-entities.mjs`。浏览器套件只使用一次性合成账户和本地服务，不调用真实模型。
 
 ## 9. 安全与隐私红线
 
@@ -192,6 +203,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-05 | 记忆库 | 分类与敏感级别 | live | — | memory.classify, memory.sensitivity |
 | MEM-06 | 记忆库 | 批量整理 | live | memories | memory.organize, memory.organize_undo, memory.batch_classify, memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
+| MEM-08 | 记忆库 | 对象关联、别名与候选审阅 | live | entities | entity.create, entity.alias, entity.alias_correct, entity.alias_remove, entity.link, entity.unlink, entity.resolve |
 | SUM-01 | 分类与摘要 | 分类索引与派生摘要 | live | summaries, summary | — |
 | SUM-02 | 分类与摘要 | 生成分类与摘要 | live | — | jobs.schedule |
 | SUM-03 | 分类与摘要 | 自定义分类体系 | live | taxonomy | category.create, category.rename, category.delete, taxonomy.save |
@@ -217,12 +229,6 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MOD-02 | 模型配置 | 连通性测试 | live | — | models.test |
 | MOD-03 | 模型配置 | 个人向量索引（含首次建立：冻结清单、总预算、手动启用与回滚） | live | — | vector.schedule, vector.prepare, vector.activate, vector.deactivate |
 | MOD-04 | 模型配置 | 用量与预算（含手动调用次数限制） | live | model-usage | models.quota |
-| PRV-01 | 隐私与保留 | 外发许可总览 | live | models | — |
-| PRV-02 | 隐私与保留 | 新记忆默认设置 | live | privacy-defaults | privacy.defaults |
-| PRV-03 | 隐私与保留 | 数据保留策略 | live | retention | retention.save |
-| PRV-04 | 隐私与保留 | 清理过期数据 | live | — | retention.prune |
-| PRV-05 | 隐私与保留 | 删除账户与全部数据 | policy | — | — |
-| PRV-06 | 隐私与保留 | ChatGPT 读取范围（只读，运维配置） | live | capabilities | — |
 | SEC-01 | 账户安全 | 修改密码 | live | — | security.password |
 | SEC-02 | 账户安全 | 更换验证器 | live | — | security.totp.begin, security.totp.complete |
 | SEC-03 | 账户安全 | 轮换恢复码 | live | — | security.recovery_codes |
@@ -234,14 +240,17 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | STO-02 | 存储与备份 | 导入为新记忆 | live | — | storage.import |
 | STO-03 | 存储与备份 | 存储用量 | live | storage | — |
 | STO-04 | 存储与备份 | 整库备份与恢复 | policy | — | — |
-| INV-01 | 注册码管理 | 注册码清单 | live | invitations | — |
-| INV-02 | 注册码管理 | 批量签发 | live | — | invitations.issue |
-| INV-03 | 注册码管理 | 撤销 | live | — | invitations.revoke, invitations.revoke_batch |
-| ACC-01 | 账户管理 | 账户清单 | live | accounts | — |
-| ACC-02 | 账户管理 | 停用与启用 | live | — | accounts.disable, accounts.enable |
-| ACC-03 | 账户管理 | 平台管理员角色 | live | — | accounts.role |
-| ACC-04 | 账户管理 | 查看他人记忆 | policy | — | — |
 | SYS-01 | 系统状态 | 平台开关 | live | capabilities | — |
 | SYS-02 | 系统状态 | 服务健康 | live | system-health | — |
 | SYS-03 | 系统状态 | 版本与迁移 | live | system-version | — |
 | SYS-04 | 系统状态 | 备份状态 | live | backups | — |
+
+### 审计来源、引用与导出边界（AUD-01 / AUD-02）
+
+- `GET /console-api/audit?source=core|identity` 每次只返回一个来源，省略 `source` 时为 Core。`entries`、`offset`、`limit`、`next_offset` 全部属于所选来源；不再提供混合的 `core_entries`。界面切换来源保留各自页码，提交筛选重置两者页码。操作名及结果为精确匹配，时间筛选发送规范 UTC 时间；界面输入、显示使用浏览器本地时区。
+- Core 记录中的 `credential_id` 是当时留下的凭据引用；可查到的名称、Agent、设备及实例 ID 是凭据签发信息。实例等稳定 ID 保留完整值。当前的撤销状态、当前连接名称/状态与当前记忆标题清楚区分，不推测旧记录缺失的执行者、连接或查询结果。
+- 连接映射必须由当前账户的凭据绑定表精确匹配；个人连接包括凭据版本及现已撤销的版本。系统连接只通过当前账户的明确绑定识别。旧绑定已丢失时显示未知/未映射，不通过名称或时间猜测。
+- 记忆标题在读取审计页时，仅从本账户当前可读、项目生命周期未删除的记忆解析，最多 500 条/页。正文不随审计接口返回。外账户、已删除项目、缺失的记忆引用保留事件所录 ID，不提供标题或可点击链接。标题不足可能是本页查询上限，不声称内容已被删除。
+- 新的 `memory.query` 最多记录 20 个词法子查询返回的 ID，明确标记 `result_refs_kind=lexical_subquery` 与截断。一次 hybrid/semantic 检索可能调用多个词法子查询；这些行、数量和 ID 不代表用户发起的搜索次数或最终语义结果。旧记录的 `result_refs=null` 与新记录的空数组有区别。`memory.read` 记录成功读取的目标 ID。
+- `mnemuron-own-audit-v2` 导出仅含当前选中的来源与筛选、事件字段白名单、有限凭据签发信息、当前连接元数据、当前可读记忆标题和词法子查询引用，不含正文、原始查询、密钥或私有哈希。导出按独立来源分页，最多 100 页/16 MiB；是有上限的实时列表，不是数据库快照。失败、无效分页、换来源/筛选、登出使未完成导出失效，不下载部分结果。
+- 核心与界面回归：`server/test/console-audit.test.mjs`、`services/oauth/test/console-audit-ui.test.mjs`、`services/oauth/test/console-actions.test.mjs` 中 HTTP-AUDIT；独立真实浏览器验收 `scripts/test-console-audit.mjs` 使用一次性双账户 loopback fixture，涵盖详情隔离、两个来源与分页、迟到响应、导出取消和窄屏。

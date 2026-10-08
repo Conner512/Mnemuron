@@ -21,6 +21,8 @@ enable-console-basic --config /private/auth.json --core-database /private/core.s
 enable-console | enable-console-basic --worker-config /private/identity-worker.json --account-id ID --confirm
   (split service UIDs: run as root; OAuth and Core steps run under their own service UIDs)
 grant-operator | revoke-operator --config /private/auth.json --account-id ID --confirm
+disable-account | enable-account --config /private/auth.json --account-id ID --confirm
+  (multi-account member lockout; needs configured local maintenance; the last active operator stays protected)
 provision-once --config /private/auth.json --confirm
 recovery-begin --config /private/auth.json --proof-file /private/proofs.json --output /private/new-session.json --confirm
 recovery-complete --config /private/auth.json --session-file /private/session.json --proof-file /private/new-factor.json --confirm
@@ -31,7 +33,8 @@ No command downloads memories, enables MCP writes, or restores shared databases.
   const enable=args.has('--worker-config')?['--worker-config','--account-id']:['--config','--core-database','--account-id'];
   const allowed={
     'core-key':['--output'], 'enable-console':enable,'enable-console-basic':enable,
-    'grant-operator':['--config','--account-id'],'revoke-operator':['--config','--account-id'],'provision-once':['--config'],
+    'grant-operator':['--config','--account-id'],'revoke-operator':['--config','--account-id'],
+    'disable-account':['--config','--account-id'],'enable-account':['--config','--account-id'],'provision-once':['--config'],
     'recovery-begin':['--config','--proof-file','--output'],'recovery-complete':['--config','--session-file','--proof-file']
   }[command];requireConfig(!!allowed&&args.has('--confirm'),'explicit command confirmation');
   requireConfig([...args].every(([k,v])=>[...allowed,'--confirm','--isolated-fixture'].includes(k)&&(v===true||typeof v==='string'&&!v.startsWith('--')))&&allowed.every(k=>args.has(k)),'complete command arguments');
@@ -64,6 +67,12 @@ No command downloads memories, enables MCP writes, or restores shared databases.
     }else if(command==='grant-operator'||command==='revoke-operator'){
       const account=args.get('--account-id'),a=ids.byId(account);requireConfig(a&&ids.eligible(a.subject),'active exact account');
       ids.store.transaction(()=>{ids.console.role(account,command==='grant-operator');ids.audit(account,`operator.${command}`);});result={status:'updated',account_id:account,operator:ids.console.operator(account)};
+    }else if(command==='disable-account'||command==='enable-account'){
+      // Same local maintenance path the removed web Accounts page used: disable revokes the account's sessions,
+      // grants and Core credentials; enable restores it. The last active operator cannot be disabled.
+      const maintenance=new IdentityMaintenance(ids,config);requireConfig(maintenance.enabled(),'configured local maintenance');
+      const account=args.get('--account-id');requireConfig(ids.byId(account),'exact account');
+      result=await maintenance.setState(account,command==='disable-account'?'disable':'enable');
     }else{
       const maintenance=new IdentityMaintenance(ids,config);
       if(command==='provision-once'){requireConfig(maintenance.enabled(),'configured local maintenance');result=await maintenance.run();}

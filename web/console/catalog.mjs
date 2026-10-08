@@ -13,7 +13,7 @@ export const catalog={
   securityNote:'登录需要密码与动态验证码。恢复证明组合尚待确认，不启用弱恢复。',modelsNote:'模型资源与费用策略待确认。不显示密钥或其他账户配置。',storageNote:'只展示本人记录的统计。整库备份、恢复与下载不在网页权限内。',platformNote:'当前账户没有平台管理授权。此页不返回其他账户的身份或统计。',
   error:'请求未完成',errorNote:'请返回并重试。未授权、过期或依赖故障不会跳过安全校验。',identity:'当前账户',state:'状态',created:'创建时间',scope:'范围',status:'状态',consent:'授权连接',consentNote:'仅允许读取你授权的记忆和项目。不会写入记忆、切换任务或确认 Resume。',
   policy:'权限边界',pendingPolicies:'未批准操作保持关闭',noDemo:'所有数据来自当前账户；不可用时不会显示演示数据。',newMemory:'新建记忆',organize:'手动整理',export:'导出记忆',restore:'整库恢复',configure:'修改配置',issue:'网页签发',manage:'角色管理',revoke:'撤销授权',
-  passwordConfirm:'再次输入密码',alreadyShown:'密钥已显示过。本页不会重新展示；请使用已保存的验证器或恢复码。',oauthClient:'请求连接的应用',scopeIdentity:'识别你的 Mnemuron 账户',scopeOffline:'使用可撤销、轮换的刷新令牌保持连接',scopeMemory:'读取你授权的记忆',scopeProject:'读取你授权的项目上下文',systemLabel:'个人记忆系统',workspaceLabel:'个人工作空间',heroLabel:'让记忆持续连接',passwordTotp:'密码与动态验证码',back:'返回安全入口',expired:'此步骤已过期，请从安全入口重新开始。',loginFailed:'登录信息无效或账户尚不可用。请检查凭证后重试。',rateLimited:'尝试过于频繁，请稍后重试。',pendingStep:'此步骤暂不可用，请重新检查当前注册状态。',
+  passwordConfirm:'再次输入密码',alreadyShown:'密钥已显示过。本页不会重新展示；请使用已保存的验证器或恢复码。',oauthClient:'请求连接的应用',scopeIdentity:'识别你的 Mnemuron 账户',scopeOffline:'使用可撤销、轮换的刷新令牌保持连接',scopeMemory:'读取你授权的记忆',scopeProject:'读取你授权的项目上下文',systemLabel:'个人记忆系统',workspaceLabel:'个人工作空间',heroLabel:'让记忆持续连接',passwordTotp:'密码与动态验证码',back:'返回安全入口',expired:'此步骤已过期，请从安全入口重新开始。',loginFailed:'登录信息无效或账户尚不可用。请检查凭证后重试。',rateLimited:'尝试过于频繁，请稍后重试。',pendingStep:'此步骤暂不可用，请重新检查当前注册状态。'
  },
  en:{
   consoleLogin:'Sign in to the console',consoleLoginNote:'Manage your memories and connections. This sign-in does not authorize ChatGPT.',oauthLogin:'Connect ChatGPT',oauthLoginNote:'Verify your Mnemuron account, then explicitly allow read-only access. This does not sign you in to the console.',oauthConsent:'Allow ChatGPT read-only access',oauthRestartHelp:'This link belongs to one authorization request, not a permanent integration page. Close this page and start a new connection from ChatGPT.',oauthRetry:'Retry this authorization',
@@ -29,7 +29,7 @@ export const catalog={
   securityNote:'Sign-in requires a password and authenticator code. Recovery proof policy is pending; no weaker recovery is enabled.',modelsNote:'Model resources and cost policy are pending. Keys and other accounts’ configuration are never shown.',storageNote:'Only your record totals are shown. Whole-database backup, restore and download are not web capabilities.',platformNote:'This account has no platform management grant. This page returns no other account identities or statistics.',
   error:'Request not completed',errorNote:'Go back and try again. Authorization, expiry and dependency checks are never bypassed.',identity:'Current account',state:'State',created:'Created',scope:'Scope',status:'Status',consent:'Authorize connection',consentNote:'Read only memories and projects you authorize. No memory writes, task switching or Resume confirmation.',
   policy:'Permission boundary',pendingPolicies:'Unapproved operations stay disabled',noDemo:'All data belongs to the current account. No demo fallback when unavailable.',newMemory:'New memory',organize:'Run organizer',export:'Export memories',restore:'Restore database',configure:'Change settings',issue:'Issue in browser',manage:'Manage roles',revoke:'Revoke grant',
-  passwordConfirm:'Confirm password',alreadyShown:'The secret was already displayed. It is not shown again; use your saved authenticator or recovery codes.',oauthClient:'Application requesting access',scopeIdentity:'Identify your Mnemuron account',scopeOffline:'Keep this connection with revocable, rotating refresh tokens',scopeMemory:'Read memories you authorize',scopeProject:'Read project context you authorize',systemLabel:'PERSONAL MEMORY SYSTEM',workspaceLabel:'PERSONAL WORKSPACE',heroLabel:'YOUR MEMORY, CONNECTED',passwordTotp:'Password and authenticator code',back:'Return to the safe entry point',expired:'This step expired. Start again from the safe entry point.',loginFailed:'The sign-in details or account are unavailable. Check your credentials and try again.',rateLimited:'Too many attempts. Please try again later.',pendingStep:'This step is unavailable. Check your current registration status.',
+  passwordConfirm:'Confirm password',alreadyShown:'The secret was already displayed. It is not shown again; use your saved authenticator or recovery codes.',oauthClient:'Application requesting access',scopeIdentity:'Identify your Mnemuron account',scopeOffline:'Keep this connection with revocable, rotating refresh tokens',scopeMemory:'Read memories you authorize',scopeProject:'Read project context you authorize',systemLabel:'PERSONAL MEMORY SYSTEM',workspaceLabel:'PERSONAL WORKSPACE',heroLabel:'YOUR MEMORY, CONNECTED',passwordTotp:'Password and authenticator code',back:'Return to the safe entry point',expired:'This step expired. Start again from the safe entry point.',loginFailed:'The sign-in details or account are unavailable. Check your credentials and try again.',rateLimited:'Too many attempts. Please try again later.',pendingStep:'This step is unavailable. Check your current registration status.'
  }
 };
 
@@ -67,9 +67,7 @@ Object.assign(catalog['zh-CN'], {
   pageNote_memories:'搜索、查看并追溯属于你的每一条记忆。', pageNote_summaries:'分类整理与来源关联的摘要，始终与原始记忆分开。',
   pageNote_jobs:'查看整理任务的进度、结果与需要处理的问题。', pageNote_connections:'在同一处查看你的应用授权和 Agent 连接。',
   pageNote_models:'查看模型配置边界与外发政策。密钥不会在页面回显。', pageNote_security:'管理你的身份、验证器与账户访问。',
-  pageNote_audit:'仅查看当前账户的访问与安全事件。', pageNote_storage:'了解个人记录与存储边界。个人数据不等于整库备份。',
-  pageNote_invitations:'查看注册准入规则。签发能力由明确的运维权限控制。',
-  pageNote_accounts:'账户管理与个人记忆读取相互独立。',
+  pageNote_audit:'仅查看当前账户的访问与安全事件。', pageNote_storage:'了解个人记录与存储边界。个人数据不等于整库备份。'
 });
 Object.assign(catalog.en, {
   viewWithoutWrite:'Details are available. Changes are not enabled; inspecting data will not modify it.',
@@ -89,9 +87,7 @@ Object.assign(catalog.en, {
   pageNote_memories:'Search, inspect and trace every memory in your own space.', pageNote_summaries:'Source-linked categories and summaries, kept separate from original memories.',
   pageNote_jobs:'Inspect organizer progress, results and items that need attention.', pageNote_connections:'Review your application grants and Agent connections in one place.',
   pageNote_models:'Review model boundaries and egress policy. Secret keys are never displayed.', pageNote_security:'Your identity, authenticator and account access.',
-  pageNote_audit:'Access and security events for the current account only.', pageNote_storage:'Understand your record totals. Personal data is not a whole-database backup.',
-  pageNote_invitations:'Review registration rules. Issuance requires explicit operator permission.',
-  pageNote_accounts:'Account administration does not grant access to personal memories.',
+  pageNote_audit:'Access and security events for the current account only.', pageNote_storage:'Understand your record totals. Personal data is not a whole-database backup.'
 });
 
 Object.assign(catalog["zh-CN"],{
@@ -167,6 +163,77 @@ Object.assign(catalog["zh-CN"],{
   "approveEgress": "我允许将所选级别的记忆发送至此模型",
   "approveQuery": "我也允许发送搜索词以进行语义检索",
   "keyWriteOnlyNote": "密钥仅可写入，服务不会返回原密钥。跨站点更换服务地址时，必须重新填写密钥。",
+  "enableModel": "启用",
+  "models.discover": "获取可用模型",
+  "discoverModels": "获取可用模型",
+  "discoverConsent": "仅本次：用上面的地址和密钥向该服务请求模型列表（不发送任何记忆，不保存设置）",
+  "discoverRunning": "正在请求模型列表…",
+  "discoverFound": "找到模型",
+  "discoverShowing": "显示前",
+  "discoverDropped": "已忽略无法使用的名称",
+  "discoverEmpty": "该服务没有返回任何模型，请手动填写模型名称",
+  "discoverPick": "可用模型",
+  "discoverPickPrompt": "选择一个模型…",
+  "discoverKeptModel": "当前填写的模型名称已保留，它不在返回的列表中",
+  "discoverManualNote": "列表只来自该服务的自述，不代表模型已验证可用；也可以直接手动填写。",
+  "discoverKeySaved": "将使用已保存的密钥",
+  "discoverKeyTyped": "将使用刚填写的密钥（仅本次，不保存）",
+  "discoverKeyNone": "不带密钥请求",
+  "dimensionsShort": "维",
+  "deletedProjects": "已删除",
+  "deletedProjectsNote": "已删除的项目只对你可见，所有记录都被保留（不会清除，账户原有的保留规则不变）。恢复需要重新预览并验证密码和验证码。",
+  "noDeletedProjects": "没有已删除的项目。",
+  "projectDeletedTag": "已删除",
+  "mergedMembers": "已合并的项目",
+  "deletedAt": "删除于",
+  "restoreDeletedProject": "恢复项目",
+  "mergeProject": "合并到…",
+  "deleteProject": "删除项目",
+  "projects.lifecycle_delete": "删除项目",
+  "projects.lifecycle_restore": "恢复已删除的项目",
+  "projects.merge": "合并项目",
+  "projects.lifecycle_preview": "预览项目变更",
+  "impactTitle": "影响范围",
+  "impactMemories": "记忆（有效 / 全部）",
+  "impactRevisions": "记忆版本",
+  "impactCheckpoints": "检查点",
+  "impactEvents": "事件",
+  "impactSummaries": "相关摘要",
+  "impactVectors": "已向量化的记忆",
+  "impactPending": "待确认的预览与提议",
+  "impactJobs": "排队中的整理任务",
+  "impactMembers": "包含的项目",
+  "impactTruncated": "只显示前 20 项；确认时会核对完整内容。",
+  "impactConflicts": "冲突",
+  "conflictSameTitle": "同名任务（保持为不同任务）",
+  "conflictName": "名称或别名相同",
+  "noConflicts": "没有发现冲突。",
+  "mergeConflictNote": "冲突不会被自动处理：同名任务保持独立，名称和别名都不会被改写。",
+  "mergeNoUndo": "合并后目前无法撤销。原项目的记录保留原来的项目标识，新写入会进入目标项目。",
+  "deleteRetentionNote": "删除后，这个项目及其合并的项目会从所有正常读取中隐藏，新的写入会被拒绝；记录全部保留，可在“已删除”中恢复。项目标识保持占用，不会被重新创建。",
+  "restoreLifecycleNote": "恢复后项目及其合并的项目重新可用，控制台归档状态保持不变；之前的预览和确认授权不会恢复，需要时请重新发起。",
+  "mergeRetentionNote": "合并不会移动或改写任何已有记录。",
+  "mergeSourceNote": "要合并的项目：",
+  "mergeTargetSearch": "搜索目标项目（名称或别名）",
+  "mergeTarget": "目标项目",
+  "previewMerge": "预览合并",
+  "mergeTargetMore": "只显示前 20 个匹配项，请输入更多文字缩小范围。",
+  "noEligibleTargets": "没有可合并的目标项目。",
+  "typeProjectName": "请输入项目名称以确认：",
+  "confirmDeleteProject": "删除项目",
+  "confirmRestoreProject": "恢复项目",
+  "confirmMergeProject": "确认合并",
+  "refreshPreview": "重新预览",
+  "previewExpires": "预览有效至",
+  "projectDeletedResult": "项目已删除：",
+  "projectRestoredResult": "项目已恢复：",
+  "projectMergedResult": "项目已合并：",
+  "operationDone": "操作已完成",
+  "deletedRestoreHint": "可以在项目列表的“已删除”中恢复。",
+  "previewRefreshedExpired": "预览已过期，已重新生成。请核对后再确认；项目名称和密码已保留，请重新输入验证码。",
+  "previewRefreshedChanged": "预览之后数据有变化，已重新生成预览。请核对后再确认；项目名称和密码已保留，请重新输入验证码。",
+  "previewRefreshed": "已重新生成预览。",
+  "SESSION_REQUIRED": "登录已失效，请重新登录",
   "probeCostNote": "此测试发送合成文本，不发送个人记忆，但真实模型可能计费，并计入每日限额。",
   "chatgptGrants": "ChatGPT 授权",
   "agentConnections": "Agent 连接",
@@ -195,18 +262,13 @@ Object.assign(catalog["zh-CN"],{
   "currentPassword": "当前密码",
   "newPassword": "新密码",
   "otpFreshNote": "请使用尚未用于登录或其他操作的动态验证码；必要时等待下一组验证码。",
-  "invitationLimits": "有效期 1–1440 分钟；本次最大生成数量：",
   "count": "生成数量",
   "ttlMinutes": "有效期（分钟）",
   "revokeBatch": "撤销整批",
   "operatorRequired": "当前账户不是平台管理员，不能访问注册码或其他账户的管理信息。",
   "role": "角色",
-  "accountAdminNote": "只管理账户状态和角色，不提供访问其他用户记忆的入口。最后一位管理员受到保护。",
-  "maintenanceRequired": "启停账户需要配置本地身份供应与凭证撤销 worker。",
   "enable": "启用",
   "disable": "停用",
-  "grantOperator": "授予管理员",
-  "revokeOperator": "移除管理员",
   "personalExport": "个人数据迁移",
   "importMemories": "导入个人记忆",
   "file": "导入文件",
@@ -238,6 +300,20 @@ Object.assign(catalog["zh-CN"],{
   "NOT_CONFIGURED": "尚未启用所需模型",
   "EGRESS_DENIED": "模型外发尚未获准",
   "ADDRESS_DENIED": "目标地址被安全策略拒绝",
+  "TLS_REQUIRED": "公网地址必须使用 HTTPS",
+  "SECRET_REFERENCE_INVALID": "服务端密钥引用无效",
+  "AUTH_NOT_CONFIGURED": "服务端未配置所需密钥",
+  "INVALID_ROUTE": "模型接口路径无效",
+  "PROJECT_NOT_DELETED": "这个项目没有被删除，无需恢复",
+  "NOT_FOUND": "没有找到这个内容",
+  "PREVIEW_EXPIRED": "预览已过期，请重新预览",
+  "PROJECT_MERGE_CONFLICT": "这两个项目不能合并（同一项目，或会形成循环）",
+  "CONFIRMATION_MISMATCH": "请准确输入项目名称以确认",
+  "INPUT_TOO_LARGE": "发送给模型的内容超过上限",
+  "MODEL_DISCOVERY_CONSENT_REQUIRED": "请先勾选“仅本次向该服务请求模型列表”",
+  "MODEL_KEY_UNAVAILABLE": "这个地址没有已保存的密钥：请填写密钥，或先保存当前地址",
+  "MODEL_DISCOVERY_PENDING": "上一次模型列表请求仍在进行，请稍候",
+  "MODEL_LIST_INVALID": "该服务返回的模型列表格式无法识别，请手动填写模型名称",
   "IDENTITY_MAINTENANCE_REQUIRED": "需要配置本地身份维护服务",
   "LAST_OPERATOR": "不能停用或降级最后一位管理员",
   "IDEMPOTENCY_CONFLICT": "此操作编号已用于不同请求",
@@ -349,6 +425,77 @@ Object.assign(catalog["en"],{
   "approveEgress": "I approve sending selected memory classes to this model",
   "approveQuery": "I also approve sending search queries for semantic retrieval",
   "keyWriteOnlyNote": "Keys are write-only. Changing the service origin clears the old key unless a new key is supplied.",
+  "enableModel": "Enable",
+  "models.discover": "Find available models",
+  "discoverModels": "Find available models",
+  "discoverConsent": "This time only: ask this service for its model list using the address and key above (no memory is sent; nothing is saved)",
+  "discoverRunning": "Requesting the model list…",
+  "discoverFound": "Models found",
+  "discoverShowing": "showing the first",
+  "discoverDropped": "unusable names ignored",
+  "discoverEmpty": "This service returned no models; enter the model name manually",
+  "discoverPick": "Available models",
+  "discoverPickPrompt": "Choose a model…",
+  "discoverKeptModel": "The model name you entered is kept; it is not in the returned list",
+  "discoverManualNote": "The list is only what the service reports about itself; it does not verify a model. You can also type the name.",
+  "discoverKeySaved": "Uses the saved key",
+  "discoverKeyTyped": "Uses the key just entered (this time only, not saved)",
+  "discoverKeyNone": "Requests without a key",
+  "dimensionsShort": "dimensions",
+  "deletedProjects": "Deleted",
+  "deletedProjectsNote": "Deleted projects are visible only to you, and every record is kept (nothing is purged; your account's retention rules are unchanged). Restoring needs a fresh preview and your password and authenticator code.",
+  "noDeletedProjects": "No deleted projects.",
+  "projectDeletedTag": "Deleted",
+  "mergedMembers": "Merged projects",
+  "deletedAt": "Deleted",
+  "restoreDeletedProject": "Restore project",
+  "mergeProject": "Merge into…",
+  "deleteProject": "Delete project",
+  "projects.lifecycle_delete": "Delete project",
+  "projects.lifecycle_restore": "Restore deleted project",
+  "projects.merge": "Merge project",
+  "projects.lifecycle_preview": "Preview project change",
+  "impactTitle": "Impact",
+  "impactMemories": "Memories (active / all)",
+  "impactRevisions": "Memory revisions",
+  "impactCheckpoints": "Checkpoints",
+  "impactEvents": "Events",
+  "impactSummaries": "Related summaries",
+  "impactVectors": "Vector-indexed memories",
+  "impactPending": "Pending previews and proposals",
+  "impactJobs": "Queued organize jobs",
+  "impactMembers": "Projects included",
+  "impactTruncated": "Only the first 20 are shown; the confirmation checks everything.",
+  "impactConflicts": "Conflicts",
+  "conflictSameTitle": "Same-title task (kept as separate tasks)",
+  "conflictName": "Same name or alias",
+  "noConflicts": "No conflicts found.",
+  "mergeConflictNote": "Conflicts are never resolved automatically: same-title tasks stay separate, and no name or alias is rewritten.",
+  "mergeNoUndo": "A merge cannot currently be undone. Existing records keep their original project; new writes go to the target project.",
+  "deleteRetentionNote": "After deleting, this project and its merged projects are hidden from every normal read and new writes are refused. Every record is kept and can be restored from Deleted. The project ID stays reserved and is never recreated.",
+  "restoreLifecycleNote": "Restoring makes the project and its merged projects available again; the Console archive state is kept. Earlier previews and confirmations are not revived; start them again if needed.",
+  "mergeRetentionNote": "A merge moves and rewrites no existing record.",
+  "mergeSourceNote": "Project to merge:",
+  "mergeTargetSearch": "Search target projects (name or alias)",
+  "mergeTarget": "Target project",
+  "previewMerge": "Preview merge",
+  "mergeTargetMore": "Only the first 20 matches are shown; type more to narrow them.",
+  "noEligibleTargets": "No project can take this merge.",
+  "typeProjectName": "Type the project name to confirm:",
+  "confirmDeleteProject": "Delete project",
+  "confirmRestoreProject": "Restore project",
+  "confirmMergeProject": "Confirm merge",
+  "refreshPreview": "Preview again",
+  "previewExpires": "Preview valid until",
+  "projectDeletedResult": "Project deleted:",
+  "projectRestoredResult": "Project restored:",
+  "projectMergedResult": "Project merged:",
+  "operationDone": "Done",
+  "deletedRestoreHint": "You can restore it from Deleted in the project list.",
+  "previewRefreshedExpired": "The preview expired and was made again. Review it before confirming; the project name and password are kept, so enter a new authenticator code.",
+  "previewRefreshedChanged": "Something changed after the preview, so it was made again. Review it before confirming; the project name and password are kept, so enter a new authenticator code.",
+  "previewRefreshed": "The preview was made again.",
+  "SESSION_REQUIRED": "Your session ended; sign in again",
   "probeCostNote": "This sends synthetic text, not personal memories. The real model may charge and the call counts toward your daily limit.",
   "chatgptGrants": "ChatGPT grants",
   "agentConnections": "Agent connections",
@@ -377,18 +524,13 @@ Object.assign(catalog["en"],{
   "currentPassword": "Current password",
   "newPassword": "New password",
   "otpFreshNote": "Use an OTP not already consumed by login or another action. Wait for the next code when necessary.",
-  "invitationLimits": "TTL: 1–1440 minutes. Maximum batch size:",
   "count": "Count",
   "ttlMinutes": "Lifetime (minutes)",
   "revokeBatch": "Revoke batch",
   "operatorRequired": "This account has no operator role. Invitation and account administration is unavailable.",
   "role": "Role",
-  "accountAdminNote": "Manage account state and roles only, not other users’ memories. The last operator is protected.",
-  "maintenanceRequired": "Account activation/suspension requires the local identity provisioning and revocation worker.",
   "enable": "Enable",
   "disable": "Disable",
-  "grantOperator": "Grant operator",
-  "revokeOperator": "Remove operator",
   "personalExport": "Personal data portability",
   "importMemories": "Import personal memories",
   "file": "Import file",
@@ -420,6 +562,20 @@ Object.assign(catalog["en"],{
   "NOT_CONFIGURED": "The required model is not enabled",
   "EGRESS_DENIED": "Model egress has not been approved",
   "ADDRESS_DENIED": "The destination address is denied by security policy",
+  "TLS_REQUIRED": "Public addresses must use HTTPS",
+  "SECRET_REFERENCE_INVALID": "The server-side key reference is invalid",
+  "AUTH_NOT_CONFIGURED": "The server-side key is not configured",
+  "INVALID_ROUTE": "The model API path is invalid",
+  "PROJECT_NOT_DELETED": "This project is not deleted, so there is nothing to restore",
+  "NOT_FOUND": "Not found",
+  "PREVIEW_EXPIRED": "The preview expired; preview again",
+  "PROJECT_MERGE_CONFLICT": "These projects cannot be merged (the same project, or the merge would form a cycle)",
+  "CONFIRMATION_MISMATCH": "Type the project name exactly to confirm",
+  "INPUT_TOO_LARGE": "The content sent to the model exceeds the limit",
+  "MODEL_DISCOVERY_CONSENT_REQUIRED": "First tick \"Ask this service for its model list, this time only\"",
+  "MODEL_KEY_UNAVAILABLE": "There is no saved key for this address: enter a key, or save this address first",
+  "MODEL_DISCOVERY_PENDING": "The previous model list request is still running; please wait",
+  "MODEL_LIST_INVALID": "This service's model list was not in a recognized format; enter the model name manually",
   "IDENTITY_MAINTENANCE_REQUIRED": "Local identity maintenance must be configured",
   "LAST_OPERATOR": "The last operator cannot be disabled or demoted",
   "IDEMPOTENCY_CONFLICT": "This operation ID belongs to another request",
@@ -469,24 +625,16 @@ Object.assign(catalog['zh-CN'],{
   registrationDisabled:'当前暂未开放注册。请联系平台管理员；已有账户可继续登录。',
   registrationSteps:'创建用户：验证注册码 → 设置用户名与密码 → 绑定验证器 → 保存恢复码。所有步骤完成并绑定核心身份后才能登录。',
   registrationCredentials:'用户名使用 1–100 位英文字母、数字、点、横线、下划线或 @；密码至少 14 位。请使用自己的验证器完成下一步。',
-  platform:'平台管理',invitationIdentifier:'注册码 / 批次编号',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
-  operatorManagement:'管理员操作',managementDisabled:'此项管理功能尚未由服务器启用。',rolesServerOnly:'角色只能通过服务器命令调整；此页面不能授予管理员权限，也不能查看其他人的记忆。',
-  invitationPrivateNote:'注册码为一次性凭证，有效期为 1–1440 整数分钟。仅在签发结果中显示，请通过可信渠道交给接收人。',
-  invitationSavedNote:'请现在复制并妥善保存注册码。关闭此窗口后，列表只显示状态，不显示原码。',
-  currentAccount:'当前账户',mfaStatus:'动态口令',bindingStatus:'核心身份',verified:'已验证',ready:'就绪',operator:'平台管理员',member:'普通用户',issued:'待使用',reserved:'注册中',consumed:'已使用',provisioning:'绑定中',pending_mfa:'待绑定验证器',
-  disableAccountNote:'停用将撤销该账户的登录会话、OAuth 授权和核心凭证。其记忆及历史仍保留，不会删除。',
+  platform:'平台管理',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
+  verified:'已验证',ready:'就绪',operator:'平台管理员',member:'普通用户',issued:'待使用',reserved:'注册中',consumed:'已使用',provisioning:'绑定中',pending_mfa:'待绑定验证器',
   enableAccountNote:'重新启用会建立新的账户凭证，不会恢复旧会话或旧密钥；对方需要重新登录与授权。'
 });
 Object.assign(catalog.en,{
   registrationDisabled:'Registration is currently closed. Contact the platform operator; existing accounts can still sign in.',
   registrationSteps:'Create an account: validate invitation → choose username and password → bind authenticator → save recovery codes. Sign-in requires all steps and a completed Core identity binding.',
   registrationCredentials:'Use 1–100 letters, digits, dots, hyphens, underscores or @ for your username and at least 14 characters for your password. Have your own authenticator ready.',
-  platform:'Platform management',invitationIdentifier:'Invitation / batch ID',revocation_pending:'Sessions disabled; Core revocation pending. Refresh to verify completion.',
-  operatorManagement:'Operator actions',managementDisabled:'This management feature has not been enabled on the server.',rolesServerOnly:'Roles are managed by server command only. This page cannot grant operator rights or read another account’s memories.',
-  invitationPrivateNote:'Codes are single-use credentials, valid for 1–1440 whole minutes. They appear only in the issuance result; share them through a trusted channel.',
-  invitationSavedNote:'Copy and securely save these codes now. After this dialog closes, the inventory shows status only, never the original codes.',
-  currentAccount:'Current account',mfaStatus:'Authenticator',bindingStatus:'Core identity',verified:'Verified',ready:'Ready',operator:'Platform operator',member:'Member',issued:'Available',reserved:'Registering',consumed:'Used',provisioning:'Provisioning',pending_mfa:'Awaiting authenticator',
-  disableAccountNote:'Disabling revokes this account’s sessions, OAuth grants and Core credentials. Memories and history are retained, not deleted.',
+  platform:'Platform management',revocation_pending:'Sessions disabled; Core revocation pending. Refresh to verify completion.',
+  verified:'Verified',ready:'Ready',operator:'Platform operator',member:'Member',issued:'Available',reserved:'Registering',consumed:'Used',provisioning:'Provisioning',pending_mfa:'Awaiting authenticator',
   enableAccountNote:'Enabling creates fresh account credentials, not old sessions or keys. The account must sign in and authorize again.'
 });
 
@@ -496,14 +644,14 @@ Object.assign(catalog['zh-CN'],{
  constellationEmpty:'还没有记忆。连接一个 Agent，新的记忆会在这里汇聚成网络。',
  activityLabel:'近 30 天',activityTitle:'记忆写入活动',activityTotal:'新增',peakDay:'单日峰值',noActivity:'最近 30 天没有新增记忆',
  compositionLabel:'结构',compositionTitle:'类型与生命周期',typesLegend:'记忆类型',lifecycle:'生命周期',categoriesLegend:'分类',
- flowLabel:'处理管线',shortcutSearch:'搜索记忆',consoleStatus:'控制台会话',sessionSecure:'已验证 · 本账户隔离',
+ flowLabel:'处理管线',shortcutSearch:'搜索记忆',consoleStatus:'控制台会话',sessionSecure:'已验证 · 本账户隔离'
 });
 Object.assign(catalog.en,{
  constellationLabel:'MEMORY CONSTELLATION',constellationTitle:'Your memory network',constellationNote:'Active memories grouped by category and type. Node size reflects count.',
  constellationEmpty:'No memories yet. Connect an agent and new memories will gather here.',
  activityLabel:'LAST 30 DAYS',activityTitle:'Memory activity',activityTotal:'New',peakDay:'Daily peak',noActivity:'No new memories in the last 30 days',
  compositionLabel:'STRUCTURE',compositionTitle:'Types & lifecycle',typesLegend:'Memory types',lifecycle:'Lifecycle',categoriesLegend:'Categories',
- flowLabel:'PIPELINE',shortcutSearch:'Search memories',consoleStatus:'Console session',sessionSecure:'Verified · account isolated',
+ flowLabel:'PIPELINE',shortcutSearch:'Search memories',consoleStatus:'Console session',sessionSecure:'Verified · account isolated'
 });
 
 // Workbench UI (memory-centred shell). Later assignments intentionally override older labels.
@@ -514,7 +662,7 @@ Object.assign(catalog['zh-CN'],{
  recentStream:'最近写入',pulseTitle:'记忆概况',activityStrip:'近 30 天写入',pipelineTitle:'整理管线',openLibrary:'打开记忆库',
  libraryHint:'选择一条记忆，在右侧查看正文、来源与修订历史。',filters:'筛选',resultCount:'条结果',closePane:'关闭详情',
  summaryIndex:'分类索引',summaryList:'派生摘要',auditTimeline:'事件时间线',accountPanel:'账户',
- authPoint_source:'每条记忆都保留来源与版本',authPoint_readonly:'第三方应用仅获得你明确授权的访问权限',authPoint_isolation:'账户彼此隔离，登录需要密码和动态验证码',
+ authPoint_source:'每条记忆都保留来源与版本',authPoint_readonly:'第三方应用仅获得你明确授权的访问权限',authPoint_isolation:'账户彼此隔离，登录需要密码和动态验证码'
 });
 Object.assign(catalog.en,{
  navHome:'Home',navLibrary:'Library',navSummaries:'Summaries',navJobs:'Organize',navSettings:'Settings',navMore:'More settings',
@@ -523,19 +671,19 @@ Object.assign(catalog.en,{
  recentStream:'Recently saved',pulseTitle:'At a glance',activityStrip:'Saved in the last 30 days',pipelineTitle:'Organizer pipeline',openLibrary:'Open library',
  libraryHint:'Select a memory to read its content, sources and revision history on the right.',filters:'Filters',resultCount:'results',closePane:'Close details',
  summaryIndex:'Category index',summaryList:'Derived summaries',auditTimeline:'Event timeline',accountPanel:'Account',
- authPoint_source:'Every memory keeps its source and revision',authPoint_readonly:'Apps get only the access you explicitly grant',authPoint_isolation:'Accounts are isolated; sign-in needs a password and a one-time code',
+ authPoint_source:'Every memory keeps its source and revision',authPoint_readonly:'Apps get only the access you explicitly grant',authPoint_isolation:'Accounts are isolated; sign-in needs a password and a one-time code'
 });
 
 // HUD skin: status bar and radar. Status values shown only from real session state.
 Object.assign(catalog['zh-CN'],{
  statusClock:'本地时间',statusSession:'会话',sessionVerified:'已验证',statusLink:'核心链路',linkPending:'连接中',linkOnline:'在线',linkDegraded:'异常',
  radarLabel:'记忆雷达',radarTitle:'分类扫描',radarNote:'扇区按有效记忆的分类占比划分，外圈刻度是近 30 天每天的写入量。',radarEmpty:'尚无记忆信号',
- recentStream:'最近写入',openLibrary:'打开记忆库',pulseTitle:'信号概况',pipelineTitle:'整理管线',activityStrip:'近 30 天写入',
+ recentStream:'最近写入',openLibrary:'打开记忆库',pulseTitle:'信号概况',pipelineTitle:'整理管线',activityStrip:'近 30 天写入'
 });
 Object.assign(catalog.en,{
  statusClock:'Local time',statusSession:'Session',sessionVerified:'Verified',statusLink:'Core link',linkPending:'Connecting',linkOnline:'Online',linkDegraded:'Degraded',
  radarLabel:'MEMORY RADAR',radarTitle:'Category sweep',radarNote:'Sectors show each category’s share of active memories; rim ticks are daily saves over the last 30 days.',radarEmpty:'No memory signal yet',
- recentStream:'Recently saved',openLibrary:'Open library',pulseTitle:'Signal overview',pipelineTitle:'Organizer pipeline',activityStrip:'Saved in the last 30 days',
+ recentStream:'Recently saved',openLibrary:'Open library',pulseTitle:'Signal overview',pipelineTitle:'Organizer pipeline',activityStrip:'Saved in the last 30 days'
 });
 
 // Ink archive: overview distribution and registration steps (override earlier labels).
@@ -550,16 +698,16 @@ Object.assign(catalog['zh-CN'],{
  tasks:'项目与任务',resume:'接续交接',privacy:'隐私与保留',system:'系统状态',
  operatorRequired:'当前账户不是平台管理员，不能查看平台管理信息（注册码、账户和系统状态）。',
  pageNote_tasks:'查看项目、任务与各 Agent 的来源分支，为接续工作做准备。',pageNote_resume:'预览、确认并追踪跨 Agent 的工作接续；每一步都需要你明确确认。',
- pageNote_privacy:'决定哪些内容可以离开你的空间，以及数据保留多久。',pageNote_system:'平台开关、服务健康、版本与备份，仅平台管理员可见。',
+ pageNote_system:'平台开关、服务健康、版本与备份，仅平台管理员可见。',
  featureStatus_live:'已实现',featureStatus_planned:'规划中',featureStatus_policy:'不开放',featureStatus_partial:'部分实现',
  roadmapTitle:'功能规划',roadmapNote:'以下功能已列入规划，界面仅为占位，暂不可用。',devNotes:'开发说明',featureStandard:'开发标准见',
  contractRead:'读取接口',contractWrite:'写操作',contractCore:'复用 Core 接口',contractScope:'Core 权限',contractReauth:'需要当前密码和动态验证码',contractOperator:'仅平台管理员',
  plannedPlaceholder:'规划中 · 暂无数据',featureProgress:'功能进度',featureProgressNote:'按功能清单统计。已上线的功能都有真实接口；规划中的功能只有界面占位。',featurePage:'页面',
  noProjects:'还没有项目。Agent 第一次上报项目后会出现在这里。',projectName:'项目名称',projectId:'项目 ID',modelKind:'模型',egressAllowed:'允许发送记忆',queryAllowed:'允许发送检索词',
- sysConsoleOperations:'控制台写操作',sysCoreWritable:'核心服务可写',sysInvitations:'注册码管理',sysAccounts:'账户管理',sysRoles:'角色管理',sysConnections:'连接管理',sysRecovery:'账户恢复策略',sysMaintenance:'身份维护 Worker',
+ sysConsoleOperations:'控制台写操作',sysCoreWritable:'核心服务可写',sysInvitations:'注册码管理（命令行与接口）',sysAccounts:'账户管理（命令行与接口）',sysRoles:'角色管理（命令行与接口）',sysConnections:'连接管理',sysRecovery:'账户恢复策略',sysMaintenance:'身份维护 Worker',
  taskTitle:'任务',sourceBranch:'来源分支',lastCheckpoint:'最近检查点',checkpoint:'检查点',generatePreview:'生成预览',newProject:'新建项目',newTask:'新建任务',proposal:'修改提议',runReconciliation:'运行对账',
  previewResume:'预览接续',confirmResume:'确认接续',resumeId:'接续编号',targetAgent:'目标 Agent',deliveryState:'投递状态',completionAck:'完成回执',
- defaultSensitivity:'默认敏感级别',eventRetentionDays:'事件保留天数',checkpointRetentionDays:'检查点保留天数',pruneNow:'立即清理',
+ checkpointRetentionDays:'检查点保留天数',
  svcCore:'核心服务',svcWeb:'网页网关',svcAuth:'认证服务',svcWorker:'整理 Worker',svcVector:'向量索引',releaseVersion:'发布版本',schemaVersion:'数据库版本',runtimeVersion:'运行时',
  backupTime:'备份时间',backupSize:'大小',backupVerified:'校验结果',
  featOVW01:'记忆分布与计数',featOVW01Note:'按分类展示有效记忆的占比，以及原子记忆、来源、摘要和整理任务的数量。',
@@ -596,11 +744,6 @@ Object.assign(catalog['zh-CN'],{
  featMOD02:'连通性测试',featMOD02Note:'用合成内容测试模型连接，不发送真实记忆。',
  featMOD03:'个人向量索引',featMOD03Note:'为语义检索重建你的个人向量索引。',
  featMOD04:'用量与预算',featMOD04Note:'按天查看请求次数和 Token 用量，并与预算上限对比。',
- featPRV01:'外发许可总览',featPRV01Note:'哪些模型获准接收你的记忆内容或检索词。修改请到模型配置。',
- featPRV02:'新记忆默认设置',featPRV02Note:'设置控制台新记忆的默认敏感级别。',
- featPRV03:'数据保留策略',featPRV03Note:'设置以后捕获事件的默认保留天数；已有事件不变，检查点和记忆永久保留。',
- featPRV04:'清理过期数据',featPRV04Note:'确认后清理本账户到期且未固定保留的原始事件正文，并报告数量；不删除检查点。',
- featPRV05:'删除账户与全部数据',featPRV05Note:'网页端不提供。停用账户会保留记忆和历史；彻底删除需由运维按数据保留流程在服务器上处理。',
  featSEC01:'修改密码',featSEC01Note:'需要当前密码和一个未使用过的动态验证码。',
  featSEC02:'更换验证器',featSEC02Note:'新验证器验证通过后，才会替换旧的验证器。',
  featSEC03:'轮换恢复码',featSEC03Note:'生成一组新的恢复码，旧恢复码立即失效。',
@@ -612,19 +755,7 @@ Object.assign(catalog['zh-CN'],{
  featSTO02:'导入为新记忆',featSTO02Note:'从导出文件导入，全部作为新记忆，不覆盖现有记录。',
  featSTO03:'存储用量',featSTO03Note:'记忆、来源、事件和版本的数量。',
  featSTO04:'整库备份与恢复',featSTO04Note:'网页端不提供。整库备份和恢复由运维在服务器上执行，并单独校验。',
- featINV01:'注册码清单',featINV01Note:'查看每个注册码的状态和有效期；原始注册码不会再次显示。',
- featINV02:'批量签发',featINV02Note:'一次签发多个注册码，有效期 1–1440 分钟。',
- featINV03:'撤销',featINV03Note:'撤销单个注册码或整批注册码。',
- featACC01:'账户清单',featACC01Note:'用户名、状态和角色；不显示任何人的记忆。',
- featACC02:'停用与启用',featACC02Note:'停用会撤销会话和凭证，数据保留；重新启用后需要重新登录和授权。',
- featACC03:'平台管理员角色',featACC03Note:'授予或收回平台管理员角色；至少保留一名管理员。',
- featACC04:'查看他人记忆',featACC04Note:'不提供。平台管理员只能管理账户，不能读取他人的记忆，也不能代替他人操作。',
- featPRV06:'ChatGPT 读取范围',featPRV06Note:'同一账户中已授权的智能体和设备读取同一套记忆。此设置由运维在服务器配置中启用，控制台只显示当前状态。',readPolicyUniform:'ChatGPT 与其他智能体读取一致',readPolicyUniformOn:'已启用：ChatGPT 与本账户其他已授权的智能体读取同样的有效记忆（机密级别除外）。已修订、已撤回的历史版本仍按原有的逐条规则处理。',readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有的逐条授权规则读取。启用需要运维单独确认。',readPolicyOperator:'控制台不能更改这项设置，也不再提供逐条的 ChatGPT 可见性开关。',
- 
- 
- 
- 
- 
+ readPolicyUniform:'ChatGPT 与其他智能体读取一致',readPolicyUniformOn:'已启用：ChatGPT 与本账户其他已授权的智能体读取同样的有效记忆（机密级别除外）。已修订、已撤回的历史版本仍按原有的逐条规则处理。',readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有的逐条授权规则读取。启用需要运维单独确认。',readPolicyOperator:'控制台不能更改这项设置，也不再提供逐条的 ChatGPT 可见性开关。',
  'memory.web_policy':'ChatGPT 读取范围',
  connChatGPTWeb:'插件连接',connChatGPTWebNote:'通过系统预置的插件连接读取你的记忆，不限于浏览器。目前由 ChatGPT 插件使用：每次在 ChatGPT 中授权都会留下一条授权记录；撤销后需要在 ChatGPT 中重新连接。',
  connAuthorized:'已授权',connNotAuthorized:'未授权',connReadScope:'读取范围',connReadAll:'全部记忆（机密除外）',connReadGranted:'仅逐条授权的记忆',connAdjust:'调整',
@@ -668,22 +799,22 @@ Object.assign(catalog['zh-CN'],{
  featSYS01:'平台开关',featSYS01Note:'服务器当前生效的控制台写操作、账户管理、连接管理和恢复策略。',
  featSYS02:'服务健康',featSYS02Note:'核心服务、网页网关、认证服务、整理 Worker 和向量索引的就绪状态。',
  featSYS03:'版本与迁移',featSYS03Note:'当前发布版本、数据库结构版本和运行时版本。',
- featSYS04:'备份状态',featSYS04Note:'核对备份状态的数据来源；尚未接入可信记录时明确显示无法确认。',
+ featSYS04:'备份状态',featSYS04Note:'核对备份状态的数据来源；尚未接入可信记录时明确显示无法确认。'
 });
 Object.assign(catalog.en,{
  tasks:'Projects & tasks',resume:'Resume & handoff',privacy:'Privacy & retention',system:'System status',
  operatorRequired:'This account has no operator role. Invitations, accounts and system status are unavailable.',
  pageNote_tasks:'Projects, tasks and each agent’s source branch, ready for picking work back up.',pageNote_resume:'Preview, confirm and track work resumed across agents. Every step needs your explicit confirmation.',
- pageNote_privacy:'Decide what may leave your space and how long data is kept.',pageNote_system:'Platform switches, service health, versions and backups. Platform operators only.',
+ pageNote_system:'Platform switches, service health, versions and backups. Platform operators only.',
  featureStatus_live:'Implemented',featureStatus_planned:'Planned',featureStatus_policy:'Not offered',featureStatus_partial:'Partly implemented',
  roadmapTitle:'Roadmap',roadmapNote:'These features are planned. Their controls are placeholders and do not work yet.',devNotes:'Developer notes',featureStandard:'Development standard:',
  contractRead:'Read view',contractWrite:'Write actions',contractCore:'Core API to reuse',contractScope:'Core scopes',contractReauth:'Needs the current password and an authenticator code',contractOperator:'Platform operators only',
  plannedPlaceholder:'Planned · no data yet',featureProgress:'Feature progress',featureProgressNote:'Counted from the feature map. Live features have real endpoints; planned ones are placeholders only.',featurePage:'Page',
  noProjects:'No projects yet. They appear here after an agent first reports one.',projectName:'Project',projectId:'Project ID',modelKind:'Model',egressAllowed:'May receive memories',queryAllowed:'May receive search terms',
- sysConsoleOperations:'Console writes',sysCoreWritable:'Core writable',sysInvitations:'Invitation management',sysAccounts:'Account management',sysRoles:'Role management',sysConnections:'Connection management',sysRecovery:'Recovery policy',sysMaintenance:'Identity maintenance worker',
+ sysConsoleOperations:'Console writes',sysCoreWritable:'Core writable',sysInvitations:'Invitation management (CLI and API)',sysAccounts:'Account management (CLI and API)',sysRoles:'Role management (CLI and API)',sysConnections:'Connection management',sysRecovery:'Recovery policy',sysMaintenance:'Identity maintenance worker',
  taskTitle:'Task',sourceBranch:'Source branch',lastCheckpoint:'Latest checkpoint',checkpoint:'Checkpoint',generatePreview:'Generate preview',newProject:'New project',newTask:'New task',proposal:'Proposal',runReconciliation:'Run reconciliation',
  previewResume:'Preview resume',confirmResume:'Confirm resume',resumeId:'Resume ID',targetAgent:'Target agent',deliveryState:'Delivery',completionAck:'Completion ACK',
- defaultSensitivity:'Default sensitivity',eventRetentionDays:'Keep events (days)',checkpointRetentionDays:'Keep checkpoints (days)',pruneNow:'Prune now',
+ checkpointRetentionDays:'Keep checkpoints (days)',
  svcCore:'Core service',svcWeb:'Web gateway',svcAuth:'Auth service',svcWorker:'Organizer worker',svcVector:'Vector index',releaseVersion:'Release',schemaVersion:'Database schema',runtimeVersion:'Runtime',
  backupTime:'Backed up',backupSize:'Size',backupVerified:'Verification',
  featOVW01:'Distribution and counts',featOVW01Note:'Category share of active memories, plus counts of memories, sources, summaries and jobs.',
@@ -720,11 +851,6 @@ Object.assign(catalog.en,{
  featMOD02:'Connectivity test',featMOD02Note:'Probe a model with synthetic input; no real memory is sent.',
  featMOD03:'Personal vector index',featMOD03Note:'Rebuild your personal vector index for semantic search.',
  featMOD04:'Usage and budget',featMOD04Note:'Daily requests and tokens against the budget limits.',
- featPRV01:'Egress approvals',featPRV01Note:'Which models may receive memory content or search terms. Change them under Model settings.',
- featPRV02:'Defaults for new memories',featPRV02Note:'Default sensitivity for console-created memories.',
- featPRV03:'Retention policy',featPRV03Note:'Default retention for future captured events. Existing events are unchanged; checkpoints and memories remain permanent.',
- featPRV04:'Prune expired data',featPRV04Note:'Confirm removal of your expired, unpinned raw event bodies and report the count. Checkpoints are not deleted.',
- featPRV05:'Delete account and all data',featPRV05Note:'Not offered on the web. Disabling an account keeps memories and history; permanent deletion is an operator procedure on the server.',
  featSEC01:'Change password',featSEC01Note:'Needs the current password and an unused authenticator code.',
  featSEC02:'Replace authenticator',featSEC02Note:'The old authenticator stays until the new one verifies.',
  featSEC03:'Rotate recovery codes',featSEC03Note:'Issue a new set of recovery codes; the old ones stop working at once.',
@@ -736,19 +862,7 @@ Object.assign(catalog.en,{
  featSTO02:'Import as new memories',featSTO02Note:'Import an export file. Everything becomes new memories; nothing is overwritten.',
  featSTO03:'Storage usage',featSTO03Note:'Counts of memories, sources, events and revisions.',
  featSTO04:'Whole-database backup and restore',featSTO04Note:'Not offered on the web. Operators back up and restore the database on the server and verify it separately.',
- featINV01:'Invitation inventory',featINV01Note:'Status and expiry of each code. The codes themselves are never shown again.',
- featINV02:'Issue in batches',featINV02Note:'Issue several codes at once, valid for 1–1440 minutes.',
- featINV03:'Revoke',featINV03Note:'Revoke a single code or a whole batch.',
- featACC01:'Account inventory',featACC01Note:'Username, state and role. Nobody’s memories are shown.',
- featACC02:'Disable and enable',featACC02Note:'Disabling revokes sessions and credentials but keeps data; after enabling, the account signs in and authorizes again.',
- featACC03:'Operator role',featACC03Note:'Grant or revoke the platform operator role; at least one operator always remains.',
- featACC04:'Read other accounts’ memories',featACC04Note:'Not offered. Operators manage accounts only; they cannot read anyone else’s memories or act on their behalf.',
- featPRV06:'ChatGPT read scope',featPRV06Note:'Authorized agents and devices of one account read the same memories. Operators enable this in the server configuration; the console only shows the current state.',readPolicyUniform:'ChatGPT reads like other agents',readPolicyUniformOn:'On: ChatGPT reads the same active memories as the other authorized agents of this account, except secret ones. Corrected and retracted history keeps the earlier per-memory rules.',readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier per-memory grants. Enabling it needs a separate operator confirmation.',readPolicyOperator:'The console cannot change this setting and no longer offers per-memory ChatGPT visibility switches.',
- 
- 
- 
- 
- 
+ readPolicyUniform:'ChatGPT reads like other agents',readPolicyUniformOn:'On: ChatGPT reads the same active memories as the other authorized agents of this account, except secret ones. Corrected and retracted history keeps the earlier per-memory rules.',readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier per-memory grants. Enabling it needs a separate operator confirmation.',readPolicyOperator:'The console cannot change this setting and no longer offers per-memory ChatGPT visibility switches.',
  'memory.web_policy':'ChatGPT read scope',
  connChatGPTWeb:'Plugin connection',connChatGPTWebNote:'Reads your memories through the preconfigured plugin connection; it is not limited to a browser. It is currently used by the ChatGPT plugin: every authorization in ChatGPT is recorded here, and after revoking you reconnect from ChatGPT.',
  connAuthorized:'Authorized',connNotAuthorized:'Not authorized',connReadScope:'Read scope',connReadAll:'All memories except secret',connReadGranted:'Only memories allowed one by one',connAdjust:'Change',
@@ -792,7 +906,7 @@ Object.assign(catalog.en,{
  featSYS01:'Platform switches',featSYS01Note:'Which console writes, account management, connection management and recovery policy the server has in effect.',
  featSYS02:'Service health',featSYS02Note:'Readiness of the core service, web gateway, auth service, organizer worker and vector index.',
  featSYS03:'Versions and migrations',featSYS03Note:'Current release, database schema version and runtime version.',
- featSYS04:'Backup status',featSYS04Note:'Check the source of backup-status evidence; explicitly unknown until trusted records are integrated.',
+ featSYS04:'Backup status',featSYS04Note:'Check the source of backup-status evidence; explicitly unknown until trusted records are integrated.'
 });
 
 Object.assign(catalog['zh-CN'],{
@@ -820,10 +934,6 @@ Object.assign(catalog['zh-CN'],{
   "usedRequests": "已预留请求",
   "firstRunBuildRequests": "首次建立请求（不占每日额度）",
   "remainingRequests": "剩余请求预算",
-  "privacyDefaultsBoundary": "仅作用于以后在控制台新建的记忆；不会修改旧内容。",
-  "retentionBoundary": "仅更改本账户以后捕获事件的默认保留天数，不回溯修改已有事件。检查点、权威任务状态和记忆永久保留。",
-  "pruneBoundary": "仅清除本账户已到期且未被记忆来源引用固定的原始事件正文，每次最多 100 条；保留元数据、记忆、检查点和来源链。此操作无法恢复原始正文。",
-  "confirmPrune": "我确认清理本账户已到期的原始事件正文",
   "loginHistoryNote": "记录登录和敏感操作重新验证的成功或失败；未知用户名不归属任何账户，旧版本未记录的失败不会补造。",
   "exportAudit": "导出当前筛选的审计记录",
   "auditExportNote": "仅导出本人审计元数据，不包含正文、密码、密钥。导出为有上限的实时列表，不是数据库快照。",
@@ -843,7 +953,6 @@ Object.assign(catalog['zh-CN'],{
   "failure": "失败",
   "taxonomyCategories": "分类标识（每行一个）",
   "taxonomyEditNote": "最多 64 类，小写字母开头，仅使用字母、数字、下划线或连字符，保留 uncategorized。使用中的手动分类不能删除；修改后旧整理任务暂停，摘要标记过期。",
-  "retentionMode": "保留方式",
   "limited": "按天保留",
   "permanent": "永久保留",
   "BATCH_SELECTION_REQUIRED": "请先选择 1～50 条记忆",
@@ -890,10 +999,6 @@ Object.assign(catalog.en,{
   "usedRequests": "Reserved requests",
   "firstRunBuildRequests": "First-run build requests (outside daily limit)",
   "remainingRequests": "Remaining requests",
-  "privacyDefaultsBoundary": "Applies only to future console-created memories, never existing records.",
-  "retentionBoundary": "Changes the default for future captured events in this account only. Existing events, checkpoints, canonical task state and memories are unchanged.",
-  "pruneBoundary": "Removes expired, unpinned raw event bodies for this account, up to 100 per action. Metadata, memories, checkpoints and provenance remain. Raw bodies cannot be recovered.",
-  "confirmPrune": "I confirm removal of my expired raw event bodies",
   "loginHistoryNote": "Includes successful/failed sign-in and sensitive-action reauthentication. Unknown usernames have no owner; historical failures are not fabricated.",
   "exportAudit": "Export filtered audit",
   "auditExportNote": "Exports only your audit metadata, without bodies or secrets. Bounded live listing, not a database snapshot.",
@@ -913,7 +1018,6 @@ Object.assign(catalog.en,{
   "failure": "Failure",
   "taxonomyCategories": "Category IDs (one per line)",
   "taxonomyEditNote": "Up to 64 lowercase category IDs. Use letters, digits, underscores or hyphens; keep uncategorized. In-use manual categories cannot be removed. Old jobs pause and summaries become stale.",
-  "retentionMode": "Retention mode",
   "limited": "Limited days",
   "permanent": "Permanent",
   "BATCH_SELECTION_REQUIRED": "Select 1–50 memories first",
@@ -1017,11 +1121,11 @@ Object.assign(catalog['zh-CN'],{
  deleteCategoryNote:'这个分类中的记忆移到：',deleteCategoryBoundary:'不会删除任何记忆，模型分类结果也一并移动。可在“最近整理”中撤销。',deleteAndMove:'删除并移动',
  categoryManagerNote:'名称可随时修改，不影响已分类的记忆和摘要。分类最多 64 个。',categoryCreated:'已新建分类',categoryRenamed:'已重命名',categoryDeleted:'已删除分类，移动的记忆数：',
  importProgress:'正在导入',importDone:'导入完成',importCreated:'新增',importExisting:'已存在（未重复导入）',organizeImported:'整理导入的记忆',importResumeNote:'重新导入同一文件会跳过已导入的记录',
- PREVIEW_CHANGED:'预览之后记忆有变化。已重新生成预览，请核对后再次确认。',PREVIEW_REQUIRED:'请先预览变更再确认',SELECTION_TOO_LARGE:'一次最多整理 2000 条，请缩小范围',
+ PREVIEW_CHANGED:'预览之后数据有变化。请查看新的预览后再确认。',PREVIEW_REQUIRED:'请先预览变更再确认',SELECTION_TOO_LARGE:'一次最多整理 2000 条，请缩小范围',
  SELECTION_TRUNCATED:'检索结果过多，无法完整核验，请缩小范围',SELECTION_EMPTY:'当前选择已没有可整理的记忆',INVALID_SELECTION:'请勾选 1–100 条记忆，或使用“选择全部匹配结果”',
  BATCH_ALREADY_UNDONE:'这次整理已经撤销过',BATCH_NOT_FOUND:'找不到这次整理记录',UNDO_CONFLICT:'这次整理涉及的记忆之后都被改动过，没有可撤销的内容。可先撤销之后的那次整理。',
  CATEGORY_EXISTS:'已有同名分类',INVALID_CATEGORY_LABEL:'分类名称需为 1–40 个字符，不能包含 < >',INVALID_CATEGORY:'这个分类不能执行该操作',TAXONOMY_FULL:'分类最多 64 个',
- SETTINGS_VERSION_CHANGED:'分类已在其他页面修改，已载入最新内容，请重新操作',INVALID_CATEGORY_TARGET:'只有有效记忆可以分类',
+ SETTINGS_VERSION_CHANGED:'分类已在其他页面修改，已载入最新内容，请重新操作',INVALID_CATEGORY_TARGET:'只有有效记忆可以分类'
 });
 Object.assign(catalog.en,{
  moveToCategory:'Move to category','memory.organize':'Organize into a category','memory.organize_undo':'Undo organize','category.manage':'Manage categories','category.create':'Create category','category.rename':'Rename category','category.delete':'Delete category',
@@ -1040,11 +1144,11 @@ Object.assign(catalog.en,{
  deleteCategoryNote:'Move its memories to:',deleteCategoryBoundary:'No memory is deleted; model classifications move too. You can undo this from Recent changes.',deleteAndMove:'Delete and move',
  categoryManagerNote:'Names can change at any time without affecting classified memories or summaries. Up to 64 categories.',categoryCreated:'Category created',categoryRenamed:'Renamed',categoryDeleted:'Category deleted; memories moved:',
  importProgress:'Importing',importDone:'Import finished',importCreated:'New',importExisting:'Already present (not duplicated)',organizeImported:'Organize imported memories',importResumeNote:'importing the same file again skips records already imported',
- PREVIEW_CHANGED:'Memories changed after the preview. The preview was refreshed; review it and confirm again.',PREVIEW_REQUIRED:'Preview the change before confirming',SELECTION_TOO_LARGE:'At most 2,000 memories at once; narrow the selection',
+ PREVIEW_CHANGED:'Something changed after the preview. Review a fresh preview, then confirm again.',PREVIEW_REQUIRED:'Preview the change before confirming',SELECTION_TOO_LARGE:'At most 2,000 memories at once; narrow the selection',
  SELECTION_TRUNCATED:'Too many search matches to verify; narrow the selection',SELECTION_EMPTY:'Nothing in this selection can be organized any more',INVALID_SELECTION:'Select 1–100 memories, or use “Select everything matching this filter”',
  BATCH_ALREADY_UNDONE:'This change was already undone',BATCH_NOT_FOUND:'This change could not be found',UNDO_CONFLICT:'Every memory in this change was changed again since, so nothing was undone. Undo the later change first.',
  CATEGORY_EXISTS:'A category with this name already exists',INVALID_CATEGORY_LABEL:'Category names need 1–40 characters and cannot contain < or >',INVALID_CATEGORY:'This category does not allow that operation',TAXONOMY_FULL:'At most 64 categories',
- SETTINGS_VERSION_CHANGED:'Categories changed in another tab. The latest version is loaded; try again.',INVALID_CATEGORY_TARGET:'Only active memories can be categorized',
+ SETTINGS_VERSION_CHANGED:'Categories changed in another tab. The latest version is loaded; try again.',INVALID_CATEGORY_TARGET:'Only active memories can be categorized'
 });
 Object.assign(catalog['zh-CN'],{organizeNote:'可跨页勾选最多 100 条，或选择当前筛选的全部结果；先预览，再确认，之后可撤销。批量撤回每批最多 50 条。',editCategoryIds:'编辑分类标识（高级）',
  featMEM06Note:'勾选或按筛选选择记忆，预览后移到分类，可撤销；也可批量撤回。',featSUM03Note:'新建、重命名和删除分类（成员移到指定分类，可撤销）；模型分类结果保持可见。'});
@@ -1064,7 +1168,7 @@ Object.assign(catalog['zh-CN'],{
  jobStaleTaxonomyHint:'点击“按新分类重新整理”，会用当前分类重新安排同类任务；已有分类结果保留。',
  rescheduleWithCategories:'按新分类重新整理','jobs.retry':'重试任务',
  rescheduleNote:'这个任务按旧的分类规划。确认后会按当前分类重新安排同类整理任务，并把按旧分类排队的同类任务标记为已接替。已有的分类结果和手动分类都会保留；可能产生模型调用费用。',
- rescheduledResult:'已按新分类排队任务数',supersededResult:'已接替的旧任务',rescheduledNoWork:'没有需要重新整理的记忆，旧任务已标记为已接替。',
+ rescheduledResult:'已按新分类排队任务数',supersededResult:'已接替的旧任务',rescheduledNoWork:'没有需要重新整理的记忆，旧任务已标记为已接替。'
 });
 Object.assign(catalog.en,{
  allMatchingSelected:'All active memories matching the current filter are selected (at most 2,000 per step); the preview shows the exact count.',
@@ -1077,7 +1181,7 @@ Object.assign(catalog.en,{
  jobStaleTaxonomyHint:'Use “Reschedule with current categories” to plan this work again; existing classifications are kept.',
  rescheduleWithCategories:'Reschedule with current categories','jobs.retry':'Retry job',
  rescheduleNote:'This job was planned with an older category list. Confirming plans the same kind of organizing again with the current categories and marks the outdated queued jobs of this kind as replaced. Existing classifications and manual categories are kept; model calls may be charged.',
- rescheduledResult:'Jobs queued with current categories',supersededResult:'outdated jobs replaced',rescheduledNoWork:'Nothing needs organizing again; the outdated jobs were marked as replaced.',
+ rescheduledResult:'Jobs queued with current categories',supersededResult:'outdated jobs replaced',rescheduledNoWork:'Nothing needs organizing again; the outdated jobs were marked as replaced.'
 });
 // Readable results and errors for existing memory actions.
 Object.assign(catalog['zh-CN'],{
@@ -1089,7 +1193,7 @@ Object.assign(catalog['zh-CN'],{
  MEMORY_NOT_FOUND:'找不到这条记忆，可能已不在当前账户中。',JOB_NOT_RETRYABLE:'这个任务当前不能重试。',JOB_TERMINAL:'已完成的任务不能取消。',JOB_NOT_FOUND:'找不到这个任务。',
  IMPORT_CONFLICT:'同一条导出记录的内容与之前导入的版本不同，已停止导入。请检查文件来源。',INVALID_CONSOLE_INPUT:'输入格式不正确，请刷新页面后重试。',INVALID_PAYLOAD:'输入内容不符合要求，请检查后重试。',
  INVALID_IDENTIFIER:'标识格式不正确，请刷新页面后重试。',CONSOLE_INPUT_TOO_LARGE:'这次提交的内容太大，请减少数量后重试。',OPERATION_FAILED:'同一操作之前已失败，请查看结果后重新发起。',
- EXPORT_RECORD_TOO_LARGE:'有记录超过单页导出上限，请使用离线导出流程。',STALE_ACCOUNT:'登录状态已变化，请刷新页面。',UNAVAILABLE:'服务暂时不可用，请稍后重试。',
+ EXPORT_RECORD_TOO_LARGE:'有记录超过单页导出上限，请使用离线导出流程。',STALE_ACCOUNT:'登录状态已变化，请刷新页面。',UNAVAILABLE:'服务暂时不可用，请稍后重试。'
 });
 Object.assign(catalog.en,{
  IMPORT_INVALID_JSON:'The file is not valid JSON; it may be damaged or incomplete. Export again and retry. Nothing was imported.',INVALID_IMPORT:'The file is not a Mnemuron personal export (mnemuron-personal-portable-v1). Nothing was imported.',
@@ -1100,7 +1204,7 @@ Object.assign(catalog.en,{
  MEMORY_NOT_FOUND:'This memory could not be found; it may no longer be in this account.',JOB_NOT_RETRYABLE:'This job cannot be retried now.',JOB_TERMINAL:'A completed job cannot be cancelled.',JOB_NOT_FOUND:'This job could not be found.',
  IMPORT_CONFLICT:'A record in the file differs from the version imported earlier, so the import stopped. Check where the file came from.',INVALID_CONSOLE_INPUT:'The input format is invalid; refresh the page and try again.',INVALID_PAYLOAD:'The input does not meet the requirements; check it and try again.',
  INVALID_IDENTIFIER:'An identifier is malformed; refresh the page and try again.',CONSOLE_INPUT_TOO_LARGE:'This submission is too large; reduce the amount and retry.',OPERATION_FAILED:'This operation failed earlier; review the result before starting it again.',
- EXPORT_RECORD_TOO_LARGE:'A record exceeds the page export limit; use the offline export procedure.',STALE_ACCOUNT:'Your sign-in changed; refresh the page.',UNAVAILABLE:'The service is temporarily unavailable; try again later.',
+ EXPORT_RECORD_TOO_LARGE:'A record exceeds the page export limit; use the offline export procedure.',STALE_ACCOUNT:'Your sign-in changed; refresh the page.',UNAVAILABLE:'The service is temporarily unavailable; try again later.'
 });
 // Classification status in the library and Jobs page.
 Object.assign(catalog['zh-CN'],{
@@ -1111,7 +1215,7 @@ Object.assign(catalog['zh-CN'],{
  classifySetupModel:'如需自动分类，请在“模型配置”中设置分类模型并批准发送范围；首次运行前可先测试。',
  classifyOperatorNeeds:'还需要管理员开启',classifyNeedKeyStorage:'模型密钥加密存储',classifyNeedWorker:'后台执行器',
  classifyBrowseUncategorized:'查看未分类记忆',classifyOpenModels:'前往模型配置',classifyStart:'开始自动分类',
- classifyCounts:'当前分类来源',classifyManual:'手动',classifyModel:'模型',jobsNotReady:'暂时不能开始整理：',
+ classifyCounts:'当前分类来源',classifyManual:'手动',classifyModel:'模型',jobsNotReady:'暂时不能开始整理：'
 });
 Object.assign(catalog.en,{
  classifyUnconfigured:'Automatic classification is not set up, so memories show as “Uncategorized”. No classifications were lost.',classifyBlocked:'A classification model exists but cannot run yet:',
@@ -1121,7 +1225,7 @@ Object.assign(catalog.en,{
  classifySetupModel:'For automatic classification, set up a classification model under Models and approve what may be sent; you can test it before the first run.',
  classifyOperatorNeeds:'An operator also needs to enable',classifyNeedKeyStorage:'encrypted model-key storage',classifyNeedWorker:'the background worker',
  classifyBrowseUncategorized:'Show uncategorized memories',classifyOpenModels:'Open Models',classifyStart:'Start automatic classification',
- classifyCounts:'Current category sources',classifyManual:'manual',classifyModel:'model',jobsNotReady:'Organizing cannot start yet:',
+ classifyCounts:'Current category sources',classifyManual:'manual',classifyModel:'model',jobsNotReady:'Organizing cannot start yet:'
 });
 
 // Memory presentation: a display title, a labelled original tag (never presented as a file), and provenance kinds.
@@ -1167,11 +1271,11 @@ Object.assign(catalog.en,{built:'Built, awaiting activation',deactivated:'Deacti
  FIRST_RUN_IN_PROGRESS:'The first build already started; activate or deactivate it first.',BUDGET_ALREADY_SET:'The first-run budget is already set and cannot change.',BUDGET_REQUIRED:'Prepare the first build first.'});
 
 // Read scope as ChatGPT actually experiences it, including an earlier account-wide read-all setting.
-Object.assign(catalog['zh-CN'],{connReadActiveUniform:'与其他智能体一致的有效记忆（机密除外）',connReadDetails:'详情',
+Object.assign(catalog['zh-CN'],{connReadActiveUniform:'与其他智能体一致的有效记忆（机密除外）',
  readPolicyLegacyReadAll:'尚未启用统一读取，但此账户之前开启了“允许 ChatGPT 读取全部记忆”：ChatGPT 可以读取全部记忆（机密及你明确设为私有的除外）。控制台已不能更改这项旧设置；如需关闭，请联系运维。',
  readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有规则读取（公开记忆和逐条授权的记忆）。启用需要运维单独确认。',
  MANIFEST_EXCEEDS_BUDGET:'预算不足以覆盖接口测试和清单中每条记录各一次调用。',FIRST_RUN_EXISTS:'首次建立已经生成向量，请重新启用它；新的首次建立需要另行批准。'});
-Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other agents (except secret)',connReadDetails:'Details',
+Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other agents (except secret)',
  readPolicyLegacyReadAll:'Not enabled yet, but this account earlier turned on “ChatGPT may read all memories”: ChatGPT can read all memories except secret ones and those you explicitly kept private. The console can no longer change that setting; ask an operator to turn it off.',
  readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (public memories and memories allowed one by one). Enabling it needs a separate operator confirmation.',
  MANIFEST_EXCEEDS_BUDGET:'The budget cannot cover the probe and one call per listed record.',FIRST_RUN_EXISTS:'This first run already embedded records; activate it again. A new first run needs a separate approval.'});
@@ -1217,3 +1321,151 @@ Object.assign(catalog.en,{
  connChatGPTNeed:'A ChatGPT account that can add custom plugins (connectors)',connGenericNeed:'An MCP client with Streamable HTTP and custom request headers',
  connDangerZone:'Disable or revoke',connDangerNote:'These actions cut off this connection immediately. A disabled connection can be enabled again; revocation cannot be undone. Saved memories are not deleted.',
  connConfirm_disable:'Disable connection',connConfirm_revoke:'Revoke connection',connConfirm_grant:'Revoke grant'});
+
+// Summaries: what tells same-category summaries apart, and an in-pane way back to the list.
+// Six-box authenticator code: the boxes are decoration over one labelled field.
+Object.assign(catalog['zh-CN'],{
+ summaryPeriod_daily:'日摘要',summaryPeriod_weekly:'周摘要',summaryWeekFrom:'起始',summaryWindowUnknown:'时间窗口未知',
+ summaryScope_user:'个人范围',summaryScope_project:'项目',summaryScope_task:'任务',summaryScope_workstream:'工作流',summaryScope_session:'会话',summaryScope_unknown:'范围未知',
+ summaryOmitted:'未引用来源',summaryId:'摘要标识',summaryScopeIds:'范围标识',backToList:'返回列表',
+ otpHint:'6 位数字，可直接粘贴或使用自动填充。'
+});
+Object.assign(catalog.en,{
+ summaryPeriod_daily:'Daily summary',summaryPeriod_weekly:'Weekly summary',summaryWeekFrom:'from',summaryWindowUnknown:'Window unknown',
+ summaryScope_user:'Personal',summaryScope_project:'Project',summaryScope_task:'Task',summaryScope_workstream:'Workstream',summaryScope_session:'Session',summaryScope_unknown:'Scope unknown',
+ summaryOmitted:'Sources not cited',summaryId:'Summary ID',summaryScopeIds:'Scope IDs',backToList:'Back to list',
+ otpHint:'6 digits. You can paste the code or use autofill.'
+});
+
+// Projects and tasks: editing the common fields, Console-only archive, and inline read-only context.
+Object.assign(catalog['zh-CN'],{
+ consoleArchived:'已在控制台归档',taskCount:'任务',projectContext:'项目上下文',editProject:'编辑项目',archiveProject:'在控制台归档',restoreProject:'恢复显示',editTask:'编辑任务',
+ projectViews:'项目视图',activeProjects:'当前项目',archivedProjects:'控制台归档',noArchivedProjects:'没有在控制台归档的项目。',
+ consoleArchiveNote:'控制台归档只是在本控制台中隐藏项目：Agent 仍可读写，项目的任务和记忆全部保留，可随时恢复显示。这不是删除；真正的删除与合并将作为单独的生命周期功能提供。',
+ archiveProjectNote:'归档后，此项目只在控制台的项目列表中隐藏。Agent 仍可读写；任务、记忆和历史全部保留，可随时恢复显示。这不是删除。',
+ restoreProjectNote:'恢复后，此项目重新显示在控制台的当前项目中。项目数据本身没有被改动过。',
+ projectContextInline:'项目上下文在每个项目行内展开查看。',contextUnavailable:'暂时无法生成此项目的上下文。',contextFailed:'项目上下文读取失败。',
+ contextProvenance:'只读预览，根据你当前的记录生成',contextMemories:'结构化记忆',contextCheckpoints:'检查点',contextActivity:'最近活动',
+ contextTasksLimited:'任务较多，只显示前一部分。',contextCheckpointsLimited:'检查点较多，只显示最近的一部分。',contextCompacted:'内容较长，部分文本已按服务器的预览限制缩短。',
+ contextIdentities:'记录来源（Agent 实例@设备）',contextNoTasks:'这个项目还没有任务。',contextSafety:'查看上下文不会创建接续、不会改变任务范围，也不会注入任何内容。',
+ contextProgress:'进展',contextNextSteps:'下一步',contextResources:'资源',contextConflicts:'记录的冲突',contextWorkstreams:'工作流',contextOutcome:'最新结果',contextCompleted:'已完成',
+ contextRecordedBy:'记录者',contextRawExpired:'原始内容已按保留策略过期',contextPartial:'仅显示部分',
+ field_aliases:'别名',field_git_remotes:'Git 远程地址',field_repo_fingerprints:'仓库指纹',field_path_hints:'路径提示',
+ field_progress:'进展',field_decisions:'决策',field_blockers:'阻碍',field_next_steps:'下一步',field_resources:'资源',field_workstreams:'工作流',field_conflicts:'冲突记录',
+ valueTooLarge:'这个值过长，无法在这里显示；它会原样保留。',removeValuesHint:'勾选的值会在保存时移除，其余保持不变。',noValues:'暂无。',addValues:'添加（每行一个）',
+ nameTooLongToEdit:'名称过长，无法在控制台编辑；它会原样保留。',fieldTooLongToEdit:'这个字段过长，无法在控制台编辑；它会原样保留。',statusNotEditable:'当前状态不是标准值，无法在这里修改；它会原样保留。',
+ taskRetainedNote:'以下内容会原样保留，不在控制台编辑：',taskGoal:'任务目标',
+ PROJECT_NOT_FOUND:'项目不存在或不属于当前账户。',TASK_NOT_FOUND:'任务不存在或不属于当前账户。',
+ PROJECT_DELETED:'该项目已删除，它的记录不会出现在普通视图中。',PROJECT_LIFECYCLE_CORRUPT:'项目生命周期数据不一致；为避免显示错误内容，本次读取已停止。',
+ PROJECT_NOT_CANONICAL:'该项目已合并到另一个项目，请在目标项目上操作。',PROJECT_MEMBER_LIMIT:'一个项目最多合并 20 个项目（合并层级也有上限），无法继续；为避免不完整的内容，也不会显示超出上限的读取。',
+ INVALID_OPERATION_ID:'操作编号无效，请刷新后重试。',
+ PROJECT_VERSION_CHANGED:'项目已被其他操作修改，请刷新后再保存。',TASK_VERSION_CHANGED:'任务已被其他操作修改，请刷新后再保存。',
+ FIELD_VALUE_NOT_FOUND:'要移除的值已经变化，请刷新后再保存。',FIELD_FULL:'最多 50 个值，请先移除一些再添加。',FIELD_TOO_LONG_TO_EDIT:'这个字段过长，无法在控制台编辑。',
+ HANDOFF_DISABLED:'接续功能已停用，项目和任务暂时只读。',
+ 'projects.update':'编辑项目','projects.archive':'在控制台归档项目','projects.restore':'恢复显示项目','tasks.update':'编辑任务',
+ paused:'已暂停',archived:'已归档',merged:'已合并',unknown:'未知',blockers:'阻碍'
+});
+Object.assign(catalog.en,{
+ consoleArchived:'Archived in Console',taskCount:'Tasks',projectContext:'Project context',editProject:'Edit project',archiveProject:'Archive in Console',restoreProject:'Show again',editTask:'Edit task',
+ projectViews:'Project views',activeProjects:'Active projects',archivedProjects:'Archived in Console',noArchivedProjects:'No projects are archived in the Console.',
+ consoleArchiveNote:'Console archive only hides a project in this Console: agents can still read and write it, and all its tasks and memories are kept. You can show it again at any time. This is not deletion; real deletion and merging will come as separate lifecycle features.',
+ archiveProjectNote:'Archiving hides this project in the Console project list only. Agents can still read and write; tasks, memories and history are all kept, and you can show it again at any time. This is not deletion.',
+ restoreProjectNote:'Showing it again returns this project to the Console\'s active projects. The project data itself was never changed.',
+ projectContextInline:'Project context opens inside each project row.',contextUnavailable:'Context for this project is unavailable right now.',contextFailed:'The project context could not be read.',
+ contextProvenance:'Read-only preview built from your current records',contextMemories:'Structured memories',contextCheckpoints:'Checkpoints',contextActivity:'Recent activity',
+ contextTasksLimited:'Many tasks; only the first ones are shown.',contextCheckpointsLimited:'Many checkpoints; only the latest are shown.',contextCompacted:'Long text was shortened to the server\'s preview limits.',
+ contextIdentities:'Recorded sources (agent instance@device)',contextNoTasks:'This project has no tasks yet.',contextSafety:'Viewing context creates no Resume, changes no task scope and injects nothing.',
+ contextProgress:'Progress',contextNextSteps:'Next steps',contextResources:'Resources',contextConflicts:'Recorded conflicts',contextWorkstreams:'Workstreams',contextOutcome:'Latest outcome',contextCompleted:'Completed',
+ contextRecordedBy:'Recorded by',contextRawExpired:'Raw content expired under the retention policy',contextPartial:'partial',
+ field_aliases:'Aliases',field_git_remotes:'Git remotes',field_repo_fingerprints:'Repository fingerprints',field_path_hints:'Path hints',
+ field_progress:'Progress',field_decisions:'Decisions',field_blockers:'Blockers',field_next_steps:'Next steps',field_resources:'Resources',field_workstreams:'Workstreams',field_conflicts:'Conflict records',
+ valueTooLarge:'This value is too long to show here; it is kept as is.',removeValuesHint:'Checked values are removed when you save; the rest stay unchanged.',noValues:'None.',addValues:'Add (one per line)',
+ nameTooLongToEdit:'The name is too long to edit in the Console; it is kept as is.',fieldTooLongToEdit:'This field is too long to edit in the Console; it is kept as is.',statusNotEditable:'The current status is not a standard value and cannot be changed here; it is kept as is.',
+ taskRetainedNote:'Kept exactly as stored, not edited in the Console:',taskGoal:'Task goal',
+ PROJECT_NOT_FOUND:'This project does not exist or does not belong to this account.',TASK_NOT_FOUND:'This task does not exist or does not belong to this account.',
+ PROJECT_DELETED:'This project was deleted. Its records are not shown in normal views.',PROJECT_LIFECYCLE_CORRUPT:'Project lifecycle data is inconsistent, so this read was stopped rather than show wrong content.',
+ PROJECT_NOT_CANONICAL:'This project was merged into another project. Use the target project instead.',PROJECT_MEMBER_LIMIT:'At most 20 projects can be merged into one project (merge chains are bounded too), so this cannot continue; a read over the limit is stopped rather than show incomplete content.',
+ INVALID_OPERATION_ID:'The operation ID is invalid. Refresh and try again.',
+ PROJECT_VERSION_CHANGED:'The project was changed elsewhere. Refresh before saving.',TASK_VERSION_CHANGED:'The task was changed elsewhere. Refresh before saving.',
+ FIELD_VALUE_NOT_FOUND:'A value to remove has changed. Refresh before saving.',FIELD_FULL:'At most 50 values; remove some before adding more.',FIELD_TOO_LONG_TO_EDIT:'This field is too long to edit in the Console.',
+ HANDOFF_DISABLED:'Handoff is disabled; projects and tasks are read-only for now.',
+ 'projects.update':'Edit project','projects.archive':'Archive project in Console','projects.restore':'Show project again','tasks.update':'Edit task',
+ paused:'Paused',archived:'Archived',merged:'Merged',unknown:'Unknown',blockers:'Blockers'
+});
+
+// Console item 6: coarse sign-in snapshot for sessions.
+Object.assign(catalog['zh-CN'],{sessionClient:'登录设备',sessionClientNote:'设备类型、浏览器和操作系统是登录时浏览器自报的大类，仅供参考，不是经过验证的设备。不记录 IP 地址、完整浏览器标识或位置。',
+ clientNotRecorded:'未知（此会话登录时尚未记录）',session_device:'设备类型',session_browser:'浏览器',session_os:'操作系统',sessionLocation:'位置',locationNotRecorded:'不记录',
+ device_desktop:'桌面设备',device_mobile:'手机',device_tablet:'平板',device_unknown:'未知设备',
+ browser_edge:'Edge',browser_opera:'Opera',browser_samsung:'三星浏览器',browser_firefox:'Firefox',browser_chrome:'Chrome',browser_safari:'Safari',browser_unknown:'未知浏览器',
+ os_windows:'Windows',os_ios:'iOS',os_ipados:'iPadOS',os_android:'Android',os_chromeos:'ChromeOS',os_macos:'macOS',os_linux:'Linux',os_unknown:'未知系统'});
+Object.assign(catalog.en,{sessionClient:'Sign-in device',sessionClientNote:'Device type, browser and operating system are broad families reported by the browser at sign-in. They are approximate, not a verified device. No IP address, full browser string or location is recorded.',
+ clientNotRecorded:'Unknown (signed in before this was recorded)',session_device:'Device type',session_browser:'Browser',session_os:'Operating system',sessionLocation:'Location',locationNotRecorded:'Not recorded',
+ device_desktop:'Desktop',device_mobile:'Phone',device_tablet:'Tablet',device_unknown:'Unknown device',
+ browser_edge:'Edge',browser_opera:'Opera',browser_samsung:'Samsung Internet',browser_firefox:'Firefox',browser_chrome:'Chrome',browser_safari:'Safari',browser_unknown:'Unknown browser',
+ os_windows:'Windows',os_ios:'iOS',os_ipados:'iPadOS',os_android:'Android',os_chromeos:'ChromeOS',os_macos:'macOS',os_linux:'Linux',os_unknown:'Unknown system'});
+
+// Audit facts distinguish recorded references from current metadata and missing historical fields.
+Object.assign(catalog['zh-CN'],{
+ auditSource:'事件来源',auditSourceCore:'记忆与连接活动',auditSourceIdentity:'登录与账户安全',
+ auditScopeCore:'凭据与实例 ID 来自事件记录；凭据名称是签发信息，连接名称与状态、记忆标题是当前信息。仅链接目前属于本账户且可读取的记忆。查询行仅代表一次词法子查询，可能不是最终搜索结果；一次混合搜索可能产生多行。',
+ auditScopeIdentity:'当前账户的身份与安全事件。这个来源独立分页；旧记录没有凭据、连接或记忆明细时，不推测补全。',
+ auditCredential:'记录的凭据',auditActorUnknown:'执行者未知（事件未记录凭据）',auditCredentialGone:'凭据的签发信息不可用',
+ auditConnectionCurrent:'连接（当前信息）',auditConnectionMissing:'连接资料不可用',auditCredentialVersion:'凭据版本',auditConnectionUnmapped:'未记录可确认的连接映射',
+ auditSystemWeb:'系统 Web 连接',auditSystemConsole:'系统控制台连接',auditRevokedNow:'现已撤销',auditTarget:'操作对象',auditMemoryUnavailable:'当前不可读取或标题不可用',
+ auditRefsNotRecorded:'此历史事件未记录可确认的结果引用',auditLexicalRefs:'词法子查询的记忆引用：',auditRefsEmpty:'无结果',auditRefsTruncated:'仅保留部分引用',
+ auditTitlesTruncated:'本页标题查询已达上限；其他引用仅显示 ID。',auditIdentityActor:'账户事件；执行者与连接未在此记录中留存',
+ auditKind_read:'读取',auditKind_write:'写入',auditKind_auth:'账户安全',auditKind_credential:'连接与凭据',auditKind_other:'其他',
+ auditLocalTime:'时间按浏览器本地时区显示和筛选。',applyFilters:'应用筛选',INVALID_AUDIT_PAGE:'审计分页已变化或格式无效，请重新导出。',
+ auditExportNote:'导出当前来源与筛选的本人审计记录，以及有限的凭据、当前连接信息和当前可读记忆标题；不含正文、原始查询或密钥。有上限的实时列表，不是数据库快照。'
+});
+Object.assign(catalog.en,{
+ auditSource:'Event source',auditSourceCore:'Memory & connection activity',auditSourceIdentity:'Sign-in & account security',
+ auditScopeCore:'Credential and instance IDs are recorded references. Credential names are issuance details; connection labels, states and memory titles are current. Only currently readable memories owned by this account are linked. Query rows describe lexical subqueries, not final search results; one hybrid search can produce several rows.',
+ auditScopeIdentity:'Identity and security events for this account, paged independently. Missing historical credential, connection or memory details are not reconstructed.',
+ auditCredential:'Recorded credential',auditActorUnknown:'Unknown actor (no credential recorded)',auditCredentialGone:'Credential issuance details unavailable',
+ auditConnectionCurrent:'Connection (current information)',auditConnectionMissing:'Connection details unavailable',auditCredentialVersion:'Credential version',auditConnectionUnmapped:'No confirmed connection mapping recorded',
+ auditSystemWeb:'System Web connection',auditSystemConsole:'System Console connection',auditRevokedNow:'Revoked now',auditTarget:'Target',auditMemoryUnavailable:'Not currently readable or title unavailable',
+ auditRefsNotRecorded:'Confirmed result references were not recorded for this historical event',auditLexicalRefs:'Lexical subquery memory references:',auditRefsEmpty:'No results',auditRefsTruncated:'References are truncated',
+ auditTitlesTruncated:'This page reached its title lookup limit; remaining references show IDs only.',auditIdentityActor:'Account event; actor and connection details were not retained in this record',
+ auditKind_read:'Read',auditKind_write:'Write',auditKind_auth:'Account security',auditKind_credential:'Connection & credential',auditKind_other:'Other',
+ auditLocalTime:'Times are displayed and filtered in your browser’s local timezone.',applyFilters:'Apply filters',INVALID_AUDIT_PAGE:'Audit paging changed or is invalid. Restart the export.',
+ auditExportNote:'Exports the selected source and filters, with limited credential details, current connections and currently readable memory titles. No bodies, raw queries or keys. Bounded live listing, not a database snapshot.'
+});
+
+// Entity associations are derived owner-scoped metadata; names and source bodies remain user text.
+Object.assign(catalog['zh-CN'],{
+ featMEM08:'对象与别名',featMEM08Note:'审阅来源明确的关联与别名，不改写记忆正文。',
+ entityAssociations:'对象与别名',entityPending:'待确认的对象关联',entityPendingCount:'待确认数',entityPendingNote:'同名不代表同一对象。请核对来源、上下文和日期后再决定。',
+ entityDerivedNote:'这里只修改派生的对象关联，不会改写记忆正文。',entityNoProposals:'没有匹配的关联候选。',entityNoPending:'没有待确认的关联。',entityNoAssociations:'没有对象关联。',entityBrowse:'浏览对象',entityReview:'审阅',entityManage:'管理别名与关联',
+ entitySource:'来源记忆',entityTarget:'目标对象',entityScope:'上下文范围',entityUserScope:'用户范围',entityScope_project:'项目范围',entityScope_task:'任务范围',entityScope_workstream:'工作流范围',entityScope_session:'会话范围',entityScopeUnknown:'范围未知',entityNoProject:'未关联项目',entityNameUnknown:'名称未记录',entitySession:'会话',entityIdentifiers:'内部引用（辅助识别）',
+ entityCurrentSource:'当前有效的原始修订',entityStaleSource:'来源修订已变化，不显示旧的锚点正文',entityInactiveSource:'来源已不活跃，不可确认',entityUnavailable:'对象锚点已变化或不可用',entityOpenSource:'查看这条来源',
+ entityAliasProposal:'别名候选',entityLinkProposal:'同一对象关联候选',entityRelatedProposal:'相关关系候选',entityRelationNote:'相关关系与同一对象不同；确认关系不会扩展搜索。',entityConfirmNote:'确认将使用当前、同一上下文内的来源依据。',entityProposalStale:'此候选无法确认；请重新检查来源状态。',entityAccept:'确认关联',entityReject:'拒绝候选',
+ entityState_objects:'全部对象',entityState_pending:'待确认',entityState_accepted:'已确认',entityState_rejected:'已拒绝',entityState_retired:'已停用',entityState_related:'相关关系',entityState_unlinked:'已解除',
+ entityKind:'对象类型',entityKind_object:'对象',entityKind_person:'人物',entityKind_place:'地点',entityKind_project:'项目',entityKind_server:'服务器',entityKind_vendor:'服务商',
+ entityCreate:'手动添加对象',entityLinkExisting:'关联现有对象',entityChooseLink:'关联到此对象',entityLinkedMemories:'关联的记忆',entityUnlink:'解除关联',entityAliases:'名称与别名',entityAddAlias:'添加手动别名',entityCorrect:'纠正别名',entityRemoveAlias:'停用别名',entityNameTooLong:'名称最多为 80 个字符。',entityName:'名称（最多 80 个字符）',entityManualName:'手动名称',entityProvenName:'有来源依据的名称',
+ entityEqualNamesNote:'相同名称的对象保持独立；来源与完整上下文用于区分。',entityLinkScopeNote:'只能关联当前有效、上下文完全相同的记忆与对象。',entityManualScopeNote:'手动名称只用于授权的本人读取，不提供给受限 Web 读取者。',entityRetiredNameNote:'已停用的名称不会参与别名搜索。',entityRetiredAliasesNote:'确认对象之间的同一对象关联时，两个对象的手动别名都会停用，不会在对象之间移动。有依据的别名仍依赖原证明与关联，解除后立即失效。',
+ entitySearch:'搜索对象名称',entityTruncated:'对象或候选已达到显示上限；结果不完整。',entityChanged:'来源或关联已变化。请关闭后重新审阅，不要重复提交旧操作。',entityFailed:'无法读取或保存关联。请重新检查来源后重试。',entitySaved:'关联已保存。记忆正文保持原样。',
+ entityConfirmAccept:'确认以下对象或名称之间的关联？',entityConfirmReject:'拒绝以下关联候选？',entityConfirmCreate:'为这条记忆添加以下对象？',entityConfirmAlias:'为这个对象添加以下手动别名？',entityConfirmCorrect:'将此对象的别名纠正为以下名称？',entityConfirmRemove:'停用这个对象的以下别名？',entityConfirmLink:'将这条记忆关联到以下对象？',entityConfirmUnlink:'解除以下对象关联？',
+ entityMatchExact:'原始查询完整匹配',entityMatchTerms:'原始查询词匹配',entityMatchAlias:'通过已确认别名匹配',entitySearchAmbiguous:'该名称对应多个独立对象；同名结果未自动合并。',entitySearchTruncated:'别名扩展达到安全上限，已停止或截断；部分关联结果可能未显示。',
+ ENTITY_SCOPE_MISMATCH:'来源与对象的完整上下文不一致。',ENTITY_TOMBSTONED:'此名称或关联曾被拒绝或解除；不会自动恢复。'
+});
+Object.assign(catalog.en,{
+ featMEM08:'Objects & aliases',featMEM08Note:'Review source-grounded associations and aliases without rewriting memory content.',
+ entityAssociations:'Objects & aliases',entityPending:'Pending object associations',entityPendingCount:'Pending',entityPendingNote:'Equal names do not establish identity. Check the sources, full context and dates before deciding.',
+ entityDerivedNote:'Changes affect derived associations only. Memory content is never rewritten.',entityNoProposals:'No matching proposals.',entityNoPending:'No pending associations.',entityNoAssociations:'No object associations.',entityBrowse:'Browse objects',entityReview:'Review',entityManage:'Manage aliases & associations',
+ entitySource:'Source memory',entityTarget:'Target object',entityScope:'Context scope',entityUserScope:'User scope',entityScope_project:'Project scope',entityScope_task:'Task scope',entityScope_workstream:'Workstream scope',entityScope_session:'Session scope',entityScopeUnknown:'Unknown scope',entityNoProject:'No associated project',entityNameUnknown:'Name not recorded',entitySession:'Session',entityIdentifiers:'Internal references (secondary)',
+ entityCurrentSource:'Current exact source revision',entityStaleSource:'Source revision changed; old anchor text is hidden',entityInactiveSource:'Source is inactive; cannot confirm',entityUnavailable:'The object anchor changed or is unavailable',entityOpenSource:'Open this source',
+ entityAliasProposal:'Alias proposal',entityLinkProposal:'Same-object association proposal',entityRelatedProposal:'Related-object proposal',entityRelationNote:'A relationship does not establish identity. Confirming it does not expand search.',entityConfirmNote:'Confirmation uses current source evidence within the same exact context.',entityProposalStale:'This proposal cannot be confirmed. Check its source state again.',entityAccept:'Confirm association',entityReject:'Reject proposal',
+ entityState_objects:'All objects',entityState_pending:'Pending',entityState_accepted:'Accepted',entityState_rejected:'Rejected',entityState_retired:'Retired',entityState_related:'Related',entityState_unlinked:'Unlinked',
+ entityKind:'Object type',entityKind_object:'Object',entityKind_person:'Person',entityKind_place:'Place',entityKind_project:'Project',entityKind_server:'Server',entityKind_vendor:'Vendor',
+ entityCreate:'Add object manually',entityLinkExisting:'Link existing object',entityChooseLink:'Link to this object',entityLinkedMemories:'Linked memories',entityUnlink:'Unlink association',entityAliases:'Names & aliases',entityAddAlias:'Add manual alias',entityCorrect:'Correct alias',entityRemoveAlias:'Retire alias',entityNameTooLong:'Names can contain up to 80 characters.',entityName:'Name (up to 80 characters)',entityManualName:'Owner-typed name',entityProvenName:'Source-backed name',
+ entityEqualNamesNote:'Objects with equal names remain separate. Sources and full context distinguish them.',entityLinkScopeNote:'Only current memories and objects in the exact same context can be linked.',entityManualScopeNote:'Owner-typed names are used only in authorized owner reads, never for restricted Web readers.',entityRetiredNameNote:'Retired names do not participate in alias search.',entityRetiredAliasesNote:'Confirming a same-object link retires both objects’ owner-typed aliases without moving them between objects. Proven aliases retain their original proof and bridge dependencies; unlinking invalidates that expansion immediately.',
+ entitySearch:'Search object names',entityTruncated:'The object or proposal display limit was reached. Results are incomplete.',entityChanged:'The source or association changed. Close and review it again before making a new decision.',entityFailed:'Could not read or save associations. Check the source again before retrying.',entitySaved:'Association saved. Memory content is unchanged.',
+ entityConfirmAccept:'Confirm the following object or name association?',entityConfirmReject:'Reject this association proposal?',entityConfirmCreate:'Add this object to the following memory?',entityConfirmAlias:'Add this manual alias to the following object?',entityConfirmCorrect:'Correct this object’s alias to the following name?',entityConfirmRemove:'Retire the following alias for this object?',entityConfirmLink:'Link this memory to the following object?',entityConfirmUnlink:'Unlink the following object association?',
+ entityMatchExact:'Exact original query match',entityMatchTerms:'Original query terms match',entityMatchAlias:'Matched through a confirmed alias',entitySearchAmbiguous:'This name identifies multiple separate objects. Equal-name results were not merged.',entitySearchTruncated:'Alias expansion reached a safety limit and was stopped or truncated. Some associated results may be missing.',
+ ENTITY_SCOPE_MISMATCH:'The source and object have different complete contexts.',ENTITY_TOMBSTONED:'This name or association was rejected or unlinked before and cannot be restored automatically.'
+});
+
+Object.assign(catalog['zh-CN'],{impactEntities:'派生对象',impactEntityProposals:'对象关联候选',impactPendingEntities:'待确认对象候选'});
+Object.assign(catalog.en,{impactEntities:'Derived objects',impactEntityProposals:'Object association proposals',impactPendingEntities:'Pending object proposals'});

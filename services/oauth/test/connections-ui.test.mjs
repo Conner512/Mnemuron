@@ -57,7 +57,7 @@ test('C-03: ChatGPT web and agent devices are counted and listed; managed and re
  assert.equal(inv.chatgpt.authorized,true);assert.equal(inv.chatgpt.first,1757490455000);assert.equal(inv.chatgpt.last,Date.parse('2026-09-30T06:42:01Z'));
  const html=connectionsView(data,caps,{});
  const card=html.match(/<section class="card connection-chatgpt">[\s\S]*?<\/section>/)[0];
- assert.match(card,/data-state="enabled"/);assert.match(card,/data-i18n="connReadAll"/);assert.match(card,/href="\/app\/privacy"/);
+ assert.match(card,/data-state="enabled"/);assert.match(card,/data-i18n="connReadAll"/);assert.match(card,/data-i18n="readPolicyLegacyReadAll"/);assert.doesNotMatch(card,/href="\/app\/privacy"/,'the removed privacy page is not linked');
  assert.equal((card.match(/data-console-action="oauth.revoke"/g)||[]).length,2);assert.match(card,/<code>project:read<\/code>/);assert.doesNotMatch(card,/<code>openid<\/code>/);
  const devices=html.match(/<section class="card connection-devices">[\s\S]*?<\/section>/)[0];
  assert.match(devices,/data-console-action="devices.revoke" data-id="inst-openclaw"/);assert.match(devices,/data-inspect="core_connections" data-id="cred-inst-hermes"/);

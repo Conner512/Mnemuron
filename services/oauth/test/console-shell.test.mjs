@@ -124,14 +124,14 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar keeps three groups and all fifteen destinations as icon links',()=>{
+test('Shell: the sidebar keeps three groups and all twelve destinations as icon links',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
   assert.equal((nav.match(/class="nav-group"/g)||[]).length,3);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,15);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,15);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,12);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,12);
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);

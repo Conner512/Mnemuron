@@ -4,7 +4,13 @@ import {catalog} from '../../../web/console/catalog.mjs';
 // Every error code a console action or read can raise reaches the browser as that code (never as
 // CONSOLE_REQUEST_FAILED) and has a message in both languages. Codes only; messages never cross the BFF.
 const sources=['server/lib/console/service.mjs','server/lib/console/features.mjs','server/lib/console/organize.mjs','server/lib/console/models.mjs',
-  'server/lib/console/state.mjs','server/lib/memory-derived/store.mjs','server/lib/memory/web-visibility.mjs','server/lib/console-read.mjs'];
+  'server/lib/console/state.mjs','server/lib/memory-derived/store.mjs','server/lib/memory/web-visibility.mjs','server/lib/console-read.mjs',
+  // Console project views and every lifecycle read check (deleted, corrupt or oversized metadata) reach Console reads.
+  'server/lib/console/projects.mjs','server/lib/lifecycle/resolver.mjs',
+  // Model-list discovery returns the shared transport's fixed codes directly.
+  'server/lib/model-providers/transport.mjs',
+  // Project lifecycle mutations (preview and confirm).
+  'server/lib/lifecycle/mutations.mjs'];
 const read=file=>fs.readFileSync(new URL('../../../'+file,import.meta.url),'utf8');
 const raised=new Set(['INVALID_PAYLOAD']);
 for(const file of sources){const s=read(file);

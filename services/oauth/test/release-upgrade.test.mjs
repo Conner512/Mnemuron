@@ -7,6 +7,7 @@ import {execFileSync,spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {MnemuronStore} from '../../../server/lib/store.mjs';
+import {CORE_SCHEMA_VERSION} from '../../../server/lib/store/schema.mjs';
 import {AuthStore} from '../src/sqlite-adapter.mjs';
 import {IdentityRepository} from '../src/identity-repository.mjs';
 import {readPrivate} from '../../../shared/oauth-common.mjs';
@@ -49,7 +50,7 @@ test('RELEASE-01 paired Core/OAuth upgrade, old-reader refusal and isolated rest
   assert.equal(tableHash(f.core.db,'memories'),business);
   assert.equal(tableHash(f.core.db,'cloud_memory_operations'),receipts);
   assert.equal(tableHash(f.auth.db,'identity_accounts'),identities);
-  assert.equal(f.core.db.prepare('PRAGMA user_version').get().user_version,7);
+  assert.equal(f.core.db.prepare('PRAGMA user_version').get().user_version,CORE_SCHEMA_VERSION);
   for(const r of records){
    assert.ok(f.ids.eligible(r.subject));
    const own=f.principal(r,'console'),web=f.principal(r,'web'),foreign=records.find(x=>x!==r);

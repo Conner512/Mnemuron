@@ -36,19 +36,22 @@ export class ConsoleFeatures {
   // Display names for category IDs. Built-in IDs without a stored name are translated by the browser.
   labels(user){const p=this.preference(user,'taxonomy',{});return p.labels&&typeof p.labels==='object'?p.labels:{};}
   restoreCategory(auth,detail){return this.categories.restore(auth,detail);}
-  task(auth,taskId){id(taskId);const row=this.db.prepare('SELECT * FROM tasks WHERE user_id=? AND task_id=?').get(auth.user_id,taskId);if(!row)throw new NotFoundError('Task not found.');return row;}
+  task(auth,taskId){id(taskId);const row=this.db.prepare('SELECT * FROM tasks WHERE user_id=? AND task_id=?').get(auth.user_id,taskId);if(!row)throw new NotFoundError('Task not found.');
+    this.service.projects.requireLive(auth.user_id,row.project_id);return row;}
   read(auth,view,p){
     object(p,featureParams[view]||[]);const {db,store,service}=this,user=auth.user_id;
     const result=value=>({read_only:true,production_ready:false,...value});
     if(view==='taxonomy')return result({...this.preference(user,'taxonomy',service.taxonomy(user)),...service.taxonomy(user),labels:this.labels(user)});
     if(view==='privacy-defaults')return result({...this.privacy(user),applies_to:'new_console_memories',cloud_grant_requires_explicit_revision:true});
     if(view==='retention')return result(this.retention(user));
-    if(view==='attention')return result({counts:{memories:count(db,'SELECT count(*) n FROM memories WHERE user_id=?',user),
+    // Normal views are live-only: records of deleted projects are not counted or listed.
+    const liveSql=view==='attention'||view==='capture-status'||view==='task-branches'?store.lifecycle.live(user).sql('project_id'):null;
+    if(view==='attention')return result({counts:{memories:db.prepare(`SELECT count(*) n FROM memories WHERE user_id=? AND ${liveSql.sql}`).get(user,...liveSql.params).n,
       failed_jobs:count(db,"SELECT count(*) n FROM memory_jobs WHERE user_id=? AND state IN ('dead_letter','blocked_auth','blocked_budget','blocked_config','review_required')",user),
       stale_summaries:count(db,"SELECT count(*) n FROM memory_summaries WHERE user_id=? AND status='stale'",user),
       pending_reconciliation:count(db,"SELECT count(*) n FROM task_reconciliation_proposals WHERE user_id=? AND status='awaiting_confirmation'",user)}});
     if(view==='capture-status')return result({
-      agents:db.prepare('SELECT agent_id,agent_instance_id,device_id,count(*) events,max(received_at) last_received_at,max(captured_at) last_captured_at FROM events WHERE user_id=? GROUP BY agent_id,agent_instance_id,device_id ORDER BY last_received_at DESC LIMIT 100').all(user),
+      agents:db.prepare(`SELECT agent_id,agent_instance_id,device_id,count(*) events,max(received_at) last_received_at,max(captured_at) last_captured_at FROM events WHERE user_id=? AND ${liveSql.sql} GROUP BY agent_id,agent_instance_id,device_id ORDER BY last_received_at DESC LIMIT 100`).all(user,...liveSql.params),
       local_hook_failures:'not_observable',local_queue:'not_observable',
       processing:db.prepare('SELECT state,count(*) count FROM memory_processing_outbox WHERE user_id=? GROUP BY state').all(user)});
     if(view==='model-usage'){
@@ -68,8 +71,13 @@ export class ConsoleFeatures {
     }
     if(view==='task-branches'){
       if(p.task_id){this.task(auth,p.task_id);return result({preview:store.previewTaskBranches(auth,{query:p.task_id})});}
-      const pg=page(p);if(p.project_id){id(p.project_id);if(!db.prepare('SELECT 1 FROM projects WHERE user_id=? AND project_id=?').get(user,p.project_id))throw new NotFoundError('Project not found.');}
-      const rows=db.prepare('SELECT task_id,project_id,title,status,canonical_version,updated_at FROM tasks WHERE user_id=? AND (? IS NULL OR project_id=?) ORDER BY updated_at DESC,task_id LIMIT ? OFFSET ?').all(user,p.project_id||null,p.project_id||null,pg.limit+1,pg.offset);
+      const pg=page(p);let members=null;
+      if(p.project_id){id(p.project_id);if(!db.prepare('SELECT 1 FROM projects WHERE user_id=? AND project_id=?').get(user,p.project_id))throw new NotFoundError('Project not found.');
+        // A merged source's tasks belong to its canonical project; each task keeps its origin project_id.
+        members=store.lifecycle.scope(user,p.project_id).members;}
+      const rows=db.prepare(`SELECT task_id,project_id,title,status,canonical_version,updated_at FROM tasks WHERE user_id=? AND ${liveSql.sql}
+        AND (? IS NULL OR project_id IN (SELECT value FROM json_each(?))) ORDER BY updated_at DESC,task_id LIMIT ? OFFSET ?`)
+        .all(user,...liveSql.params,members?'1':null,members?JSON.stringify(members):null,pg.limit+1,pg.offset);
       return result(paged(rows,pg,'tasks'));
     }
     if(view==='project-context'){
@@ -78,7 +86,9 @@ export class ConsoleFeatures {
     }
     if(view==='task-checkpoints'){
       const row=this.task(auth,p.task_id),pg=page(p);
-      const checkpoints=db.prepare('SELECT * FROM checkpoints WHERE user_id=? AND task_id=? ORDER BY created_at DESC,checkpoint_id LIMIT ? OFFSET ?').all(user,p.task_id,pg.limit+1,pg.offset).map(r=>store.checkpointFromRow(r));
+      // Per-record lifecycle (a moved Task keeps an earlier, possibly deleted, project's checkpoints), before paging.
+      const live=store.lifecycle.live(user).sql('project_id');
+      const checkpoints=db.prepare(`SELECT * FROM checkpoints WHERE user_id=? AND task_id=? AND ${live.sql} ORDER BY created_at DESC,checkpoint_id LIMIT ? OFFSET ?`).all(user,p.task_id,...live.params,pg.limit+1,pg.offset).map(r=>store.checkpointFromRow(r));
       return result({...paged(checkpoints,pg,'checkpoints'),canonical:store.taskFromRow(row),revisions:store.listCanonicalRevisions({...auth,scopes:[...auth.scopes,'task:reconcile:read']},p.task_id,100)});
     }
     if(view==='task-reconciliation'){this.task(auth,p.task_id);return result(store.reconciliationState(auth,p.task_id,{internal:true}));}

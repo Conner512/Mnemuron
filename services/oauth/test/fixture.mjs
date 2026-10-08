@@ -14,18 +14,26 @@ import { previousStepCode } from "./helpers/totp.mjs";
 // The probe listener closes before the caller binds, so the OS may offer the same port again.
 // Never hand out a port twice in one test process (an issuer and resource on one origin is invalid).
 const issuedPorts = new Set();
+const reservedPorts = new Map();
 export async function freePort() {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const server = net.createServer();
+    const server = net.createServer(socket=>socket.destroy());
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const port = server.address().port;
+    if (!issuedPorts.has(port)) { issuedPorts.add(port);server.unref();reservedPorts.set(port,server);return port; }
     await new Promise((resolve) => server.close(resolve));
-    if (!issuedPorts.has(port)) { issuedPorts.add(port); return port; }
   }
   throw new Error("No unused loopback port");
 }
-export async function listen(server, port) { server.listen(port, "127.0.0.1"); await once(server, "listening"); }
+export async function listen(server, port) {
+  // Keep the selected port occupied during slow key generation/provisioning in parallel test files.
+  // Release it only immediately before the real listener binds, never seconds beforehand.
+  await releasePortReservation(port);
+  server.listen(port, "127.0.0.1"); await once(server, "listening");
+}
+// Real child-process servers bind without this file's listen helper.
+export async function releasePortReservation(port){const reservation=reservedPorts.get(port);if(reservation){reservedPorts.delete(port);await new Promise(r=>reservation.close(r));}}
 export async function close(server) {
   if (!server.listening) return;
   const done = once(server, "close"); server.close(); server.closeAllConnections(); await done;
@@ -90,6 +98,7 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mnemuron-oauth-test-"));
   fs.chmodSync(directory, 0o700);
   const ports = { authPort: await freePort(), gatewayPort: await freePort(), callbackPort: await freePort() };
+  t.after(async()=>{for(const port of Object.values(ports)){const reservation=reservedPorts.get(port);if(reservation){reservedPorts.delete(port);await new Promise(r=>reservation.close(r));}}});
   const config = authConfiguration(directory, ports);
   mutate(config);
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });

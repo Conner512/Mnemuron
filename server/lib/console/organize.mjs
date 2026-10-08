@@ -1,6 +1,8 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {object,id,number,fingerprint} from './state.mjs';
 import {ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
+import {protectTables} from '../lifecycle/protection.mjs';
+import {resolveMemoryScope} from '../memory-scope.mjs';
 
 // One organizer for every manual category write: a single memory, a page selection, everything
 // matching a filter, or the members of a deleted category. Each write is previewed (token), applied
@@ -11,12 +13,14 @@ const MEMORY_TYPES=['fact','goal','constraint','decision','completed','blocker',
 const ORIGINS=['imported','other'];
 
 // Current category per memory: a locked manual override wins, then the model annotation of the
-// latest revision under the account's taxonomy version, otherwise uncategorized.
-export const categorySql=`SELECT m.memory_id,COALESCE(o.category,a.category,'uncategorized') category FROM memories m
+// latest revision under the account's taxonomy version, otherwise uncategorized. Only live memories (no project, or
+// an owned project that is not deleted) take part: every library, facet, preview and organize read goes through here.
+// Parameters: taxonomy version, user, then the live filter's own parameters.
+export const categorySql=live=>`SELECT m.memory_id,COALESCE(o.category,a.category,'uncategorized') category FROM memories m
   LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
   LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
     AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
-  WHERE m.user_id=?`;
+  WHERE m.user_id=? AND ${live.sql}`;
 
 export function label(value){
   if(typeof value!=='string')throw new ValidationError('Invalid category name.','INVALID_CATEGORY_LABEL');
@@ -42,9 +46,14 @@ export class ConsoleOrganizer {
       CREATE TABLE IF NOT EXISTS console_organize_items(user_id TEXT NOT NULL,batch_id TEXT NOT NULL,memory_id TEXT NOT NULL,prior_category TEXT,applied_category TEXT NOT NULL,
         PRIMARY KEY(user_id,batch_id,memory_id));
       CREATE TABLE IF NOT EXISTS console_import_records(user_id TEXT NOT NULL,memory_id TEXT NOT NULL,original_created_at TEXT,imported_at TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));`);
+    protectTables(this.db,['console_organize_batches','console_organize_items']);
   }
   taxonomy(user){return this.service.taxonomy(user);}
   labels(user){return this.service.features.labels(user);}
+  /** The owner's authoritative lifecycle filter for one Console request (normal views are live-only). */
+  live(user){return this.store.lifecycle.live(user);}
+  /** categorySql with its parameters for this owner. */
+  categories(user,live=this.live(user)){const filter=live.sql('m.project_id');return {sql:categorySql(filter),params:[this.taxonomy(user).version,user,...filter.params]};}
 
   /** Validated filter shared by the library list, the facets, the preview and the apply step. */
   filter(user,p,{organize=false}={}){
@@ -59,22 +68,24 @@ export class ConsoleOrganizer {
   }
   /** Rows matching a filter, newest first (or search rank). Candidate windows are bounded and say so. */
   rows(auth,f,{ids,ranked,limit=ORGANIZE_LIMIT+1,offset=0,count=false}={}){
-    const user=auth.user_id;let order=ranked||null,truncated=false,total;
+    const user=auth.user_id,live=this.live(user),categories=this.categories(user,live);let order=ranked||null,truncated=false,total,aliases=null,dependencyToken=null,matchById=new Map();
     if(ranked)ids=ids?ids.filter(x=>ranked.includes(x)):ranked;
     if(f.query){
-      const found=this.store.memorySearch.candidates(user,f.query,{}, {auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES});
-      truncated=found.truncated===true;order=found.rows.map(r=>r.memory_id);
+      // The search window is cut after the live filter, so deleted-project records never take candidate slots.
+      const scope=resolveMemoryScope(this.db,user,{},{lifecycle:this.store.lifecycle});
+      const found=this.store.memorySearch.candidates(user,f.query,scope,{auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES});
+      truncated=found.truncated===true;aliases=found.aliases;dependencyToken=found.dependency_token;matchById=new Map(found.rows.map(r=>[r.memory_id,r._entity_match]));order=found.rows.map(r=>r.memory_id);
       ids=ids?ids.filter(x=>order.includes(x)):order;
     }
-    const sql=`SELECT m.memory_id,m.content,m.memory_type,m.status,m.topic,m.created_at,c.category,
+    const sql=`SELECT m.memory_id,m.content,m.memory_type,m.status,m.topic,m.created_at,m.project_id,c.category,
         (SELECT MAX(revision) FROM memory_revisions r WHERE r.user_id=m.user_id AND r.memory_id=m.memory_id) revision,
         m.source LIKE 'user_import:%' imported,i.original_created_at
-      FROM memories m JOIN (${categorySql}) c ON c.memory_id=m.memory_id
+      FROM memories m JOIN (${categories.sql}) c ON c.memory_id=m.memory_id
       LEFT JOIN console_import_records i ON i.user_id=m.user_id AND i.memory_id=m.memory_id
       WHERE m.user_id=? AND (? IS NULL OR m.status=?) AND (? IS NULL OR c.category=?) AND (? IS NULL OR m.topic=?)
         AND (? IS NULL OR (m.source LIKE 'user_import:%')=(?='imported'))
         AND (? IS NULL OR m.memory_id IN (SELECT value FROM json_each(?)))`;
-    const args=[this.taxonomy(user).version,user,user,f.status??null,f.status??null,f.category??null,f.category??null,f.topic??null,f.topic??null,
+    const args=[...categories.params,user,f.status??null,f.status??null,f.category??null,f.category??null,f.topic??null,f.topic??null,
       f.origin??null,f.origin??null,ids?'1':null,ids?JSON.stringify(ids):null];
     let rows;
     if(order){
@@ -83,16 +94,16 @@ export class ConsoleOrganizer {
       rows=all.slice(offset,offset+limit);if(count)total=all.length;
     }else{rows=this.db.prepare(sql+' ORDER BY m.created_at DESC,m.rowid DESC LIMIT ? OFFSET ?').all(...args,limit,offset);
       if(count)total=rows.length<limit&&offset===0?rows.length:this.db.prepare(`SELECT COUNT(*) n FROM (${sql})`).get(...args).n;}
-    return {rows:rows.map(r=>({...r,imported:r.imported===1})),truncated,...(count?{total}:{})};
+    return {rows:rows.map(r=>({...r,imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{})})),truncated,aliases,dependencyToken,...(count?{total}:{})};
   }
   /** Facets for browsing a large collection: active memories only, owner scoped, counts only. */
   facets(auth){
-    const user=auth.user_id,taxonomy=this.taxonomy(user),labels=this.labels(user);
-    const counts=new Map(this.db.prepare(`SELECT c.category,COUNT(*) n FROM memories m JOIN (${categorySql}) c ON c.memory_id=m.memory_id WHERE m.user_id=? AND m.status='active' GROUP BY c.category`)
-      .all(taxonomy.version,user,user).map(r=>[r.category,r.n]));
-    const topics=this.db.prepare("SELECT topic,COUNT(*) count FROM memories WHERE user_id=? AND status='active' AND topic IS NOT NULL AND topic<>'' GROUP BY topic ORDER BY count DESC,topic LIMIT 30").all(user);
-    const statuses=Object.fromEntries(this.db.prepare('SELECT status,COUNT(*) n FROM memories WHERE user_id=? GROUP BY status').all(user).map(r=>[r.status,r.n]));
-    const imported=this.db.prepare("SELECT COUNT(*) n FROM memories WHERE user_id=? AND status='active' AND source LIKE 'user_import:%'").get(user).n;
+    const user=auth.user_id,taxonomy=this.taxonomy(user),labels=this.labels(user),live=this.live(user),categories=this.categories(user,live),filter=live.sql('project_id');
+    const counts=new Map(this.db.prepare(`SELECT c.category,COUNT(*) n FROM memories m JOIN (${categories.sql}) c ON c.memory_id=m.memory_id WHERE m.user_id=? AND m.status='active' GROUP BY c.category`)
+      .all(...categories.params,user).map(r=>[r.category,r.n]));
+    const topics=this.db.prepare(`SELECT topic,COUNT(*) count FROM memories WHERE user_id=? AND status='active' AND topic IS NOT NULL AND topic<>'' AND ${filter.sql} GROUP BY topic ORDER BY count DESC,topic LIMIT 30`).all(user,...filter.params);
+    const statuses=Object.fromEntries(this.db.prepare(`SELECT status,COUNT(*) n FROM memories WHERE user_id=? AND ${filter.sql} GROUP BY status`).all(user,...filter.params).map(r=>[r.status,r.n]));
+    const imported=this.db.prepare(`SELECT COUNT(*) n FROM memories WHERE user_id=? AND status='active' AND source LIKE 'user_import:%' AND ${filter.sql}`).get(user,...filter.params).n;
     const importDays=this.db.prepare("SELECT substr(imported_at,1,10) day,COUNT(*) count FROM console_import_records WHERE user_id=? GROUP BY day ORDER BY day DESC LIMIT 10").all(user);
     return {read_only:true,categories:taxonomy.categories.map(c=>({category:c,label:labels[c]||null,count:counts.get(c)||0})),
       topics,statuses:{active:statuses.active||0,superseded:statuses.superseded||0,retracted:statuses.retracted||0},
@@ -105,11 +116,12 @@ export class ConsoleOrganizer {
     const organizer=service.models.list(user).find(m=>m.kind==='organizer')?.config||{},processing=service.processing(user).classification;
     const jobs=Object.fromEntries(this.db.prepare("SELECT state,COUNT(*) n FROM memory_jobs WHERE user_id=? AND job_type='classification' AND COALESCE(last_error_code,'')<>'RESCHEDULED' GROUP BY state").all(user).map(r=>[r.state,r.n]));
     const last=this.db.prepare("SELECT state,last_error_code,updated_at FROM memory_jobs WHERE user_id=? AND job_type='classification' AND COALESCE(last_error_code,'')<>'RESCHEDULED' ORDER BY updated_at DESC,job_id LIMIT 1").get(user);
+    const live=this.live(user).sql('m.project_id');
     const counts=this.db.prepare(`SELECT SUM(o.memory_id IS NOT NULL) manual,SUM(o.memory_id IS NULL AND a.memory_id IS NOT NULL AND a.category<>'uncategorized') model,COUNT(*) active FROM memories m
       LEFT JOIN memory_category_overrides o ON o.user_id=m.user_id AND o.memory_id=m.memory_id AND o.locked=1
       LEFT JOIN memory_annotations a ON a.user_id=m.user_id AND a.memory_id=m.memory_id AND a.taxonomy_version=?
         AND a.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=m.user_id AND memory_id=m.memory_id)
-      WHERE m.user_id=? AND m.status='active'`).get(taxonomy.version,user);
+      WHERE m.user_id=? AND m.status='active' AND ${live.sql}`).get(taxonomy.version,user,...live.params);
     const running=(jobs.pending||0)+(jobs.leased||0)+(jobs.retry_wait||0),failed=['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required'].reduce((n,s)=>n+(jobs[s]||0),0);
     // Scheduling works with the worker disabled (jobs wait for it); only these make a schedule fail.
     const configured=!!organizer.model&&organizer.enabled===true,blocking=processing.blockers.filter(code=>['NOT_CONFIGURED','EGRESS_DENIED'].includes(code));
@@ -128,10 +140,12 @@ export class ConsoleOrganizer {
     }
     const f=this.filter(user,{query:p.query,category:p.filter_category,topic:p.topic,origin:p.origin},{organize:true});
     if(!ids&&!Object.keys(f).some(k=>k!=='status')&&p.all!==true&&p.all!=='true')throw new ValidationError('Choose memories or a filter to organize.','INVALID_SELECTION');
-    const {rows,truncated,total}=this.rows(auth,f,{ids,count:true});
-    return {rows,truncated,total,filter:f,ids};
+    const {rows,truncated,total,aliases,dependencyToken}=this.rows(auth,f,{ids,count:true});
+    return {rows,truncated,total,aliases,dependencyToken,filter:f,ids};
   }
-  token(target,rows){return fingerprint(['organize-v1',target,rows.map(r=>[r.memory_id,r.revision,r.category])]);}
+  // Bound to the owner, the owner's lifecycle generation and each row's project as well as its revision and category, so
+  // a preview taken before a project delete/restore (or merge) never matches again even if nothing else changed.
+  token(user,target,rows,dependencyToken=null){return fingerprint(['organize-v3',dependencyToken,user,this.store.lifecycle.generation(user),target,rows.map(r=>[r.memory_id,r.revision,r.category,r.project_id??null])]);}
 
   /** organize-preview: exactly what memory.organize would do now, without writing anything. */
   preview(auth,p){return this.plan(auth,p).preview;}
@@ -139,7 +153,7 @@ export class ConsoleOrganizer {
     object(p,['category','memory_ids','query','filter_category','topic','origin','all']);
     const user=auth.user_id,taxonomy=this.taxonomy(user);
     if(!taxonomy.categories.includes(p.category))throw new ValidationError('Invalid category.','INVALID_CATEGORY');
-    const {rows,truncated,total,ids}=this.selection(auth,p);
+    const {rows,truncated,total,ids,aliases,dependencyToken}=this.selection(auth,p);
     const over=total>ORGANIZE_LIMIT,list=rows.slice(0,ORGANIZE_LIMIT);
     const breakdown=new Map();for(const r of list)breakdown.set(r.category,(breakdown.get(r.category)||0)+1);
     const unchanged=breakdown.get(p.category)||0;
@@ -147,12 +161,15 @@ export class ConsoleOrganizer {
     return {rows:list,preview:{read_only:true,category:p.category,total,matched:list.length,changed:list.length-unchanged,unchanged,
       missing:ids?ids.length-list.length:0,by_category:[...breakdown].map(([category,count])=>({category,count})).sort((a,b)=>b.count-a.count),
       sample:list.slice(0,5).map(r=>({memory_id:r.memory_id,content:[...String(r.content)].slice(0,120).join(''),category:r.category})),
-      truncated,over_limit:over,limit:ORGANIZE_LIMIT,applicable:!over&&!truncated&&list.length>0,preview_token:this.token(p.category,list)}};
+      truncated,aliases,over_limit:over,limit:ORGANIZE_LIMIT,applicable:!over&&!truncated&&list.length>0,preview_token:this.token(user,p.category,list,dependencyToken)}};
   }
   /** memory.organize: re-resolves the same selection and refuses if anything changed since the preview. */
   organize(auth,p){
     object(p,['category','memory_ids','query','filter_category','topic','origin','all','preview_token']);
     if(typeof p.preview_token!=='string'||!/^[a-f0-9]{64}$/.test(p.preview_token))throw new ValidationError('Preview the change before applying it.','PREVIEW_REQUIRED');
+    // Re-plan, token comparison and write share one transaction: the token (owner, lifecycle generation, each row's
+    // project, revision and category) is rechecked against exactly the state that is written; hidden records never are.
+    return this.store.memoryTransaction(()=>{
     const {preview_token,...request}=p,{rows,preview:current}=this.plan(auth,request);
     if(current.truncated)throw new ConflictError('The search matches more records than one organize step can verify; narrow the filter.','SELECTION_TRUNCATED');
     if(current.over_limit)throw new ConflictError(`Organize at most ${ORGANIZE_LIMIT} memories at a time; narrow the filter.`,'SELECTION_TOO_LARGE');
@@ -160,11 +177,13 @@ export class ConsoleOrganizer {
     if(current.preview_token!==preview_token)throw new ConflictError('Memories changed since the preview; review the new preview.','PREVIEW_CHANGED');
     const kind=request.memory_ids!==undefined?'selection':'filter';
     return this.write(auth,rows,p.category,{kind,detail:{filter:kind==='filter'?this.filter(auth.user_id,{query:p.query,category:p.filter_category,topic:p.topic,origin:p.origin}):null}});
+    });
   }
   /** Rows a manual category can apply to: owned and active. Sensitivity does not matter; nothing leaves. */
   targets(user,ids){
-    const rows=this.db.prepare(`SELECT m.memory_id,m.status,c.category FROM memories m JOIN (${categorySql}) c ON c.memory_id=m.memory_id
-      WHERE m.user_id=? AND m.memory_id IN (SELECT value FROM json_each(?))`).all(this.taxonomy(user).version,user,user,JSON.stringify(ids));
+    const categories=this.categories(user);
+    const rows=this.db.prepare(`SELECT m.memory_id,m.status,c.category FROM memories m JOIN (${categories.sql}) c ON c.memory_id=m.memory_id
+      WHERE m.user_id=? AND m.memory_id IN (SELECT value FROM json_each(?))`).all(...categories.params,user,JSON.stringify(ids));
     return new Map(rows.map(r=>[r.memory_id,r]));
   }
   /** The one write path. Callers have authorized the owner and validated the category. */
@@ -180,6 +199,7 @@ export class ConsoleOrganizer {
         changed.push(row.memory_id);
       }
       this.invalidate(user,changed);
+      store.entities.enqueue(user,changed);
       this.db.prepare('INSERT INTO console_organize_batches VALUES (?,?,?,?,?,?,?,?,NULL)').run(user,batch,kind,category,JSON.stringify(detail),rows.length,changed.length,now);
       store.audit({auth,action:'memory.category.batch',targetType:'console_organize_batch',targetId:batch,metadata:{kind,matched:rows.length,changed:changed.length,locked:true}});
       return {status:'organized',batch_id:batch,kind,category,matched:rows.length,changed:changed.length,unchanged:rows.length-changed.length,undo_available:changed.length>0};
@@ -216,7 +236,9 @@ export class ConsoleOrganizer {
       for(const item of items){
         const current=this.db.prepare('SELECT category FROM memory_category_overrides WHERE user_id=? AND memory_id=? AND locked=1').get(user,item.memory_id)?.category??null;
         // A corrected or retracted memory changed since: its replacement carries the category on.
-        const active=this.db.prepare('SELECT status FROM memories WHERE user_id=? AND memory_id=?').get(user,item.memory_id)?.status==='active';
+        const memory=this.db.prepare('SELECT status,project_id FROM memories WHERE user_id=? AND memory_id=?').get(user,item.memory_id),active=memory?.status==='active';
+        // A memory of a deleted (or dangling/foreign) project is never changed by undo and never reported as restored.
+        if(memory&&!this.store.lifecycle.liveProject(user,memory.project_id)){skipped.push({memory_id:item.memory_id,reason:'PROJECT_UNAVAILABLE'});continue;}
         if(current!==item.applied_category||!active){skipped.push({memory_id:item.memory_id,reason:'CHANGED_SINCE'});continue;}
         if(item.prior_category!==null&&!categories.includes(item.prior_category)){skipped.push({memory_id:item.memory_id,reason:'CATEGORY_REMOVED'});continue;}
         if(item.prior_category===null)this.db.prepare('DELETE FROM memory_category_overrides WHERE user_id=? AND memory_id=?').run(user,item.memory_id);
@@ -259,7 +281,7 @@ export function categoryEditor(features){
       insert.run(r.user_id,r.memory_id,r.revision,to,category,r.tags_json,r.suggestion,r.profile,r.job_id);}
   };
   // Queued organizer jobs carry their own taxonomy; fence them before output can publish under it.
-  const fence=user=>db.prepare("UPDATE memory_jobs SET state='blocked_config',fence=fence+1,lease_owner=NULL,lease_expires=NULL,last_error_code='STALE_TAXONOMY' WHERE user_id=? AND state IN ('pending','leased','retry_wait')").run(user);
+  const fence=user=>db.prepare("UPDATE memory_jobs SET state='blocked_config',fence=fence+1,lease_owner=NULL,lease_expires=NULL,last_error_code='STALE_TAXONOMY' WHERE user_id=? AND job_type<>'entities' AND state IN ('pending','leased','retry_wait')").run(user);
   const current=user=>{const p=features.preference(user,'taxonomy',features.service.taxonomy(user));return {revision:p.revision,version:p.version,categories:p.categories,labels:p.labels||{}};};
   const unique=(t,text,except)=>{const lower=text.toLocaleLowerCase();
     if(t.categories.some(c=>c!==except&&(c===lower||(t.labels[c]||'').toLocaleLowerCase()===lower)))throw new ConflictError('A category with this name already exists.','CATEGORY_EXISTS');};
@@ -288,11 +310,18 @@ export function categoryEditor(features){
       if(!t.categories.includes(p.move_to)||p.move_to===p.category)throw new ValidationError('Choose where its memories go.','INVALID_CATEGORY');
       const categories=t.categories.filter(c=>c!==p.category),version=versionFor(user,categories,t.revision+1),{[p.category]:removed,...labels}=t.labels;
       store.derivedMemory.taxonomy({version,categories});
-      const members=db.prepare('SELECT memory_id FROM memory_category_overrides WHERE user_id=? AND category=? AND locked=1').all(user,p.category);
+      const members=db.prepare(`SELECT o.memory_id,m.project_id FROM memory_category_overrides o LEFT JOIN memories m ON m.user_id=o.user_id AND m.memory_id=o.memory_id
+        WHERE o.user_id=? AND o.category=? AND o.locked=1`).all(user,p.category);
+      // Records of a deleted project are not part of the visible, undoable move: their override follows the removed
+      // category to its target as taxonomy maintenance, so the taxonomy stays consistent if the project is restored.
+      // They are not counted in `moved`, get no organize item and cannot be undone by the batch.
+      const hidden=members.filter(m=>!store.lifecycle.liveProject(user,m.project_id)),visible=members.filter(m=>!hidden.includes(m));
       const saved=persist(user,p.expected_revision,{version,categories,labels});
       carryForward(user,t.version,version,categories,{map:{[p.category]:p.move_to}});fence(user);
       db.prepare("UPDATE memory_summaries SET status='stale' WHERE user_id=? AND status='current' AND category IN (?,?)").run(user,p.category,p.move_to);
-      const batch=organizer.write(auth,members.map(m=>({memory_id:m.memory_id,category:p.category})),p.move_to,
+      for(const m of hidden)db.prepare('UPDATE memory_category_overrides SET category=? WHERE user_id=? AND memory_id=? AND locked=1').run(p.move_to,user,m.memory_id);
+      organizer.invalidate(user,hidden.map(m=>m.memory_id));
+      const batch=organizer.write(auth,visible.map(m=>({memory_id:m.memory_id,category:p.category})),p.move_to,
         {kind:'category.delete',detail:{deleted:{id:p.category,label:removed||null,index:t.categories.indexOf(p.category)},previous_version:t.version}});
       return {...saved,status:'deleted',category:p.category,move_to:p.move_to,moved:batch.changed,batch_id:batch.batch_id};
     },

@@ -2,12 +2,30 @@ import {lookup} from 'node:dns/promises';
 import {randomUUID} from 'node:crypto';
 import {Organizer,Embedder} from '../model-providers/providers.mjs';
 import {requestJSON} from '../model-providers/transport.mjs';
-import {validateProfile,fail} from '../model-providers/contracts.mjs';
+import {validateProfile,fail,ModelError} from '../model-providers/contracts.mjs';
+import {isIP} from 'node:net';
 import {ConflictError,ValidationError} from '../errors.mjs';
 import {object,number,fingerprint} from './state.mjs';
+import {protectTables} from '../lifecycle/protection.mjs';
 import {outputSchema,validateSummary} from '../memory-jobs/worker.mjs';
 import {ConsoleQuotas} from './quotas.mjs';
 
+// Model-list discovery bounds: one deadline for DNS and HTTP, response bytes, listed IDs, ID length (the save limit).
+export const DISCOVERY=Object.freeze({deadline_ms:10000,max_bytes:262144,max_models:200,max_id:160});
+/** The model IDs of a documented list reply ({data:[{id}]} or Ollama {models:[{name}]}), deduplicated and sorted. An ID
+ * that saving would refuse (empty, too long, padded) or that carries control, format or separator characters is dropped
+ * and counted, never offered. A name
+ * is not evidence of capability or dimensions. */
+export function modelIds(protocol,reply){
+  const list=protocol==='ollama'?reply?.models:reply?.data;if(!Array.isArray(list))fail('MODEL_LIST_INVALID');
+  const ids=new Set();let dropped=0;
+  for(const item of list){const value=protocol==='ollama'?item?.name??item?.model:item?.id;
+    // Control, format (bidi overrides, zero-width) and line/paragraph separator characters are never offered.
+    if(typeof value!=='string'||!value.trim()||value!==value.trim()||value.length>DISCOVERY.max_id||/[\u0000-\u001f\u007f-\u009f\u2028\u2029]|\p{Cf}/u.test(value)){dropped++;continue;}
+    ids.add(value);}
+  const all=[...ids].sort((a,b)=>a<b?-1:a>b?1:0);
+  return {models:all.slice(0,DISCOVERY.max_models),count:Math.min(all.length,DISCOVERY.max_models),total:all.length,truncated:all.length>DISCOVERY.max_models,dropped};
+}
 // A browser may configure its own HTTPS service and its own key, never an env/file
 // reference, a proxy, or another user's model. Private destinations need operator approval.
 export class ConsoleModels {
@@ -19,7 +37,10 @@ export class ConsoleModels {
       CREATE TABLE IF NOT EXISTS console_vector_budget(user_id TEXT PRIMARY KEY,total INTEGER NOT NULL CHECK(total BETWEEN 1 AND 150),used INTEGER NOT NULL DEFAULT 0,opened_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);
-    this.quotas=new ConsoleQuotas(store,this);}
+    protectTables(this.db,['memory_vector_manifest']);
+    this.quotas=new ConsoleQuotas(store,this);
+    // Replaceable in synthetic tests only (fake DNS, controlled clock); discovery never uses another resolver path.
+    this.lookup=lookup;this.clock=()=>Date.now();this.discoveryDeadlineMs=DISCOVERY.deadline_ms;this.discovering=new Set();}
   /** Counts one embedder call: the owner's limits (if set) and an open first-run budget. Returns true for a manifest
    * build call (outside the daily cap), 'manual' when the owner's daily limit was already enforced, else false. */
   budgetReserve(user,purpose,day){
@@ -87,10 +108,7 @@ export class ConsoleModels {
     if(config.native_schema===undefined)config.native_schema=true;
     if(typeof config.native_schema!=='boolean')throw new ValidationError('Invalid schema capability.');
     if(typeof config.enabled!=='boolean'||!['openai_compatible','ollama'].includes(config.protocol))throw new ValidationError('Invalid model configuration.');
-    let url;try{url=new URL(config.base_url);}catch{throw new ValidationError('Invalid model URL.');}
-    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(url.origin);
-    if(url.username||url.password||url.hash||url.search||!['https:',...(privateApproved?['http:']:[])].includes(url.protocol))throw new ValidationError('Use HTTPS; private HTTP requires operator approval.','MODEL_URL_DENIED');
-    config.base_url=url.href.replace(/\/$/,'');
+    const {url,base}=this.endpoint(config.base_url);config.base_url=base;
     for(const key of ['model','profile_revision'])if(typeof config[key]!=='string'||!config[key].trim()||config[key].length>160)throw new ValidationError('Model name and revision are required.');
     number(config.daily_requests,1,10000);number(config.output_tokens,128,32768);number(config.batch_size,1,20);
     if(p.kind==='embedder')number(config.dimensions,1,65536);
@@ -105,7 +123,21 @@ export class ConsoleModels {
     this.db.prepare('DELETE FROM console_model_tests WHERE user_id=? AND kind=?').run(auth.user_id,p.kind);
     // Old profile jobs do not run with a new key/model by accident. They remain inspectable.
     if(p.kind==='organizer')this.db.prepare("UPDATE memory_jobs SET state='blocked_config',fence=fence+1,lease_owner=NULL,lease_expires=NULL,last_error_code='NOT_CONFIGURED' WHERE user_id=? AND profile LIKE 'console-%' AND state IN ('pending','leased','retry_wait')").run(auth.user_id);
+    // Carry forward only existing unfinished extraction intents. Never enumerate historical memories.
+    // A new configuration revision gives the new worker a distinct job fingerprint; old leases stay fenced.
+    if(p.kind==='organizer')this.db.prepare(`UPDATE memory_processing_outbox SET state='pending' WHERE user_id=? AND job_type='entities' AND state='scheduled'
+      AND EXISTS(SELECT 1 FROM memory_job_items i JOIN memory_jobs j ON j.job_id=i.job_id WHERE i.user_id=memory_processing_outbox.user_id
+        AND i.memory_id=memory_processing_outbox.memory_id AND i.revision=memory_processing_outbox.revision AND j.job_type='entities'
+        AND j.profile LIKE 'console-%' AND j.state='blocked_config' AND j.last_error_code='NOT_CONFIGURED')`).run(auth.user_id);
     return {status:'saved',model:this.list(auth.user_id).find(m=>m.kind===p.kind)};
+  }
+  /** One URL rule for saving and for model-list discovery: HTTPS, or HTTP only for an operator-approved private origin;
+   * no credentials, query or fragment. Returns the normalized base (no trailing slash). */
+  endpoint(value){
+    let url;try{url=new URL(value);}catch{throw new ValidationError('Invalid model URL.');}
+    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(url.origin);
+    if(url.username||url.password||url.hash||url.search||!['https:',...(privateApproved?['http:']:[])].includes(url.protocol))throw new ValidationError('Use HTTPS; private HTTP requires operator approval.','MODEL_URL_DENIED');
+    return {url,base:url.href.replace(/\/$/,''),privateApproved};
   }
   profile(user,kind,c) {
     const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(new URL(c.base_url).origin);
@@ -134,6 +166,50 @@ export class ConsoleModels {
       return requestJSON(target,route,body,{resolve:async()=>addresses,headers});
     }});
     provider.profile=Object.freeze(profile);return provider;
+  }
+  /** Model-list discovery for the editing form: one explicit, consented GET of the provider's list route at the draft
+   * URL. It never saves settings, records verification, runs inference, queues work or changes egress settings, and it
+   * never returns a key. The consent covers this one metadata request only: the operator's private-origin approval and
+   * every transport rule (address classes, pinned DNS, no redirects, bounded bytes) still apply. A saved key is used only
+   * for its own owner/kind, at the saved origin and revision, re-checked before DNS, after DNS (just before the key is
+   * unsealed) and before the result is returned. A typed key is used once and never stored. */
+  async discover(auth,p) {
+    object(p,['kind','expected_revision','protocol','base_url','key_source','api_key','consent']);
+    if(p.consent!==true)throw new ValidationError('Confirm this one-time model list request.','MODEL_DISCOVERY_CONSENT_REQUIRED');
+    const user=auth.user_id,row=this.raw(user,p.kind),revision=row?.revision||0;
+    if(number(p.expected_revision,0,2147483647)!==revision)throw new ConflictError('Model configuration changed.','MODEL_VERSION_CHANGED');
+    if(!['openai_compatible','ollama'].includes(p.protocol)||!['saved','typed','none'].includes(p.key_source))throw new ValidationError('Invalid model list request.','INVALID_CONSOLE_INPUT');
+    const {url,base,privateApproved}=this.endpoint(p.base_url);
+    if(p.key_source==='typed'?typeof p.api_key!=='string'||!p.api_key||p.api_key.length>16384||/[\r\n\x00]/.test(p.api_key):p.api_key!==undefined)throw new ValidationError('Invalid model key.','INVALID_CONSOLE_INPUT');
+    const cipher=row?.secret_cipher||null,savedOrigin=row&&new URL(JSON.parse(row.config_json).base_url).origin;
+    // A saved key never travels to another origin (an unsaved origin change drops it, exactly as saving would).
+    if(p.key_source==='saved'&&(!cipher||savedOrigin!==url.origin))throw new ConflictError('No saved key for this address.','MODEL_KEY_UNAVAILABLE');
+    // A saved, explicit egress denial for this origin is never overridden by the one-time consent (any key source).
+    const saved=row&&JSON.parse(row.config_json);
+    if(saved&&savedOrigin===url.origin&&saved.egress_approved!==true)throw new ModelError('EGRESS_DENIED');
+    const current=()=>{const now=this.raw(user,p.kind);
+      if((now?.revision||0)!==revision||p.key_source==='saved'&&now?.secret_cipher!==cipher)throw new ConflictError('Model configuration changed.','MODEL_VERSION_CHANGED');};
+    const slot=`${user}\u0000${p.kind}`;if(this.discovering.has(slot))throw new ConflictError('A model list request is already running.','MODEL_DISCOVERY_PENDING');
+    this.discovering.add(slot);
+    try{
+      // One deadline covers DNS and HTTP. It starts before the first await; a lookup that finishes late is ignored and
+      // can never start a request, and the HTTP timer gets only the time that is left.
+      const deadline=this.clock()+this.discoveryDeadlineMs,left=()=>deadline-this.clock();
+      const within=(promise,ms)=>new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new ModelError('REQUEST_TIMEOUT')),Math.max(0,ms));
+        promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});
+      current();
+      const host=url.hostname.replace(/^\[|\]$/g,'');
+      const addresses=isIP(host)?[{address:host,family:isIP(host)}]:await within(Promise.resolve().then(()=>this.lookup(host,{all:true,verbatim:true})).catch(()=>fail('DNS_UNAVAILABLE')),left());
+      if(left()<=0)fail('REQUEST_TIMEOUT');
+      current();
+      const headers=p.key_source==='saved'?{authorization:'Bearer '+this.state.unseal(user,`model:${p.kind}`,cipher)}:p.key_source==='typed'?{authorization:'Bearer '+p.api_key}:{};
+      const target={base_url:base,auth:{none:true},timeouts:{request_ms:Math.max(1,left())},limits:{input_bytes:1,output_bytes:DISCOVERY.max_bytes},
+        egress:{approved:true,origins:[url.origin],addresses:addresses.map(a=>a.address),allow_private:privateApproved}};
+      const reply=await requestJSON(target,p.protocol==='ollama'?'/api/tags':'/models',undefined,{method:'GET',resolve:async()=>addresses,headers});
+      current();
+      return {status:'listed',kind:p.kind,protocol:p.protocol,model_revision:revision,key_source:p.key_source,...modelIds(p.protocol,reply),
+        settings_saved:false,capability_verified:false};
+    }finally{this.discovering.delete(slot);}
   }
   async test(auth,p) {
     object(p,['kind','mode']);const mode=p.mode===undefined?'connection':p.mode;if(!['connection','capabilities'].includes(mode))throw new ValidationError('Unknown model test mode.');

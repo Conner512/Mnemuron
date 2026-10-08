@@ -80,18 +80,26 @@ label{display:block;font-size:13px;font-weight:600;color:var(--text);margin:16px
 .card{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;min-width:0}
 .card+.card,.columns+.card,.card-grid+.card{margin-top:var(--gap)}
 .columns>.card,.card-grid>.card,.connection-stats>.card,.connection-types>.card{margin-top:0}
-.section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.section-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;min-width:0}
 .section-head h2{margin:0}
-.section-head>div,.section-head>a{display:flex;align-items:center;gap:8px}
+.section-head>div,.section-head>a{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%}
 .section-head>a{font-size:13px;text-decoration:underline;text-underline-offset:4px}
 .section-head>a .icon{width:14px;height:14px}
 .section-foot{display:flex;justify-content:flex-end;margin-top:10px}
 .columns{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:var(--gap);align-items:start}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--gap)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:var(--gap)}
 .model-verification{border-top:1px solid var(--border);margin-top:20px;padding-top:16px}
 .model-verification p{margin:6px 0;overflow-wrap:anywhere}
 .model-pipeline>div{border-top:1px solid var(--border);padding-top:16px;min-width:0}
 .model-card code{overflow-wrap:anywhere}
+/* Both model cards share one layout: equal regions, actions at the bottom, dimensions beside the model name. */
+.model-card{display:flex;flex-direction:column;min-width:0}
+.model-card>.action-toolbar{margin-top:auto;padding-top:14px}
+.model-card .model-name{overflow-wrap:anywhere}
+.model-dimensions{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+.model-discovery{border-top:1px solid var(--border);margin-top:14px;padding-top:12px;display:grid;gap:8px;min-width:0}
+.model-discovery [data-discover-status]{margin:0;overflow-wrap:anywhere}
+.model-discovery [data-discover-key]{margin:0}
 .model-pipeline+.section-foot{gap:20px;flex-wrap:wrap}
 .metadata-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 20px;margin:0 0 14px;font-size:13.5px}
 .metadata-grid dt{color:var(--muted);font-size:12.5px}.metadata-grid dd{margin:0;overflow-wrap:anywhere}
@@ -110,7 +118,7 @@ th,td{padding:11px 12px;border-bottom:1px solid var(--border);text-align:left;ve
 th{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.08em;color:var(--muted);border-bottom:1.5px solid var(--text)}
 tbody tr:hover{background:var(--hover)}
 td small{margin-top:3px}
-.table-scroll{overflow-x:auto}
+.table-scroll{overflow-x:auto;container-type:inline-size;min-width:0}
 .table-scroll .actions{gap:6px}
 .table-scroll .actions button{min-height:30px;padding:3px 10px;font-size:12.5px}
 .pagination{display:flex;justify-content:flex-end;gap:8px}
@@ -140,11 +148,6 @@ details{margin:8px 0}summary{cursor:pointer;color:var(--muted);font-size:13px}
 .nav-icon{display:flex;color:var(--muted)}.nav-icon .icon{width:18px;height:18px}
 .sidebar nav a:hover .nav-icon{color:var(--text)}
 .sidebar nav a[aria-current] .nav-icon{color:var(--accent)}
-.account-badge{margin-top:auto;display:flex;align-items:center;gap:10px;padding:14px 10px 0;border-top:1px solid var(--border)}
-.account-badge>div{min-width:0;flex:1}
-.account-badge strong{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.account-badge small{font-size:11.5px}
-.account-badge>.icon{width:16px;height:16px;color:var(--good)}
 .avatar{display:grid;place-items:center;width:30px;height:30px;flex:none;border:1px solid var(--text);border-radius:var(--radius-sm);font-family:var(--font-serif);font-size:16px;font-weight:600;text-transform:uppercase}
 .workspace{display:flex;flex-direction:column;min-width:0;min-height:100vh}
 .topbar{position:sticky;top:0;z-index:4;height:var(--topbar);display:flex;align-items:center;gap:18px;padding:0 var(--gutter);background:var(--bg);border-bottom:1px solid var(--border)}
@@ -169,6 +172,9 @@ body.pane-open .breadcrumb>span{display:none}
 .account-menu-panel strong{display:block;margin:2px 0 12px}
 .account-menu-panel form{margin:0}
 .account-menu-panel button{width:100%;justify-content:flex-start}
+.account-menu-panel .account-security{display:flex;align-items:center;gap:8px;min-height:40px;margin:0 0 8px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);text-decoration:none}
+.account-menu-panel .account-security:hover{border-color:var(--text)}
+.account-menu-panel .account-security .icon{width:16px;height:16px}
 #main{container-type:inline-size;flex:1;min-width:0;width:100%;max-width:1600px;margin:0 auto;padding:28px var(--gutter) 40px;outline:none}
 footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:flex;justify-content:center}
 .footer-mark{font-family:var(--font-serif);font-size:12px;letter-spacing:.2em;color:var(--muted)}
@@ -330,12 +336,13 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .category-manager form{flex:1 1 100%}
 .category-create{display:flex;align-items:end;gap:8px}
 .category-create label{flex:1;margin:0}
+/* Base before the container rules below: a later base rule would override their single-column stack. */
+.split{display:grid;grid-template-columns:280px minmax(0,1fr);gap:24px;align-items:start}
 @container (max-width:860px){.library-layout{grid-template-columns:minmax(0,1fr)}.library-facets{position:static;max-height:none;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));overflow:visible}}
 @container (max-width:1040px){.memory-filters{grid-template-columns:repeat(3,minmax(160px,1fr))}.memory-filters .query-field,.memory-filters .filter-actions{grid-column:1/-1}.home-grid,.split{grid-template-columns:minmax(0,1fr)}.radar-panel{grid-template-columns:minmax(0,1fr)}.memory-table .col-date{width:150px}}
 @container (max-width:620px){.memory-filters{grid-template-columns:minmax(0,1fr)}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
-/* Summaries, audit */
-.split{display:grid;grid-template-columns:280px minmax(0,1fr);gap:24px;align-items:start}
+/* Summaries, audit (the .split base rule sits above the container rules that stack it) */
 .index-panel h2,.list-panel h2{padding-bottom:8px;margin-bottom:0;border-bottom:1.5px solid var(--text);font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.1em;color:var(--muted)}
 .category-index{list-style:none;margin:0;padding:0}
 .category-link{display:grid;grid-template-columns:minmax(0,1fr) 60px 30px;align-items:center;gap:10px;padding:10px 8px;border-bottom:1px solid var(--border);color:var(--text);font-size:13.5px}
@@ -345,7 +352,41 @@ footer{padding:14px var(--gutter);border-top:1px solid var(--border);display:fle
 .summary-list{list-style:none;margin:0 0 12px;padding:0}
 .summary-row{display:flex;align-items:flex-start;gap:10px;padding-right:12px;border-bottom:1px solid var(--border)}
 .summary-row>.tag{margin-top:13px}
-.summary-title{font-weight:600}
+.summary-title{display:block;font-weight:600}
+/* Distinguishing facts wrap as whole phrases; IDs are secondary and may break anywhere. */
+.summary-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 12px;margin-top:4px;font-size:12.5px;line-height:1.6;color:var(--muted)}
+.summary-facts time{font-family:var(--font-mono);font-size:11.5px}
+.summary-tz{font-family:var(--font-mono);font-size:11px}
+.summary-name{color:var(--text)}
+.summary-facts code,.summary-id code{font-size:11px;overflow-wrap:anywhere;word-break:break-all}
+.summary-id{display:block;margin-top:4px;font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.summary-detail-facts{margin:0 0 14px}
+/* Projects and tasks: long names and IDs wrap; actions follow the text on narrow widths. */
+.view-switch{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.view-switch button[aria-pressed="true"]{border-color:var(--text);background:var(--soft);font-weight:600}
+.project-list{list-style:none;margin:0;padding:0}
+.project-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;padding:12px 0;border-bottom:1px solid var(--border)}
+.project-name{font-size:14.5px;overflow-wrap:anywhere}
+.project-aliases{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0 0}.project-aliases .tag{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+.project-meta{display:block;margin-top:4px;color:var(--muted);overflow-wrap:anywhere}
+.project-actions{align-self:start;flex-wrap:wrap;justify-content:flex-end}
+.project-context{grid-column:1/-1;margin:4px 0 0;padding:12px 14px;border-left:2px solid var(--line);background:var(--bg);font-size:13px;overflow-wrap:anywhere}
+.project-context p{margin:0 0 6px}.project-context ul,.project-context ol{margin:4px 0 8px;padding-left:18px}
+.context-provenance{color:var(--muted)}.context-identities code{margin-right:6px}
+.context-tasks{list-style:none;padding:0!important}.context-task>summary,.context-section>summary{color:var(--text)}
+.context-section{margin:4px 0 4px 8px}
+.task-list{list-style:none;margin:0;padding:0}
+.task-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px;padding:10px 0;border-bottom:1px solid var(--border)}
+.task-title{display:block;overflow-wrap:anywhere;white-space:pre-wrap}
+.task-actions{align-self:start;flex-wrap:wrap;justify-content:flex-end}
+.list-editor{margin:12px 0;padding:10px 12px;border:1px solid var(--border)}.list-editor ul{list-style:none;margin:0 0 6px;padding:0;max-height:240px;overflow:auto}
+.list-editor .check-field{align-items:flex-start}.list-value{overflow-wrap:anywhere;white-space:pre-wrap;font-family:var(--font-mono);font-size:12px}
+@container (max-width:620px){.project-row,.task-row{grid-template-columns:minmax(0,1fr)}.project-actions,.task-actions{justify-content:flex-start}}
+/* Narrow: the status tag sits in the corner beside the short title, so the facts use the full row width. */
+@container (max-width:520px){.summary-row{position:relative;padding-right:0}.summary-row>.tag{position:absolute;top:11px;right:8px;margin:0}
+  .summary-row .summary-title{padding-right:96px}}
+.claim-list .detail-source button{max-width:100%;white-space:normal;text-align:left;overflow-wrap:anywhere}
+.claim-list .detail-source button>span{white-space:nowrap}
 .timeline{list-style:none;margin:0 0 10px;padding:0}
 .timeline-item{display:grid;grid-template-columns:14px minmax(0,1fr);gap:12px;padding:11px 0;border-top:1px solid var(--border)}
 .timeline-item:first-child{border-top:0}
@@ -467,6 +508,27 @@ body.pane-open .workspace{margin-right:var(--pane)}
 .form-content form input{min-height:44px}
 .form-content form input[name="otp"]{height:52px;font-family:var(--font-mono);font-size:20px;letter-spacing:.5em}
 .form-content form input[name="code"]{font-family:var(--font-mono);font-size:13.5px}
+.field-hint{display:block;margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted)}
+/* Six-box code: one transparent input covers six decorative boxes; the active box shows focus and caret. */
+.otp-shell{position:relative;display:block;width:min(100%,328px);height:60px;overflow:hidden}
+.otp-slots{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;height:100%;padding:4px;pointer-events:none}
+/* Box borders use the same --muted boundary as every other field (at least 3:1 on --field). */
+.otp-slot{display:flex;align-items:center;justify-content:center;min-width:0;border:1px solid var(--muted);border-radius:var(--radius-sm);background:var(--field);font-family:var(--font-mono);font-size:22px;color:var(--text)}
+.otp-slot.is-active{border-color:var(--text);box-shadow:0 0 0 3px var(--soft)}
+.otp-slot.is-active:empty::after{content:"";width:1.5px;height:22px;background:var(--text);animation:otp-caret 1.1s steps(1) infinite}
+/* A selected range is shown on the boxes it covers, matching what typing, Backspace or paste replaces. */
+.otp-slot.is-selected{border-color:var(--text);background:var(--soft)}
+/* The shell clips the wide invisible field, so the keyboard focus ring sits inside its own box edge. */
+.otp-shell:has(input:focus-visible){outline:2px solid var(--text);outline-offset:-2px}
+.otp-shell:has(input:user-invalid) .otp-slot{border-color:var(--bad)}
+.form-content form .otp-shell input[data-otp]{position:absolute;top:0;left:0;width:100%;height:100%;min-height:0;margin:0;padding:0;border:0;background:transparent;color:transparent;caret-color:transparent;letter-spacing:0;font-family:var(--font-mono);font-size:22px;outline:none;box-shadow:none}
+.otp-shell input::selection{background:transparent}
+@keyframes otp-caret{50%{opacity:0}}
+/* Forced colours: drop the decoration and show the real field with native text, selection and focus. */
+@media(forced-colors:active){.otp-slots{display:none}.otp-shell{height:auto;overflow:visible}.otp-shell:has(input:focus-visible){outline:0}
+  .form-content form .otp-shell input[data-otp]{position:static;height:52px;color:CanvasText;caret-color:auto;border:1px solid CanvasText;letter-spacing:.5em}
+  .form-content form .otp-shell input[data-otp]:focus-visible{outline:2px solid Highlight;outline-offset:2px}
+  .otp-shell input::selection{background:Highlight;color:HighlightText}}
 .form-content form button.primary{width:100%;min-height:46px;margin-top:24px;font-size:15px}
 .form-content form .actions button{width:auto}
 .form-content form button[data-password-toggle]{display:block;margin:6px 0 0 auto;min-height:0;padding:2px 0;border:0;background:none;color:var(--muted);font-size:12.5px;font-weight:400;text-decoration:underline;text-underline-offset:3px}
@@ -504,7 +566,7 @@ body.pane-open .workspace{margin-right:var(--pane)}
 @media(max-width:1180px){.auth-cards{display:none}}
 @media(max-width:1100px){.top-search{display:none}.columns{grid-template-columns:minmax(0,1fr)}.feature-grid{grid-template-columns:minmax(0,1fr)}}
 @media(max-width:860px){#main.auth-layout{grid-template-columns:minmax(0,1fr)}.auth-brand{display:none}.auth-form{border-left:0;padding:24px 20px}}
-@media(max-width:760px){.shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}.sidebar>.eyebrow,.account-badge{display:none}.sidebar nav{display:flex;flex-wrap:wrap;gap:4px}.nav-group{display:contents}.nav-group h2{display:none}.topbar{position:relative;height:auto;min-height:56px;flex-wrap:wrap;padding:10px 16px}.page-heading{flex-direction:column;align-items:flex-start}}
+@media(max-width:760px){.shell{grid-template-columns:minmax(0,1fr)}.sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--border)}.sidebar>.eyebrow{display:none}.sidebar nav{display:flex;flex-wrap:wrap;gap:4px}.nav-group{display:contents}.nav-group h2{display:none}.topbar{position:relative;height:auto;min-height:56px;flex-wrap:wrap;padding:10px 16px}.page-heading{flex-direction:column;align-items:flex-start}}
 @keyframes slide{from{transform:translateX(16px);opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 
@@ -517,3 +579,93 @@ body.pane-open .workspace{margin-right:var(--pane)}
 .detail-facts dt{color:var(--muted);font-size:12.5px;line-height:22px}.detail-facts dd{margin:0;overflow-wrap:anywhere;display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .detail-facts .tag-value{font-size:12px}.detail-facts small{width:100%}
 #detail-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Project lifecycle (5G): delete/merge are visually distinct but never alarming in the list; impact lists wrap. */
+.project-actions button.danger:not(:disabled){color:var(--bad);border-color:var(--bad)}
+#operation-dialog form>.actions button.primary.danger:not(:disabled){border-color:var(--bad);background:var(--bad);color:var(--on-accent)}
+.project-members{margin:4px 0 0;overflow-wrap:anywhere}
+.lifecycle-impact{border-top:1px solid var(--border);margin-top:12px;padding-top:10px;min-width:0}
+.lifecycle-impact h3,.lifecycle-impact h4{margin:10px 0 6px}
+.lifecycle-members,.lifecycle-conflicts,.lifecycle-target-list{margin:0;padding-left:18px;display:grid;gap:4px}
+.lifecycle-members li,.lifecycle-conflicts li,.lifecycle-target-list li{overflow-wrap:anywhere;min-width:0}
+.lifecycle-target-list{list-style:none;padding-left:0}
+.lifecycle-targets{min-width:0}
+.lifecycle-result [data-lifecycle-result]:focus,[data-lifecycle-message]:focus{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Audit: compact optional filters and wrapping recorded references. */
+.audit-scope{max-width:88ch;font-size:12.5px;line-height:1.7}
+.audit-filter-panel{margin:10px 0 16px;border-bottom:1px solid var(--border);padding-bottom:10px}
+.audit-filter-panel>summary{cursor:pointer;width:fit-content;font-size:13px}
+.audit-filters{display:grid;grid-template-columns:repeat(4,minmax(0,1fr)) auto;gap:10px;align-items:end;margin-top:10px}
+.audit-filters label{min-width:0;font-size:12px}.audit-filters input{width:100%;min-width:0;margin-top:4px}
+.audit-filter-zone{grid-column:1/-1;color:var(--muted)}
+.audit-facts{display:grid;gap:5px;margin-top:8px;font-size:12px;line-height:1.8;color:var(--muted)}
+.audit-facts>span{min-width:0;overflow-wrap:anywhere}.audit-facts code,.audit-timeline .memory-meta code{overflow-wrap:anywhere;word-break:break-all;font-size:11px}
+.audit-timeline .memory-meta{display:flex;flex-wrap:wrap;gap:6px 10px}
+.audit-timeline time{font-variant-numeric:tabular-nums}
+.audit-memory{display:inline-block;max-width:100%;margin:2px 4px 2px 0;padding:3px 6px;text-align:left;white-space:normal;overflow-wrap:anywhere;font-size:12px}
+.audit-memory small{display:block;color:var(--muted)}
+@media(max-width:1000px){.audit-filters{grid-template-columns:repeat(2,minmax(0,1fr))}.audit-filters button{justify-self:start}}
+@media(max-width:500px){.audit-filters{grid-template-columns:minmax(0,1fr)}.audit-memory{display:block}.audit-timeline .memory-meta{align-items:start}}
+
+/* Entity evidence stays full-width: equal names need readable source/context/date distinctions. */
+.entity-pending,.entity-memory,.entity-dialog,.entity-summary,.entity-source,.entity-proposal,.entity-member{min-width:0;overflow-wrap:anywhere;word-break:normal}
+.entity-pending{margin-top:24px}.entity-pending-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:16px;margin:18px 0}
+.entity-pending-list>article,.entity-proposal,.entity-summary{border:1px solid var(--border);padding:16px;margin:12px 0}
+.entity-pending-list>article{margin:0}.entity-summary>header,.entity-proposal>header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.entity-name{white-space:normal;overflow-wrap:anywhere;word-break:normal;max-width:100%;line-height:1.5;margin:0 0 8px}.entity-summary h3{font-size:16px}
+.entity-memory{border-top:1px solid var(--border);padding-top:22px;margin-top:24px}.entity-source{margin-top:14px}.entity-source h4{margin:0 0 6px}
+.entity-source-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;margin:10px 0}.entity-source-state,.entity-identifiers,.entity-facts dt{color:var(--muted);font-size:12px}
+.entity-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:10px 20px;margin:14px 0}.entity-facts>div{min-width:0}.entity-facts dt,.entity-facts dd{margin:0}.entity-facts dd{margin-top:4px}
+.entity-identifiers{margin:12px 0}.entity-identifiers code{white-space:normal;overflow-wrap:anywhere}.entity-source>.actions{margin-top:12px}
+.entity-dialog{width:min(760px,calc(100vw - 32px));max-width:calc(100vw - 24px);max-height:calc(100dvh - 24px);border-radius:4px}
+.entity-dialog>.dialog-header{position:sticky;top:0;background:var(--surface);z-index:1}.entity-dialog-content{padding:24px;min-width:0}.entity-dialog-content form{display:grid;gap:16px}
+.entity-dialog-content label{display:grid;gap:6px;min-width:0}.entity-dialog-content input,.entity-dialog-content select{width:100%;min-width:0}.entity-dialog-content .actions,.entity-pending .actions,.entity-memory .actions{flex-wrap:wrap}
+.entity-dialog button,.entity-memory button,.entity-pending button{white-space:normal;max-width:100%;overflow-wrap:anywhere}.entity-names{list-style:none;padding:0;margin:12px 0}.entity-names>li{border-bottom:1px solid var(--border);padding:14px 0}.entity-names small{display:block;margin:6px 0}
+.entity-member{border-top:1px solid var(--border);padding:12px 0}.entity-match{display:block;font-size:12px;color:var(--muted);margin-top:7px;overflow-wrap:anywhere}.entity-target-label{font-weight:600}
+@media(max-width:600px){.entity-dialog-content{padding:16px}.entity-pending-list{grid-template-columns:minmax(0,1fr)}.entity-summary,.entity-proposal{padding:12px}.entity-facts{grid-template-columns:minmax(0,1fr)}.entity-dialog{width:calc(100vw - 24px)}}
+
+/* Tables use the width of their own card, including when a detail pane is docked. */
+@container (max-width:620px){
+ table.responsive-table{display:block;min-width:0;width:100%}
+ .responsive-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+ .responsive-table tbody{display:block}
+ .responsive-table tbody tr{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(190px,100%),1fr));gap:8px 18px;padding:12px 0;border-bottom:1px solid var(--border)}
+ .responsive-table td{display:block;min-width:0;border:0;padding:0;overflow-wrap:anywhere}
+ .responsive-table td::before{content:attr(data-cell-label);display:block;font:11px/1.5 var(--font-sans);letter-spacing:0;color:var(--muted);margin-bottom:4px}
+ .responsive-table td .actions{flex-wrap:wrap}
+ .metadata-grid,.detail-facts{grid-template-columns:minmax(0,1fr) minmax(90px,1fr);gap:8px 14px}
+ .metadata-grid dt,.metadata-grid dd,.detail-facts dt,.detail-facts dd{min-width:0;overflow-wrap:anywhere}
+}
+@media(max-width:500px){
+ .identity-row{align-items:flex-start}.identity-row>div{min-width:0}.identity-row strong{overflow-wrap:anywhere}
+ .page-heading-actions{flex-wrap:wrap;max-width:100%}
+ .dialog-header h2{overflow-wrap:anywhere}.dialog-header .close-button{flex:none}
+}
+@container (max-width:620px){
+ .feature-progress .responsive-table tbody tr{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px}
+ .feature-progress .responsive-table td:first-child{grid-column:1/-1;font-weight:600}
+ .feature-progress .responsive-table td:first-child::before{display:none}
+ [data-feature="MOD-04"] .responsive-table tbody tr{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+ [data-feature="MOD-04"] .responsive-table td:first-child{grid-column:1/-1;font-weight:600}
+ .model-card>.metadata-grid dt:nth-child(-n+4),.model-card>.metadata-grid dd:nth-child(-n+4){grid-column:1/-1}
+ .model-card>.metadata-grid dt:nth-child(-n+4){margin-bottom:-5px}
+}
+/* Small status panels share the desktop width instead of leaving a wide empty right side. */
+.feature-grid--system,.feature-grid--resume{grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch}
+.feature-grid--system>.feature-card[data-status="live"]{grid-column:auto}
+@container (max-width:860px){.feature-grid--system,.feature-grid--resume{grid-template-columns:minmax(0,1fr)}}
+@container (max-width:620px){
+ .roadmap-list>li{grid-template-columns:minmax(0,1fr);gap:8px}
+ .roadmap-meta{flex-wrap:wrap}
+ .feature-progress .responsive-table tbody tr{grid-template-columns:minmax(0,1fr);gap:4px}
+ .feature-progress .responsive-table td:not(:first-child){display:flex;align-items:baseline;gap:12px}
+ .feature-progress .responsive-table td:not(:first-child)::before{display:inline-block;min-width:100px;margin:0}
+}
+/* Keep the overview search and profile state usable inside narrow cards. */
+@container (max-width:620px){
+ .ask{display:grid;grid-template-columns:20px minmax(0,1fr);height:auto;padding:10px;gap:8px}
+ .ask input{width:100%;min-height:38px}
+ .ask kbd{display:none}
+ .ask button{grid-column:1/-1;width:100%}
+ .identity-row .tag{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+}

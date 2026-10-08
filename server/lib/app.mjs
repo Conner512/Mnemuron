@@ -100,7 +100,7 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
-        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|operation)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
         || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
       if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){

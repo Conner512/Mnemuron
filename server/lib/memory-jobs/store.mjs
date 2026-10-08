@@ -1,5 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {digest,fail,integer} from '../model-providers/contracts.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
 
 export class MemoryJobs {
   constructor(store,{clock=()=>Date.now(),leaseMs=60000,concurrency=1,batchSize=20}={}){
@@ -14,9 +15,10 @@ export class MemoryJobs {
       CREATE TABLE IF NOT EXISTS memory_profile_state (profile TEXT PRIMARY KEY,state TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_model_budget (profile TEXT NOT NULL,day TEXT NOT NULL,reserved_calls INTEGER NOT NULL,PRIMARY KEY(profile,day));
       CREATE TABLE IF NOT EXISTS memory_owner_model_usage (user_id TEXT NOT NULL,profile TEXT NOT NULL,day TEXT NOT NULL,reserved_calls INTEGER NOT NULL,PRIMARY KEY(user_id,profile,day));`);
+    protectGroup(this.db,'jobs');
   }
   enqueue({type,userId,scope,profile,metadata,items,highwater=0}) {
-    if(!['classification','summary'].includes(type) || !items.length || items.some(i=>i.user_id!==userId || i.scope_key!==scope))fail('INVALID_JOB');
+    if(!['classification','summary','entities'].includes(type) || !items.length || items.some(i=>i.user_id!==userId || i.scope_key!==scope))fail('INVALID_JOB');
     const manifest=items.map(i=>[i.memory_id,i.revision,i.state_hash,i.scope_key]),inputHash=digest(manifest),groupKey=digest([type,userId,scope,metadata.category,metadata.window,metadata.taxonomy?.version]);
     const fingerprint=digest([groupKey,profile,inputHash,metadata]),now=this.clock();
     return this.store.memoryTransaction(()=>{
@@ -47,9 +49,12 @@ export class MemoryJobs {
     && ['user_id','scope_key','profile','input_hash','group_key','job_type'].every(key=>row[key]===job[key]) && JSON.stringify(row.metadata)===JSON.stringify(job.metadata);}
   renew(job){if(!this.owns(job))fail('LEASE_LOST');this.db.prepare('UPDATE memory_jobs SET lease_expires=? WHERE job_id=? AND fence=?').run(this.clock()+this.leaseMs,job.job_id,job.fence);}
   items(job){return this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? ORDER BY ordinal').all(job.job_id);}
-  /** quota(job,day): an optional owner limit checked and counted first in this transaction; {manual:true} replaces `limit`. */
-  reserve(job,limit,quota=null){return this.store.memoryTransaction(()=>{
+  /** quota(job,day): an optional owner limit checked and counted first in this transaction; {manual:true} replaces `limit`.
+   * sources: the job items about to be sent. Reserving is the last step before every model call (a repair retry included),
+   * so each source is revalidated here (lifecycle, status, revision, privacy): a stale one fails before any budget is used. */
+  reserve(job,limit,quota=null,sources=null){return this.store.memoryTransaction(()=>{
     if(!this.owns(job))fail('LEASE_LOST');const day=new Date(this.clock()).toISOString().slice(0,10);
+    if(sources?.some(item=>!this.store.derivedMemory.validateItem(item)))fail('STALE_INPUT');
     const manual=quota?quota(job,day).manual===true:false;
     this.db.prepare('INSERT OR IGNORE INTO memory_model_budget VALUES (?,?,0)').run(job.profile,day);
     const current=this.db.prepare('SELECT reserved_calls FROM memory_model_budget WHERE profile=? AND day=?').get(job.profile,day);

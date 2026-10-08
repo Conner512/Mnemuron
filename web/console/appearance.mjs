@@ -17,6 +17,18 @@ export function syncAppearance() {
   for(const node of document.querySelectorAll('[data-i18n-title]'))node.title=translate(node.dataset.i18nTitle);
   for(const node of document.querySelectorAll('[data-pref]')){node.value=prefs[node.dataset.pref];node.disabled=false;}
   if(document.body.dataset.title)document.title=`Mnemuron · ${translate(document.body.dataset.title)}`;
+  // Compact tables become labelled records in a narrow local container. Preserve native
+  // table semantics and derive labels from the translated header, never from user content.
+  for(const table of document.querySelectorAll('.table-scroll > table:not(.memory-table)')){
+    const headers=[...table.querySelectorAll('thead th')];if(!headers.length)continue;
+    table.classList.add('responsive-table');table.setAttribute('role','table');
+    for(const group of table.querySelectorAll('thead,tbody'))group.setAttribute('role','rowgroup');
+    for(const row of table.querySelectorAll('tr'))row.setAttribute('role','row');
+    for(const header of headers){header.setAttribute('scope','col');header.setAttribute('role','columnheader');}
+    for(const row of table.querySelectorAll('tbody tr'))for(const [index,cell] of [...row.cells].entries()){
+      cell.dataset.cellLabel=headers[index]?.textContent.trim()||'';cell.setAttribute('role','cell');
+    }
+  }
   syncSelectControls();
 }
 function setPreference(property,value) {
@@ -219,6 +231,86 @@ if(supportsPopover){
   window.visualViewport?.addEventListener('resize',scheduleSelectSync);window.visualViewport?.addEventListener('scroll',scheduleSelectSync);
   window.addEventListener('pagehide',()=>{closeSelect();cancelAnimationFrame(selectFrame);selectFrame=0;});
 }
+
+// Six-box authenticator code. Progressive enhancement like the select above: the one original
+// input keeps its name, label, hint, pattern, required state, autofill and form submission; the six
+// boxes are aria-hidden decoration under it. Without this module the plain input still works.
+const OTP_LENGTH=6;
+// NFKC folds full-width digits from CJK input methods (１２３) to ASCII before non-digits are dropped.
+const otpDigits=value=>String(value??'').normalize('NFKC').replace(/\D/g,'');
+function drawOtp(input) {
+  const shell=input.closest('.otp-shell');if(!shell)return;
+  const value=input.value,focused=document.activeElement===input;
+  const start=input.selectionStart??value.length,end=input.selectionEnd??start,range=focused&&end>start;
+  // A collapsed caret marks one box; a selection marks every box it covers (what an edit replaces).
+  const active=focused&&!range?Math.min(start,value.length,OTP_LENGTH-1):-1;
+  for(const [index,slot] of [...shell.querySelectorAll('.otp-slot')].entries()){
+    if(slot.textContent!==(value[index]||''))slot.textContent=value[index]||'';
+    slot.classList.toggle('is-active',index===active);slot.classList.toggle('is-filled',!!value[index]);
+    slot.classList.toggle('is-selected',range&&index>=start&&index<end);
+  }
+}
+// Every change goes through here: digits only, at most six, caret kept inside the code.
+function setOtp(input,value,caret) {
+  const clean=otpDigits(value).slice(0,OTP_LENGTH);
+  if(input.value!==clean)input.value=clean;
+  const at=Math.max(0,Math.min(caret,clean.length));input.setSelectionRange(at,at);drawOtp(input);
+}
+function enhanceOtp(input) {
+  if(input.closest('.otp-shell')||input.type!=='text')return;
+  const shell=document.createElement('span');shell.className='otp-shell';
+  const slots=document.createElement('span');slots.className='otp-slots';slots.setAttribute('aria-hidden','true');
+  for(let i=0;i<OTP_LENGTH;i++){const slot=document.createElement('span');slot.className='otp-slot';slots.append(slot);}
+  input.before(shell);shell.append(slots,input);
+  input.addEventListener('beforeinput',event=>{
+    // An input method owns the field until compositionend; its provisional text is never rewritten.
+    if(event.isComposing||(event.inputType!=='insertText'&&event.inputType!=='insertReplacementText'))return;
+    const digits=otpDigits(event.data),start=input.selectionStart??input.value.length,end=input.selectionEnd??start;
+    event.preventDefault();if(!digits)return;
+    // A typed digit overwrites the box under the caret; a longer insertion behaves like a paste.
+    const tail=start===end&&digits.length===1?input.value.slice(start+1):input.value.slice(end);
+    setOtp(input,input.value.slice(0,start)+digits+tail,start+digits.length);
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  input.addEventListener('paste',event=>{
+    const digits=otpDigits(event.clipboardData?.getData('text'));event.preventDefault();if(!digits)return;
+    // A complete code replaces the field from any caret position; a fragment is inserted at the caret.
+    if(digits.length>=OTP_LENGTH)setOtp(input,digits,OTP_LENGTH);
+    else{const start=input.selectionStart??input.value.length,end=input.selectionEnd??start;setOtp(input,input.value.slice(0,start)+digits+input.value.slice(end),start+digits.length);}
+    input.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  // Autofill, deletion and anything else that bypasses beforeinput is normalized after the fact.
+  const normalize=()=>{if(input.value!==otpDigits(input.value).slice(0,OTP_LENGTH))setOtp(input,input.value,OTP_LENGTH);else drawOtp(input);};
+  input.addEventListener('input',event=>{if(event.isComposing)drawOtp(input);else normalize();});
+  input.addEventListener('compositionend',()=>queueMicrotask(normalize));
+  for(const type of ['focus','blur','keyup','select'])input.addEventListener(type,()=>drawOtp(input));
+  if(globalThis.ResizeObserver)new ResizeObserver(()=>layoutOtp(input)).observe(shell);
+  document.fonts?.ready.then(()=>layoutOtp(input));
+  layoutOtp(input);drawOtp(input);
+}
+// Pointer geometry is native: the invisible digits are spaced one box pitch apart and start at the
+// middle of box 0, so every caret boundary k lies between box k-1's centre and box k's centre. A click
+// anywhere in box k puts the caret before digit k, and drags or Shift ranges select whole boxes,
+// with no script remapping pointer positions. Forced colours show the plain field, so styles are cleared.
+// Guarded like the select support above: this module is also imported where no media queries exist.
+const forcedColors=globalThis.matchMedia?.('(forced-colors: active)')??null;
+let measure=null;
+function layoutOtp(input) {
+  const shell=input.closest('.otp-shell');if(!shell)return;
+  if(forcedColors?.matches){for(const property of ['width','paddingLeft','letterSpacing'])input.style[property]='';return;}
+  const [first,second]=shell.querySelectorAll('.otp-slot');if(!first||!second)return;
+  const box=first.getBoundingClientRect(),pitch=second.getBoundingClientRect().left-box.left;if(!box.width||!pitch)return;
+  const style=getComputedStyle(input);measure||=document.createElement('canvas').getContext('2d');
+  measure.font=`${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const advance=measure.measureText('0').width;
+  const start=box.left-input.getBoundingClientRect().left+box.width/2;
+  input.style.paddingLeft=`${start}px`;input.style.letterSpacing=`${pitch-advance}px`;
+  // Wide enough that the field never scrolls its text away from the boxes; the shell clips the rest.
+  input.style.width=`${start+OTP_LENGTH*pitch+box.width}px`;input.scrollLeft=0;
+}
+forcedColors?.addEventListener('change',()=>{for(const input of document.querySelectorAll('.otp-shell input[data-otp]')){layoutOtp(input);drawOtp(input);}});
+document.addEventListener('selectionchange',()=>{const input=document.activeElement;if(input?.matches?.('.otp-shell input[data-otp]'))drawOtp(input);});
+for(const input of document.querySelectorAll('input[data-otp]'))enhanceOtp(input);
 
 syncAppearance();
 document.addEventListener('change',event=>setPreference(event.target.dataset.pref,event.target.value));

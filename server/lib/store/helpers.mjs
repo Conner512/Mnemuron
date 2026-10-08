@@ -173,12 +173,13 @@ export function finalizeReadPreview(preview, projection) {
   };
   let bytes = serializedBytes(preview);
   if (bytes > READ_PREVIEW_RESPONSE_BUDGET_BYTES) {
-    preview.recent_activity = preview.recent_activity.slice(0, 10).map((activity) => ({
+    // Not every preview kind carries every section (a branch preview has no recent activity or memories).
+    if (Array.isArray(preview.recent_activity)) preview.recent_activity = preview.recent_activity.slice(0, 10).map((activity) => ({
       ...activity,
       content: activity.content === null ? null : compactText(activity.content, 120),
       content_truncated: activity.content !== null,
     }));
-    preview.structured_memories = preview.structured_memories.slice(0, 5).map((memory) => ({
+    if (Array.isArray(preview.structured_memories)) preview.structured_memories = preview.structured_memories.slice(0, 5).map((memory) => ({
       ...memory,
       content: compactText(memory.content, 160),
       content_truncated: true,
