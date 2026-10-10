@@ -88,7 +88,7 @@ try{
   await op.locator('.policy-box[role=status]').waitFor();check('Category with a Chinese name is created',(await op.locator('.category-manager').innerText()).includes('旅行计划'));
   const trip=await op.locator('.category-manager li').last().getAttribute('data-manage-category');
   await op.locator(`[data-category-rename="${trip}"]`).click();await op.locator('[data-organize-step="rename"] [name=label]').fill('旅行');
-  await op.locator('[data-organize-step="rename"] button[type=submit]').click();await op.locator('.policy-box[role=status]',{hasText:'已重命名'}).waitFor();
+  await op.locator('[data-organize-step="rename"] button[type=submit]').click();await op.locator('.policy-box[role=status]',{hasText:'分类定义已更新'}).waitFor();
   check('Rename changes only the name',(await op.locator(`[data-manage-category="${trip}"]`).innerText()).includes('旅行')&&!(await op.locator('.category-manager').innerText()).includes('旅行计划'));
   await op.locator(`[data-category-rename="${trip}"]`).click();await op.locator('[data-manage-back]').click();
   check('Cancel in rename returns to the list without writing',await op.locator('[data-organize-step="rename"]').count()===0);
@@ -101,6 +101,7 @@ try{
   await page.waitForFunction(()=>new URLSearchParams(location.search).get('topic')==='travel');
   // Imported single-word topics are labelled tags; the filter value is the stored topic.
   const chips=page.locator('.memory-extra .topic-chip');
+  await page.waitForFunction(()=>{const chips=[...document.querySelectorAll('.memory-extra .topic-chip')];return chips.length>0&&chips.every(n=>n.dataset.value==='travel');});
   check('Topic facet filters the list',(await chips.count())>0&&(await chips.evaluateAll(n=>n.map(x=>x.dataset.value))).every(x=>x==='travel'));
   check('Imported topic is labelled as an original tag, not a path or title',await page.locator('.memory-extra .tag-chip .chip-label').count()===await chips.count()&&await page.locator('#memory-rows .memory-path').count()===0);
   await page.locator('[data-select-all]').click();check('Select-all states that the preview gives the exact count',(await page.locator('[data-memory-selection]').innerText()).includes('预览会显示准确数量'));
@@ -137,6 +138,7 @@ try{
   // Category filter and pills use the account-defined name.
   await page.locator('[data-clear-facet="topic"]').click();await settle();
   await page.locator(`.library-facets [data-facet="category"][data-value="${trip}"]`).click();await settle();
+  await page.waitForFunction(()=>{const pills=[...document.querySelectorAll('.memory-table .category-pill')];return pills.length===25&&pills.every(n=>n.textContent.trim()==='旅行');});
   check('Category facet filters to the category and shows its name',(await pillTexts()).length===25&&(await pillTexts()).every(x=>x==='旅行'));
   await shot('10-category-filter');
 
@@ -236,8 +238,9 @@ try{
   check('Batch result summarizes successes and names each failure with a readable reason',outcome.includes('已撤回 1')&&outcome.includes('未处理 1')&&outcome.includes('记忆已更新'));
   await shot('20c-batch-retract-result',page,false);await page.keyboard.press('Escape');
   // A selection kept across pages is what the batch acts on, and the confirmation names every selected memory.
-  await goto('memories?topic=billing');const firstPick=await rowText(page.locator('.memory-table tbody tr').nth(0));await page.locator('[data-batch-memory]').nth(0).check();
+  await goto('memories?topic=billing');const firstId=await page.locator('[data-batch-memory]').first().getAttribute('data-batch-memory');const firstPick=await rowText(page.locator('.memory-table tbody tr').nth(0));await page.locator('[data-batch-memory]').nth(0).check();
   await page.locator('[data-offset="25"]').first().click();await page.locator('.memory-table').waitFor();await page.waitForFunction(()=>new URLSearchParams(location.search).get('offset')==='25');
+  await page.waitForFunction(id=>{const box=document.querySelector('[data-batch-memory]');return box&&box.dataset.batchMemory!==id;},firstId);
   const secondPick=await rowText(page.locator('.memory-table tbody tr').nth(0));await page.locator('[data-batch-memory]').nth(0).check();
   check('Toolbar counts the selection across pages',(await page.locator('[data-selection-count]').innerText())==='2');
   await page.locator('[data-memory-selection] [data-console-action="memory.batch_retract"]').click();await op.locator('form').waitFor();

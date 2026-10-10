@@ -42,3 +42,12 @@ test('Memory search hides only its placeholder while focused; selection layout i
  assert.equal(declarations(css,'.memory-select').width,'16px');
  assert.match(render(batch),/class="sr-only" data-i18n="query"/,'persistent accessible search label');
 });
+
+test('hybrid default preserves select-all for browsing and keyword fallback, never a fused result set',()=>{
+ const render=(query,retrieval,mode='hybrid')=>libraryView(k=>text(k,'zh-CN'),{data:{results:[{memory_id:'synthetic-selection',content:'Synthetic',status:'active'}],retrieval},query,searchMode:mode,status:'active',allowedActions:['memory.organize']});
+ assert.match(render('',undefined),/data-select-all>/);
+ assert.match(render('synthetic',{effective_mode:'lexical',degraded:true}),/data-select-all>/);
+ assert.match(render('synthetic',{effective_mode:'lexical'},'lexical'),/data-select-all>/);
+ assert.doesNotMatch(render('synthetic',{effective_mode:'hybrid'}),/data-select-all>/);
+ assert.doesNotMatch(render('synthetic',{effective_mode:'semantic'},'semantic'),/data-select-all>/);
+});

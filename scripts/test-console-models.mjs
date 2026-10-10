@@ -28,7 +28,8 @@ try{
  const pick=async(name,value)=>{const s=op.locator(`[name="${name}"]`),index=await s.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const b=s.locator('..').locator('> .select-trigger');await b.click();await page.locator('#'+await b.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();};
  const shot=async name=>{await page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});};
  await goto('models');check('Models page has two distinct configurable roles',await page.locator('.model-card').count()===2);
- check('Missing worker and vector storage are explained',(await page.locator('#console-root').innerText()).includes('后台处理尚未启用')&&(await page.locator('#console-root').innerText()).includes('向量库尚未配置'));
+ check('Missing worker and vector storage are explained',(await page.locator('.model-pipeline').innerText()).includes('后台处理已暂停')&&(await page.locator('.model-pipeline').innerText()).includes('向量库尚未配置'));
+ const blocked=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Paused worker and unavailable vectors remain server-enforced',blocked.processing.classification.blockers.includes('WORKER_DISABLED')&&blocked.processing.vector.blockers.includes('VECTOR_DISABLED'));
  check('Unconfigured processing cannot be launched',await page.locator('.model-pipeline button:enabled').count()===0);await shot('models-unconfigured');
  for(const kind of ['organizer','embedder']){
   await begin('models.save',kind);await op.locator('[name=base_url]').fill(cfg.model_url);await op.locator('[name=model]').fill('synthetic-browser-'+kind);

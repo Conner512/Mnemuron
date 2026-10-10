@@ -226,7 +226,7 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   const batchActions = [organize ? ['memory.organize', 'moveToCategory'] : ['memory.batch_classify', 'batchClassify'], ['memory.batch_retract', 'batchRetract']].filter(([action]) => allowedActions.includes(action));
   const selectable = batchActions.length > 0 && rows.some(m => m.status === 'active');
   const count = selectAll ? null : chosen.size;
-  const canSelectAll = organize && searchMode === 'lexical' && (status === 'active' || !status);
+  const canSelectAll = organize && (!query || searchMode === 'lexical' || data.retrieval?.effective_mode === 'lexical') && (status === 'active' || !status);
   const selection = selectable || selectAll ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
     <p role="status" aria-live="polite">${selectAll ? i18n(t, 'allMatchingSelected') : html`${i18n(t, 'selectedMemories')} <strong data-selection-count>${count}</strong> / ${organize ? SELECTION_LIMIT : 50}`}</p>
     <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${(selectAll ? action !== 'memory.organize' : !count) ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}${canSelectAll && !selectAll ? html`<button type="button" class="quiet" data-select-all>${i18n(t, 'selectAllMatching')}</button>` : ''}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
