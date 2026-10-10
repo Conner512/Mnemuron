@@ -42,7 +42,7 @@ export class OwnerControls{
  }
  require(user){if(!this.user||user!==this.user)throw new AuthorizationError('single owner');}
  policy(){const row=this.db.prepare('SELECT * FROM owner_feature_policy WHERE user_id=?').get(this.user);if(!row)error('OWNER_MIGRATION_REQUIRED');return {revision:row.revision,flags:JSON.parse(row.flags_json),schedule:JSON.parse(row.schedule_json)};}
- preferences(){return this.service.features.preference(this.user,'owner-controls',{read_policy:this.store.memoryConfig.memory?.agent_read_policy||'chatgpt_per_memory_v1',retrieval_mode:this.store.memoryConfig.memory?.retrieval?.mode||'lexical'});}
+ preferences(){return this.service.features.preference(this.user,'owner-controls',{read_policy:this.store.memoryConfig.memory?.agent_read_policy||'chatgpt_per_memory_v1',retrieval_mode:this.store.memoryConfig.memory?.retrieval?.mode||'hybrid'});}
  readImpact(policy){return this.db.prepare(`SELECT COUNT(*) n FROM memories m WHERE m.user_id=? AND m.status='active' AND NOT EXISTS(SELECT 1 FROM project_lifecycle l WHERE l.user_id=m.user_id AND l.project_id=m.project_id AND l.state<>'active') AND ${webMemorySql({agent_id:'chatgpt-web',read_policy:AGENT_READ_POLICIES[policy]})}`).get(this.user).n;}
  allowed(key){return !this.user||this.policy().flags[key]===true;}
  view(user){this.require(user);const p=this.policy(),models=this.service.models.list(user),effective={};

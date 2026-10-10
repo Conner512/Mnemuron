@@ -46,7 +46,7 @@ test('ORG-01: a large import is browsable by facets, topic, origin and original 
   assert.deepEqual(newest,[299,298,297,296],'records written in the same second keep their import order (newest first)');
   const other=(await f.get('memories',{origin:'other'})).body.results;assert.deepEqual(other.map(m=>m.content),['Synthetic console-created note']);
   const search=(await f.get('memories',{query:'imported note',topic:'garden',status:'active',limit:50})).body;
-  assert.ok(search.results.length>0&&search.results.every(m=>m.topic==='garden'));assert.equal(search.retrieval.mode,'lexical');
+  assert.ok(search.results.length>0&&search.results.every(m=>m.topic==='garden'));assert.equal(search.retrieval.requested_mode,'hybrid');assert.equal(search.retrieval.effective_mode,'lexical');assert.equal(search.retrieval.degraded,true);
   for(const p of [{origin:'elsewhere'},{topic:'x'.repeat(201)},{part:'anything'},{part:'facets',topic:'router'},{target:'technical'},{memory_ids:'a'}])assert.equal((await f.get('memories',p)).status,400,JSON.stringify(p));
   assert.equal((await f.get('memories',{part:'facets'},f.B)).body.origins.imported,0);
 });

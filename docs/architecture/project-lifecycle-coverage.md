@@ -255,3 +255,7 @@ The owner-control, handoff and lifecycle behavior tests remain required alongsid
 - **Global epoch:** ownerless vector generations and their manifests bump the global epoch.
 - **Protection loss:** a missing or altered epoch trigger on a previously protected table is repaired at open and bumps the global epoch, so tokens taken before the loss never match again.
 - **Lifecycle history** (`project_lifecycle_events`) is append-only, including against `INSERT OR REPLACE`. No supported Core cleanup path deletes owner history (raw-event retention only edits captured events), so no purge exception exists.
+
+## PR 14 search integration review
+
+The new declaration probe in `memory-retrieval.mjs` uses the resolved lifecycle scope and Web visibility before collecting aliases. Dynamic project/task metadata queries use the same live-project view and canonical member set; they are disabled for Web readers. `memory-entities/store.mjs` adds an owner-scoped memory lookup to reserve existing names, filtered by resolved lifecycle scope and readable source. Vector results still refresh scope after provider waits. These are read-only query-time additions; no lifecycle write or migration is added.

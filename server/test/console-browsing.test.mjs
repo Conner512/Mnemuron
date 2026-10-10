@@ -12,8 +12,8 @@ test('BROWSE-01: lexical search pages beyond twenty within an explicit bounded c
  const f=await setup(t),ids=[];
  for(let n=0;n<31;n++)ids.push(f.store.saveMemory(f.a.auth,{scope:'user',content:`Synthetic browse marker ${n}`}).memory.memory_id);
  const foreign=f.store.saveMemory(f.other.auth,{scope:'user',content:'Synthetic browse marker foreign'}).memory.memory_id;
- const first=await f.get('memories',{query:'browse marker',limit:25});assert.equal(first.status,200);assert.equal(first.body.results.length,25);assert.equal(first.body.next_offset,25);
- const second=await f.get('memories',{query:'browse marker',limit:25,offset:25});assert.equal(second.status,200);assert.equal(second.body.results.length,6);assert.equal(second.body.next_offset,null);
+ const first=await f.get('memories',{query:'browse marker',mode:'lexical',limit:25});assert.equal(first.status,200);assert.equal(first.body.results.length,25);assert.equal(first.body.next_offset,25);
+ const second=await f.get('memories',{query:'browse marker',mode:'lexical',limit:25,offset:25});assert.equal(second.status,200);assert.equal(second.body.results.length,6);assert.equal(second.body.next_offset,null);
  const found=[...first.body.results,...second.body.results].map(m=>m.memory_id);assert.equal(new Set(found).size,31);assert.deepEqual(found.sort(),ids.sort());assert.ok(!found.includes(foreign));
  assert.equal(first.body.retrieval.candidate_limit,500);assert.equal(first.body.retrieval.degraded,false);
 });
@@ -48,13 +48,13 @@ test('BROWSE-05: hybrid search awaits the result and never borrows a deployment-
  const f=await setup(t);f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic hybrid marker'});
  let borrowed=false;f.store.vectorIndex={search(){borrowed=true;throw new Error('must not borrow global model');}};
  const r=await f.get('memories',{query:'hybrid marker',mode:'hybrid'});
- assert.equal(r.status,200);assert.equal(r.body.results.length,1);assert.equal(r.body.retrieval.degraded,true);assert.equal(r.body.retrieval.window_limited,true);assert.equal(borrowed,false);
+ assert.equal(r.status,200);assert.equal(r.body.results.length,1);assert.equal(r.body.retrieval.degraded,true);assert.equal(r.body.retrieval.effective_mode,'lexical');assert.equal(r.body.retrieval.candidate_limit,500);assert.equal(r.body.next_offset,null);assert.equal(borrowed,false);
  const semantic=await f.get('memories',{query:'hybrid marker',mode:'semantic'});assert.notEqual(semantic.status,200);assert.equal(borrowed,false);
 });
 test('BROWSE-06: a bounded search advertises truncation rather than hiding matches past the window',async t=>{
  const f=await setup(t);
  for(let n=0;n<502;n++)f.store.saveMemory(f.a.auth,{scope:'user',content:`Synthetic bounded window marker ${n}`});
- const r=await f.get('memories',{query:'bounded window marker',offset:475,limit:25});
+ const r=await f.get('memories',{query:'bounded window marker',mode:'lexical',offset:475,limit:25});
  assert.equal(r.status,200);assert.equal(r.body.results.length,25);assert.equal(r.body.truncated,true);assert.equal(r.body.next_offset,null);assert.equal(r.body.retrieval.candidate_limit,500);
 });
 test('BROWSE-07: stable jobs/summary pagination and job detail never return a foreign record',async t=>{

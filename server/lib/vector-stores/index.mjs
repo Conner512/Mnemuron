@@ -1,3 +1,4 @@
+import {semanticPolicy,acceptsSemanticScore,aliasAnchorsMatch} from '../search-query.mjs';
 import {randomUUID} from 'node:crypto';
 import {digest,fail,integer} from '../model-providers/contracts.mjs';
 import {memoryScopeSql,resolveMemoryScope} from '../memory-scope.mjs';
@@ -229,13 +230,14 @@ export class VectorIndex {
   }
   async search(auth,payload){if(this.ownerId&&this.ownerId!==auth.user_id)fail('INVALID_OWNER');
     this.store.requireScope(auth,'memory:read');
-    const mode=payload.mode || 'lexical';if(!['lexical','hybrid','semantic'].includes(mode))fail('INVALID_RETRIEVAL_MODE');
+    const mode=payload.mode || 'hybrid';if(!['lexical','hybrid','semantic'].includes(mode))fail('INVALID_RETRIEVAL_MODE');
     if(mode==='lexical')return this.store.queryMemories(auth,payload);
     // Existing validation and exact scope resolution remain authoritative.
     let lexical=this.store.queryMemories(auth,{...payload,limit:Math.min(payload.limit || 10,20)});
     let scope=resolveMemoryScope(this.db,auth.user_id,payload);const limit=lexical.result_limit;
     try{
       const snapshot=this.snapshot(),e=this.embedders.get(snapshot.profile);if(!e)fail('NOT_CONFIGURED');
+      const relevance=semanticPolicy(this.store.memoryConfig.memory?.retrieval,e.profile);if(!relevance)fail('RELEVANCE_NOT_CONFIGURED');
       let scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false});
       const assertWebIndexFresh=()=>{
         if(!isWebReader(auth))return;
@@ -250,7 +252,7 @@ export class VectorIndex {
       if(scopes.length>128)fail('VECTOR_SCOPE_TOO_BROAD');
       const filter={must:[condition('owner',surrogate(auth.user_id)),condition('profile',snapshot.profile),condition('lifecycle','active'),{key:'scope',match:{any:scopes.map(row=>surrogate(scopeKey(row)))}}]};
       const {vectors}=await this.embed(e,[payload.query],'query',{sensitivity:'sensitive',userId:auth.user_id});
-      const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[];
+      const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[],semanticScores=new Map();let rejected=0;
       // The requested scope is resolved again after the network waits, before anything else: a project deleted meanwhile
       // is the deterministic answer (PROJECT_DELETED, re-thrown below), never a stale-index degradation. The fresh
       // lifecycle filter then backs the web freshness check and hit hydration; the narrow grant checks are unchanged.
@@ -259,14 +261,24 @@ export class VectorIndex {
       assertWebIndexFresh();
       // Network waits may outlive a privacy change; rebuild lexical results and conflicts now.
       lexical=this.store.queryMemories(auth,{...payload,limit});
-      for(const hit of hits){
+      const plan=this.store.memorySearch.plan(auth.user_id,payload.query,scope,{auth,
+        workstreamIds:payload.source_workstream_ids||(payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false,
+        statuses:payload.statuses||['active'],memoryTypes:payload.memory_types||['fact','goal','constraint','decision','completed','blocker','remaining','next_step']});
+      // Filter absolute model scores BEFORE rank fusion; the first neighbour may itself
+      // be unrelated. Sort before dedup so a many-chunk record contributes only its best hit.
+      const scoreOrder=hit=>Number.isFinite(hit.score)?(relevance.direction==='maximum'?-hit.score:hit.score):-Infinity;
+      const qualified=[...hits].sort((a,b)=>scoreOrder(b)-scoreOrder(a));
+      for(const hit of qualified){
         const point=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=? AND user_id=?').get(String(hit.id),snapshot.generation,auth.user_id);if(!point)continue;
         const row=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=? AND m.status='active' AND ${scopeSql.sql}`).get(auth.user_id,point.memory_id,...scopeSql.params);
         if(!row || !this.store.webVisibility.visible(auth,row.memory_id) || payload.statuses && !payload.statuses.includes(row.status)
           || payload.memory_types && !payload.memory_types.includes(row.memory_type))continue;
         const source=this.store.derivedMemory.currentSource(auth.user_id,point.memory_id);
         if(!source || source.revision!==point.revision || hit.payload?.content_hash!==digest(source.content) || hit.payload?.profile!==snapshot.profile || !e.profile.egress.sensitivities.includes(source.sensitivity))continue;
+        // Counts, too, are scoped: hidden/foreign/stale hits never affect returned diagnostics.
+        if(!acceptsSemanticScore(hit.score,relevance)||!aliasAnchorsMatch(plan,source.content)||(plan.authority_ids&&!plan.authority_ids.includes(source.memory_id))){rejected++;continue;}
         if(!semantic.some(m=>m.memory_id===row.memory_id)) {
+          semanticScores.set(row.memory_id,hit.score);
           const memory=memorySummary(this.store.memoryFromRow(row));semantic.push(isWebReader(auth)?this.store.webVisibility.project(auth,memory):memory);
         }
       }
@@ -281,14 +293,15 @@ export class VectorIndex {
       }
       const priority={raw_query:0,original_terms:1,alias:2,semantic:3};
       const result=[...ranked.values()].sort((a,b)=>(mode==='semantic'?Number(b.kind==='raw_query')-Number(a.kind==='raw_query'):priority[a.kind]-priority[b.kind])||b.rrf-a.rrf||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
-        .map(r=>({...r.item,ranking:{...r.item.ranking,method:'rrf-v1',score:r.rrf,match_kind:r.kind,matched_by:r.methods}}));
-      lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length};
+        .map(r=>({...r.item,ranking:{...r.item.ranking,method:'rrf-v1',score:r.rrf,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
+      lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length,semantic_rejected:rejected,semantic_threshold:relevance.threshold,semantic_threshold_direction:relevance.direction,semantic_distance:relevance.distance,relevance_policy:'query-relevance-v1',alias_expanded:plan.expanded,alias_ambiguous:plan.ambiguous,alias_source_truncated:plan.source_truncated};
+      lexical.retrieval.result_truncated ||= ranked.size>limit;
       boundMemoryResponse(lexical);return lexical;
     }catch(error){
       // A lifecycle/validation/authorization outcome during or after the wait (e.g. the requested project was deleted
       // meanwhile: PROJECT_DELETED) is the answer, not provider degradation.
       if(isDeterministicReadError(error))throw error;
-      const code=['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(error.code)?error.code:'VECTOR_UNAVAILABLE';
+      const code=['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(error.code)?error.code:'VECTOR_UNAVAILABLE';
       if(mode==='semantic')throw Object.assign(new Error('Semantic retrieval unavailable.'),{statusCode:503,code:'SEMANTIC_UNAVAILABLE',errorCode:'SEMANTIC_UNAVAILABLE',degradation_code:code});
       lexical=this.store.queryMemories(auth,{...payload,limit});
       lexical.retrieval={...lexical.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return lexical;

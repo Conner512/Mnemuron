@@ -36,7 +36,7 @@ export class ReadonlyCoreClient {
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
       const error=new BoundaryError(503, result.data.error_code);
-      if(['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED','VECTOR_UNAVAILABLE'].includes(result.data.degradation_code))error.degradation_code=result.data.degradation_code;
+      if(['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED','VECTOR_UNAVAILABLE'].includes(result.data.degradation_code))error.degradation_code=result.data.degradation_code;
       throw error;
     }
     if (result.status === 409 && result.data.error_code === 'TASK_VERSION_CHANGED') throw new BoundaryError(409, 'TASK_VERSION_CHANGED');
@@ -92,10 +92,11 @@ export class ReadonlyCoreClient {
         if(this.config.identity_mode!=='multi_account_v1')return this.request('/v1/memories/query',args);
         // This flag is self-scoped Core metadata, not a tool argument. Pin the allocation
         // guard so a model removed between identity/read cannot fall back to a shared key.
-        if(identity?.personal_retrieval?.configured===true)return this.request('/v1/memories/query',{...args,mode:args.mode||'lexical',personal_model_only:true});
-        if(args.mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
+        const mode=args.mode||identity?.personal_retrieval?.default_mode||'hybrid';
+        if(identity?.personal_retrieval?.configured===true)return this.request('/v1/memories/query',{...args,mode,personal_model_only:true});
+        if(mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
         const result=await this.request('/v1/memories/query',{...args,mode:'lexical'});
-        if(args.mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};
+        if(mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};
         return result;
       }
       case "mnemuron_get_summary": return this.request("/v1/memory-summaries/query", args);

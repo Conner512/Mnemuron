@@ -128,7 +128,7 @@ export function createMnemuronApp({
 
       if (request.method === "GET" && pathname === "/v1/identity") {
         responseStatus = 200;
-        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes,personal_retrieval:{configured:!!store.consoleService.models.raw(auth.user_id,'embedder')} });
+        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes,personal_retrieval:{default_mode:store.defaultRetrievalMode(auth),configured:!!store.consoleService.models.raw(auth.user_id,'embedder')} });
       }
 
       if (request.method === "GET" && pathname === "/readyz/search") {
@@ -432,7 +432,7 @@ export function createMnemuronApp({
           error: responseStatus >= 500 ? "Internal server error." : error.message,
           error_code: responseStatus >= 500 && !['SEARCH_UNAVAILABLE','SEARCH_RETRYABLE','SEMANTIC_UNAVAILABLE'].includes(error.errorCode) ? "INTERNAL_ERROR" : error.errorCode
             || (responseStatus === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_FAILED"),
-          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
+          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
         });
       }
     } finally {

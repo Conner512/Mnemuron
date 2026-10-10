@@ -46,3 +46,18 @@ test('a partial job stops at the run budget without publishing an incomplete res
 test('explicit migration CLI initializes a populated isolated database without running work',async t=>{const f=fixture(t);f.save('Synthetic pre-migration');const fs=await import('node:fs'),{execFileSync}=await import('node:child_process');const config={...f.s.memoryConfig,console:{worker_enabled:false},jobs:{enabled:false}};const file=f.root+'/runtime.json';fs.writeFileSync(file,JSON.stringify(config),{mode:0o600});const result=JSON.parse(execFileSync(process.execPath,[new URL('../bin/mnemuron-owner-migrate.mjs',import.meta.url).pathname,f.root+'/synthetic.sqlite3',file,f.auth.user_id,'--apply-paused'],{encoding:'utf8'}));assert.equal(result.processing,false);assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM owner_processing_runs').get().n,0);assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);});
 
 test('all owner status views reflect Web processing policy rather than the paused legacy worker',async t=>{const f=setup(t);assert.equal(f.service.capabilities(f.auth).worker_enabled,false);await enable(f);assert.equal(f.service.capabilities(f.auth).worker_enabled,true);const {consoleRead}=await import('../lib/console-read.mjs');assert.equal((await consoleRead(f.s,f.auth,'jobs')).worker_enabled,true);assert.equal((await consoleRead(f.s,f.auth,'system-health')).services.worker,'enabled_not_probed');await f.act('schedule.save',{expected_revision:f.owner.policy().revision,enabled:true,kinds:['classification'],interval_minutes:5,max_items:1,budget:1});assert.equal(f.service.settings(f.user).schedule_enabled,true);assert.equal(f.calls(),0);});
+
+test('SEARCH-OWNER: explicit request, saved owner preference, runtime mode, then hybrid; lexical has no provider use',async t=>{
+ const f=setup(t);f.save('Synthetic searchable configuration');let calls=0;
+ f.service.models.provider=()=>{calls++;throw new Error('Lexical must never allocate a provider');};
+ f.service.vector=()=>{calls++;throw new Error('Lexical must never query vectors');};
+ assert.equal(f.s.defaultRetrievalMode(f.auth),'hybrid');
+ f.s.memoryConfig.memory={retrieval:{mode:'lexical'}};assert.equal(f.s.defaultRetrievalMode(f.auth),'lexical');
+ const initial=await f.s.searchMemories(f.auth,{query:'searchable'});assert.equal(initial.retrieval.requested_mode,'lexical');
+ await f.act('features.save',{expected_revision:f.owner.policy().revision,flags:{},retrieval_mode:'lexical'});
+ f.s.memoryConfig.memory.retrieval.mode='hybrid';assert.equal(f.s.defaultRetrievalMode(f.auth),'lexical');
+ assert.equal(f.service.capabilities(f.auth).default_retrieval_mode,'lexical');
+ const {consoleRead}=await import('../lib/console-read.mjs');assert.equal((await consoleRead(f.s,f.auth,'memories',{query:'searchable'})).retrieval.requested_mode,'lexical');
+ await f.act('features.save',{expected_revision:f.owner.policy().revision,flags:{},retrieval_mode:'semantic'});
+ assert.equal((await f.s.searchMemories(f.auth,{query:'searchable',mode:'lexical'})).retrieval.requested_mode,'lexical');assert.equal(calls,0);
+});

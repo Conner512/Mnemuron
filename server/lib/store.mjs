@@ -3181,10 +3181,14 @@ export class MnemuronStore {
     return {...result,next_request:result.next_cursor?{...request,cursor:result.next_cursor}:null,production_ready:false};
   }
 
+  defaultRetrievalMode(auth) {
+    return (this.consoleService.owner.user===auth.user_id?this.consoleService.owner.preferences().retrieval_mode:this.memoryConfig.memory?.retrieval?.mode)||'hybrid';
+  }
+
   async searchMemories(auth,payload) {
     this.requireScope(auth,'memory:read');
     if(payload?.personal_model_only!==undefined&&typeof payload.personal_model_only!=='boolean')throw new ValidationError('Invalid model allocation guard.');
-    const mode=payload?.mode || (this.consoleService.owner.user===auth.user_id?this.consoleService.owner.preferences().retrieval_mode:this.memoryConfig.memory?.retrieval?.mode) || 'lexical';
+    const mode=payload?.mode || this.defaultRetrievalMode(auth);
     if(!['lexical','hybrid','semantic'].includes(mode))throw new ValidationError('Invalid retrieval mode.');
     if(mode==='lexical') {
       const result=this.queryMemories(auth,payload);
@@ -3196,7 +3200,7 @@ export class MnemuronStore {
       catch(error){
         // Lifecycle, validation and authorization outcomes are answers, not provider degradation (e.g. PROJECT_DELETED).
         if(isDeterministicReadError(error))throw error;
-        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
       }
@@ -3251,7 +3255,7 @@ export class MnemuronStore {
     const candidates = rows
       .map((row) => this.memoryFromRow(row))
       .map((memory) => {
-        const lexical = lexicalScore(payload.query, memory);
+        const lexical = lexicalScore(payload.query, memory, selection.plan);
         const match=entityMatches.get(memory.memory_id)||{match_kind:'original_terms'};
         if (lexical <= 0 && match.match_kind!=='alias') return null;
         const confidence = Number.isFinite(memory.generation.confidence)
@@ -3338,6 +3342,8 @@ export class MnemuronStore {
       results: candidates.slice(0, limit).map(memory => memorySummary(memory)),
       retrieval: {
         engine: 'sqlite_fts5', index_version: INDEX_VERSION, coverage: 'authorized_scope',
+        relevance_policy:'query-relevance-v1', alias_expanded:selection.plan.expanded,
+        alias_ambiguous:selection.plan.ambiguous, alias_source_truncated:selection.plan.source_truncated,
         execution_complete: true, degraded: false, candidate_limit: 500,
         aliases:selection.aliases,
         candidate_truncated: selection.truncated, result_truncated: candidates.length > limit,

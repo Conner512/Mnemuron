@@ -408,7 +408,7 @@
   },
   "server/lib/memory-entities/store.mjs": {
    "memories": {
-    "read": 4,
+    "read": 5,
     "write": 0
    },
    "memory_revisions": {
@@ -460,7 +460,7 @@
   },
   "server/lib/memory-retrieval.mjs": {
    "memories": {
-    "read": 5,
+    "read": 6,
     "write": 0
    }
   },

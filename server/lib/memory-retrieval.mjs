@@ -1,36 +1,15 @@
 import { ValidationError } from './errors.mjs';
-import { memoryScopeSql } from './memory-scope.mjs';
-import {webMemorySql} from './memory/web-visibility.mjs';
+import { memoryScopeSql, SCOPE_LIFECYCLE } from './memory-scope.mjs';
+import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
-export const normalizeSearch = value => String(value ?? '').normalize('NFKC').toLowerCase();
-export function searchTokens(value) {
-  const text = normalizeSearch(value), tokens = new Set();
-  // Han boundaries must not split adjacent engineering identifiers into characters.
-  for (const segment of text.split(/(\p{Script=Han}+)/u)) {
-    if (/^\p{Script=Han}/u.test(segment)) {
-      const chars = Array.from(segment);
-      chars.forEach((char, i) => { tokens.add(char); if (chars[i+1]) tokens.add(char + chars[i+1]); });
-    } else for (const word of segment.match(/[\p{L}\p{N}]+(?:[._:/-][\p{L}\p{N}]+)*/gu) || []) {
-      tokens.add(word);
-      // Colons can separate labels from text; retain the full token as well.
-      for (const part of word.split(':')) tokens.add(part);
-    }
-  }
-  for (const symbol of text.match(/\p{S}/gu) || []) tokens.add(symbol);
-  return [...tokens];
-}
+export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
 export function originalMatchKind(query,memory){
-  const text=normalizeSearch(`${memory.content}\n${memory.topic||''}`),normalized=normalizeSearch(query.trim()),tokens=searchTokens(query),present=new Set(searchTokens(text));
-  if(tokens.length&&text.includes(normalized)&&tokens.every(token=>present.has(token)))return 'raw_query';
-  return tokens.some(token=>present.has(token))?'original_terms':null;
-}
-export function lexicalScore(query,memory){
-  if(originalMatchKind(query,memory)==='raw_query')return 1;
-  const tokens=searchTokens(query),present=new Set(searchTokens(`${memory.content}\n${memory.topic||''}`));
-  return tokens.length?tokens.filter(token=>present.has(token)).length/tokens.length*0.8:0;
+  const score=lexicalScore(query,memory);
+  return score===1?'raw_query':score>0?'original_terms':null;
 }
 export const searchUnavailable = () => Object.assign(new Error('Memory search index is unavailable; rebuild or enable it before querying.'), {statusCode:503,errorCode:'SEARCH_UNAVAILABLE'});
 export function transientSql(error){return [5,6,9].includes(Number(error?.errcode)&255) || ['SQLITE_BUSY','SQLITE_LOCKED','SQLITE_INTERRUPT'].includes(error?.code);}
@@ -43,6 +22,13 @@ export class MemorySearch {
     this.entities = entities;
     db.function('memory_search_tokens', {deterministic:true}, indexText);
     db.function('memory_search_normalize', {deterministic:true}, normalizeSearch);
+    db.function('memory_search_contains', {deterministic:true}, (text,term)=>Number(containsTerm(text,term)));
+    db.function('memory_search_alias_seed', {deterministic:true}, (text,query)=>Number(declaredAliases(text).some(group=>group.some(term=>containsTerm(query,term)))));
+    let cachedJSON,cachedPlan;
+    db.function('memory_search_relevance', {deterministic:true}, (content,topic,json)=>{
+      if(cachedJSON!==json){cachedPlan=JSON.parse(json);cachedJSON=json;}
+      return lexicalScore(cachedPlan.queries[0],{content,topic},cachedPlan);
+    });
     this.state = 'unavailable';
     try { this.initialize(); } catch { this.state = 'unavailable'; }
   }
@@ -116,24 +102,64 @@ export class MemorySearch {
       return {index_version:INDEX_VERSION,state:this.enabled && this.state==='ready' && row?.state==='ready' && row.version===INDEX_VERSION && tables.n===8 ? 'ready':'unavailable',enabled:this.enabled};
     } catch { return {index_version:INDEX_VERSION,state:'unavailable',enabled:this.enabled}; }
   }
+  plan(userId,query,scope,options) {
+    const tokens=queryTokens(query),filter=memoryScopeSql(scope,options),groups=[];
+    const auth=options.auth||{user_id:userId},authority=this.entities?.queryAuthority(auth,scope,options);
+    let limited=authority?.truncated===true;
+    if(tokens.length) {
+      // Only current, authorized declarations are evidence for aliases. This is a bounded
+      // FTS probe, not a full-memory scan, and it never follows a chain of new aliases.
+      const seeds=this.db.prepare(`SELECT m.content FROM memory_search_fts
+        JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
+        WHERE memory_search_fts MATCH ? AND m.user_id=? AND m.status='active'
+          AND ${filter.sql} AND ${webMemorySql(options.auth)} AND memory_search_alias_seed(m.content,?)
+        ORDER BY memory_search_fts.rank,m.memory_id LIMIT 65`).all(
+          tokens.map(t=>'"'+encode(t)+'"').join(' OR '),userId,...filter.params,query);
+      limited ||= seeds.length>64;for(const seed of seeds.slice(0,64))groups.push(...declaredAliases(seed.content));
+    }
+    // Internal project aliases are not part of the Web visibility grant. Cloud clients may
+    // expand only explicit aliases contained in records they can actually read.
+    if(!isWebReader(options.auth))for(const [table,name,id] of [['projects','name','project_id'],['tasks','title','task_id']]) {
+      const lifecycle=scope[SCOPE_LIFECYCLE],live=lifecycle.live.sql('project_id');
+      const members=scope.project_id?JSON.stringify(lifecycle.members||[scope.project_id]):null;
+      const rows=this.db.prepare(`SELECT ${name} name,aliases_json FROM ${table} WHERE user_id=?
+        AND (? IS NULL OR project_id IN (SELECT value FROM json_each(?))) ${table==='tasks'?'AND (? IS NULL OR task_id=?)':''} AND ${live.sql}
+        AND (memory_search_contains(?,${name}) OR EXISTS(SELECT 1 FROM json_each(aliases_json) a WHERE memory_search_contains(?,a.value)))
+        ORDER BY ${id} LIMIT 65`).all(userId,members,members,
+          ...(table==='tasks'?[scope.task_id||null,scope.task_id||null]:[]),...live.params,query,query);
+      limited ||= rows.length>64;for(const row of rows.slice(0,64))groups.push([row.name,...JSON.parse(row.aliases_json)]);
+    }
+    const reserved=authority?.terms||[];
+    const plan=makeQueryPlan(query,groups.filter(g=>!g.some(term=>reserved.includes(normalizeSearch(term)))),limited);
+    const known=reserved.some(term=>containsTerm(query,term));
+    if(known){
+      const expansion=this.entities.expand(auth,query,scope,options);
+      plan.authority_ids=[...expansion.matches].filter(([,m])=>aliasSubjectMatches(query,m.explanation.matched_name,m.row)).map(([id])=>id);
+    }
+    return plan;
+  }
   candidates(userId, query, scope, options) {
     if (this.status().state!=='ready') throw searchUnavailable();
-    const tokens=searchTokens(query);
-    if(tokens.length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
+    if(searchTokens(query).length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
     const filter=memoryScopeSql(scope,options);
-    if(!tokens.length) return {rows:[],truncated:false};
     try {
-      const rows=this.db.prepare(`SELECT m.* FROM memory_search_fts
+      let plan=this.plan(userId,query,scope,options);
+      let tokens=[...new Set(plan.queries.flatMap(q=>queryTokens(q).length?queryTokens(q):searchTokens(q)))];
+      if(tokens.length>256){plan=makeQueryPlan(query,[],true);tokens=queryTokens(query).length?queryTokens(query):searchTokens(query);}
+      if(!tokens.length)return {rows:[],truncated:false,plan};
+      const json=JSON.stringify(plan);
+      const rows=this.db.prepare(`SELECT m.*,memory_search_relevance(m.content,m.topic,?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
         WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)}
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})
-        ORDER BY (instr(d.normalized,?)>0) DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
-      ).all(tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes,normalizeSearch(query.trim()));
+        AND search_relevance>0
+        ORDER BY search_relevance DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
+      ).all(json,tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes);
       const expansion=this.entities?.expand(options.auth||{user_id:userId},query,scope,options);
-      const matches=new Map(rows.map(row=>[row.memory_id,{row,kind:originalMatchKind(query,row)||'original_terms'}]));
-      for(const [id,match] of expansion?.matches||[])if(!matches.has(id))matches.set(id,{row:match.row,kind:'alias',explanation:match.explanation});
-      const priority={raw_query:0,original_terms:1,alias:2},ordered=[...matches.values()].sort((a,b)=>priority[a.kind]-priority[b.kind]||lexicalScore(query,b.row)-lexicalScore(query,a.row)||String(b.row.updated_at||b.row.created_at).localeCompare(String(a.row.updated_at||a.row.created_at))||a.row.memory_id.localeCompare(b.row.memory_id));
-      return {rows:ordered.slice(0,500).map(x=>({...x.row,_entity_match:{match_kind:x.kind,...(x.explanation?{alias:x.explanation}:{})}})),truncated:rows.length>500||ordered.length>500||expansion?.truncated===true,
+      const matches=new Map(rows.map(row=>[row.memory_id,{row,kind:originalMatchKind(query,row)||'alias'}]));
+      for(const [id,match] of expansion?.matches||[])if(!matches.has(id)&&aliasSubjectMatches(query,match.explanation.matched_name,match.row))matches.set(id,{row:match.row,kind:'alias',explanation:match.explanation});
+      const priority={raw_query:0,original_terms:1,alias:2},ordered=[...matches.values()].sort((a,b)=>priority[a.kind]-priority[b.kind]||lexicalScore(query,b.row,plan)-lexicalScore(query,a.row,plan)||String(b.row.updated_at||b.row.created_at).localeCompare(String(a.row.updated_at||a.row.created_at))||a.row.memory_id.localeCompare(b.row.memory_id));
+      return {plan,rows:ordered.slice(0,500).map(x=>({...x.row,_entity_match:{match_kind:x.kind,...(x.explanation?{alias:x.explanation}:{})}})),truncated:rows.length>500||ordered.length>500||expansion?.truncated===true,
         aliases:{expanded:!!expansion?.matches.size,truncated:expansion?.truncated===true,ambiguous:expansion?.ambiguous===true,ambiguity_complete:expansion?.ambiguity_complete!==false},dependency_token:expansion?.dependency_token||null};
     } catch(error) { if(transientSql(error))throw searchBusy();if(error?.errorCode==='ENTITY_PROOF_INVALID'||error?.errorCode?.startsWith('PROJECT_'))throw error;this.state='unavailable'; throw searchUnavailable(); }
   }

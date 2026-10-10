@@ -33,7 +33,7 @@
             "contains": {"const": "uncategorized"}, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}}
         }},
         "agent_read_policy": {"enum": ["chatgpt_per_memory_v1", "active_uniform_v1"], "description": "ChatGPT read policy. Absent means chatgpt_per_memory_v1. Changing it changes effective access."},
-        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}}}
+        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}, "semantic_min_score":{"type":"number","minimum":0,"maximum":1}, "semantic_max_distance":{"type":"number","minimum":0,"maximum":1000000}}}
       }
     },
     "providers": {"type": "object", "additionalProperties": false, "properties": {"organizer": {"$ref": "#/$defs/profile"}, "embedder": {"$ref": "#/$defs/embeddingProfile"}}},

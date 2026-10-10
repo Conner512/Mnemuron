@@ -139,6 +139,17 @@ export class MemoryEntities {
   names(e,auth,{search=false}={}){if(!this.anchor(e,auth))return [];const outgoing=this.db.prepare("SELECT 1 FROM memory_entity_proposals WHERE user_id=? AND (source_entity_id=? OR target_entity_id=?) AND target_entity_id IS NOT NULL AND relation='same_entity' AND state='accepted'").get(auth.user_id,e.entity_id,e.entity_id);
     return this.db.prepare('SELECT * FROM memory_entity_names WHERE user_id=? AND entity_id=? ORDER BY name_id LIMIT ?').all(auth.user_id,e.entity_id,ENTITY_LIMITS.names).filter(n=>
       (!search||n.state==='accepted')&&(!isWebReader(auth)||n.origin==='model')&&!(n.origin==='manual'&&outgoing)&&this.validProof(parse(n.proof_json),auth));}
+  queryAuthority(auth,scope,options){
+    const inventory=this.namingRows(auth.user_id),terms=new Set(),filter=memoryScopeSql(scope,options);
+    for(const n of inventory.rows){
+      if(isWebReader(auth)&&n.origin!=='model')continue;
+      const e=this.get(auth.user_id,n.entity_id),source=e&&this.source(auth.user_id,e.anchor_memory_id,auth);
+      if(!source||source.scope_key!==e.scope_key)continue;
+      if(!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${filter.sql}`).get(auth.user_id,source.memory_id,...filter.params))continue;
+      terms.add(n.normalized);
+    }
+    return {terms:[...terms],truncated:inventory.truncated};
+  }
   /** Search is purely local. A naming overflow fails closed rather than selecting an arbitrary subset. */
   expand(auth,query,scope,options){const inventory=this.namingRows(auth.user_id),empty={matches:new Map(),truncated:inventory.truncated,ambiguous:false,dependency_token:this.dependencyToken(auth)};
     const normalized=normalizedName(query),filter=memoryScopeSql(scope,options),eligible=new Map(),entries=[];

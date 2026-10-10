@@ -249,6 +249,8 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', catego
   ${chips.length ? html`<div class="filter-chips">${chips.map(([facet, , label]) => html`<span class="filter-chip">${label}<button type="button" class="quiet" data-clear-facet="${facet}" data-i18n-aria-label="clearFilter" aria-label="${t('clearFilter')}">×</button></span>`)}</div>` : ''}
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
+    ${data.retrieval?.degraded?html`<p class="policy-box library-note" data-search-degraded>${i18n(t,'searchDegradedNote')} ${data.retrieval.degradation_code||'VECTOR_UNAVAILABLE'}</p>`:''}
+    ${data.retrieval?.alias_ambiguous?html`<p class="policy-box library-note">${i18n(t,'searchAliasAmbiguous')}</p>`:''}
     ${data.retrieval?.aliases?.truncated?html`<p class="policy-box library-note">${i18n(t,'entitySearchTruncated')}</p>`:''}
     ${data.retrieval?.aliases?.ambiguous?html`<p class="policy-box library-note">${i18n(t,'entitySearchAmbiguous')}</p>`:''}
     ${selection}<div id="memory-rows">${table}</div>

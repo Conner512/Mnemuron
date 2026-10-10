@@ -68,13 +68,13 @@ export class ConsoleOrganizer {
   }
   /** Rows matching a filter, newest first (or search rank). Candidate windows are bounded and say so. */
   rows(auth,f,{ids,ranked,limit=ORGANIZE_LIMIT+1,offset=0,count=false}={}){
-    const user=auth.user_id,live=this.live(user),categories=this.categories(user,live);let order=ranked||null,truncated=false,total,aliases=null,dependencyToken=null,matchById=new Map();
+    const user=auth.user_id,live=this.live(user),categories=this.categories(user,live);let order=ranked||null,truncated=false,total,plan=null,aliases=null,dependencyToken=null,matchById=new Map();
     if(ranked)ids=ids?ids.filter(x=>ranked.includes(x)):ranked;
     if(f.query){
       // The search window is cut after the live filter, so deleted-project records never take candidate slots.
       const scope=resolveMemoryScope(this.db,user,{},{lifecycle:this.store.lifecycle});
       const found=this.store.memorySearch.candidates(user,f.query,scope,{auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES});
-      truncated=found.truncated===true;aliases=found.aliases;dependencyToken=found.dependency_token;matchById=new Map(found.rows.map(r=>[r.memory_id,r._entity_match]));order=found.rows.map(r=>r.memory_id);
+      truncated=found.truncated===true;plan=found.plan;aliases=found.aliases;dependencyToken=found.dependency_token;matchById=new Map(found.rows.map(r=>[r.memory_id,r._entity_match]));order=found.rows.map(r=>r.memory_id);
       ids=ids?ids.filter(x=>order.includes(x)):order;
     }
     const sql=`SELECT m.memory_id,m.content,m.memory_type,m.status,m.topic,m.created_at,m.project_id,c.category,
@@ -94,7 +94,7 @@ export class ConsoleOrganizer {
       rows=all.slice(offset,offset+limit);if(count)total=all.length;
     }else{rows=this.db.prepare(sql+' ORDER BY m.created_at DESC,m.rowid DESC LIMIT ? OFFSET ?').all(...args,limit,offset);
       if(count)total=rows.length<limit&&offset===0?rows.length:this.db.prepare(`SELECT COUNT(*) n FROM (${sql})`).get(...args).n;}
-    return {rows:rows.map(r=>({...r,imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{})})),truncated,aliases,dependencyToken,...(count?{total}:{})};
+    return {rows:rows.map(r=>({...r,imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{})})),truncated,plan,aliases,dependencyToken,...(count?{total}:{})};
   }
   /** Facets for browsing a large collection: active memories only, owner scoped, counts only. */
   facets(auth){

@@ -14,7 +14,7 @@ const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
 let capabilities={enabled:false,writable:false},actions,connections,entities,featureReads,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,entityPendingSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
-let detailMeta=null,query='',searchMode='lexical',category='',status='active',topic='',origin='',offset=0;
+let detailMeta=null,query='',searchMode='hybrid',category='',status='active',topic='',origin='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
 // selected maps memory_id → the text its list row already showed (kept for confirmations across pages).
 let selected=new Map(),selectAll=false,facets=null;
@@ -24,13 +24,13 @@ let projectOffset=0,projectArchived='false',taskOffset=0,contextGeneration=0;con
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 
-function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=['system','memory','connections','security'].includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||'lexical';category=p.get('category')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
-function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!=='lexical')p.set('mode',searchMode);if(category)p.set('category',category);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
+function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=['system','memory','connections','security'].includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||capabilities.default_retrieval_mode||'hybrid';category=p.get('category')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
+function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);p.set('mode',searchMode);if(category)p.set('category',category);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
 readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
  actions?.clear();connections?.clear();entities?.clear();featureReads?.clear();state.clear();requestSequence++;entityPendingSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
- currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
+ currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -233,7 +233,7 @@ document.addEventListener('click',event=>{
  if(page==='audit'&&event.target.closest('[data-audit-next]')&&currentData?.next_cursor){const h=auditPages[auditGroup]?.history||[];h.push(auditCursor);auditPages[auditGroup]={...auditPages[auditGroup],history:h};auditCursor=currentData.next_cursor;saveLocation();void load();return;}
  if(page==='audit'&&event.target.closest('[data-audit-prev]')){auditCursor=auditPages[auditGroup]?.history?.pop()||'';saveLocation();void load();return;}
  const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);if(selectAll)resetSelection();saveLocation();void load();}
- if(event.target.closest('[data-reset-filters]')){query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;resetSelection();saveLocation();void load();}
+ if(event.target.closest('[data-reset-filters]')){query='';category='';status='active';topic='';origin='';searchMode=capabilities.default_retrieval_mode||'hybrid';offset=0;resetSelection();saveLocation();void load();}
  const facet=event.target.closest('[data-facet]');if(facet&&page==='memories'){const value=facet.dataset.value||'';
    if(facet.dataset.facet==='category')category=category===value&&value?'':value;else if(facet.dataset.facet==='topic')topic=topic===value?'':value;else if(facet.dataset.facet==='origin')origin=origin===value?'':value;
    offset=0;resetSelection();saveLocation();void load();return;}
@@ -244,7 +244,7 @@ document.addEventListener('click',event=>{
 document.addEventListener('change',event=>{if(event.target.matches('[data-batch-memory]'))updateMemorySelection();});
 document.addEventListener('submit',event=>{
  if(event.target.id==='audit-filter'){event.preventDefault();const values=Object.fromEntries(new FormData(event.target));try{Object.assign(values,auditDateRange(values.from,values.to));}catch(e){const field=event.target.elements.to;field.setCustomValidity(t(e.message));field.reportValidity();return;}auditFilters=values;auditCursor='';auditPages[auditGroup]={history:[]};featureReads.invalidateAudit();saveLocation();void load();}
- if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'lexical');category=String(f.get('category')||'');status=String(f.get('status')||'active');offset=0;resetSelection();saveLocation();void load();}
+ if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'hybrid');category=String(f.get('category')||'');status=String(f.get('status')||'active');offset=0;resetSelection();saveLocation();void load();}
  if(event.target.getAttribute('action')==='/console-api/logout'){entities?.clear();requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;detailMeta=null;}
 });
 pane.addEventListener('close',()=>{entities?.clearMemory();detailSequence++;detailData=null;detailMeta=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
@@ -278,5 +278,5 @@ entities=mountEntities({api,mutate,getCaps:()=>capabilities,isActive:()=>!!state
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}
- else{try{capabilities={...await api('capabilities'),security_version:me.security_version};}catch{capabilities={enabled:false,writable:false,unavailable:true};}for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
+ else{try{capabilities={...await api('capabilities'),security_version:me.security_version};}catch{capabilities={enabled:false,writable:false,unavailable:true};}readLocation();for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
 }catch(e){if(state.account)root.innerHTML=`<div class="card" role="alert">${l('unavailable','h2')}${l('errorNote','p')}</div>`;}

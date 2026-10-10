@@ -54,6 +54,9 @@ export function memoryRuntime(input) {
       }
       if(conversation.max_chars!==undefined)integer(conversation.max_chars,8,1000);
     }
+    const retrieval=input.memory?.retrieval;
+    if(retrieval?.semantic_min_score!==undefined&&(!Number.isFinite(retrieval.semantic_min_score)||retrieval.semantic_min_score<0||retrieval.semantic_min_score>1))throw new Error('invalid semantic minimum');
+    if(retrieval?.semantic_max_distance!==undefined&&(!Number.isFinite(retrieval.semantic_max_distance)||retrieval.semantic_max_distance<0||retrieval.semantic_max_distance>1000000))throw new Error('invalid semantic distance');
     if(input.memory?.retrieval?.mode!==undefined && !['lexical','hybrid','semantic'].includes(input.memory.retrieval.mode))throw new Error('invalid retrieval');
     // ChatGPT read policy. Absent = the per-memory filter. Changing it changes effective access: an operator step.
     if(input.memory?.agent_read_policy!==undefined && !['chatgpt_per_memory_v1','active_uniform_v1'].includes(input.memory.agent_read_policy))throw new Error('invalid read policy');

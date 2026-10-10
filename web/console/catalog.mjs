@@ -615,7 +615,7 @@ Object.assign(catalog["en"],{
   "storage.import": "Import personal memories"
 });
 
-Object.assign(catalog['zh-CN'],{modelNotConfigured:'尚未配置',nativeSchema:'服务支持原生 JSON Schema',searchMode:'检索方式',lexical:'精确检索',hybrid:'混合检索',semantic:'语义检索',workerStatus:'后台执行器',workerDisabledNote:'任务已保存。请在“功能与处理”中预览并明确授权批次。'});
+Object.assign(catalog['zh-CN'],{modelNotConfigured:'尚未配置',nativeSchema:'服务支持原生 JSON Schema',searchMode:'检索方式',lexical:'关键词检索',hybrid:'混合检索',semantic:'语义检索',workerStatus:'后台执行器',workerDisabledNote:'任务已保存。请在“功能与处理”中预览并明确授权批次。'});
 Object.assign(catalog.en,{modelNotConfigured:'Not configured',nativeSchema:'Service supports native JSON Schema',searchMode:'Search mode',lexical:'Lexical',hybrid:'Hybrid',semantic:'Semantic',workerStatus:'Worker',workerDisabledNote:'Jobs are stored durably. An operator must enable the worker before queued jobs can run.'});
 
 Object.assign(catalog['zh-CN'],{CSRF_REFRESH_REQUIRED:'表单校验已更新，请重新确认本次操作',EXPORT_SIZE_LIMIT:'导出超过 16 MiB，请使用运维备份或分批导出',BUDGET_EXHAUSTED:'今日模型调用额度已用尽',WEB_VISIBILITY_DENIED:'此分类或版本不允许授权；secret 不会发送给 ChatGPT',CONSOLE_REQUEST_FAILED:'操作未完成，请核对输入和服务状态',MODEL_URL_DENIED:'服务地址不符合网络安全策略'});
@@ -1486,3 +1486,6 @@ Object.assign(catalog.en,{auditLexicalRefs:'Search subquery references (not fina
 
 Object.assign(catalog['zh-CN'],{MEMORY_DISABLED:'记忆功能已关闭，请在设置中检查记忆开关。',FEATURE_DISABLED:'此功能已关闭，请在设置中检查功能开关。',EXECUTION_GRANT_REQUIRED:'此操作需要执行授权，请先预览并确认处理任务。'});
 Object.assign(catalog.en,{MEMORY_DISABLED:'Memory is disabled. Review the memory switch in settings.',FEATURE_DISABLED:'This feature is disabled. Review its switch in settings.',EXECUTION_GRANT_REQUIRED:'This operation requires an execution grant. Preview and confirm a processing run first.'});
+
+Object.assign(catalog['zh-CN'],{searchDegradedNote:'混合检索当前降级为关键词检索，未返回未经验证的语义结果。原因：',searchAliasAmbiguous:'此查询命中了有歧义的别名，未自动展开。请补充项目或完整名称。'});
+Object.assign(catalog.en,{searchDegradedNote:'Hybrid search fell back to keywords; no unverified semantic results were added. Reason:',searchAliasAmbiguous:'An alias is ambiguous and was not expanded. Specify the project or full name.'});

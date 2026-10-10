@@ -84,7 +84,7 @@ try{
   await begin('devices.rotate');await proof();const rotated=await submit();check('Agent rotation changes actual key',rotated.api_key!==registered.api_key);await close();
   check('Server observations do not claim local hooks are healthy',(await page.locator('[data-feature="CON-04"]').innerText()).includes('Hook'));await shot('connections');
   await goto('security');check('Authentication history shows real proof activity',await page.locator('[data-feature="SEC-05"] tbody tr').count()>0);await shot('security');
-  await goto('audit');await page.locator('.audit-filter-panel summary').click();await page.locator('#audit-filter [name=action]').fill('console.taxonomy.save');await page.locator('#audit-filter button[type=submit]').click();
+  await goto('audit?group=system');await page.locator('.audit-filter-panel summary').click();await page.locator('#audit-filter [name=action]').fill('console.taxonomy.save');await page.locator('#audit-filter button[type=submit]').click();
   await page.waitForFunction(()=>{const rows=[...document.querySelectorAll('.timeline-item strong')];return rows.length>0&&rows.every(n=>n.textContent==='console.taxonomy.save');});
   check('Audit filter returns only selected action',(await page.locator('.timeline-item strong').allInnerTexts()).every(s=>s==='console.taxonomy.save'));
   const download=page.waitForEvent('download');await page.locator('[data-audit-export]').click();const file=await download;await file.saveAs(path.join(evidence,'synthetic-audit.json'));

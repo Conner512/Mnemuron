@@ -241,7 +241,7 @@ test('ENT-04c: model quote clipping cannot invent a name token at an internal id
 
 
 test('ENT-05b: aliases inside unspaced Chinese queries expand without splitting engineering identifiers',async t=>{
-  const f=setup(t),a=f.save('主机甲（又称 别称乙）'),b=f.save('磁盘备份数据');await f.derive({[a.memory_id]:[named('主机甲','别称乙')]});await f.change('entity.link',f.entity(a),{memory_id:b.memory_id,revision:1});
+  const f=setup(t),a=f.save('主机甲（又称 别称乙）'),b=f.save('磁盘备份配置');await f.derive({[a.memory_id]:[named('主机甲','别称乙')]});await f.change('entity.link',f.entity(a),{memory_id:b.memory_id,revision:1});
   assert.ok(ids(f.search('别称乙')).includes(b.memory_id));assert.ok(ids(f.search('查看别称乙配置')).includes(b.memory_id));assert.equal(f.search('查看别称乙配置').results.find(r=>r.memory_id===b.memory_id).ranking.match_kind,'alias');
 });
 
@@ -287,4 +287,17 @@ test('ENT-25: restore supersedes pending and leased entity jobs before a fresh l
   const dp=await f.act('projects.lifecycle_preview',{action:'delete',project_id:'fenced-restore'});await f.act('projects.lifecycle_delete',{preview_id:dp.preview_id,confirm_name:'fenced-restore'});
   const rp=await f.act('projects.lifecycle_preview',{action:'restore',project_id:'fenced-restore'});await f.act('projects.lifecycle_restore',{preview_id:rp.preview_id});assert.equal(f.s.memoryJobs.get(old).state,'cancelled');assert.throws(()=>f.s.memoryJobs.publish(lease,()=>{}),{code:'LEASE_LOST'});
   const current=f.g.schedule(f.auth.user_id,model).jobs[0];assert.notEqual(current,old);await new MemoryWorker(f.s,f.s.memoryJobs,model,{userId:f.auth.user_id,profileFilter:model.profile.fingerprint}).drain();assert.equal(calls,1);assert.equal(f.list(a.memory_id).entities.length,1);
+});
+
+test('ENT-SEARCH-01: graph authority wins over text aliases, preserves subjects, and removal cannot be revived',async t=>{
+ const f=setup(t),anchor=f.save('alpha (aka bravo)'),target=f.save('Network configuration backup'),noise=f.save('Invoice dates only');
+ await f.derive({[anchor.memory_id]:[named('alpha','bravo')]});const entity=f.entity(anchor);
+ for(const m of [target,noise])await f.change('entity.link',entity,{memory_id:m.memory_id,revision:1});
+ f.save('bravo (星桥)');const conflict=f.save('星桥 network configuration');
+ let found=f.search('bravo network configuration');assert.ok(ids(found).includes(target.memory_id));assert.ok(!ids(found).includes(noise.memory_id));assert.ok(!ids(found).includes(conflict.memory_id));
+ assert.equal(found.results.find(m=>m.memory_id===target.memory_id).ranking.alias.matched_name,'bravo');
+ await f.change('entity.alias_remove',entity,{name_id:f.get(entity).aliases.find(n=>n.name==='bravo').name_id});
+ found=f.search('bravo network configuration');assert.ok(!ids(found).includes(target.memory_id));assert.ok(!ids(found).includes(conflict.memory_id));
+ const e=embedder(),backend=new MockVectorStore(),index=new VectorIndex(f.s,backend,new Map([[e.profile.fingerprint,e]]));e.mock=texts=>texts.map(()=>[1,0,0]);const generation=index.begin(e.profile.fingerprint);await index.sync(generation);index.activate(generation);
+ const semantic=await index.search(f.auth,{query:'bravo network configuration',mode:'semantic'});assert.equal(semantic.result_count,0,'high scores cannot resurrect removed authority');
 });

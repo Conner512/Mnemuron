@@ -110,7 +110,7 @@ try{
    await page.goto(cfg.url+'/app/memories');await page.locator('#search-form [data-search-input]').waitFor();const q=page.locator('#search-form [data-search-input]');
    await page.locator('h1').click();await page.keyboard.press('/');check('search','library shortcut still focuses its input',await q.evaluate(e=>document.activeElement===e));
    await q.fill('部署前备份');await page.keyboard.type('/');check('search','typing slash is not hijacked',(await q.inputValue()).endsWith('/'));
-   await q.fill('部署前备份');const waiting=page.waitForResponse(r=>r.url().includes('/console-api/memories?')&&new URL(r.url()).searchParams.get('query')==='部署前备份');await q.press('Enter');const result=await waiting,body=await result.json();check('search','library performs existing lexical query',result.status()===200&&body.retrieval?.mode==='lexical'&&JSON.stringify(body).includes('部署前备份'));
+   await q.fill('部署前备份');const waiting=page.waitForResponse(r=>r.url().includes('/console-api/memories?')&&new URL(r.url()).searchParams.get('query')==='部署前备份');await q.press('Enter');const result=await waiting,body=await result.json();check('search','library reports hybrid fallback and preserves keyword results',result.status()===200&&body.retrieval?.requested_mode==='hybrid'&&body.retrieval?.effective_mode==='lexical'&&body.retrieval?.degraded===true&&JSON.stringify(body).includes('部署前备份'));
    check('search','query URL and field agree',new URL(page.url()).searchParams.get('query')==='部署前备份'&&await q.inputValue()==='部署前备份');await page.reload();await q.waitFor();check('search','library refresh preserves query',await q.inputValue()==='部署前备份');
   }
   check('audit',label+' no JS/CSP errors',errors.length===0);await context.close();
