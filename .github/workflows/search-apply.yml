@@ -1,0 +1,72 @@
+name: Apply verified search source changes
+on:
+  push:
+    branches: [fix/search-hybrid-relevance-20261010]
+    paths: [.github/workflows/search-apply.yml]
+permissions:
+  contents: read
+jobs:
+  apply:
+    if: github.repository == 'Conner512/Mnemuron' && github.ref == 'refs/heads/fix/search-hybrid-relevance-20261010'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Validate public source hashes and apply literal edits
+        run: |
+          python3 - <<'PY'
+          import json, hashlib, os
+          from pathlib import Path
+          root=Path.cwd().resolve()
+          records=[]
+          for i in range(1,5):
+            records.extend(json.loads((root/f'.github/search-transfer/part-{i}.json').read_text()))
+          assert len(records)==24 and len({r['path'] for r in records})==24
+          pending=[]
+          for row in records:
+            rel=Path(row['path'])
+            assert not rel.is_absolute() and '..' not in rel.parts and rel.parts[0] in {'server','adapters','plugins','web','docs','scripts'}
+            p=root/rel
+            assert p.resolve().is_relative_to(root) and not p.is_symlink() and p.exists()==row['exists'], row['path']
+            before=p.read_text() if row['exists'] else ''
+            assert hashlib.sha256(before.encode()).hexdigest()==row['before'], 'Base changed: '+row['path']
+            value=before
+            for edit in sorted(row['edits'],key=lambda e:e['start'],reverse=True):
+              start=edit['start'];old=edit['old']
+              assert isinstance(start,int) and 0<=start<=len(before) and value[start:start+len(old)]==old, 'Edit mismatch: '+row['path']
+              value=value[:start]+edit['new']+value[start+len(old):]
+            assert hashlib.sha256(value.encode()).hexdigest()==row['after'], 'Result hash mismatch: '+row['path']
+            pending.append((p,value))
+          for p,value in pending:
+            p.parent.mkdir(parents=True,exist_ok=True);p.write_text(value)
+          Path(os.environ['RUNNER_TEMP'],'search-changed-paths.txt').write_text(''.join(r['path']+'\n' for r in records))
+          print('Verified and applied',len(pending),'public source files; no runtime or production data')
+          PY
+          git diff --check
+      - name: Install existing locked test dependencies
+        run: |
+          npm ci --prefix services/oauth --ignore-scripts
+          npm ci --prefix adapters/chatgpt-web --ignore-scripts
+      - name: Existing and new isolated regression suites
+        run: node scripts/test-all.mjs
+      - name: Commit verified sources to the requested feature branch only
+        run: |
+          set -eu
+          git config user.name Conner512
+          git config user.email 51692123+Conner512@users.noreply.github.com
+          git add server/test/helpers/recent-capture.mjs server/test/core-review-v03.test.mjs server/test/reconciliation.test.mjs server/test/structured-memory-lifecycle.test.mjs server/test/structured-memory.test.mjs
+          git commit -m 'test: keep dated capture fixtures within their intended retention window'
+          git rm .github/search-transfer/part-1.json .github/search-transfer/part-2.json .github/search-transfer/part-3.json .github/search-transfer/part-4.json .github/workflows/search-apply.yml .github/workflows/search-review-bundle.yml
+          git add --pathspec-from-file="$RUNNER_TEMP/search-changed-paths.txt"
+          node scripts/check-publication.mjs --worktree
+          node scripts/check-publication.mjs --staged
+          git diff --cached --check
+          git commit -m 'fix(search): default to hybrid and filter alias and semantic noise before fusion'
+          git push origin HEAD:refs/heads/fix/search-hybrid-relevance-20261010
