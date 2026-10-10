@@ -28,14 +28,14 @@ def check_selects(page, goto, check, previews):
     expect(native).to_have_value('hybrid')
     check('New search pages default to hybrid', True)
     page.locator('[name="query"]').fill('technical')
-    with page.expect_response(lambda response: '/console-api/memories?' in response.url) as pending:
+    with page.expect_response(lambda response: '/console-api/memories?' in response.url and 'part=facets' not in response.url) as pending:
         page.locator('#search-form button[type="submit"]').click()
     data = pending.value.json()
     check('Default hybrid request reports honest personal-model fallback', data['retrieval']['requested_mode'] == 'hybrid' and data['retrieval']['effective_mode'] == 'lexical' and data['retrieval']['degraded'])
     expect(page.locator('[data-i18n="searchDegradedNote"]')).to_be_visible()
     check('Search downgrade is visible in the actual page')
     choose_select(page, '[name="search_mode"]', 'lexical')
-    with page.expect_response(lambda response: '/console-api/memories?' in response.url) as pending:
+    with page.expect_response(lambda response: '/console-api/memories?' in response.url and 'part=facets' not in response.url) as pending:
         page.locator('#search-form button[type="submit"]').click()
     data = pending.value.json()
     check('Explicit lexical choice is preserved in the bookmark', 'mode=lexical' in page.url and data['retrieval']['effective_mode'] == 'lexical')
@@ -43,7 +43,7 @@ def check_selects(page, goto, check, previews):
     expect(native).to_have_value('lexical')
     expect(page.locator('.loading-card')).to_have_count(0)
     check('Reload preserves the explicit no-embedding search mode')
-    with page.expect_response(lambda response: '/console-api/memories?' in response.url):
+    with page.expect_response(lambda response: '/console-api/memories?' in response.url and 'part=facets' not in response.url):
         page.locator('[data-reset-filters]').click()
     expect(native).to_have_value('hybrid')
     expect(page.locator('[name="query"]')).to_have_value('')
