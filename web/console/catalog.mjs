@@ -1483,3 +1483,6 @@ Object.assign(catalog["en"],{"auditGroup_system": "System activity", "auditGroup
 
 Object.assign(catalog['zh-CN'],{auditLexicalRefs:'搜索子查询引用（非最终结果，不代表逐条读取）：',auditTitlesTruncated:'本页标题查询已达上限；其余引用在详情中保留 ID。'});
 Object.assign(catalog.en,{auditLexicalRefs:'Search subquery references (not final results or individual reads):',auditTitlesTruncated:'Title lookup limit reached; remaining IDs are retained in event details.'});
+
+Object.assign(catalog['zh-CN'],{MEMORY_DISABLED:'记忆功能已关闭，请在设置中检查记忆开关。',FEATURE_DISABLED:'此功能已关闭，请在设置中检查功能开关。',EXECUTION_GRANT_REQUIRED:'此操作需要执行授权，请先预览并确认处理任务。'});
+Object.assign(catalog.en,{MEMORY_DISABLED:'Memory is disabled. Review the memory switch in settings.',FEATURE_DISABLED:'This feature is disabled. Review its switch in settings.',EXECUTION_GRANT_REQUIRED:'This operation requires an execution grant. Preview and confirm a processing run first.'});
