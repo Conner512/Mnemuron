@@ -64,7 +64,7 @@ Preserve the existing query-egress consent, per-user allocation, budget, scope, 
 
 `server/test/search-relevance.test.mjs` covers defaults, no-egress overrides, Chinese noise, bidirectional/ambiguous/retired/scoped aliases, near identifiers, over-500 candidate noise, low/malformed vector scores, chunk deduplication, no-answer results, configured thresholds, metric directions and Web privacy. Cloud adapter and real-browser tests cover mode forwarding, URL/reload/reset and visible degradation while preserving existing workflows.
 
-The original baseline also contained six failures in four older Core suites: their fixed September capture dates had crossed the production 30-day retention period. Those fixtures now shift their original relative capture intervals to a recent fixed reference per test process. Ordering, assertions, explicit expired-record tests and the production clock/retention are unchanged. This is a test-fixture maintenance change, not a workaround that disables retention.
+The integrated deployment baseline already has current capture fixtures. Its retention behavior and expired-record assertions are preserved; this integration does not alter the production clock or retention policy.
 
 Run in isolated data:
 
