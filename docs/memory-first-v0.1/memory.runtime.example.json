@@ -22,7 +22,7 @@
     "preserve_atomic_records": true,
     "automatic_fact_overwrite": false,
     "taxonomy": { "version": "example-taxonomy-v1", "categories": ["uncategorized", "engineering", "preferences"] },
-    "retrieval": { "mode": "lexical" }
+    "retrieval": { "mode": "hybrid", "semantic_min_score": 0.55 }
   },
   "providers": { "organizer": { "enabled": false }, "embedder": { "enabled": false } },
   "vector_store": { "enabled": false },
