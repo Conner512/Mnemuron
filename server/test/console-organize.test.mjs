@@ -112,7 +112,7 @@ test('ORG-04: categories have editable names, stable IDs, and edits keep model c
   await f.organize('home-network',{memory_ids:n});
   const renamed=await f.act('category.rename',{category:'home-network',label:'Network & Wi-Fi',expected_revision:tax.revision});
   assert.equal(renamed.status,200,JSON.stringify(renamed.body));const after=await f.taxonomy();
-  assert.equal(after.version,tax.version);assert.equal(after.labels['home-network'],'Network & Wi-Fi');assert.equal(await f.categoryOf(n),'home-network');
+  assert.notEqual(after.version,tax.version);assert.equal(after.labels['home-network'],'Network & Wi-Fi');assert.equal(await f.categoryOf(n),'home-network');
   assert.equal((await f.act('category.rename',{category:'uncategorized',label:'Inbox',expected_revision:after.revision})).body.error_code,'INVALID_CATEGORY');
   // Legacy textarea saves carry model classifications forward too.
   const legacy=await f.act('taxonomy.save',{expected_revision:after.revision,categories:[...after.categories,'synthetic']});assert.equal(legacy.status,200,JSON.stringify(legacy.body));

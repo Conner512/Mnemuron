@@ -9,6 +9,7 @@ const identityActions=[...basicActions.security,...basicActions.oauth,'security.
 // An explicit management policy overrides the older all-operations switch.
 // Roles stay independently gated; browser policy never grants operator status.
 export function consoleManagement(config) {
+  if(config.identity.owner_account_id)return {invitations:false,accounts:false,roles:false};
   const configured=config.identity.console_management;
   const legacy=config.identity.console_operations===true;
   return Object.fromEntries(['invitations','accounts','roles'].map(key=>

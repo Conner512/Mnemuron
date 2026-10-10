@@ -25,7 +25,14 @@ const inspect=(collection,id)=>`<button type="button" class="quiet" data-inspect
 const pager=data=>`<div class="pagination">${data.offset?`<button type="button" data-offset="${Math.max(0,data.offset-(data.limit||25))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div>`;
 const progress=(done,total)=>{const n=Number(done)||0,m=Number(total)||0,w=m>0?Math.min(100,Math.round(n/m*100)):0;return `<span class="progress"><svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${w}" height="4" rx="2"/></svg><span>${n} / ${m}</span></span>`;};
 
+const ownerLabels={processing:'后台处理',classification:'自动分类',summary:'摘要生成',entities:'实体提取',vector_build:'向量构建',vector_search:'语义检索',memory:'记忆业务',handoff:'接续交接',capture:'捕获提取',conversation:'会话提取',cloud_write:'Cloud 记忆写入',cloud_submitted_grants:'提交版本可读授权',connections:'个人连接管理'};
+const ownerActions=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel'];
+const ownerButton=(action,label,data={})=>`<button type="button" data-console-action="${esc(action)}" ${Object.entries(data).map(([k,v])=>`data-${k}="${esc(v)}"`).join(' ')}>${esc(label)}</button>`;
+function ownerView(o){if(!o)return '<p role="alert">功能状态暂时不可用，请重试。</p>';
+ return `<section class="card"><h2>功能与处理</h2><p>当前账户是唯一所有者。保存配置、允许功能、开始处理是独立操作。历史数据须先预览并确认；注册码保留后台管理。</p><p>配置版本 ${esc(o.revision)} · ${o.flags.processing?'后台待命':'后台处理已暂停'} · 自动历史补处理：关闭</p><dl class="metadata-grid">${Object.entries(ownerLabels).map(([k,label])=>`<dt>${esc(label)}</dt><dd>${o.effective[k]?.effective?'可用':'不可用'}${o.effective[k]?.blockers?.length?' · '+esc(o.effective[k].blockers.map(c=>({FEATURE_DISABLED:'开关已关闭',PROCESSING_PAUSED:'后台已暂停',NOT_CONFIGURED:'模型未配置',EGRESS_DENIED:'尚未同意模型外发',QUERY_EGRESS_DENIED:'尚未同意查询外发',VECTOR_DISABLED:'向量基础设施未配置',VECTOR_NOT_READY:'索引尚未就绪',MEMORY_DISABLED:'记忆业务已关闭',CONVERSATION_NOT_CONFIGURED:'未配置会话提取范围',CLOUD_WRITE_NOT_CONFIGURED:'未配置 Cloud 写入'}[c]||t(c))).join(' / ')):''}</dd>`).join('')}</dl><div class="actions">${ownerButton('features.save','修改功能开关')}${ownerButton('schedule.save','设置新记录自动规则')}${ownerButton('processing.preview','预览有限批次')}</div><p>自动规则：${o.schedule.enabled?'已启用，仅限保存规则后新建的记忆':o.schedule.error_code?'已暂停 · '+t(o.schedule.error_code):'关闭'}；隔离的旧可运行任务：${esc(o.legacy_runnable_jobs)}</p></section><section class="card"><h2>处理批次</h2><p>暂停会停止后续请求与发布。已经发送的数据无法撤回。向量构建完成后仍须单独激活。</p>${o.runs.length?o.runs.map(r=>`<article class="policy-box"><strong>${esc(ownerLabels[r.kind]||r.kind)}</strong> · ${esc(r.state)} · 调用 ${esc(r.used)}/${esc(r.budget)} · ${esc(r.count)} 条 · ${esc(r.model||'')}<p><code class="owner-digest">${esc(r.manifest_digest)}</code></p>${r.error_code?`<p role="status">${esc(r.error_code)}</p>`:''}<div class="actions">${r.state==='preview'?ownerButton('processing.start','确认并开始',{id:r.run_id}):''}${['running','queued'].includes(r.state)?ownerButton('processing.pause','暂停',{id:r.run_id}):''}${['paused','blocked'].includes(r.state)?ownerButton('processing.resume','确认恢复',{id:r.run_id}):''}${!['completed','cancelled'].includes(r.state)?ownerButton('processing.cancel','取消',{id:r.run_id}):''}</div></article>`).join(''):'<p>尚无授权批次。</p>'}</section>`;
+}
 export function actionPage(page,data,caps,connectionQuery={}) {
+  if(page==='system'&&caps.owner_mode)return ownerView(data.features?.['system-health']?.owner);
   if(page==='system'&&!caps.operator)return section(page,note('operatorRequired'));
   const writable=caps.enabled===true&&caps.writable===true,can=action=>canAct(caps,action);
   const onlyRead=()=>note(caps.enabled?'consoleUpgradeRequired':'viewWithoutWrite');
@@ -168,7 +175,11 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   const content=modal.querySelector('#operation-content');let intent=null,opId=null,lastPayload=null,returnFocus=null,sequence=0,working=false;
   function open(title){sequence++;returnFocus=document.activeElement;modal.querySelector('h2').textContent=t(title);content.innerHTML=`<p>${l('loading')}</p>`;if(!modal.open)modal.showModal();}
   const MEMORY_RESULTS={'memory.create':'resultCreated','memory.correct':'resultCorrected','memory.retract':'resultRetracted','memory.sensitivity':'resultSensitivity','memory.batch_retract':'resultBatchRetract','memory.batch_classify':'resultBatchClassify'};
-  function result(data){content.replaceChildren();const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);
+  function result(data){content.replaceChildren();
+    if(ownerActions.includes(intent?.action)){
+      const message=document.createElement('p');message.setAttribute('role','status');message.textContent=data.status==='preview'?`预览已生成：${data.count} 条，模型 ${data.model}，最多 ${data.budget} 次调用。未发送内容。关闭此窗口后可检查批次并确认开始。`:data.status==='saved'?'配置已保存。本次保存没有启动处理。':data.status==='queued'?'批次已获授权，等待后台处理。':data.status==='paused'?'批次已暂停，不再领取或发布结果。':'批次已取消，已经发送的请求无法撤回。';content.append(message);intent=null;const close=document.createElement('button');close.type='button';close.dataset.operationClose='';close.textContent=t('close');content.append(close);close.focus();return;
+    }
+const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);
     const summary=MEMORY_RESULTS[intent?.action];
     if(summary){
       // A plain confirmation first; the receipt stays available for support under technical details.
@@ -275,10 +286,10 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     content.innerHTML=`<p role="status">${l('loading')}</p>`;
     const [tax,f]=await Promise.all([api('taxonomy'),api('memories',{part:'facets'}).catch(()=>null)]);if(!fresh(seq))return;
     const counts=new Map((f?.categories||[]).map(c=>[c.category,c.count])),labels=tax.labels||{};
-    flow={kind:'manage',revision:tax.revision,categories:tax.categories,labels,counts};
+    flow={kind:'manage',revision:tax.revision,categories:tax.categories,labels,descriptions:tax.descriptions||{},counts};
     content.innerHTML=`${message?`<p class="policy-box" role="status">${esc(message)}${undoBatch&&can('memory.organize_undo')?` <button type="button" data-organize-undo="${esc(undoBatch)}">${l('undo')}</button>`:''}</p>`:''}
       <ul class="category-manager">${tax.categories.map(c=>`<li data-manage-category="${esc(c)}"><span class="category-pill" data-category="${esc(c)}">${esc(labelOf(c,labels))}</span><small>${counts.has(c)?counts.get(c):'—'} ${l('categoryCount')}</small>${c==='uncategorized'?`<small class="muted">${l('categoryFixed')}</small>`:`<span class="actions">${can('category.rename')?`<button type="button" class="quiet" data-category-rename="${esc(c)}">${l('renameCategory')}</button>`:''}${can('category.delete')?`<button type="button" class="quiet" data-category-delete="${esc(c)}">${l('deleteCategory')}</button>`:''}</span>`}</li>`).join('')}</ul>
-      ${can('category.create')?`<form data-organize-step="create" class="category-create"><label>${l('newCategoryName')}<input name="label" maxlength="40" required autocomplete="off"></label><button type="submit">${l('createCategory')}</button></form>`:''}
+      ${can('category.create')?`<form data-organize-step="create" class="category-create"><label>${l('newCategoryName')}<input name="label" maxlength="40" required autocomplete="off"></label><label>${l('categoryDescription')}<textarea name="description" maxlength="600" rows="3" placeholder="${esc(t('categoryDescriptionHint'))}"></textarea></label><button type="submit">${l('createCategory')}</button></form>`:''}
       <p class="muted">${l('categoryManagerNote')}</p><p data-operation-error role="alert"></p><div class="actions"><button type="button" data-operation-close>${l('close')}</button></div>`;
     syncAppearance();if(message)live(message);
   }
@@ -310,8 +321,8 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
         if(!fresh(seq))return;await reload({});if(!fresh(seq))return;resultStep(data);}
       catch(e){if(!fresh(seq))return;if(e.message==='PREVIEW_CHANGED'){await previewStep(seq,'PREVIEW_CHANGED').catch(error=>fail(error,seq));return;}fail(e,seq);}finally{busy(false);}})();
     if(step==='undo')void runUndo(seq,flow.batch);
-    if(step==='create')void managerWrite(seq,'category.create',{label:String(fd.get('label')||'')},data=>manager(seq,`${t('categoryCreated')}: ${data.label}`));
-    if(step==='rename')void managerWrite(seq,'category.rename',{category:event.target.dataset.category,label:String(fd.get('label')||'')},data=>manager(seq,`${t('categoryRenamed')}: ${data.label}`));
+    if(step==='create')void managerWrite(seq,'category.create',{label:String(fd.get('label')||''),description:String(fd.get('description')||'')},data=>manager(seq,`${t('categoryCreated')}: ${data.label}`));
+    if(step==='rename')void managerWrite(seq,'category.rename',{category:event.target.dataset.category,label:String(fd.get('label')||''),...(String(fd.get('description')||'')!==(flow.descriptions[event.target.dataset.category]||'')?{description:String(fd.get('description')||'')}:{})},data=>manager(seq,`${t('categoryRenamed')}: ${data.label}`));
     if(step==='delete')void managerWrite(seq,'category.delete',{category:event.target.dataset.category,move_to:String(fd.get('move_to'))},data=>manager(seq,`${t('categoryDeleted')} ${data.moved}`,data.batch_id));
   });
   modal.addEventListener('click',event=>{
@@ -322,7 +333,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     if(event.target.closest('[data-manage-back]')){void manager(seq).catch(e=>fail(e,seq));return;}
     const rename=event.target.closest('[data-category-rename]'),remove=event.target.closest('[data-category-delete]');
     if(rename||remove){const id=(rename||remove).dataset[rename?'categoryRename':'categoryDelete'],row=content.querySelector(`[data-manage-category="${CSS.escape(id)}"]`);if(!row)return;
-      row.innerHTML=rename?`<form data-organize-step="rename" data-category="${esc(id)}"><label>${l('renameCategory')}<input name="label" maxlength="40" required autocomplete="off" value="${esc(labelOf(id,flow.labels))}"></label><div class="actions"><button type="submit" class="primary">${l('save')}</button><button type="button" data-manage-back>${l('cancel')}</button></div></form>`
+      row.innerHTML=rename?`<form data-organize-step="rename" data-category="${esc(id)}"><label>${l('renameCategory')}<input name="label" maxlength="40" required autocomplete="off" value="${esc(labelOf(id,flow.labels))}"></label><label>${l('categoryDescription')}<textarea name="description" maxlength="600" rows="3" placeholder="${esc(t('categoryDescriptionHint'))}">${esc(flow.descriptions[id]||'')}</textarea></label><p class="muted">${l('categorySemanticNote')}</p><div class="actions"><button type="submit" class="primary">${l('save')}</button><button type="button" data-manage-back>${l('cancel')}</button></div></form>`
         :`<form data-organize-step="delete" data-category="${esc(id)}"><p><strong>${esc(labelOf(id,flow.labels))}</strong> · ${flow.counts.has(id)?flow.counts.get(id):'—'} ${l('categoryCount')}</p><label>${l('deleteCategoryNote')}<select name="move_to">${options(flow.categories.filter(c=>c!==id),'uncategorized',flow.labels)}</select></label><p class="muted">${l('deleteCategoryBoundary')}</p><div class="actions"><button type="submit" class="primary">${l('deleteAndMove')}</button><button type="button" data-manage-back>${l('goBack')}</button></div></form>`;
       syncAppearance();row.querySelector('input,select')?.focus();}
   });
@@ -453,7 +464,15 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   async function begin(action,button){if(working)return;if(ORGANIZE_FLOW.includes(action))return organizeBegin(action,button);if(Object.hasOwn(LIFECYCLE_FLOW,action))return lifecycleBegin(action,button);open(action);const seq=sequence;opId=crypto.randomUUID();lastPayload=null;intent={action,id:button.dataset.id,kind:button.dataset.kind,operator:button.dataset.operator};
     try{
       let fields='',data=getData();
-      if(action==='memory.create'){
+      if(ownerActions.includes(action)){
+        modal.querySelector('h2').textContent={'features.save':'功能开关','schedule.save':'新记录自动规则','processing.preview':'预览有限批次','processing.start':'确认并开始处理','processing.resume':'确认恢复处理','processing.pause':'暂停处理','processing.cancel':'取消批次'}[action];
+        const o=(await api('system-health')).owner;if(!o)throw new Error('OWNER_REQUIRED');intent.owner=o;intent.revision=o.revision;
+        if(action==='features.save')fields='<p>只保存功能配置。任何配置变更都会暂停已有批次，打开开关不会启动历史处理。</p>'+Object.entries(ownerLabels).map(([key,label])=>`<label class="check-field"><input type="checkbox" name="${key}" ${o.flags[key]?'checked':''}>${esc(label)}</label>`).join('')+select('read_policy','ChatGPT 读取策略',o.read_policy_options.map(x=>x.value),o.preferences.read_policy)+`<p>${o.read_policy_options.map(x=>esc(x.value)+'：当前可读 '+esc(x.active_readable)+' 条活动记忆').join('；')}。不扩大现有连接权限，secret 和生命周期边界始终保留。</p>`+select('retrieval_mode','默认检索模式',['lexical','hybrid','semantic'],o.preferences.retrieval_mode)+reauth();
+        else if(action==='schedule.save')fields='<p>仅处理本次保存后新建的记录，不补旧记录或旧修订。保存不会立即执行。后续执行仍需后台与各通道开关、模型外发许可和额度均可用。</p>'+check('enabled','启用自动规则',o.schedule.enabled)+['classification','summary','entities','vector'].map(k=>check(k,ownerLabels[k]||'向量构建',o.schedule.kinds.includes(k))).join('')+field('interval_minutes','间隔（分钟）',{type:'number',value:o.schedule.interval_minutes,min:5,upper:10080})+field('max_items','每轮最多记录数',{type:'number',value:o.schedule.max_items,min:1,upper:100})+field('budget','每轮最多模型调用数',{type:'number',value:o.schedule.budget,min:1,upper:1000})+reauth();
+        else if(action==='processing.preview')fields='<p>预览只生成冻结清单，不发送正文，不启动处理。最多选择100条当前可用、非 secret 且已获外发许可的记录。</p>'+select('kind','处理类型',['classification','summary','entities','vector'],'classification')+field('limit','最多记录数',{type:'number',value:10,min:1,upper:100})+field('budget','最多模型调用数（含重试）',{type:'number',value:10,min:1,upper:1000})+field('from','创建时间起点（ISO 8601）',{required:false})+field('to','创建时间终点（ISO 8601）',{required:false});
+        else {const run=o.runs.find(r=>r.run_id===intent.id);if(!run)throw new Error('RUN_NOT_FOUND');intent.run=run;fields=`<p>${esc(run.kind)} · ${esc(run.count)} 条 · ${esc(run.model)} · 已用/上限 ${esc(run.used)}/${esc(run.budget)}</p><p>敏感度：${esc(JSON.stringify(run.sensitivities))}；排除 ${esc(run.excluded)} 条${run.truncated?'；范围内还有未选记录':''}</p><code class="owner-digest">${esc(run.manifest_digest)}</code><p>${['processing.start','processing.resume'].includes(action)?'确认后仅处理此冻结清单，可能向上述已配置模型发送内容。':'停止后不会自动恢复；已发送请求无法撤回。'}</p>`+(['processing.start','processing.resume'].includes(action)?reauth():'');}
+      }
+      else if(action==='memory.create'){
         const defaults=await api('privacy-defaults');if(seq!==sequence||!isActive())return;
         fields=area('content','content')+select('memory_type','memoryType',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128})+select('sensitivity','sensitivity',['sensitive','internal','public','secret'],defaults.sensitivity);
       }
@@ -550,6 +569,13 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
     }catch(e){if(seq!==sequence||!isActive())return;content.innerHTML=`<p role="alert">${esc(t(e.message))}</p><button type="button" data-operation-close>${l('close')}</button>`;}
   }
   function payload(fd){const a=intent.action,p={};
+    if(ownerActions.includes(a)){
+      if(a==='features.save'){p.expected_revision=intent.revision;p.flags=Object.fromEntries(Object.keys(ownerLabels).map(k=>[k,fd.has(k)]));p.read_policy=fd.get('read_policy');p.retrieval_mode=fd.get('retrieval_mode');}
+      else if(a==='schedule.save')Object.assign(p,{expected_revision:intent.revision,enabled:fd.has('enabled'),kinds:['classification','summary','entities','vector'].filter(k=>fd.has(k)),interval_minutes:Number(fd.get('interval_minutes')),max_items:Number(fd.get('max_items')),budget:Number(fd.get('budget'))});
+      else if(a==='processing.preview'){Object.assign(p,{kind:fd.get('kind'),limit:Number(fd.get('limit')),budget:Number(fd.get('budget'))});for(const k of ['from','to'])if(fd.get(k))p[k]=fd.get(k);}
+      else {p.run_id=intent.id;if(['processing.start','processing.resume'].includes(a))p.digest=intent.run.manifest_digest;}
+      if(['features.save','schedule.save','processing.start','processing.resume'].includes(a)){p.current_password=fd.get('current_password');p.otp=fd.get('otp');}return p;
+    }
     if(a==='memory.create'){Object.assign(p,{content:fd.get('content'),memory_type:fd.get('memory_type'),scope:fd.get('scope'),sensitivity:fd.get('sensitivity')});if(fd.get('topic'))p.topic=fd.get('topic');if(p.scope!=='user')p[`${p.scope}_id`]=fd.get('target_id');}
     else if(a.startsWith('memory.batch_')){p.items=intent.items;if(a==='memory.batch_classify')p.category=fd.get('category');else if(fd.get('reason'))p.reason=fd.get('reason');}
     else if(a==='taxonomy.save'){p.expected_revision=intent.revision;p.categories=String(fd.get('categories')).split(/[\s,，]+/).filter(Boolean);}

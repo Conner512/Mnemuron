@@ -176,3 +176,5 @@ button.select-trigger[aria-invalid="true"]{border-color:var(--bad)}
 @keyframes rise{from{transform:translateY(6px);opacity:0}to{transform:none;opacity:1}}
 #feature-dialog ins{background:var(--hover);text-decoration:underline;text-underline-offset:4px}
 #feature-dialog del{background:var(--hover);text-decoration:line-through}
+
+.owner-digest{overflow-wrap:anywhere;word-break:break-all;white-space:normal}

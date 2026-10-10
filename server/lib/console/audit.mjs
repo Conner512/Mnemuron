@@ -11,7 +11,7 @@
 // - memory.query rows carry the IDs one lexical subquery returned (bounded, flagged when truncated). Under
 //   semantic/hybrid search several rows can belong to one user search and none of them is the final delivered list.
 //   Rows written before refs were recorded say so (`result_refs: null`), distinct from an empty result.
-import {auditKind,AUDIT_QUERY_REFS} from '../../../shared/console-queries.mjs';
+import {auditKind,AUDIT_QUERY_REFS,auditGroup,auditUnclassified,auditGroupFilter} from '../../../shared/console-queries.mjs';
 import {memoryPresentation} from '../../../shared/memory-display.mjs';
 
 const ID=/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -28,6 +28,7 @@ function queryProvenance(metadata){
 
 export function auditPage(store,user,q){
   const {db}=store,{offset,limit}=q,conditions=['user_id=?'],values=[user];
+  if(q.group){const f=auditGroupFilter(q.group);conditions.push(f.sql);values.push(...f.values);}
   for(const key of ['action','outcome'])if(q[key]){conditions.push(`${key}=?`);values.push(q[key]);}
   if(q.from){conditions.push('created_at>=?');values.push(new Date(q.from).toISOString());}if(q.to){conditions.push('created_at<=?');values.push(new Date(q.to).toISOString());}
   const rows=db.prepare(`SELECT audit_id,credential_id,action,target_type,target_id,outcome,metadata_json,created_at FROM audit_events WHERE ${conditions.join(' AND ')} ORDER BY created_at DESC,audit_id LIMIT ? OFFSET ?`).all(...values,limit+1,offset);
@@ -37,7 +38,7 @@ export function auditPage(store,user,q){
     let metadata=null;if(row.action==='memory.query'){try{metadata=JSON.parse(row.metadata_json||'null');}catch{metadata=null;}}
     const target=row.target_type==='memory'?id(row.target_id):null;want(target);
     const query=row.action==='memory.query'?queryProvenance(metadata):undefined;for(const ref of query?.result_refs||[])want(ref);
-    return {audit_id:row.audit_id,created_at:row.created_at,action:row.action,kind:auditKind(row.action),outcome:row.outcome,
+    return {audit_id:row.audit_id,created_at:row.created_at,action:row.action,kind:auditKind(row.action),group:auditGroup(row.action),unclassified:auditUnclassified(row.action),outcome:row.outcome,
       target_type:row.target_type,target_id:row.target_type==='memory'?target:id(row.target_id),credential_id:id(row.credential_id),...(query?{query}:{})};
   });
   // Recorded credentials of this owner only: issuance attributes plus current revocation state.

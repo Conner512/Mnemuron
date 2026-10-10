@@ -11,11 +11,11 @@ test('Audit UI: exact source, recorded references, current labels, owner links a
    const html=auditView(key=>text(key,locale),{data:facts,source:'core'});
    for(const value of ['credential-1','synthetic-instance','connection-1','Current own title','2026-10-08T01:00:00.000Z'])assert.ok(html.includes(value));
    assert.match(html,/data-memory="own-memory"/);assert.doesNotMatch(html,/data-memory="foreign-memory"|<script>/);assert.match(html,/&lt;script&gt;/);
-   assert.match(html,/class="audit-filter-panel" >/);assert.match(html,/data-audit-source="core" aria-pressed="true"/);
+   assert.match(html,/class="audit-filter-panel" >/);assert.match(html,/data-audit-group="memory" aria-pressed="true"/);
    for(const [,key] of html.matchAll(/data-i18n="([^"]+)"/g))assert.ok(Object.hasOwn(catalog[locale],key),`${locale}:${key}`);
    const filtered=auditView(key=>text(key,locale),{data:facts,filters:{action:'memory.query'}});assert.match(filtered,/class="audit-filter-panel" open/);
  }
- const identity=auditView(text,{source:'identity',data:{entries:[{action:'account.login',kind:'auth',outcome:'success',created:1}]}});assert.doesNotMatch(identity,/data-memory=|Recorded credential/);assert.match(identity,/data-audit-source="identity" aria-pressed="true"/);
+ const identity=auditView(text,{source:'identity',group:'security',data:{entries:[{action:'account.login',kind:'auth',outcome:'success',created:1}]}});assert.doesNotMatch(identity,/data-memory=|Recorded credential/);assert.match(identity,/data-audit-group="security" aria-pressed="true"/);
  const old=auditView(text,{data:{entries:[{action:'memory.query',query:{result_refs:null}}]}});assert.match(old,/auditActorUnknown/);assert.match(old,/auditRefsNotRecorded/);
  const inherited=auditView(text,{data:{entries:[{action:'memory.read',target_type:'memory',target_id:'constructor'}],memories:{}}});assert.doesNotMatch(inherited,/data-memory=/);
 });

@@ -1,3 +1,4 @@
+import {mountAuditDates,auditDateRange} from './audit.mjs';
 // Console controller: account-bound requests, routing and the detail pane.
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
 import {actionButton,actionPage,mountActions,mountFeatureReads,canAct} from './actions.mjs';
@@ -11,7 +12,7 @@ const root=document.getElementById('console-root'),pane=document.getElementById(
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections,entities,featureReads,auditFilters={},auditSource='core',auditOffsets={core:0,identity:0};
+let capabilities={enabled:false,writable:false},actions,connections,entities,featureReads,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,entityPendingSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let detailMeta=null,query='',searchMode='lexical',category='',status='active',topic='',origin='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
@@ -23,13 +24,13 @@ let projectOffset=0,projectArchived='false',taskOffset=0,contextGeneration=0;con
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 
-function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditSource=p.get('source')==='identity'?'identity':'core';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||'lexical';category=p.get('category')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
-function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('source',auditSource);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!=='lexical')p.set('mode',searchMode);if(category)p.set('category',category);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
-readLocation();if(page==='audit')auditOffsets[auditSource]=offset;
+function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=['system','memory','connections','security'].includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||'lexical';category=p.get('category')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
+function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!=='lexical')p.set('mode',searchMode);if(category)p.set('category',category);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
+readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
  actions?.clear();connections?.clear();entities?.clear();featureReads?.clear();state.clear();requestSequence++;entityPendingSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
- currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditOffsets={core:0,identity:0};
+ currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -60,7 +61,7 @@ async function mutate(action,payload,operation_id) {
  }finally{state.finish(ticket);}
 }
 
-const pagination=data=>`<div class="pagination">${offset?`<button type="button" data-offset="${Math.max(0,offset-(data.limit||25))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div>`;
+const pagination=data=>page==='audit'?`<div class="pagination">${auditCursor?`<button type="button" data-audit-prev>${l('previous')}</button>`:''}${data.next_cursor?`<button type="button" data-audit-next>${l('next')}</button>`:''}</div>`:`<div class="pagination">${offset?`<button type="button" data-offset="${Math.max(0,offset-(data.limit||25))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div>`;
 const policy=(note,items)=>`<section class="card"><div class="policy-box"><span class="tag">${l('blocked')}</span>${l(note,'p')}<div class="actions">${items.map(key=>`<button type="button" disabled title="${esc(t('blocked'))}" data-i18n="${key}">${esc(t(key))}</button>`).join('')}</div></div></section>`;
 
 function heading() {
@@ -77,10 +78,10 @@ function render(data) {
  // Replaced rows can never receive a context reply that was requested before this render.
  contextGeneration++;contextRequests.clear();
  let html='';
- if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{}});
+ if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{},taxonomy:capabilities.taxonomy?.categories||[],descriptions:capabilities.category_descriptions||{}});
  else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,topic,origin,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data),labels:capabilities.category_labels||{}});
- else if(page==='audit')html=auditView(t,{data,source:auditSource,pagination:pagination(data),filters:auditFilters});
+ else if(page==='audit')html=auditView(t,{data,source:'grouped',group:auditGroup,pagination:pagination(data),filters:auditFilters});
  else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
  else if(page==='models')html=policy('modelsNote',['configure']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
@@ -136,7 +137,7 @@ async function load() {
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {
-   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status!=='all'?{status}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25,...(page==='audit'?auditParams():{})}:{};
+   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status!=='all'?{status}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})}:['jobs','summaries','audit'].includes(page)?{...(page==='audit'?{...auditParams(),...(auditCursor?{cursor:auditCursor}:{})}:{offset}),limit:25}:{};
    // Library facets are a separate read: if it fails only the sidebar degrades, never the list.
    const facetRead=page==='memories'?api('memories',{part:'facets'}).catch(e=>{if(e.message==='STALE_ACCOUNT'||e.name==='AbortError')throw e;return null;}):null;
    const [data,features,facetData]=await Promise.all([api(page,params),extras(),facetRead]);data.features=features;
@@ -228,7 +229,9 @@ document.addEventListener('click',event=>{
  if(event.target.closest('[data-detail-back]')&&detailStack.length>1){detailStack.pop();const prior=detailStack.at(-1);void (prior.kind==='summary'?openSummary:openMemory)(prior.params,false,true);return;}
  if(event.target.closest('[data-detail-next]')&&detailData?.next_request)void (detailKind==='summary'?openSummary:openMemory)(detailData.next_request);
  if(event.target.closest('[data-source-next]')&&detailData?.next_source_request)void openMemory(detailData.next_source_request);
- const stream=event.target.closest('[data-audit-source]');if(stream&&page==='audit'&&['core','identity'].includes(stream.dataset.auditSource)){auditOffsets[auditSource]=offset;auditSource=stream.dataset.auditSource;offset=auditOffsets[auditSource];featureReads.invalidateAudit();closePane();saveLocation();void load();return;}
+ const stream=event.target.closest('[data-audit-group]');if(stream&&page==='audit'&&['system','memory','connections','security'].includes(stream.dataset.auditGroup)){auditPages[auditGroup]={cursor:auditCursor,filters:{...auditFilters},history:auditPages[auditGroup]?.history||[]};auditGroup=stream.dataset.auditGroup;auditCursor=auditPages[auditGroup]?.cursor||'';auditFilters={...auditPages[auditGroup]?.filters};featureReads.invalidateAudit();auditDates?.close();closePane();saveLocation();void load();return;}
+ if(page==='audit'&&event.target.closest('[data-audit-next]')&&currentData?.next_cursor){const h=auditPages[auditGroup]?.history||[];h.push(auditCursor);auditPages[auditGroup]={...auditPages[auditGroup],history:h};auditCursor=currentData.next_cursor;saveLocation();void load();return;}
+ if(page==='audit'&&event.target.closest('[data-audit-prev]')){auditCursor=auditPages[auditGroup]?.history?.pop()||'';saveLocation();void load();return;}
  const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);if(selectAll)resetSelection();saveLocation();void load();}
  if(event.target.closest('[data-reset-filters]')){query='';category='';status='active';topic='';origin='';searchMode='lexical';offset=0;resetSelection();saveLocation();void load();}
  const facet=event.target.closest('[data-facet]');if(facet&&page==='memories'){const value=facet.dataset.value||'';
@@ -240,20 +243,20 @@ document.addEventListener('click',event=>{
 });
 document.addEventListener('change',event=>{if(event.target.matches('[data-batch-memory]'))updateMemorySelection();});
 document.addEventListener('submit',event=>{
- if(event.target.id==='audit-filter'){event.preventDefault();auditFilters=Object.fromEntries(new FormData(event.target));offset=0;auditOffsets={core:0,identity:0};featureReads.invalidateAudit();saveLocation();void load();}
+ if(event.target.id==='audit-filter'){event.preventDefault();const values=Object.fromEntries(new FormData(event.target));try{Object.assign(values,auditDateRange(values.from,values.to));}catch(e){const field=event.target.elements.to;field.setCustomValidity(t(e.message));field.reportValidity();return;}auditFilters=values;auditCursor='';auditPages[auditGroup]={history:[]};featureReads.invalidateAudit();saveLocation();void load();}
  if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'lexical');category=String(f.get('category')||'');status=String(f.get('status')||'active');offset=0;resetSelection();saveLocation();void load();}
  if(event.target.getAttribute('action')==='/console-api/logout'){entities?.clear();requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;detailMeta=null;}
 });
 pane.addEventListener('close',()=>{entities?.clearMemory();detailSequence++;detailData=null;detailMeta=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
-// Keyboard: "/" or Ctrl/Cmd+K focuses search; Escape closes a docked (non-modal) pane.
+// Keyboard shortcuts focus an existing page search only; never navigate from pages without search.
 document.addEventListener('keydown',event=>{
  if(event.key==='Escape'&&pane.open&&!document.querySelector('dialog[open]:modal')&&!document.querySelector('.select-popup:popover-open')){closePane();return;}
  const typing=event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]:modal');
  // A page shortcut must not navigate away from an editor or an unacknowledged credential.
  if(typing||event.defaultPrevented||event.isComposing||document.querySelector('.select-popup:popover-open'))return;
  if(!(event.key==='/'||(event.key.toLowerCase?.()==='k'&&(event.metaKey||event.ctrlKey))))return;
- event.preventDefault();const field=document.querySelector('[data-search-input]');
- if(field){field.focus();field.select();}else location.assign('/app/memories');
+ const field=document.querySelector('[data-search-input]');
+ if(field){event.preventDefault();field.focus();field.select();}
 });
 WIDE_PANE.addEventListener('change',()=>{if(pane.open){const modal=pane.matches(':modal');if(modal===WIDE_PANE.matches){pane.close();}}});
 window.addEventListener('pagehide',clear);
@@ -263,7 +266,7 @@ document.addEventListener('appearancechange',()=>{
  document.title=`Mnemuron · ${t(page)}`;
 });
 
-function auditParams(){return {source:auditSource,...Object.fromEntries(Object.entries(auditFilters).filter(([,v])=>v).map(([k,v])=>[k,['from','to'].includes(k)?new Date(v).toISOString():v]))};}
+function auditParams(){return {group:auditGroup,...Object.fromEntries(Object.entries(auditFilters).filter(([,v])=>v))};}
 featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:auditParams});
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
   reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});

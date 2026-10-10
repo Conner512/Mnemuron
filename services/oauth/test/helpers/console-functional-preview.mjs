@@ -26,11 +26,11 @@ async function stop(){
 const core=await memoryFixture(t);
 Object.assign(core.store.runtime,{cloudMemory:true,cloudSubmittedGrant:true});
 // Model-list discovery: a bodyless GET of the list route. Only the presence of an authorization header is recorded.
-const listing={requests:[],hold:null,release:null,models:['synthetic-embed-small','synthetic-chat-large','synthetic-chat-mini','<b>markup-like</b>']};
+const listing={inferenceCalls:0,requests:[],hold:null,release:null,models:['synthetic-embed-small','synthetic-chat-large','synthetic-chat-mini','<b>markup-like</b>']};
 const model=http.createServer(async(req,res)=>{let data='';for await(const chunk of req)data+=chunk;
  if(req.method==='GET'&&(req.url.endsWith('/models')||req.url.endsWith('/api/tags'))){listing.requests.push({url:req.url,authorized:!!req.headers.authorization});if(listing.hold)await listing.hold;
   res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(req.url.endsWith('/api/tags')?{models:listing.models.map(name=>({name}))}:{object:'list',data:listing.models.map(id=>({id}))}));return;}
- const body=JSON.parse(data);let output={ok:true};
+ listing.inferenceCalls++;const body=JSON.parse(data);let output={ok:true};
  try{const request=JSON.parse(body.messages?.find(m=>m.role==='user')?.content||'{}'),sources=request.input?.sources;
   if(sources)output={results:sources.map(s=>request.input.operation==='entities'?{memory_id:s.memory_id,revision:s.revision,objects:[]}:request.input.operation==='classification'?{memory_id:s.memory_id,category:'technical',tags:['synthetic']}:{memory_id:s.memory_id,revision:s.revision,start:0,end:s.content.length,quote:s.content})};
  }catch{}
@@ -142,6 +142,15 @@ lines.on('line',async line=>{
   if(req.command==='model-list-hold'){listing.hold=new Promise(r=>{listing.release=r;});reply={held:true};}
   if(req.command==='model-list-release'){listing.release?.();listing.hold=null;reply={released:true};}
   if(req.command==='model-list-requests')reply={requests:listing.requests};
+  if(req.command==='owner-mode'){
+   const {OwnerControls,migrateOwner}=await import('../../../../server/lib/console/owner.mjs');const s=core.store,user=o.account.user_id;
+   f.app.config.identity.owner_account_id=o.account.account_id;s.memoryConfig.console.owner_user_id=user;s.memoryConfig.cloud_memory={enabled:true};
+   s.memoryTransaction(()=>migrateOwner(s.db,user,{memory:true,connections:true,cloud_write:true}));s.consoleService.owner=new OwnerControls(s.consoleService);
+   const c={enabled:true,protocol:'openai_compatible',base_url:modelUrl,model:'synthetic-owner-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:2,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
+   s.db.prepare('INSERT INTO console_models(user_id,kind,revision,config_json,secret_cipher,updated_at) VALUES(?,?,1,?,NULL,?)').run(user,'organizer',JSON.stringify(c),Date.now());reply={done:true};
+  }
+  if(req.command==='owner-state')reply={...core.store.consoleService.owner.view(o.account.user_id),inference_calls:listing.inferenceCalls};
+  if(req.command==='owner-tick'){await core.store.consoleService.tick();reply={done:true,inference_calls:listing.inferenceCalls};}
   if(req.command==='model-config')reply={models:core.store.db.prepare('SELECT kind,revision,config_json,secret_cipher IS NOT NULL AS has_key FROM console_models WHERE user_id=? ORDER BY kind').all(o.account.user_id).map(r=>({...r,config:JSON.parse(r.config_json),config_json:undefined}))};
   if(req.command==='seed-lifecycle'){const writer=core.issue(o.account.user_id,'synthetic-lifecycle-'+Date.now()),store=core.store;
    const projects=[['synthetic-life-del','Synthetic Lifecycle Delete 合成删除项目'],['synthetic-life-src','Synthetic Lifecycle Source 合成源项目'],['synthetic-life-tgt','Synthetic Lifecycle Target 合成目标项目'],['synthetic-life-keep','Synthetic Lifecycle Keep 合成保留项目']];
@@ -199,12 +208,13 @@ lines.on('line',async line=>{
   if(req.command==='basic-memory-only'){f.app.config.identity.console_operations=false;f.app.config.identity.console_basic_operations={memory:true,security:true,oauth:true};reply={done:true};}
   if(req.command==='seed-audit'){
    const writer=core.issue(o.account.user_id,'synthetic-audit-'+Date.now()),foreign=owners.find(owner=>owner!==o);
-   const own=core.store.saveMemory(writer.auth,{scope:'user',topic:'Synthetic current audit title',content:'Synthetic current audit title. PRIVATE AUDIT BODY MUST NOT APPEAR IN LIST OR EXPORT.'}).memory;
+   const own=core.store.saveMemory(writer.auth,{scope:'user',topic:'部署前备份与回滚准备',content:'部署前备份与回滚准备。PRIVATE AUDIT BODY MUST NOT APPEAR IN LIST OR EXPORT.'}).memory;
    const foreignId=core.store.db.prepare('SELECT memory_id FROM memories WHERE user_id=? LIMIT 1').get(foreign.account.user_id).memory_id;
    for(let n=0;n<38;n++)core.store.audit({auth:writer.auth,action:'memory.read',targetType:'memory',targetId:n===37?foreignId:own.memory_id});
    core.store.audit({auth:writer.auth,action:'memory.query',metadata:{result_refs_kind:'lexical_subquery',result_refs:[own.memory_id,foreignId],result_refs_truncated:true,result_count:2}});
    core.store.audit({auth:{user_id:o.account.user_id},action:'memory.query'});
-   for(let n=0;n<36;n++)ids.audit(o.account.account_id,'synthetic.audit.account');
+   for(let n=0;n<36;n++){ids.audit(o.account.account_id,'account.login');ids.audit(o.account.account_id,'connection.tool_succeeded');core.store.audit({auth:writer.auth,action:'console.models.test'});}
+   ids.audit(o.account.account_id,'synthetic.audit.unknown');
    reply={memory_id:own.memory_id,foreign_memory_id:foreignId,credential_id:writer.auth.credential_id,agent_instance_id:writer.auth.agent_instance_id};
   }
   if(req.command==='seed-entities')reply=(await import('./entity-browser-seed.mjs')).seedEntityBrowser(core,o);

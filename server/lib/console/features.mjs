@@ -1,3 +1,4 @@
+import {DEFAULT_TAXONOMY,adoptionPreview,categoryDefinitions} from '../memory-derived/taxonomy.mjs';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {object,id,number} from './state.mjs';
@@ -24,6 +25,14 @@ export class ConsoleFeatures {
   constructor(service){this.service=service;this.store=service.store;this.db=service.db;this.categories=categoryEditor(this);
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_preferences(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,value_json TEXT NOT NULL,PRIMARY KEY(user_id,kind));`);
   }
+  initializeNewAccountTaxonomy(user){
+    // Called before the first credential is inserted, under the issuance transaction.
+    // Revoked credentials and retained data also identify an existing account.
+    if(this.store.memoryConfig.memory?.taxonomy)return;
+    for(const table of ['credentials','memories','events','tasks','console_preferences','audit_events'])
+      if(this.db.prepare(`SELECT 1 FROM ${table} WHERE user_id=? LIMIT 1`).get(user))return;
+    this.db.prepare('INSERT INTO console_preferences VALUES(?,?,?,?)').run(user,'taxonomy-default',0,JSON.stringify(DEFAULT_TAXONOMY));
+  }
   preference(user,kind,fallback){const row=this.db.prepare('SELECT revision,value_json FROM console_preferences WHERE user_id=? AND kind=?').get(user,kind);return {revision:row?.revision||0,...(row?JSON.parse(row.value_json):fallback)};}
   save(user,kind,p,value){const previous=this.preference(user,kind,{});number(p.expected_revision,0,2147483647);
     if(previous.revision!==p.expected_revision)throw new ConflictError('Settings changed; reload before saving.','SETTINGS_VERSION_CHANGED');
@@ -34,6 +43,7 @@ export class ConsoleFeatures {
   retention(user){return {...this.preference(user,'retention',{raw_retention_days:this.store.getRetention().raw_retention_days}),applies_to_existing_events:false,checkpoints:'permanent',memories:'permanent',pinned_sources_preserved:true};}
   taxonomy(user,fallback){const p=this.preference(user,'taxonomy',fallback);return {version:p.version,categories:p.categories};}
   // Display names for category IDs. Built-in IDs without a stored name are translated by the browser.
+  descriptions(user){const p=this.preference(user,'taxonomy',{});return p.descriptions&&typeof p.descriptions==='object'?p.descriptions:{};}
   labels(user){const p=this.preference(user,'taxonomy',{});return p.labels&&typeof p.labels==='object'?p.labels:{};}
   restoreCategory(auth,detail){return this.categories.restore(auth,detail);}
   task(auth,taskId){id(taskId);const row=this.db.prepare('SELECT * FROM tasks WHERE user_id=? AND task_id=?').get(auth.user_id,taskId);if(!row)throw new NotFoundError('Task not found.');
@@ -41,7 +51,7 @@ export class ConsoleFeatures {
   read(auth,view,p){
     object(p,featureParams[view]||[]);const {db,store,service}=this,user=auth.user_id;
     const result=value=>({read_only:true,production_ready:false,...value});
-    if(view==='taxonomy')return result({...this.preference(user,'taxonomy',service.taxonomy(user)),...service.taxonomy(user),labels:this.labels(user)});
+    if(view==='taxonomy'){const current=this.preference(user,'taxonomy',service.taxonomy(user)),labels=this.labels(user);return result({...current,...service.taxonomy(user),labels,descriptions:this.descriptions(user),definitions:categoryDefinitions(service.taxonomy(user),labels,this.descriptions(user)),default_adoption:adoptionPreview(service.taxonomy(user),current.revision,labels)});}
     if(view==='privacy-defaults')return result({...this.privacy(user),applies_to:'new_console_memories',cloud_grant_requires_explicit_revision:true});
     if(view==='retention')return result(this.retention(user));
     // Normal views are live-only: records of deleted projects are not counted or listed.
@@ -101,8 +111,8 @@ export class ConsoleFeatures {
       }
       const pg=page(p);return result(paged(db.prepare('SELECT revision,status,reason,created_at,length(content) content_length FROM memory_revisions WHERE user_id=? AND memory_id=? ORDER BY revision DESC LIMIT ? OFFSET ?').all(user,p.memory_id,pg.limit+1,pg.offset),pg,'versions'));
     }
-    if(view==='system-health')return result({services:{core:db.prepare('SELECT 1 n').get().n===1?'ready':'unavailable',search:store.memorySearch.status().state,
-      worker:store.memoryConfig.console?.worker_enabled?'enabled_not_probed':'disabled',vector:store.memoryConfig.vector_store?.enabled?'enabled_not_probed':'disabled',mcp:'not_probed'},observed_at:new Date().toISOString()});
+    if(view==='system-health')return result({...(service.owner.user?{owner:service.owner.view(user)}:{}),services:{core:db.prepare('SELECT 1 n').get().n===1?'ready':'unavailable',search:store.memorySearch.status().state,
+      worker:service.owner.user?(service.owner.allowed('processing')?'enabled_not_probed':'paused'):(store.memoryConfig.console?.worker_enabled?'enabled_not_probed':'disabled'),vector:store.memoryConfig.vector_store?.enabled?'enabled_not_probed':'disabled',mcp:'not_probed'},observed_at:new Date().toISOString()});
     if(view==='system-version')return result({release:packageVersion,node:process.version,schema_version:db.prepare('PRAGMA user_version').get().user_version,migrations:'initialization_completed',production_ready:false});
     if(view==='backups')return result({status:'not_configured',entries:[],verified:false,automatic_backup_changed:false});
     throw new NotFoundError('Console feature not found.');
@@ -127,12 +137,13 @@ export class ConsoleFeatures {
       });return {status:results.every(r=>r.ok)?'completed':'partial',results,physically_deleted:false};
     }
     if(action==='taxonomy.save'){
-      object(p,['expected_revision','categories']);const version='console-'+createHash('sha256').update(JSON.stringify([user,p.categories])).digest('hex');
+      object(p,['expected_revision','categories']);const version='console-'+createHash('sha256').update(JSON.stringify([user,p.categories,p.expected_revision+1])).digest('hex');
       const taxonomy={version,categories:p.categories};store.derivedMemory.taxonomy(taxonomy);
       const used=db.prepare('SELECT DISTINCT category FROM memory_category_overrides WHERE user_id=? AND locked=1').all(user);
       if(used.some(r=>!p.categories.includes(r.category)))throw new ConflictError('Reclassify records before removing their category.','CATEGORY_IN_USE');
       const before=this.categories.current(user),labels=Object.fromEntries(Object.entries(before.labels).filter(([c])=>p.categories.includes(c)));
-      const saved=this.save(user,'taxonomy',p,{...taxonomy,labels});
+      const descriptions=Object.fromEntries(Object.entries(before.descriptions).filter(([c])=>p.categories.includes(c)));
+      const saved=this.save(user,'taxonomy',p,{...taxonomy,labels,descriptions});
       // Model classifications of kept IDs stay visible under the new version; old rows are preserved.
       this.categories.carryForward(user,before.version,version,p.categories);
       // Jobs keep their immutable taxonomy; fence the old queued jobs before any output can publish.

@@ -10,6 +10,7 @@ import { ReadonlyCoreClient } from "./core-client.mjs";
 import { createMcpServer, toolDefinitions, enabledTools } from "./tools.mjs";
 import {requireScope} from './authorization.mjs';
 import {readObservation} from './read-audit.mjs';
+import {applySecurityHeaders} from '../../../shared/security-headers.mjs';
 
 export function createGateway(input, { isolated = false, logger = () => {} } = {}) {
   const config = validateGatewayConfig(input, { isolated });
@@ -39,6 +40,7 @@ export function createGateway(input, { isolated = false, logger = () => {} } = {
     let errorCode, tool,generic=false;
     let connectionId,read,readOutcome='not_executed',logged=false;
     let ownsSlot = false;
+    applySecurityHeaders(request, response, origin, config);
     response.setHeader("x-request-id", requestId);
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-content-type-options", "nosniff");

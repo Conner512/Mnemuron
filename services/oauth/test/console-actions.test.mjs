@@ -79,6 +79,12 @@ test('HTTP-CON-01: real BFF binds CSRF, Origin, account and write credentials be
  assert.equal((await x.get('memories',x.b)).body.results.length,0);
  assert.equal((await x.act('memory.create',p,x.a,randomUUID(),{account_id:x.b.record.account_id})).status,409);
  assert.equal((await x.act('memory.create',p,x.a,randomUUID(),{csrf:'invalid'})).status,401);
+ const foreignCsrf=(await x.get('me',x.b)).body.csrf;
+ assert.equal((await x.act('memory.create',p,x.a,randomUUID(),{csrf:foreignCsrf})).status,401);
+ assert.equal((await x.act('memory.create',{...p,user_id:x.b.record.user_id})).status,400);
+ const own=(await x.get('memory-meta?memory_id='+r.body.memory_id)).body;
+ assert.equal((await x.act('memory.correct',{memory_id:r.body.memory_id,revision:own.revision,content:'Denied foreign edit'},x.b)).status,404);
+ assert.deepEqual((await x.get('memory-meta?memory_id='+r.body.memory_id)).body,own);
  const me=await x.get('me');const noOrigin=await x.a.browser.request('/console-api/action',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({csrf:me.body.csrf,account_id:x.a.record.account_id,action:'memory.create',operation_id:randomUUID(),payload:JSON.stringify(p)})});assert.equal(noOrigin.status,403);
  assert.equal(x.core.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);
  const asset=await x.a.browser.request('/assets/actions.mjs');assert.equal(asset.status,200);assert.match(asset.headers.get('content-type'),/javascript/);
@@ -431,4 +437,46 @@ test('HTTP-AUDIT: revoking a session while a Core audit read is pending rejects 
  t.after(()=>{ConsoleCore.prototype.view=original;release();});
  const pending=x.get('audit?source=core');await began;x.ids.revokeSession(x.a.console.token);release();
  const result=await pending;assert.equal(result.status,401);assert.equal(result.body.entries,undefined);assert.equal(result.body.credentials,undefined);
+});
+
+test('HTTP-AUDIT-GROUPS: four categories filter before merged pagination/export with owner isolation and unknown history',async t=>{
+ const x=await setup(t);x.core.store.db.exec('DELETE FROM audit_events');x.ids.db.exec('DELETE FROM identity_audit');
+ const actions={memory:'memory.read',connections:'connection.tool_succeeded',security:'account.login',system:'console.models.test'},own=x.core.issue(x.a.record.user_id,'synthetic-group-a'),other=x.core.issue(x.b.record.user_id,'synthetic-group-b');
+ x.core.store.db.exec('DELETE FROM audit_events');
+ for(const [group,action] of Object.entries(actions))for(let i=0;i<28;i++){
+  x.core.store.audit({auth:own.auth,action});x.ids.audit(x.a.record.account_id,action);
+  x.core.store.audit({auth:other.auth,action});x.ids.audit(x.b.record.account_id,action);
+  x.core.store.audit({action});x.ids.audit(null,action);
+ }
+ x.core.store.audit({auth:own.auth,action:'historic.unknown'});
+ const {collectAuditExport}=await import('../../../web/console/audit.mjs');
+ for(const group of Object.keys(actions)){
+  let cursor=null,entries=[],pages=0;
+  do{const q=new URLSearchParams({group,limit:7,...(cursor?{cursor}:{})});const r=await x.get('audit?'+q);assert.equal(r.status,200);assert.equal(r.body.source,'grouped');assert.equal(r.body.group,group);assert.ok(r.body.entries.every(e=>e.group===group));entries.push(...r.body.entries);cursor=r.body.next_cursor;assert.ok(++pages<20);}while(cursor);
+  assert.equal(entries.length,group==='system'?57:56);assert.equal(new Set(entries.map(e=>e.source+':'+e.audit_id)).size,entries.length);assert.equal(entries.filter(e=>e.source==='identity').length,28);
+  const doc=await collectAuditExport(async p=>{const r=await x.get('audit?'+new URLSearchParams(p));assert.equal(r.status,200);return r.body;},{group});assert.deepEqual(new Set(doc.entries.map(e=>e.source+':'+e.audit_id)),new Set(entries.map(e=>e.source+':'+e.audit_id)));
+  const exact=await x.get('audit?'+new URLSearchParams({group,action:actions[group],outcome:'success',limit:100}));assert.equal(exact.body.entries.length,56);
+  assert.equal((await x.get('audit?'+new URLSearchParams({group,to:'2000-01-01T00:00:00.000Z'}))).body.entries.length,0);
+  if(group==='system')assert.equal(entries.find(e=>e.action==='historic.unknown').unclassified,true);
+ }
+ for(const q of ['group=global','group=system&user_id=foreign','group=system&source=identity','group=system&offset=1','group=system&cursor=YWJj','group=system&cursor=WzAsLTEwXQ'])assert.equal((await x.get('audit?'+q)).status,400,q);
+});
+
+test('HTTP-AUDIT-GROUPS: revocation rejects an awaited grouped private response',async t=>{
+ const x=await setup(t),{ConsoleCore}=await import('../src/console-core.mjs');
+ const original=ConsoleCore.prototype.view;let release,started;const gate=new Promise(r=>release=r),began=new Promise(r=>started=r);
+ ConsoleCore.prototype.view=async function(view,...args){const data=await original.call(this,view,...args);if(view==='audit'&&args[0]?.group){started();await gate;}return data;};
+ t.after(()=>{ConsoleCore.prototype.view=original;release();});
+ const waiting=x.get('audit?group=memory');await began;x.ids.revokeSession(x.a.console.token);release();assert.equal((await waiting).status,401);
+});
+
+test('OWNER: exact owner replaces role gate, fresh MFA remains required, second account and registration denied',async t=>{
+ const x=await setup(t);const {OwnerControls,migrateOwner}=await import('../../../server/lib/console/owner.mjs');
+ x.f.app.config.identity.owner_account_id=x.a.record.account_id;const s=x.core.store,user=x.a.record.user_id;s.memoryConfig.console={owner_user_id:user,worker_enabled:false};s.memoryTransaction(()=>migrateOwner(s.db,user,{memory:true,connections:true}));s.consoleService.owner=new OwnerControls(s.consoleService);
+ assert.equal(x.ids.console.operator(x.a.record.account_id),false);assert.equal((await x.get('system-health')).status,200);assert.equal((await x.get('me',x.b)).status,403);assert.equal((await x.get('capabilities')).body.owner_mode,true);
+ assert.equal((await x.a.browser.request('/register')).status,200);assert.equal((await x.a.browser.post('/register/reserve',{code:'synthetic'})).status,403);
+ assert.equal((await x.act('features.save',{expected_revision:0,flags:{processing:true}})).status,403);assert.equal(s.consoleService.owner.policy().flags.processing,false);
+ const saved=await x.act('features.save',{expected_revision:0,flags:{processing:true},...await x.proof()});assert.equal(saved.status,200,JSON.stringify(saved.body));assert.equal(saved.body.processing_started,false);
+ const original=x.ids.authenticate.bind(x.ids);x.ids.authenticate=async(...args)=>{const result=await original(...args);x.ids.revokeSession(x.a.console.token);return result;};assert.equal((await x.act('features.save',{expected_revision:1,flags:{processing:false},...await x.proof(x.a,30)})).status,401);
+ assert.equal(s.consoleService.owner.policy().flags.processing,true);assert.equal((await x.act('invitations.issue',{})).status,401);
 });

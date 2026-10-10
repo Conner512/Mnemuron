@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import {validateSecurityHeaders} from '../../../shared/security-headers.mjs';
 import { canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, CORE_SCOPES, publicOriginMode,validateCloudPolicy,oauthScopesFor } from "../../../shared/oauth-common.mjs";
 
 export function validateGatewayConfig(input, { isolated = false } = {}) {
@@ -6,6 +7,7 @@ export function validateGatewayConfig(input, { isolated = false } = {}) {
   requireConfig(isolated || !!process.release.lts, "production requires a supported Node.js LTS runtime");
   requireConfig(isolated || (!process.env.DEBUG && !process.env.NODE_DEBUG), "protocol debug logging must be disabled");
   const c = structuredClone(input);
+  validateSecurityHeaders(c);
   validateCloudPolicy(c);
   requireConfig(c.config_version === "mnemuron-web-gateway-config-v1", "config_version");
   requireConfig(["oauth", "bootstrap_metadata_only"].includes(c.mode), "mode");

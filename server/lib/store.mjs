@@ -248,6 +248,8 @@ export class MnemuronStore {
     if (!Array.isArray(scopes) || !scopes.length || scopes.some((scope) => typeof scope !== "string")) {
       throw new ValidationError("scopes must be a non-empty string array.");
     }
+    return this.memoryTransaction(() => {
+    this.consoleService.features.initializeNewAccountTaxonomy(userId);
     const apiKey = makeApiKey();
     const credentialId = randomUUID();
     const createdAt = nowIso();
@@ -278,6 +280,7 @@ export class MnemuronStore {
     };
     this.audit({ auth, action: "credential.issue", targetType: "credential", targetId: credentialId });
     return { api_key: apiKey, credential: { ...auth, label: label || agentInstanceId, created_at: createdAt, expires_at: expiresAt } };
+    });
   }
 
   bootstrapAdmin({ label = "Mnemuron admin", userId = DEFAULT_USER_ID } = {}) {
@@ -3181,7 +3184,7 @@ export class MnemuronStore {
   async searchMemories(auth,payload) {
     this.requireScope(auth,'memory:read');
     if(payload?.personal_model_only!==undefined&&typeof payload.personal_model_only!=='boolean')throw new ValidationError('Invalid model allocation guard.');
-    const mode=payload?.mode || this.memoryConfig.memory?.retrieval?.mode || 'lexical';
+    const mode=payload?.mode || (this.consoleService.owner.user===auth.user_id?this.consoleService.owner.preferences().retrieval_mode:this.memoryConfig.memory?.retrieval?.mode) || 'lexical';
     if(!['lexical','hybrid','semantic'].includes(mode))throw new ValidationError('Invalid retrieval mode.');
     if(mode==='lexical') {
       const result=this.queryMemories(auth,payload);

@@ -125,6 +125,8 @@ export const LIFECYCLE_ENFORCEMENT_TABLES = `
 //   memory_vector_points (derived from memory_vector_documents, which are tracked).
 const viaVectorOwner = {parent: 'memory_vector_owners', key: 'generation'};
 export const MATERIAL_TABLES = [
+  ...['owner_feature_policy','owner_processing_runs'].map(table=>({table,group:'owner_controls'})),
+  ...['owner_processing_items','owner_processing_jobs'].map(table=>({table,group:'owner_controls',owner:{parent:'owner_processing_runs',key:'run_id'}})),
   // core: created by the Core migrations.
   ...['projects', 'tasks', 'events', 'checkpoints', 'memories', 'resumes', 'resolver_selections', 'resume_delivery_receipts',
     'resume_injection_events', 'task_bootstrap_previews', 'task_canonical_revisions', 'task_reconciliation_proposals',
@@ -150,7 +152,7 @@ export const MATERIAL_TABLES = [
   {table: 'memory_vector_documents', group: 'vector'},
   {table: 'memory_vector_generations', group: 'vector', owner: viaVectorOwner, globalWhenOwnerless: true, updateOf: ['generation', 'profile', 'collection_name', 'state', 'dimensions', 'distance']},
 ];
-export const OPTIONAL_GROUPS = ['vector'];
+export const OPTIONAL_GROUPS = ['vector','owner_controls'];
 const byTable = new Map(MATERIAL_TABLES.map(entry => [entry.table, entry]));
 
 const exists = (db, table) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table);

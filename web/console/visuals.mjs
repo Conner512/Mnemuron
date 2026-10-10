@@ -1,3 +1,4 @@
+import {auditLocalValue} from './audit.mjs';
 // Pure console views for the memory workbench. No API calls, account selection or
 // authorization here: controllers pass owner-scoped data in and get markup strings out.
 // The escaping template tag and the icon set live here too: browsers may load only the
@@ -136,18 +137,28 @@ function distribution(insights, t, labels = {}) {
 function distributionLegend(insights, t, labels = {}) {
   const cats = distributionCategories(insights), total = cats.reduce((n, c) => n + c.count, 0);
   if (!cats.length) return '';
-  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><i aria-hidden="true"></i>${categoryText(t, labels, c.value)}<strong>${c.count}</strong><small>${Math.round(c.count / total * 100)}%</small></li>`)}</ol>`;
+  return html`<ol class="radar-legend">${cats.map((c, i) => html`<li class="hue-${i}"><div class="legend-category"><i aria-hidden="true"></i>${categoryText(t, labels, c.value)}</div>
+    <dl class="legend-stats"><div><dt>${i18n(t, 'distributionCount')}</dt><dd>${c.count}</dd></div><div><dt>${i18n(t, 'distributionShare')}</dt><dd>${Math.round(c.count / total * 100)}%</dd></div></dl></li>`)}</ol>`;
+}
+
+function categoryDirectory(insights,t,labels,taxonomy,descriptions={}){
+  const rows=rowsOf(insights?.categories),counts=new Map(rows.map(c=>[c.value,c.count])),total=rows.reduce((n,c)=>n+c.count,0);
+  const ids=[...new Set([...taxonomy,...rows.map(c=>c.value)])];
+  if(!ids.length)return '';
+  return html`<details class="category-directory" open><summary>${i18n(t,'categoryDirectoryTitle')} <span>(${ids.length})</span></summary>
+    ${i18n(t,'categoryDirectoryNote','p')}<ul>${ids.map(id=>html`<li><div class="directory-heading"><a href="/app/memories?category=${encodeURIComponent(id)}">${categoryText(t,labels,id)}</a><span class="directory-values">${counts.get(id)||0} <small>${i18n(t,'categoryCount')} · ${total?Math.round((counts.get(id)||0)/total*100):0}%</small></span></div>
+      <p>${Object.hasOwn(descriptions,id)?(descriptions[id]||i18n(t,'categoryDescriptionEmpty')):i18n(t,labels[id]?'categoryHint_custom':(t('categoryHint_'+id)==='categoryHint_'+id?'categoryHint_custom':'categoryHint_'+id))}</p>${!counts.get(id)?html`<span class="directory-empty">${i18n(t,'categoryNoMemories')}</span>`:''}</li>`)}</ul></details>`;
 }
 
 /** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
-export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t), labels = {}}) {
+export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t), labels = {}, taxonomy = [], descriptions = {}}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
   const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}">${i18n(t, title)}<strong>${count(key)}</strong></a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
   return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
       <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
         <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
-      ${distributionLegend(data.insights, t, labels)}</div>${distribution(data.insights, t, labels)}</section>
+      ${distributionLegend(data.insights, t, labels)}${rowsOf(data.insights?.categories).length>6?i18n(t,'categoryAggregateNote','p'):''}</div>${distribution(data.insights, t, labels)}${categoryDirectory(data.insights,t,labels,taxonomy,descriptions)}</section>
   <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/jobs')}</div>
   <div class="home-grid">
     <section class="card stream"><header class="section-head">${i18n(t, 'recentStream', 'h2')}<a href="/app/memories">${i18n(t, 'openLibrary')}${svg('arrow')}</a></header>
@@ -295,7 +306,7 @@ const auditCredential = (t, id, c) => {
 };
 const auditMemory = (t, id, memories) => {
   const m = Object.hasOwn(memories,id)?memories[id]:null;
-  return m ? html`<button type="button" class="audit-memory" data-memory="${id}">${m.title || id} <small><code>${id}</code></small></button>` : html`<span class="audit-memory unavailable"><code>${id}</code> <small>${i18n(t, 'auditMemoryUnavailable')}</small></span>`;
+  return m ? html`<button type="button" class="audit-memory" data-memory="${id}">${m.title || i18n(t,'auditMemoryUnavailable')}</button>` : html`<span class="audit-memory unavailable">${i18n(t, 'auditMemoryUnavailable')}</span>`;
 };
 function auditCoreDetail(t, e, data) {
   const memories = data.memories || {}, q = e.query, credentials=data.credentials||{};
@@ -305,18 +316,29 @@ function auditCoreDetail(t, e, data) {
     : html`<span>${i18n(t, 'auditLexicalRefs')} ${q.result_refs.length ? q.result_refs.map(id => auditMemory(t, id, memories)) : i18n(t, 'auditRefsEmpty')}${q.result_refs_truncated ? html` <small>${i18n(t, 'auditRefsTruncated')}</small>` : ''}</span>`;
   return html`<span class="audit-facts">${auditCredential(t, e.credential_id, Object.hasOwn(credentials,e.credential_id)?credentials[e.credential_id]:null)}${target}${query}</span>`;
 }
-export function auditView(t, {data = {}, source = 'core', pagination = '', filters = {}}) {
-  const entries = data.entries || [], core = source === 'core', active=Object.values(filters).filter(Boolean).length;
-  const tab = (key, label) => html`<button type="button" data-audit-source="${key}" aria-pressed="${String(source === key)}">${i18n(t, label)}</button>`;
-  return String(html`<div class="view-switch audit-sources" role="group" data-i18n-aria-label="auditSource" aria-label="${t('auditSource')}">${tab('core', 'auditSourceCore')}${tab('identity', 'auditSourceIdentity')}</div>
-    <p class="muted audit-scope">${i18n(t, core ? 'auditScopeCore' : 'auditScopeIdentity')}</p>
+export function auditView(t, {data = {}, source = 'core', group='memory', pagination = '', filters = {}}) {
+  const entries=data.entries||[],active=Object.values(filters).filter(Boolean).length;
+  const tab=(key)=>html`<button type="button" data-audit-group="${key}" aria-pressed="${String(group===key)}">${i18n(t,'auditGroup_'+key)}</button>`;
+  const idDetail=(id)=>id?html`<span class="audit-id"><code>${id}</code><button type="button" data-audit-copy="${id}" aria-label="${t('copy')}: ${id}">${i18n(t,'copy')}</button></span>`:'';
+  return String(html`<div class="view-switch audit-sources" role="group" aria-label="${t('auditSource')}">${['system','memory','connections','security'].map(tab)}</div>
+    <p class="muted audit-scope">${i18n(t,'auditGroupNote')}</p>
     <details class="audit-filter-panel" ${active?trusted('open'):''}><summary>${i18n(t,'filterAudit')}${active?html` <small>(${active})</small>`:''}</summary>
-    <form id="audit-filter" class="audit-filters">${[['action','auditAction','text'],['outcome','auditOutcome','text'],['from','auditFrom','datetime-local'],['to','auditTo','datetime-local']].map(([key,label,type])=>html`<label>${i18n(t,label)}<input name="${key}" type="${type}" value="${filters[key]||''}" ${type==='text'?trusted('maxlength="100"'):''}></label>`)}<button type="submit">${i18n(t,'applyFilters')}</button><small class="audit-filter-zone">${i18n(t,'auditLocalTime')}</small></form></details>
-    <section class="card"><header class="section-head">${i18n(t, 'auditTimeline', 'h2')}<button type="button" data-retry>${i18n(t, 'refresh')}</button></header>${!entries.length?emptyState(t):''}
-    ${core && data.memory_titles_truncated ? html`<p class="muted">${i18n(t, 'auditTitlesTruncated')}</p>` : ''}
-    <ol class="timeline audit-timeline">${entries.map(e => {const date=core?e.created_at:e.created;const stamp=new Date(typeof date==='number'?date*1000:date);return html`<li class="timeline-item" data-outcome="${e.outcome || ''}" data-kind="${e.kind || 'other'}"><span class="timeline-dot" aria-hidden="true"></span>
-      <div><strong>${e.action}</strong><span class="memory-meta"><span class="tag">${i18n(t, `auditKind_${['read','write','auth','credential'].includes(e.kind) ? e.kind : 'other'}`)}</span><span class="tag">${e.outcome || '—'}</span><time datetime="${Number.isFinite(stamp.getTime())?stamp.toISOString():''}">${formatDate(date)}</time>${e.audit_id ? html`<code>${e.audit_id}</code>` : ''}</span>
-      ${core ? auditCoreDetail(t, e, data) : html`<span class="audit-facts"><span class="muted">${i18n(t, 'auditIdentityActor')}</span></span>`}</div></li>`;})}</ol>${trusted(pagination)}</section>`);
+    <form id="audit-filter" class="audit-filters">${[['action','auditAction'],['outcome','auditOutcome']].map(([key,label])=>html`<label>${i18n(t,label)}<input name="${key}" type="text" value="${filters[key]||''}" maxlength="100"></label>`)}
+    ${[['from','auditFrom'],['to','auditTo']].map(([key,label])=>html`<label>${i18n(t,label)}<span class="audit-date-field"><input id="audit-${key}" name="${key}" type="text" autocomplete="off" placeholder="YYYY-MM-DD HH:mm" value="${auditLocalValue(filters[key])}" aria-describedby="audit-zone"><button type="button" data-audit-date="audit-${key}" aria-label="${t(label)} · ${t('auditCalendar')}" aria-haspopup="dialog" aria-expanded="false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4m8-4v4m-9 8h3m4 0h3"/></svg></button></span></label>`)}
+    <button type="submit">${i18n(t,'applyFilters')}</button><small id="audit-zone" class="audit-filter-zone">${i18n(t,'auditLocalTime')} ${Intl.DateTimeFormat().resolvedOptions().timeZone}</small></form></details>
+    <section class="card"><header class="section-head">${i18n(t,'auditTimeline','h2')}<button type="button" data-retry>${i18n(t,'refresh')}</button></header>${!entries.length?emptyState(t):''}
+    ${data.memory_titles_truncated?html`<p class="muted">${i18n(t,'auditTitlesTruncated')}</p>`:''}
+    <ol class="timeline audit-timeline">${entries.map(e=>{
+      const core=(e.source||source)==='core',date=core?e.created_at:e.created,stamp=new Date(typeof date==='number'?date*1000:date);
+      const target=core&&e.target_type==='memory'&&e.target_id,label=e.action==='memory.query'?'auditMemorySearch':e.kind==='read'?'auditMemoryRead':'auditMemoryWrite';
+      const ids=[...new Set([e.audit_id,e.credential_id,e.target_id,...(e.query?.result_refs||[])].filter(Boolean))];
+      return html`<li class="timeline-item" data-outcome="${e.outcome||''}" data-kind="${e.kind||'other'}"><span class="timeline-dot" aria-hidden="true"></span><div>
+      <div class="audit-event-title"><strong>${target||e.action==='memory.query'?i18n(t,label):e.action}</strong>${target?auditMemory(t,e.target_id,data.memories||{}):''}</div>
+      <span class="memory-meta"><span class="tag">${i18n(t,'auditKind_'+(['read','write','auth','credential'].includes(e.kind)?e.kind:'other'))}</span><span class="tag">${e.outcome||'—'}</span><time datetime="${Number.isFinite(stamp.getTime())?stamp.toISOString():''}">${formatDate(date)}</time>${e.unclassified?html`<span class="tag">${i18n(t,'auditUnclassified')}</span>`:''}${target&&Object.hasOwn(data.memories||{},e.target_id)?html`<small>${i18n(t,'auditCurrentTitle')}</small>`:''}</span>
+      ${core&&e.query?html`<p class="audit-query-note">${!Array.isArray(e.query.result_refs)?i18n(t,'auditRefsNotRecorded'):html`${i18n(t,'auditLexicalRefs')} ${e.query.result_refs.length?e.query.result_refs.map(id=>auditMemory(t,id,data.memories||{})):i18n(t,'auditRefsEmpty')} ${e.query.result_refs_truncated?i18n(t,'auditRefsTruncated'):''}`} ${e.query.result_refs?.some(id=>Object.hasOwn(data.memories||{},id))?html`<small>${i18n(t,'auditCurrentTitle')}</small>`:''}</p>`:''}
+      <details class="audit-event-details"><summary>${i18n(t,'auditDetails')}</summary><div class="audit-details-content"><code>${e.action}</code>${core?auditCoreDetail(t,e,data):html`<p>${i18n(t,'auditIdentityActor')}</p>`}${ids.map(idDetail)}</div></details>
+      </div></li>`;
+    })}</ol>${trusted(pagination)}</section>`);
 }
 
 /** Memory detail for the side pane. `actions` is markup built from fixed action buttons. */

@@ -21,7 +21,8 @@ export function memoryRuntime(input) {
   try {
     if(input.cloud_memory){strictObject(input.cloud_memory,['enabled','allow_submitted_revision_grant']);
       if(typeof input.cloud_memory.enabled!=='boolean'||typeof input.cloud_memory.allow_submitted_revision_grant!=='boolean')throw new Error('invalid cloud policy');}
-    if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins']);
+    if(input.console?.owner_user_id!==undefined&&(!/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$/.test(input.console.owner_user_id)||typeof input.console.owner_user_id!=='string'))throw new Error('invalid owner');
+    if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins','owner_user_id']);
       for(const k of ['worker_enabled','personal_vectors'])if(input.console[k]!==undefined&&typeof input.console[k]!=='boolean')throw new Error('invalid console switch');
       if(input.console.key_file!==undefined&&(typeof input.console.key_file!=='string'||!input.console.key_file.startsWith('/')))throw new Error('invalid console key');
       const origins=input.console.allowed_private_origins||[];if(!Array.isArray(origins)||origins.length>32||origins.some(o=>typeof o!=='string'||new URL(o).origin!==o))throw new Error('invalid private origins');

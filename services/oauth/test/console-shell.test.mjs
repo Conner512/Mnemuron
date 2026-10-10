@@ -159,7 +159,7 @@ test('Shell: distribution includes every category in its total and folds overflo
    assert.equal((html.match(/class="arc /g)||[]).length,6);
    if(size>6){
     const other=categories.slice(5).reduce((sum,c)=>sum+c.count,0);
-    assert.match(html,new RegExp(`<strong>${other}</strong><small>${Math.round(other/total*100)}%</small>`));
+    assert.match(html,new RegExp(`<dd>${other}</dd>[\\s\\S]*?<dd>${Math.round(other/total*100)}%</dd>`));
     assert.ok(html.includes(text('otherCategories',locale)));
    }
   }
@@ -206,4 +206,26 @@ test('Shell: the account menu caret is the same drawn chevron as the language se
  const geometry=rule=>rule.replace(/^[^{]+/,'');
  assert.equal(geometry(css.match(/\.account-chevron\{[^}]+\}/)[0]),geometry(controls.match(/\.select-chevron\{[^}]+\}/)[0]));
  assert.match(css,/\.account-menu\[open\] \.account-chevron\{transform:translateY\(2px\) rotate\(225deg\)\}/);
+});
+
+test('Category directory: all eleven IDs including zero counts, aggregation totals and custom labels stay visible',()=>{
+ const taxonomy=['technical','projects','workflows','documentation','personal','family','preferences','goals','decisions','lessons','uncategorized'];
+ for(const locale of ['zh-CN','en']){
+  const t=k=>text(k,locale),categories=taxonomy.slice(0,9).map((value,i)=>({value,count:9-i}));
+  const html=overviewView({insights:{categories}},{t,taxonomy,labels:{family:'<Family custom>'},memoryRows:()=>''});
+  assert.equal((html.match(/class="directory-heading"/g)||[]).length,11);
+  assert.equal((html.match(/class="directory-empty"/g)||[]).length,2);
+  assert.equal((html.match(/class="hue-/g)||[]).length,6);
+  assert.match(html,/&lt;Family custom&gt;/);assert.doesNotMatch(html,/<Family custom>/);
+  assert.ok(html.includes(t('categoryAggregateNote')));assert.ok(html.includes(t('categoryHint_technical')));
+  assert.match(html,/href="\/app\/memories\?category=lessons"/);
+ }
+});
+
+test('Shell header contains language/account only; page search has no cross-page shortcut',()=>{
+ const shell=renderPage({title:'audit',page:'audit',account:{username:'Synthetic',account_id:'a'},csrf:'synthetic'});
+ assert.doesNotMatch(shell,/top-search|data-search-shortcut/);
+ const script=fs.readFileSync(new URL('../../../web/console/app.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(script,/else location\.assign\('\/app\/memories'\)/);
+ assert.match(script,/if\(field\)\{event.preventDefault\(\);field.focus\(\);field.select\(\);\}/);
 });

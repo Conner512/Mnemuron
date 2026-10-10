@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import {createHash} from 'node:crypto';
-import {auditQuery,auditKind} from '../../../shared/console-queries.mjs';
+import {auditQuery,auditKind,auditGroup,auditUnclassified,auditGroupFilter} from '../../../shared/console-queries.mjs';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
 import {routeTitle,sendPage,label,escapeHtml,serveAsset,removedPages} from '../../../web/console/render.mjs';
 import {icon} from '../../../web/console/visuals.mjs';
@@ -81,7 +81,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     throw new BoundaryError(404,'NOT_FOUND');
   }
   if(pathname.startsWith('/register')) {
-    if(!config.login.registration_enabled){
+    if(config.identity.owner_account_id||!config.login.registration_enabled){
       if(pathname==='/register'&&request.method==='GET')return show('register',`<div class="policy-box" data-policy="registration_disabled">${label('registrationDisabled','p')}</div><a href="/login">${label('signIn')}</a>`);
       throw new BoundaryError(403,'REGISTRATION_DISABLED');
     }
@@ -146,6 +146,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   const token=cookie(request,config,'console');let session;
   try{session=ids.session(token,'console');}catch(error){if(routeTitle(pathname)&&request.method==='GET'){redirect(response,'/login');return true;}throw error;}
   const account=ids.byId(session.account_id),principal=ids.principal(account.subject);
+  if(config.identity.owner_account_id&&account.account_id!==config.identity.owner_account_id)throw new BoundaryError(403,'OWNER_REQUIRED');
   if(routeTitle(pathname)&&request.method==='GET') {
     sendPage(response,{title:routeTitle(pathname),page:routeTitle(pathname),account,csrf:ids.formCsrf(token,'console')});return true;
   }
@@ -155,9 +156,9 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   if(pathname==='/console-api/capabilities'&&request.method==='GET'){
     let core;try{core=await coreFor(account.subject).view('capabilities',{});}catch{core={writable:false,actions:[],reason:'CONSOLE_CORE_UNAVAILABLE'};}
     ids.session(token,'console');
-    const operator=ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
+    const operator=config.identity.owner_account_id?account.account_id===config.identity.owner_account_id:ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
     sendJson(response,200,{...core,actions:(core.actions||[]).filter(action=>allowed_actions.includes(action)),allowed_actions,writable:allowed_actions.some(action=>(core.actions||[]).includes(action)),
-      enabled:config.identity.console_operations===true,operator,resource:config.resource,
+      enabled:config.identity.console_operations===true,operator,owner_mode:!!config.identity.owner_account_id,resource:config.resource,
       account_id:account.account_id,management:consoleManagement(config),connection_management:ids.connections.capabilities(),invitation_batch_limit:config.identity.invitation_batch_limit,
       maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy&&!identityMaintenance?.external()});return true;
   }
@@ -171,9 +172,14 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const action=body.get('action'),operation_id=body.get('operation_id');
     store.limit(`console:write:${account.account_id}`,60,60);
     let result;
-    if(action.startsWith('connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);
+    if(action.startsWith('connections.')){if(config.identity.owner_account_id){const state=await coreFor(account.subject).view('system-health',{});ids.session(token,'console');if(state.owner?.flags?.connections!==true)throw new BoundaryError(403,'FEATURE_DISABLED');}result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);}
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
+    else if(['features.save','schedule.save','processing.start','processing.resume'].includes(action)){
+      await ids.console.reauthenticate(account.account_id,session,payload);
+      const {current_password,otp,...safe}=payload;
+      result=await coreFor(account.subject).action({action,operation_id,payload:safe});
+    }
     else if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){
       // Deleting, restoring or merging a project changes what every agent can read and write: fresh password + OTP here,
       // then only the confirm fields go to Core (factors never leave the BFF). Previews need no factors.
@@ -229,6 +235,31 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   // into one page or one continuation. See auditPage (server/lib/console/audit.mjs) for the Core projection.
   if(pathname==='/console-api/audit'&&request.method==='GET') {
     let q;try{q=auditQuery(Object.fromEntries(url.searchParams));}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}
+    if(q.group){
+      // Merge independently filtered streams with per-stream cursors. Never merge arbitrary current pages,
+      // never trust an account identifier from a cursor, and recheck session after the awaited Core read.
+      let positions=[0,0];
+      if(q.cursor){try{positions=JSON.parse(Buffer.from(q.cursor,'base64url').toString('utf8'));}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}}
+      if(q.offset!==0||!Array.isArray(positions)||positions.length!==2||positions.some(n=>!Number.isSafeInteger(n)||n<0||n>1000000))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const {group,limit}=q,filters={group,limit,offset:positions[0],...Object.fromEntries(['action','outcome','from','to'].filter(k=>q[k]).map(k=>[k,q[k]]))};
+      const core=await coreFor(account.subject).view('audit',filters);ids.session(token,'console');
+      const f=auditGroupFilter(group),conditions=['account_id=?',f.sql],values=[account.account_id,...f.values];
+      for(const k of ['action','outcome'])if(q[k]){conditions.push(`${k}=?`);values.push(q[k]);}
+      if(q.from){conditions.push('created>=?');values.push(Math.ceil(Date.parse(q.from)/1000));}
+      if(q.to){conditions.push('created<=?');values.push(Math.floor(Date.parse(q.to)/1000));}
+      const rows=ids.db.prepare(`SELECT audit_id,action,outcome,created FROM identity_audit WHERE ${conditions.join(' AND ')} ORDER BY created DESC,audit_id LIMIT ? OFFSET ?`).all(...values,limit+1,positions[1]);
+      const identity=rows.slice(0,limit).map(e=>({...e,source:'identity',kind:auditKind(e.action),group:auditGroup(e.action),unclassified:auditUnclassified(e.action)}));
+      const stamp=e=>e.source==='identity'?e.created*1000:Date.parse(e.created_at);
+      const entries=[...core.entries.map(e=>({...e,source:'core'})),...identity].sort((a,b)=>stamp(b)-stamp(a)||a.source.localeCompare(b.source)||a.audit_id.localeCompare(b.audit_id)).slice(0,limit);
+      const consumed=[entries.filter(e=>e.source==='core').length,entries.filter(e=>e.source==='identity').length];
+      const more=core.entries.length>consumed[0]||core.next_offset!=null||identity.length>consumed[1]||rows.length>limit;
+      const next=positions.map((n,i)=>n+consumed[i]);
+      const refs=new Set(entries.filter(e=>e.source==='core').flatMap(e=>[e.target_type==='memory'?e.target_id:null,...(e.query?.result_refs||[])]).filter(Boolean));
+      const actors=new Set(entries.filter(e=>e.source==='core').map(e=>e.credential_id));
+      sendJson(response,200,{source:'grouped',group,entries,limit,next_cursor:more?Buffer.from(JSON.stringify(next)).toString('base64url'):null,
+        credentials:auditConnections(ids,account.account_id,Object.fromEntries(Object.entries(core.credentials||{}).filter(([id])=>actors.has(id)))),
+        memories:Object.fromEntries(Object.entries(core.memories||{}).filter(([id])=>refs.has(id))),memory_titles_truncated:core.memory_titles_truncated===true,read_only:true});return true;
+    }
     const {source='core',...filters}=q,{offset,limit}=filters;
     if(source==='core'){
       const core=await coreFor(account.subject).view('audit',filters);ids.session(token,'console');
@@ -252,12 +283,12 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const rows=ids.db.prepare("SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? AND action IN ('account.login','account.login.failed') ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?").all(account.account_id,q.limit+1,q.offset);
     sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
   }
-  if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname))ids.console.requireOperator(account.account_id);
+  if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
   if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|entities|operation)$/.test(pathname)) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     const result=await core.view(view,Object.fromEntries(url.searchParams));
     ids.session(token,'console'); // Do not send a response after revocation raced an awaited Core read.
-    if(['system-health','system-version','backups'].includes(view))ids.console.requireOperator(account.account_id);
+    if(['system-health','system-version','backups'].includes(view)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
     ids.audit(account.account_id,`console.read.${view}`);sendJson(response,200,result);return true;
   }
   if(pathname.startsWith('/console-api/')&&request.method!=='GET')throw new BoundaryError(403,'BLOCKED_POLICY');

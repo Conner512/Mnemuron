@@ -1,3 +1,5 @@
+import {OwnerControls,OWNER_ACTIONS} from './owner.mjs';
+import {LEGACY_TAXONOMY,classificationContextCurrent} from '../memory-derived/taxonomy.mjs';
 import {ConsoleEntities,ENTITY_ACTIONS} from './entities.mjs';
 import {randomUUID} from 'node:crypto';
 import {ConsoleState,object,id,number,fingerprint} from './state.mjs';
@@ -22,14 +24,15 @@ const memoryOrigin=(source,imported)=>{const s=String(source||'');
 
 /** Digest of a frozen first-run manifest: the exact (memory_id, revision, state_hash) set, order-independent. */
 export const manifestDigest=items=>fingerprint(items.map(i=>[i.memory_id,i.revision,i.state_hash]).sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0));
-const taxonomyDefault={version:'console-default-v1',categories:['uncategorized','preferences','projects','technical','personal','decisions']};
+// Older accounts without a saved taxonomy continue to use v1 until explicit adoption.
+const taxonomyDefault=LEGACY_TAXONOMY;
 const receipt=result=>({status:result.status,memory_id:result.replacement_memory?.memory_id||result.memory?.memory_id||result.memory_id,physically_deleted:false});
 export class ConsoleService {
-  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;}
-  require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
-  taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;return user?this.features.taxonomy(user,fallback):fallback;}
-  capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),
-    read_policy:this.readPolicy(auth),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
+  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);}
+  require(auth,action){if(this.owner.user)this.owner.require(auth.user_id);else if(OWNER_ACTIONS.includes(action))throw new AuthorizationError('owner mode');if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
+  taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||(user?this.features.preference(user,'taxonomy-default',taxonomyDefault):taxonomyDefault);return user?this.features.taxonomy(user,fallback):fallback;}
+  capabilities(auth){if(this.owner.user)this.owner.require(auth.user_id);const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action)&&(this.owner.user?!['jobs.schedule','jobs.retry','vector.prepare','vector.schedule'].includes(action):!OWNER_ACTIONS.includes(action)));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),category_descriptions:this.features.descriptions(auth.user_id),
+    owner_mode:!!this.owner.user,read_policy:this.readPolicy(auth),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.owner.user?this.owner.allowed('processing'):this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
   /** Read-only: which ChatGPT read policy the operator configured. The console cannot change it. */
   // legacy_read_all is this account's earlier "ChatGPT may read all memories" setting: still in force under the
   // per-memory policy, shown so the console never understates what ChatGPT can read.
@@ -48,9 +51,9 @@ export class ConsoleService {
     return {memory_id:row.memory_id,revision:current.revision,state_hash:current.state_hash,sensitivity,category,...memoryPresentation(row),origin:memoryOrigin(row.source,imported),
       scope:row.scope,topic:row.topic,memory_type:row.memory_type,status:row.status};}
   job(auth,jobId){const job=this.store.memoryJobs.get(id(jobId));if(!job||job.user_id!==auth.user_id)throw new NotFoundError('Job not found.','JOB_NOT_FOUND');return job;}
-  settings(user){const row=this.db.prepare('SELECT * FROM console_settings WHERE user_id=?').get(user);return {revision:row?.revision||0,...(row?JSON.parse(row.settings_json):{schedule_enabled:false,timezone:'UTC',periods:['daily','weekly']})};}
+  settings(user){if(this.owner?.user===user){const p=this.owner.policy();return {revision:p.revision,schedule_enabled:p.schedule.enabled,timezone:'UTC',periods:[],interval_minutes:p.schedule.interval_minutes,new_memories_only:true};}const row=this.db.prepare('SELECT * FROM console_settings WHERE user_id=?').get(user);return {revision:row?.revision||0,...(row?JSON.parse(row.settings_json):{schedule_enabled:false,timezone:'UTC',periods:['daily','weekly']})};}
   processing(user){
-    const models=this.models.list(user),worker=this.store.memoryConfig.console?.worker_enabled===true;
+    const models=this.models.list(user),worker=this.owner.user?this.owner.allowed('processing'):this.store.memoryConfig.console?.worker_enabled===true;
     const blockers=kind=>{const c=models.find(m=>m.kind===kind).config;return [...(!c.enabled?['NOT_CONFIGURED']:[]),...(c.enabled&&!c.egress_approved?['EGRESS_DENIED']:[])];};
     const quotas={organizer:this.models.quotas.view(user,'organizer'),embedder:this.models.quotas.view(user,'embedder')};
     const organizer=[...blockers('organizer'),...(!worker?['WORKER_DISABLED']:[]),...quotas.organizer.exhausted],vector=[...blockers('embedder'),...(!worker?['WORKER_DISABLED']:[]),...(!this.store.memoryConfig.vector_store?.enabled?['VECTOR_DISABLED']:[])];
@@ -68,7 +71,9 @@ export class ConsoleService {
       if(active&&this.models.dailyRemaining(user,active.profile)===0)search.push('DAILY_BUDGET_EXHAUSTED');}
     const hasDocuments=this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_vector_documents'").get();
     const indexed=active&&hasDocuments?this.db.prepare("SELECT COUNT(*) n FROM memory_vector_documents WHERE user_id=? AND generation=? AND state='indexed'").get(user,active.generation).n:0;
-    return {classification:{ready:!organizer.length,blockers:organizer},summary:{ready:!organizer.length,blockers:organizer},
+    const classBlocks=[...organizer,...(!this.owner.allowed('classification')?['FEATURE_DISABLED']:[])],summaryBlocks=[...organizer,...(!this.owner.allowed('summary')?['FEATURE_DISABLED']:[])];
+    if(!this.owner.allowed('vector_search'))search.push('FEATURE_DISABLED');if(!this.owner.allowed('vector_build'))vector.push('FEATURE_DISABLED');
+    return {classification:{ready:!classBlocks.length,blockers:classBlocks},summary:{ready:!summaryBlocks.length,blockers:summaryBlocks},
       vector:{ready:!vector.length,blockers:vector,state:request.state||'not_started',error_code:request.error_code||null,updated_at:request.updated_at||null,indexed_documents:indexed,search_ready:!search.length,search_blockers:search,
         serving_generation:active?.generation||null,serving_profile_differs:!!active&&!!configured&&configured!==active.profile,first_run:this.firstRun(user,active)},settings:this.settings(user),quotas};
   }
@@ -109,6 +114,10 @@ export class ConsoleService {
     return this.state.sync(auth,action,p,operation,()=>this.apply(auth,action,p),{secret:['connections.create','connections.rotate','devices.register','devices.rotate'].includes(action)});
   }
   apply(auth,action,p){const store=this.store;
+    if(OWNER_ACTIONS.includes(action))return this.owner.apply(auth,action,p);
+    if(action.startsWith('connections.')&&!this.owner.allowed('connections'))throw new ConflictError('Connection management disabled.','FEATURE_DISABLED');
+    if(this.owner.user&&['jobs.schedule','jobs.retry','vector.prepare','vector.schedule'].includes(action))throw new ConflictError('Preview and confirm a processing run.','EXECUTION_GRANT_REQUIRED');
+    if(this.owner.user&&!this.owner.allowed('memory')&&(action.startsWith('memory.')||action.startsWith('entity.')))throw new ConflictError('Memory is disabled.','MEMORY_DISABLED');
     if(ENTITY_ACTIONS.includes(action))return this.entities.apply(auth,action,p);
     if(FEATURE_ACTIONS.includes(action))return this.features.apply(auth,action,p);
     // Runs inside state.sync's transaction (SAVEPOINT when nested): never a second BEGIN.
@@ -174,7 +183,7 @@ export class ConsoleService {
           return {status:'rescheduled',job_id:job.job_id,jobs:scheduled.jobs,job_type:'entities',truncated:scheduled.truncated};
         }
       }
-      if(job.metadata.taxonomy&&job.metadata.taxonomy.version!==this.taxonomy(auth.user_id).version)return this.reschedule(auth,job);
+      if(job.metadata.taxonomy&&(job.metadata.taxonomy.version!==this.taxonomy(auth.user_id).version||job.job_type==='classification'&&!classificationContextCurrent(store,job)))return this.reschedule(auth,job);
       const provider=this.models.provider(auth.user_id,'organizer');if(provider.profile.fingerprint!==job.profile||(job.job_type!=='entities'&&job.metadata.taxonomy?.version!==this.taxonomy(auth.user_id).version)||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i)))throw new ConflictError('Inputs/model/taxonomy changed; schedule a new job.','STALE_INPUT');
       this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(job.profile);
       this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL,fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE job_id=? AND user_id=?").run(Date.now(),Date.now(),job.job_id,auth.user_id);return {status:'queued',job_id:job.job_id};}
@@ -266,8 +275,8 @@ export class ConsoleService {
   reschedule(auth,job){
     const store=this.store,user=auth.user_id,taxonomy=this.taxonomy(user),organizer=this.models.provider(user,'organizer');
     if(!organizer.profile.egress.approved)throw new ConflictError('Model egress must be explicitly approved.','EGRESS_DENIED');
-    const stale=this.db.prepare("SELECT job_id,metadata_json FROM memory_jobs WHERE user_id=? AND job_type=? AND state IN ('dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled','pending') AND COALESCE(last_error_code,'')<>'RESCHEDULED' AND json_extract(metadata_json,'$.taxonomy.version')<>?")
-      .all(user,job.job_type,taxonomy.version).map(r=>({job_id:r.job_id,window:JSON.parse(r.metadata_json).window}));
+    const stale=this.db.prepare("SELECT job_id,metadata_json FROM memory_jobs WHERE user_id=? AND job_type=? AND state IN ('dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled','pending') AND COALESCE(last_error_code,'')<>'RESCHEDULED' ")
+      .all(user,job.job_type).filter(r=>{const metadata=JSON.parse(r.metadata_json);return metadata.taxonomy?.version!==taxonomy.version||job.job_type==='classification'&&!classificationContextCurrent(store,{user_id:user,metadata});}).map(r=>({job_id:r.job_id,window:JSON.parse(r.metadata_json).window}));
     const windows=stale.map(r=>r.window).filter(Boolean),settings=this.settings(user),now=Date.now();
     const periods=[...new Set(windows.map(w=>w.period))],timezone=windows[0]?.timezone||settings.timezone;
     const result=scheduleLibrary(store,store.memoryJobs,{userId:user,organizer,taxonomy,type:job.job_type,timezone,
@@ -333,7 +342,7 @@ export class ConsoleService {
     let current=null;try{current=this.models.provider(user,'embedder');}catch(error){if(!embedders.size)throw error;}
     if(current)embedders.set(current.profile.fingerprint,current);
     return new VectorIndex(this.store,this.vectorBackend(config),embedders,{ownerId:user,prefix:config.collection_prefix,budget:(purpose,day)=>this.models.budgetReserve(user,purpose,day)});}
-  async tick(){if(this.busy||this.store.memoryConfig.console?.worker_enabled!==true)return;this.busy=true;
+  async tick(){if(this.owner.user){if(this.busy)return;this.busy=true;try{return await this.owner.tick();}finally{this.busy=false;}}if(this.busy||this.store.memoryConfig.console?.worker_enabled!==true)return;this.busy=true;
     try{
       const users=this.db.prepare("SELECT user_id FROM console_models WHERE kind='organizer' AND json_extract(config_json,'$.enabled')=1 ORDER BY updated_at").all();
       for(const {user_id:user} of users){try{const organizer=this.models.provider(user,'organizer'),settings=this.settings(user);
@@ -360,6 +369,6 @@ export class ConsoleService {
           if(this.db.prepare('SELECT state FROM memory_vector_generations WHERE generation=?').get(row.generation)?.state!=='active')index.activate(row.generation);this.db.prepare("UPDATE console_vector_requests SET state='succeeded',error_code=NULL,updated_at=? WHERE user_id=? AND generation=?").run(Date.now(),row.user_id,row.generation);}}
         catch(error){this.db.prepare("UPDATE console_vector_requests SET state='failed',error_code=?,updated_at=? WHERE user_id=? AND generation=?").run(/^[A-Z_]+$/.test(error.code||'')?error.code:'VECTOR_UNAVAILABLE',Date.now(),row.user_id,row.generation);}
       }
-    }finally{this.busy=false;}
+    }finally{this.busy=false;this.owner=new OwnerControls(this);}
   }
 }

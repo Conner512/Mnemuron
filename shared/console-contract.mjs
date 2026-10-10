@@ -13,7 +13,8 @@ export const CONSOLE_SELF_SERVICE_ACTIONS = Object.freeze(['devices.revoke']);
 export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&(CONSOLE_MEMORY_ACTIONS.includes(action)||CONSOLE_SELF_SERVICE_ACTIONS.includes(action)));
 // ChatGPT per-memory visibility (memory.visibility, memory.web_policy) was removed from the console; the
 // account read policy is an operator runtime setting (memory.agent_read_policy).
-export const CONSOLE_ACTIONS = Object.freeze(['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity',...CONSOLE_ORGANIZE_ACTIONS,
+export const OWNER_ACTIONS=Object.freeze(['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel']);
+export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,'memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity',...CONSOLE_ORGANIZE_ACTIONS,
   'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.discover','models.disable','models.quota','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
   'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
   'memory.batch_classify','memory.batch_retract','taxonomy.save','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate',

@@ -1,3 +1,4 @@
+import {classificationContextCurrent} from './memory-derived/taxonomy.mjs';
 import {consoleActionWritable} from '../../shared/console-contract.mjs';
 import {ValidationError,NotFoundError,ConflictError} from './errors.mjs';
 import {credentialView} from './console/credentials.mjs';
@@ -67,11 +68,11 @@ function overviewInsights(store,user,live){
   return {window_days:30,activity,types:group('memory_type'),statuses:group('status'),categories};
 }
 export async function consoleRead(store,auth,view,params={}) {
-  store.requireScope(auth,'console:read');
+  store.requireScope(auth,'console:read');if(store.consoleService.owner.user)store.consoleService.owner.require(auth.user_id);
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
   const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','category','topic','origin','part','target','memory_ids','all'],summaries:['offset','limit'],jobs:['offset','limit','job_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit'],
     projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id']}[view]||[];
-  if(Object.keys(params).some(key=>!(view==='audit'?['offset','limit','action','outcome','from','to']:featureParams[view]||allowed).includes(key)))throw new ValidationError('Unknown console query parameter.');
+  if(Object.keys(params).some(key=>!(view==='audit'?['offset','limit','action','outcome','from','to','group']:featureParams[view]||allowed).includes(key)))throw new ValidationError('Unknown console query parameter.');
   if(FEATURE_VIEWS.includes(view))return store.consoleService.features.read(auth,view,params);
   const db=store.db,user=auth.user_id;
   const count=table=>db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE user_id=?`).get(user).n;
@@ -156,9 +157,9 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'jobs':{const {offset,limit}=pagination(params);if(params.job_id)return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};
       // stale_taxonomy: the job was planned with a category list the account has since changed.
       const version=store.consoleService.taxonomy(user).version;
-      const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at,json_extract(metadata_json,\'$.taxonomy.version\') taxonomy_version FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset)
-        .map(({taxonomy_version,...job})=>({...job,stale_taxonomy:!!taxonomy_version&&taxonomy_version!==version}));
-      return {read_only:true,worker_enabled:store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,processing:{classification:store.consoleService.processing(user).classification},operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
+      const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at,metadata_json,json_extract(metadata_json,\'$.taxonomy.version\') taxonomy_version FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset)
+        .map(({taxonomy_version,metadata_json,...job})=>({...job,stale_taxonomy:!!taxonomy_version&&taxonomy_version!==version||job.job_type==='classification'&&!classificationContextCurrent(store,{...job,user_id:user,metadata:JSON.parse(metadata_json)})}));
+      return {read_only:true,worker_enabled:store.consoleService.owner.user?store.consoleService.owner.allowed('processing'):store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,processing:{classification:store.consoleService.processing(user).classification},operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
     case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user).map(row=>credentialView(row)),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
     case 'audit':{let q;try{q=auditQuery(params);}catch{throw new ValidationError('Invalid audit query.');}
       return auditPage(store,user,q);}

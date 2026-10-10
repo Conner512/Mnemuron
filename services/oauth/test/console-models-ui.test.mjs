@@ -6,7 +6,7 @@ const data={models:[{kind:'organizer',config:{enabled:true},has_key:false},{kind
 test('Models page explains both roles and blocked processing without fake ready states',()=>{
  const html=actionPage('models',data,{enabled:true,writable:true,allowed_actions:['models.save','models.test','jobs.schedule','vector.schedule']});
  for(const role of ['organizerPurpose','embedderPurpose','modelPipeline','probeNotRun'])assert.match(html,new RegExp(`data-i18n="${role}"`));
- assert.match(html,/后台处理尚未启用/);assert.match(html,/向量库尚未配置/);
+ assert.match(html,/后台处理已暂停/);assert.match(html,/向量库尚未配置/);
  assert.match(html,/<button\b(?=[^>]*data-console-action="vector.schedule")(?=[^>]*disabled)/);
  assert.match(html,/<button\b(?=[^>]*data-console-action="jobs.schedule")(?=[^>]*disabled)/);
  assert.doesNotMatch(html,/data-console-action="models.disable"/,'test permission must not imply disable permission');

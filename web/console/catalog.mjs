@@ -143,7 +143,7 @@ Object.assign(catalog["zh-CN"],{
   "embedder": "向量模型",
   "testModel": "测试连接",
   "modelBoundary": "模型与数据边界",
-  "modelBoundaryNote": "模型配置只属于当前账户。密钥加密保存且不回显。外发需要明确批准，内网服务需要部署管理员允许。",
+  "modelBoundaryNote": "模型配置只属于当前账户。密钥加密保存且不回显。外发需要明确批准，私网目的地仍受部署层允许清单约束。",
   "vectorNotConfigured": "尚未配置 Qdrant 后端；向量重建需先完成服务端配置。字面检索仍可使用。",
   "rebuildIndex": "重建我的向量索引",
   "hasKey": "已保存密钥",
@@ -615,7 +615,7 @@ Object.assign(catalog["en"],{
   "storage.import": "Import personal memories"
 });
 
-Object.assign(catalog['zh-CN'],{modelNotConfigured:'尚未配置',nativeSchema:'服务支持原生 JSON Schema',searchMode:'检索方式',lexical:'精确检索',hybrid:'混合检索',semantic:'语义检索',workerStatus:'后台执行器',workerDisabledNote:'任务已持久保存。管理员需要启用后台执行器，任务才会运行。'});
+Object.assign(catalog['zh-CN'],{modelNotConfigured:'尚未配置',nativeSchema:'服务支持原生 JSON Schema',searchMode:'检索方式',lexical:'精确检索',hybrid:'混合检索',semantic:'语义检索',workerStatus:'后台执行器',workerDisabledNote:'任务已保存。请在“功能与处理”中预览并明确授权批次。'});
 Object.assign(catalog.en,{modelNotConfigured:'Not configured',nativeSchema:'Service supports native JSON Schema',searchMode:'Search mode',lexical:'Lexical',hybrid:'Hybrid',semantic:'Semantic',workerStatus:'Worker',workerDisabledNote:'Jobs are stored durably. An operator must enable the worker before queued jobs can run.'});
 
 Object.assign(catalog['zh-CN'],{CSRF_REFRESH_REQUIRED:'表单校验已更新，请重新确认本次操作',EXPORT_SIZE_LIMIT:'导出超过 16 MiB，请使用运维备份或分批导出',BUDGET_EXHAUSTED:'今日模型调用额度已用尽',WEB_VISIBILITY_DENIED:'此分类或版本不允许授权；secret 不会发送给 ChatGPT',CONSOLE_REQUEST_FAILED:'操作未完成，请核对输入和服务状态',MODEL_URL_DENIED:'服务地址不符合网络安全策略'});
@@ -626,7 +626,7 @@ Object.assign(catalog['zh-CN'],{
   registrationSteps:'创建用户：验证注册码 → 设置用户名与密码 → 绑定验证器 → 保存恢复码。所有步骤完成并绑定核心身份后才能登录。',
   registrationCredentials:'用户名使用 1–100 位英文字母、数字、点、横线、下划线或 @；密码至少 14 位。请使用自己的验证器完成下一步。',
   platform:'平台管理',revocation_pending:'会话已停用；核心凭证撤销处理中，请刷新核验。',
-  verified:'已验证',ready:'就绪',operator:'平台管理员',member:'普通用户',issued:'待使用',reserved:'注册中',consumed:'已使用',provisioning:'绑定中',pending_mfa:'待绑定验证器',
+  verified:'已验证',ready:'就绪',operator:'所有者',member:'账户',issued:'待使用',reserved:'注册中',consumed:'已使用',provisioning:'绑定中',pending_mfa:'待绑定验证器',
   enableAccountNote:'重新启用会建立新的账户凭证，不会恢复旧会话或旧密钥；对方需要重新登录与授权。'
 });
 Object.assign(catalog.en,{
@@ -644,20 +644,20 @@ Object.assign(catalog['zh-CN'],{
  constellationEmpty:'还没有记忆。连接一个 Agent，新的记忆会在这里汇聚成网络。',
  activityLabel:'近 30 天',activityTitle:'记忆写入活动',activityTotal:'新增',peakDay:'单日峰值',noActivity:'最近 30 天没有新增记忆',
  compositionLabel:'结构',compositionTitle:'类型与生命周期',typesLegend:'记忆类型',lifecycle:'生命周期',categoriesLegend:'分类',
- flowLabel:'处理管线',shortcutSearch:'搜索记忆',consoleStatus:'控制台会话',sessionSecure:'已验证 · 本账户隔离'
+ flowLabel:'处理管线',consoleStatus:'控制台会话',sessionSecure:'已验证 · 本账户隔离'
 });
 Object.assign(catalog.en,{
  constellationLabel:'MEMORY CONSTELLATION',constellationTitle:'Your memory network',constellationNote:'Active memories grouped by category and type. Node size reflects count.',
  constellationEmpty:'No memories yet. Connect an agent and new memories will gather here.',
  activityLabel:'LAST 30 DAYS',activityTitle:'Memory activity',activityTotal:'New',peakDay:'Daily peak',noActivity:'No new memories in the last 30 days',
  compositionLabel:'STRUCTURE',compositionTitle:'Types & lifecycle',typesLegend:'Memory types',lifecycle:'Lifecycle',categoriesLegend:'Categories',
- flowLabel:'PIPELINE',shortcutSearch:'Search memories',consoleStatus:'Console session',sessionSecure:'Verified · account isolated'
+ flowLabel:'PIPELINE',consoleStatus:'Console session',sessionSecure:'Verified · account isolated'
 });
 
 // Workbench UI (memory-centred shell). Later assignments intentionally override older labels.
 Object.assign(catalog['zh-CN'],{
  navHome:'首页',navLibrary:'记忆库',navSummaries:'摘要',navJobs:'整理',navSettings:'设置',navMore:'更多设置',
- settingsTitle:'设置',settingsGroupAccount:'连接与账户',settingsGroupSystem:'数据与系统',settingsGroupPlatform:'平台管理',
+ settingsTitle:'设置',settingsGroupAccount:'连接与账户',settingsGroupSystem:'数据与系统',settingsGroupPlatform:'功能设置',
  homeTitle:'今天想找回什么？',homeNote:'在你授权保存的记忆里搜索；每条结果都能追溯到来源和版本。',askPlaceholder:'搜索记忆里的事实、决定、项目……',
  recentStream:'最近写入',pulseTitle:'记忆概况',activityStrip:'近 30 天写入',pipelineTitle:'整理管线',openLibrary:'打开记忆库',
  libraryHint:'选择一条记忆，在右侧查看正文、来源与修订历史。',filters:'筛选',resultCount:'条结果',closePane:'关闭详情',
@@ -687,18 +687,18 @@ Object.assign(catalog.en,{
 });
 
 // Ink archive: overview distribution and registration steps (override earlier labels).
-Object.assign(catalog['zh-CN'],{radarLabel:'记忆分布',radarTitle:'分类构成',radarNote:'圆环按有效记忆的分类占比绘制，中心是有效记忆总数。',radarEmpty:'还没有有效记忆',activeMemories:'有效记忆',otherCategories:'其他分类',
+Object.assign(catalog['zh-CN'],{radarLabel:'记忆分布',radarTitle:'分类构成',distributionCount:'数量',distributionShare:'占比',radarNote:'圆环按有效记忆的分类占比绘制，中心是有效记忆总数。',radarEmpty:'还没有有效记忆',activeMemories:'有效记忆',otherCategories:'其他分类',
  registrationStepsLabel:'注册步骤',stepInvitation:'验证注册码',stepAccount:'设置账户',stepTotp:'绑定验证器',stepRecovery:'保存恢复码'});
-Object.assign(catalog.en,{radarLabel:'Memory distribution',radarTitle:'Category mix',radarNote:'The ring shows each category’s share of active memories; the centre is the total.',radarEmpty:'No active memories yet',activeMemories:'active',otherCategories:'Other categories',
+Object.assign(catalog.en,{radarLabel:'Memory distribution',radarTitle:'Category mix',distributionCount:'Count',distributionShare:'Share',radarNote:'The ring shows each category’s share of active memories; the centre is the total.',radarEmpty:'No active memories yet',activeMemories:'active',otherCategories:'Other categories',
  systemLabel:'Personal memory system',authEyebrow:'Connect to your memory',
  registrationStepsLabel:'Registration steps',stepInvitation:'Invitation',stepAccount:'Account',stepTotp:'Authenticator',stepRecovery:'Recovery codes'});
 
 // Feature map: new destinations, feature statuses, wireframe labels and one title + note per feature ID.
 Object.assign(catalog['zh-CN'],{
- tasks:'项目与任务',resume:'接续交接',privacy:'隐私与保留',system:'系统状态',
+ tasks:'项目与任务',resume:'接续交接',privacy:'隐私与保留',system:'功能与处理',
  operatorRequired:'当前账户不是平台管理员，不能查看平台管理信息（注册码、账户和系统状态）。',
  pageNote_tasks:'查看项目、任务与各 Agent 的来源分支，为接续工作做准备。',pageNote_resume:'预览、确认并追踪跨 Agent 的工作接续；每一步都需要你明确确认。',
- pageNote_system:'平台开关、服务健康、版本与备份，仅平台管理员可见。',
+ pageNote_system:'管理功能开关、自动规则与明确授权的处理批次。',
  featureStatus_live:'已实现',featureStatus_planned:'规划中',featureStatus_policy:'不开放',featureStatus_partial:'部分实现',
  roadmapTitle:'功能规划',roadmapNote:'以下功能已列入规划，界面仅为占位，暂不可用。',devNotes:'开发说明',featureStandard:'开发标准见',
  contractRead:'读取接口',contractWrite:'写操作',contractCore:'复用 Core 接口',contractScope:'Core 权限',contractReauth:'需要当前密码和动态验证码',contractOperator:'仅平台管理员',
@@ -1060,7 +1060,7 @@ Object.assign(catalog['zh-CN'],{
  summaryPeriods:'汇总周期',daily_weekly:'每日与每周',daily:'每日',weekly:'每周',vector:'向量化',
  indexedDocuments:'已索引记忆',semanticReadiness:'语义检索',notReady:'尚不可用',not_started:'尚未启动',viewSummaries:'查看记忆汇总',
  structured_json:'结构化 JSON',document_embedding:'文档向量',query_embedding:'查询向量',
- WORKER_DISABLED:'后台处理尚未启用，需管理员启用后才能执行。',VECTOR_DISABLED:'向量库尚未配置或启用；精确检索仍可使用。',
+ WORKER_DISABLED:'后台处理已暂停。所有者可在“功能与处理”页面设置并确认批次。',VECTOR_DISABLED:'向量库尚未配置或启用；精确检索仍可使用。',
  NOT_CONFIGURED:'请先保存并启用对应模型。',EGRESS_DENIED:'尚未批准向模型发送所选级别的数据。',QUERY_EGRESS_DENIED:'尚未允许搜索词外发，语义检索不可用。',
  VECTOR_NOT_READY:'尚无已完成的个人向量索引。',VECTOR_PROFILE_MISMATCH:'当前模型与索引不匹配，请重建索引。',
  INVALID_EMBEDDING:'模型返回的向量维度、数量或数值无效，请核对模型与维度。',INVALID_SOURCE_SET:'模型返回的引用与测试来源不一致，未通过验证。',
@@ -1469,3 +1469,17 @@ Object.assign(catalog.en,{
 
 Object.assign(catalog['zh-CN'],{impactEntities:'派生对象',impactEntityProposals:'对象关联候选',impactPendingEntities:'待确认对象候选'});
 Object.assign(catalog.en,{impactEntities:'Derived objects',impactEntityProposals:'Object association proposals',impactPendingEntities:'Pending object proposals'});
+
+// Default topic taxonomy v2; stable IDs, localized boundaries.
+Object.assign(catalog['zh-CN'],{"technical": "技术", "projects": "项目", "workflows": "工作流程", "documentation": "文档规范", "personal": "个人资料", "family": "家庭", "preferences": "偏好", "goals": "目标计划", "decisions": "决策", "lessons": "经验教训", "uncategorized": "未分类", "otherCategories": "其他（统计合并）", "categoryAggregateNote": "“其他”汇总剩余分类，仅用于统计；完整分类见下方。", "categoryDirectoryTitle": "完整分类", "categoryDirectoryNote": "按主要内容选择一个大类。下方说明相近分类的边界，零条分类也保留。点击名称查看记忆。", "categoryNoMemories": "暂无有效记忆", "categoryHint_custom": "账户自定义分类；名称与现有归类保持不变。", "categoryHint_technical": "代码、系统原理、基础设施与排障；项目进度归入“项目”。", "categoryHint_projects": "具体项目的范围、进度、交付与里程碑；通用步骤归入“工作流程”。", "categoryHint_workflows": "可复用的工作步骤、协作与操作流程；写作格式归入“文档规范”。", "categoryHint_documentation": "文档结构、模板、命名和写作格式；不限于某份文档的内容。", "categoryHint_personal": "明确的个人身份、角色与背景；家庭关系和喜好分别归类。", "categoryHint_family": "明确的家庭关系、家庭责任与安排；不推断未提供的信息。", "categoryHint_preferences": "明确表达的喜好和习惯选择；一次性的已定选择归入“决策”。", "categoryHint_goals": "尚待实现的目标、计划和意向；项目现状归入“项目”。", "categoryHint_decisions": "已经明确采用的选择、取舍及理由；建议不等于决策。", "categoryHint_lessons": "基于结果总结的经验与复盘结论；原始技术事实归入“技术”。", "categoryHint_uncategorized": "主题证据不足或含义不明确时保留于此，不强行归类。"});
+Object.assign(catalog.en,{"workflows": "Workflows", "documentation": "Documentation", "personal": "Personal profile", "family": "Family", "goals": "Goals & plans", "lessons": "Lessons learned", "otherCategories": "Other (combined)", "categoryAggregateNote": "Other combines the remaining categories for this chart only. See every category below.", "categoryDirectoryTitle": "All categories", "categoryDirectoryNote": "Choose one category by the main subject. Boundaries are explained below; empty categories remain visible. Select a name to browse.", "categoryNoMemories": "No active memories", "categoryHint_custom": "Account-defined category; its name and existing assignments are preserved.", "categoryHint_technical": "Code, systems, infrastructure and troubleshooting; project status belongs in Projects.", "categoryHint_projects": "A project\u2019s scope, status, deliverables and milestones; reusable steps belong in Workflows.", "categoryHint_workflows": "Reusable procedures, collaboration and operating steps; writing standards belong in Documentation.", "categoryHint_documentation": "Document structure, templates, naming and writing standards, rather than a document\u2019s subject.", "categoryHint_personal": "Explicit personal profile, roles and background; family and preferences have separate categories.", "categoryHint_family": "Explicit family relationships, responsibilities and arrangements; no inferred facts.", "categoryHint_preferences": "Stated likes, dislikes and habitual choices; one-off adopted choices belong in Decisions.", "categoryHint_goals": "Future outcomes, plans and intentions; current project status belongs in Projects.", "categoryHint_decisions": "Explicitly adopted choices, tradeoffs and rationale; proposals are not decisions.", "categoryHint_lessons": "Explicit retrospective lessons grounded in outcomes; raw technical facts belong in Technical.", "categoryHint_uncategorized": "Insufficient or ambiguous subject evidence; do not force a category."});
+
+Object.assign(catalog['zh-CN'],{"renameCategory": "编辑名称与说明", "categoryDescription": "分类说明（可选）", "categoryDescriptionHint": "说明应包含什么、排除什么；留空时按名称判断。", "categoryDescriptionEmpty": "未填写说明；后续分类按当前名称判断。", "categorySemanticNote": "只改名称会保留你填写的说明；修改说明可重新定义分类范围。两者都只影响后续模型判断，已有记忆归属不变，旧整理任务需重新排队。改名后不再套用该 ID 的默认含义。", "categoryManagerNote": "每类使用固定 ID，模型按当前名称和说明分类。修改后旧任务失效，不自动重分类；最多 64 类。", "categoryRenamed": "分类定义已更新", "INVALID_CATEGORY_DESCRIPTION": "分类说明最多 600 字，不能含控制字符或尖括号。"});
+Object.assign(catalog.en,{"renameCategory": "Edit name & description", "categoryDescription": "Category description (optional)", "categoryDescriptionHint": "Explain what belongs here and what does not. Leave blank to classify by name.", "categoryDescriptionEmpty": "No description; future classification uses the current name.", "categorySemanticNote": "A name-only edit preserves your description; editing the description redefines the scope. Both affect future classification, keep existing assignments, and invalidate old jobs. A renamed ID no longer inherits its default meaning.", "categoryManagerNote": "Stable IDs preserve membership. Models use current names and descriptions. Edits invalidate old jobs without reclassifying history. Up to 64 categories.", "categoryRenamed": "Category definition updated", "INVALID_CATEGORY_DESCRIPTION": "Use at most 600 characters without control characters or angle brackets."});
+
+Object.assign(catalog["zh-CN"],{"auditGroup_system": "系统活动", "auditGroup_memory": "记忆读写", "auditGroup_connections": "连接记录", "auditGroup_security": "登录与账户安全", "auditGroupNote": "仅显示当前账户已记录的事件。未知历史事件归入系统活动并标记；不包含全局服务器日志。", "auditCurrentTitle": "标题为当前信息", "auditDetails": "事件详情", "auditUnclassified": "未分类历史事件", "auditMemoryRead": "读取记忆", "auditMemoryWrite": "写入记忆", "auditMemorySearch": "搜索记忆", "auditDateChoose": "筛选时间", "auditDateUse": "使用此时间", "auditPrevMonth": "上个月", "auditNextMonth": "下个月", "auditCalendar": "日期选择", "auditTime": "时间（24 小时）", "auditDateEmpty": "未设置日期", "auditDateInvalid": "请输入有效时间：YYYY-MM-DD HH:mm；不存在的本地时间不可用。", "auditDateRange": "结束时间不能早于起始时间。", "auditDateDST": "夏令时重复时刻使用较早一次", "auditDateFormat": "YYYY-MM-DD HH:mm", "auditCopyFailed": "复制失败，请选择 ID 手动复制", "clear": "清空"});
+
+Object.assign(catalog["en"],{"auditGroup_system": "System activity", "auditGroup_memory": "Memory reads & writes", "auditGroup_connections": "Connections", "auditGroup_security": "Sign-in & security", "auditGroupNote": "Recorded events for this account only. Unknown historical actions are marked under System activity. Global server logs are excluded.", "auditCurrentTitle": "Current title", "auditDetails": "Event details", "auditUnclassified": "Unclassified historical event", "auditMemoryRead": "Read memory", "auditMemoryWrite": "Write memory", "auditMemorySearch": "Search memories", "auditDateChoose": "Filter time", "auditDateUse": "Use this time", "auditPrevMonth": "Previous month", "auditNextMonth": "Next month", "auditCalendar": "Choose date", "auditTime": "Time (24-hour)", "auditDateEmpty": "No date set", "auditDateInvalid": "Enter a valid YYYY-MM-DD HH:mm time. Nonexistent local times are unavailable.", "auditDateRange": "End time must not precede start time.", "auditDateDST": "Repeated DST times use the earlier occurrence", "auditDateFormat": "YYYY-MM-DD HH:mm", "auditCopyFailed": "Copy failed; select the ID to copy manually", "clear": "Clear"});
+
+Object.assign(catalog['zh-CN'],{auditLexicalRefs:'搜索子查询引用（非最终结果，不代表逐条读取）：',auditTitlesTruncated:'本页标题查询已达上限；其余引用在详情中保留 ID。'});
+Object.assign(catalog.en,{auditLexicalRefs:'Search subquery references (not final results or individual reads):',auditTitlesTruncated:'Title lookup limit reached; remaining IDs are retained in event details.'});

@@ -22,6 +22,10 @@ export class HandoffPolicy {
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
   }
+  setEnabled(enabled) {
+    if(!enabled&&this.enabled())this.db.exec(`DELETE FROM handoff_drain_resumes; INSERT INTO handoff_drain_resumes SELECT user_id,resume_id,preview_version FROM resumes WHERE status='confirmed';`);
+    this.db.prepare('INSERT INTO handoff_module_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled').run(Number(enabled));
+  }
   enabled() { return this.db.prepare('SELECT enabled FROM handoff_module_state WHERE id=1').get()?.enabled !== 0; }
   requireNew() { if (!this.enabled()) throw new ConflictError('New handoff operations are disabled; existing deliveries may drain.', 'HANDOFF_DISABLED'); }
   allowReceipt(auth, resumeId, payload, kind) {

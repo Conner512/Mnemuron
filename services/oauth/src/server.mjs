@@ -17,6 +17,7 @@ import { BoundaryError, SerialGate, WindowLimit, OAUTH_SCOPES, parseForm, readBo
 import {acquireAuthorizationLease} from './process-lease.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 import {invalidateBrowserAuthorization} from './browser-session.mjs';
+import {applySecurityHeaders} from '../../../shared/security-headers.mjs';
 
 function bootstrapMetadata(config) {
   return { issuer: config.issuer, authorization_endpoint: `${config.issuer}/authorize`,
@@ -67,6 +68,7 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
     const requestId = randomUUID();
     const started = Date.now();
     let errorCode;
+    applySecurityHeaders(request, response, origin, config);
     response.setHeader("x-request-id", requestId);
     response.setHeader("cache-control", "no-store");
     response.setHeader("referrer-policy", "no-referrer");
@@ -129,6 +131,8 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
         params = parseForm(request.body);
       }
       if (initialAuthorization) {
+        // Missing required input is a local error, never a redirect to supplied input.
+        if (!params.get('client_id')) return sendJson(response, 400, { error: 'invalid_request' });
         const client=params.get('client_id')===config.chatgpt_client.client_id?config.chatgpt_client:accounts.connections?.client(params.get('client_id'));
         const authError=code=>authorizationError(response,config,params,code,client);
         if (!client) return authError('invalid_client');

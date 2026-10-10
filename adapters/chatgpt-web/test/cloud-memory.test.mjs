@@ -60,7 +60,16 @@ test('A-T01..06/09/19/24: OAuth scope intersection, real SDK lifecycle and no im
   const f=await setup(t),before=businessSnapshot(f.core.store);
   const old=(await f.mcp('tools/list',undefined,f.readonly.access_token)).data.result.tools;
   assert.equal(old.some(x=>x.name==='mnemuron_save_memory'),false);
-  assert.equal((await f.call('mnemuron_save_memory',save(),f.readonly.access_token)).status,403);
+  for(const [name,args] of [
+    ['mnemuron_save_memory',save()],
+    ['mnemuron_supersede_memory',{memory_id:'synthetic-denied',expected_revision:1,content:'Denied',reason:'Synthetic',operation_id:randomUUID(),cloud_read:'keep_private'}],
+    ['mnemuron_retract_memory',{memory_id:'synthetic-denied',expected_revision:1,reason:'Synthetic',operation_id:randomUUID()}],
+    ['mnemuron_get_operation',{operation_id:randomUUID()}],
+  ]){
+    assert.equal(old.some(x=>x.name===name),false);
+    assert.equal((await f.call(name,args,f.readonly.access_token)).status,403,name);
+  }
+  assert.equal(f.core.store.db.prepare('SELECT COUNT(*) n FROM cloud_memory_operations').get().n,0);
   assert.deepEqual(businessSnapshot(f.core.store),before);
   const refreshed=await f.tokenRequest({grant_type:'refresh_token',refresh_token:f.readonly.refresh_token,resource:f.config.resource});
   assert.equal(refreshed.status,200);assert.equal(refreshed.data.scope.includes('memory:write'),false);

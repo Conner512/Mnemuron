@@ -74,6 +74,13 @@ async function otpSection() {
     markup.label==='动态验证码'&&markup.hint.includes('6 位数字')&&markup.pattern==='[0-9]{6}'&&markup.required&&markup.autocomplete==='one-time-code'&&markup.inputmode==='numeric');
   check(S,'Six boxes are aria-hidden decoration and never take focus',markup.slots===6&&!markup.slotsFocusable);
   await shot(page,'otp-01-login-1440-zh');
+  for(const name of ['username','password']){
+    await page.locator('#'+name).focus();await frame(page);
+    await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
+    check(S,`${name}: focus uses the theme border and a soft halo`,await page.locator('#'+name).evaluate(e=>{const st=getComputedStyle(e);return st.borderTopColor==='rgb(174, 63, 44)'&&st.outlineStyle==='none'&&st.boxShadow!=='none'&&st.transitionDuration.includes('0.16s');}));
+    await shot(page,`field-focus-${name}-1440-zh`);
+  }
+
 
   // Typing, filtering and overwrite.
   await otp.click();await page.keyboard.type('123456');let s=await state(page);
@@ -133,16 +140,17 @@ async function otpSection() {
 
   // Contrast and keyboard focus.
   // Resting valid boxes (not focused, not :user-invalid) are compared with the resting username field.
-  await reset(page,'123456');await otp.blur();await frame(page);
+  await reset(page,'123456');await otp.blur();await frame(page);await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
   const colours=await page.evaluate(()=>{const slot=getComputedStyle(document.querySelectorAll('.otp-slot')[5]);const parse=c=>c.match(/\d+(\.\d+)?/g).slice(0,3).map(Number);
     const lum=c=>{const [r,g,b]=parse(c).map(v=>{v/=255;return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4;});return 0.2126*r+0.7152*g+0.0722*b;};
     const a=lum(slot.borderTopColor),b=lum(slot.backgroundColor);return {ratio:(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05),border:slot.borderTopColor,field:getComputedStyle(document.querySelector('#username')).borderTopColor};});
   check(S,`Box borders keep at least 3:1 against the box (${colours.ratio.toFixed(2)}:1; box ${colours.border}, username field ${colours.field})`,colours.ratio>=3&&colours.border===colours.field);
   await page.locator('#password').focus();await page.keyboard.press('Tab');
   if(await page.evaluate(()=>document.activeElement?.dataset?.passwordToggle!==undefined))await page.keyboard.press('Tab');
-  const ring=await page.evaluate(()=>{const shell=document.querySelector('.otp-shell'),style=getComputedStyle(shell);
-    return {focused:document.activeElement?.name,width:style.outlineWidth,styleName:style.outlineStyle};});
-  check(S,'Keyboard focus on the code shows a visible 2px ring',ring.focused==='otp'&&ring.width==='2px'&&ring.styleName==='solid');
+  await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
+  const ring=await page.evaluate(()=>{const shell=document.querySelector('.otp-shell'),style=getComputedStyle(shell.querySelector('.otp-slot.is-active,.otp-slot.is-selected'));
+    return {focused:document.activeElement?.name,shadow:style.boxShadow,styleName:style.outlineStyle,shellStyle:getComputedStyle(shell).outlineStyle};});
+  check(S,'Keyboard focus marks the active box without an outer frame',ring.focused==='otp'&&ring.shadow.includes('3px')&&!ring.shadow.includes('inset')&&ring.styleName==='none'&&ring.shellStyle==='none');
   await page.keyboard.type('12');await shot(page,'otp-03-keyboard-focus-1440-zh',false);
 
   // Native validation: an incomplete code is not submitted.
@@ -189,6 +197,12 @@ async function otpSection() {
     await v.page.locator('input[data-otp]').click();await v.page.keyboard.type('1234');
     const box=await v.page.evaluate(()=>{const s=[...document.querySelectorAll('.otp-slot')].map(x=>x.getBoundingClientRect());return {min:Math.min(...s.map(r=>r.width)),right:Math.max(...s.map(r=>r.right))};});
     check(S,`${width}px ${locale}: six boxes fit without overflow`,await noOverflow(v.page)&&box.min>=32&&box.right<=width);
+    const layout=await v.page.evaluate(()=>{const shell=document.querySelector('.otp-shell'),slots=shell.querySelector('.otp-slots'),u=document.querySelector('#username').getBoundingClientRect(),r=shell.getBoundingClientRect();return {aligned:Math.abs(u.left-r.left)<.5&&Math.abs(u.right-r.right)<.5,dash:getComputedStyle(slots,'::after').width,gap:parseFloat(getComputedStyle(slots).gap)};});
+    check(S,`${width}px ${locale}: OTP aligns with text fields and has a centre dash`,layout.aligned&&layout.dash==='8px'&&layout.gap===16);
+    await v.page.emulateMedia({reducedMotion:'reduce',colorScheme:'dark'});
+    check(S,`${width}px ${locale}: reduced motion disables transitions; OS dark keeps supported palette`,await v.page.locator('.otp-slot').first().evaluate(e=>getComputedStyle(e).transitionDuration==='0s'&&getComputedStyle(document.documentElement).colorScheme==='light'));
+    await shot(v.page,`otp-reduced-dark-${width}-${locale}`);
+    await v.page.emulateMedia({reducedMotion:'no-preference',colorScheme:'light'});
     const c=await v.page.locator('.otp-slot').nth(3).boundingBox();await v.page.mouse.click(c.x+c.width/2,c.y+c.height/2);
     check(S,`${width}px ${locale}: clicking box 3 still places the caret before digit 3`,await v.page.evaluate(()=>document.querySelector('input[data-otp]').selectionStart)===3);
     if(locale==='en')check(S,`${width}px English hint is translated`,(await v.page.locator('#otp-hint').innerText()).includes('6 digits'));

@@ -267,6 +267,11 @@ export class ConsoleOrganizer {
 }
 
 /** Account-owned category list with stable IDs and editable names. */
+export function categoryDescription(value){
+  if(typeof value!=='string'||[...value].length>600||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f<>]/.test(value))throw new ValidationError('Invalid category description.','INVALID_CATEGORY_DESCRIPTION');
+  return value.normalize('NFC').trim();
+}
+
 export function categoryEditor(features){
   const {db,store}=features;
   const versionFor=(user,categories,revision)=>'console-'+createHash('sha256').update(JSON.stringify([user,categories,revision])).digest('hex');
@@ -282,33 +287,37 @@ export function categoryEditor(features){
   };
   // Queued organizer jobs carry their own taxonomy; fence them before output can publish under it.
   const fence=user=>db.prepare("UPDATE memory_jobs SET state='blocked_config',fence=fence+1,lease_owner=NULL,lease_expires=NULL,last_error_code='STALE_TAXONOMY' WHERE user_id=? AND job_type<>'entities' AND state IN ('pending','leased','retry_wait')").run(user);
-  const current=user=>{const p=features.preference(user,'taxonomy',features.service.taxonomy(user));return {revision:p.revision,version:p.version,categories:p.categories,labels:p.labels||{}};};
+  const current=user=>{const p=features.preference(user,'taxonomy',features.service.taxonomy(user));return {revision:p.revision,version:p.version,categories:p.categories,labels:p.labels||{},descriptions:p.descriptions||{}};};
   const unique=(t,text,except)=>{const lower=text.toLocaleLowerCase();
     if(t.categories.some(c=>c!==except&&(c===lower||(t.labels[c]||'').toLocaleLowerCase()===lower)))throw new ConflictError('A category with this name already exists.','CATEGORY_EXISTS');};
-  const persist=(user,expected,t)=>features.save(user,'taxonomy',{expected_revision:expected},{version:t.version,categories:t.categories,labels:t.labels});
+  const persist=(user,expected,t)=>features.save(user,'taxonomy',{expected_revision:expected},{version:t.version,categories:t.categories,labels:t.labels,descriptions:t.descriptions||{}});
   return {
     carryForward,fence,current,
     create(auth,p){
-      object(p,['label','expected_revision']);const user=auth.user_id,t=current(user),text=label(p.label);unique(t,text);
+      object(p,['label','description','expected_revision']);const description=p.description===undefined?'':categoryDescription(p.description);const user=auth.user_id,t=current(user),text=label(p.label);unique(t,text);
       if(t.categories.length>=64)throw new ConflictError('At most 64 categories.','TAXONOMY_FULL');
       const category=slug(text,new Set(t.categories)),categories=[...t.categories,category],version=versionFor(user,categories,t.revision+1);
       store.derivedMemory.taxonomy({version,categories});
-      const saved=persist(user,p.expected_revision,{version,categories,labels:{...t.labels,[category]:text}});
+      const saved=persist(user,p.expected_revision,{version,categories,labels:{...t.labels,[category]:text},descriptions:{...t.descriptions,[category]:description}});
       carryForward(user,t.version,version,categories);fence(user);
       return {...saved,status:'created',category,label:text};
     },
     rename(auth,p){
-      object(p,['category','label','expected_revision']);const user=auth.user_id,t=current(user),text=label(p.label);
+      object(p,['category','label','description','expected_revision']);const user=auth.user_id,t=current(user),text=label(p.label);
+      const descriptions=p.description===undefined?t.descriptions:{...t.descriptions,[p.category]:categoryDescription(p.description)};
       if(!t.categories.includes(p.category)||p.category==='uncategorized')throw new ValidationError('This category cannot be renamed.','INVALID_CATEGORY');
       unique(t,text,p.category);
-      // Names are presentation only: the taxonomy version, jobs and summaries are unaffected.
-      return {...persist(user,p.expected_revision,{...t,labels:{...t.labels,[p.category]:text}}),status:'renamed',category:p.category,label:text};
+      // Keep membership and historical outputs, but invalidate work planned under older semantics.
+      const version=versionFor(user,t.categories,t.revision+1),definitionChanged=JSON.stringify(descriptions)!==JSON.stringify(t.descriptions);
+      const saved=persist(user,p.expected_revision,{...t,version,labels:{...t.labels,[p.category]:text},descriptions});
+      carryForward(user,t.version,version,t.categories);fence(user);
+      return {...saved,status:'renamed',change_kind:definitionChanged?'definition':'name',category:p.category,label:text};
     },
     remove(auth,p,organizer){
       object(p,['category','move_to','expected_revision']);const user=auth.user_id,t=current(user);
       if(!t.categories.includes(p.category)||p.category==='uncategorized')throw new ValidationError('This category cannot be deleted.','INVALID_CATEGORY');
       if(!t.categories.includes(p.move_to)||p.move_to===p.category)throw new ValidationError('Choose where its memories go.','INVALID_CATEGORY');
-      const categories=t.categories.filter(c=>c!==p.category),version=versionFor(user,categories,t.revision+1),{[p.category]:removed,...labels}=t.labels;
+      const categories=t.categories.filter(c=>c!==p.category),version=versionFor(user,categories,t.revision+1),{[p.category]:removed,...labels}=t.labels,{[p.category]:removedDescription,...descriptions}=t.descriptions;
       store.derivedMemory.taxonomy({version,categories});
       const members=db.prepare(`SELECT o.memory_id,m.project_id FROM memory_category_overrides o LEFT JOIN memories m ON m.user_id=o.user_id AND m.memory_id=o.memory_id
         WHERE o.user_id=? AND o.category=? AND o.locked=1`).all(user,p.category);
@@ -316,13 +325,13 @@ export function categoryEditor(features){
       // category to its target as taxonomy maintenance, so the taxonomy stays consistent if the project is restored.
       // They are not counted in `moved`, get no organize item and cannot be undone by the batch.
       const hidden=members.filter(m=>!store.lifecycle.liveProject(user,m.project_id)),visible=members.filter(m=>!hidden.includes(m));
-      const saved=persist(user,p.expected_revision,{version,categories,labels});
+      const saved=persist(user,p.expected_revision,{version,categories,labels,descriptions});
       carryForward(user,t.version,version,categories,{map:{[p.category]:p.move_to}});fence(user);
       db.prepare("UPDATE memory_summaries SET status='stale' WHERE user_id=? AND status='current' AND category IN (?,?)").run(user,p.category,p.move_to);
       for(const m of hidden)db.prepare('UPDATE memory_category_overrides SET category=? WHERE user_id=? AND memory_id=? AND locked=1').run(p.move_to,user,m.memory_id);
       organizer.invalidate(user,hidden.map(m=>m.memory_id));
       const batch=organizer.write(auth,visible.map(m=>({memory_id:m.memory_id,category:p.category})),p.move_to,
-        {kind:'category.delete',detail:{deleted:{id:p.category,label:removed||null,index:t.categories.indexOf(p.category)},previous_version:t.version}});
+        {kind:'category.delete',detail:{deleted:{id:p.category,label:removed||null,description:removedDescription??null,index:t.categories.indexOf(p.category)},previous_version:t.version}});
       return {...saved,status:'deleted',category:p.category,move_to:p.move_to,moved:batch.changed,batch_id:batch.batch_id};
     },
     // Undo of a deletion: put the category back where it was and restore its model classifications.
@@ -332,7 +341,7 @@ export function categoryEditor(features){
       let text=detail.deleted.label;if(text){try{unique(t,text,category);}catch{text=`${text} (2)`.slice(0,LABEL_MAX);}}
       const categories=[...t.categories];categories.splice(Math.min(index,categories.length),0,category);
       const version=versionFor(user,categories,t.revision+1);store.derivedMemory.taxonomy({version,categories});
-      persist(user,t.revision,{version,categories,labels:text?{...t.labels,[category]:text}:t.labels});
+      persist(user,t.revision,{version,categories,labels:text?{...t.labels,[category]:text}:t.labels,descriptions:detail.deleted.description===null||detail.deleted.description===undefined?t.descriptions:{...t.descriptions,[category]:detail.deleted.description}});
       carryForward(user,t.version,version,categories);carryForward(user,detail.previous_version,version,categories,{only:category});fence(user);
       return category;
     },

@@ -17,7 +17,7 @@ export function splitDocument(content,maxBytes){
   if(text)parts.push(text);return parts;
 }
 export class VectorIndex {
-  constructor(store,backend,embedders,{clock=()=>Date.now(),leaseMs=120000,prefix='memory',ownerId=null,collections=backend?.precreated??null,budget=null}={}){
+  constructor(store,backend,embedders,{clock=()=>Date.now(),leaseMs=120000,prefix='memory',ownerId=null,collections=backend?.precreated??null,budget=null,guard=null}={}){this.executionGuard=guard;
     this.store=store;this.db=store.db;this.backend=backend;this.embedders=embedders;this.clock=clock;this.leaseMs=leaseMs;this.prefix=prefix;this.ownerId=ownerId;
     // collections: operator pre-created names (never created here). budget(purpose): a finite first-run call
     // allowance checked inside the same transaction as the daily limit; it returns true when it replaces it.
@@ -84,7 +84,7 @@ export class VectorIndex {
     const owner=randomUUID();this.db.prepare('UPDATE memory_vector_generations SET lease_owner=?,lease_expires=?,fence=fence+1 WHERE generation=?').run(owner,now+this.leaseMs,id);
     return {...row,fence:row.fence+1,lease_owner:owner};
   });}
-  owns(g){const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(g.generation);return row && row.fence===g.fence && row.lease_owner===g.lease_owner && row.lease_expires>this.clock();}
+  owns(g){this.executionGuard?.();const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(g.generation);return row && row.fence===g.fence && row.lease_owner===g.lease_owner && row.lease_expires>this.clock();}
   renew(g){if(!this.owns(g))fail('LEASE_LOST');this.db.prepare('UPDATE memory_vector_generations SET lease_expires=? WHERE generation=?').run(this.clock()+this.leaseMs,g.generation);}
   async sync(id,{maxDocuments=10000}={}){
     integer(maxDocuments,1,1000000);

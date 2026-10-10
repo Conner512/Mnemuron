@@ -65,9 +65,9 @@ test('S-02 S-04 S-07 S-08 S-10: locked categories, source-grounded daily/weekly 
   f.s.retractMemory(f.auth,memory.memory_id);assert.equal(f.s.derivedMemory.summaries(f.auth.user_id,summaries[0].scope_key).results.length,2);
   assert.equal(rows(f.s,'memory_summaries').filter(s=>s.status==='stale').length,2);
 });
-test('S-05: existing but unselected source IDs cannot enter claims; unknown categories remain suggestions',async t=>{
+test('S-05: existing but unselected source IDs cannot enter claims; unknown categories cannot enter worker output',async t=>{
   const f=scheduled(t,{model:organizer(input=>({results:input.sources.map(s=>({memory_id:s.memory_id,category:'new-category',tags:[]}))}))});
-  scheduleLibrary(f.s,f.jobs,f.options);await f.worker.drain();assert.ok(rows(f.s,'memory_annotations').every(a=>a.category==='uncategorized' && a.suggestion==='new-category'));
+  scheduleLibrary(f.s,f.jobs,f.options);assert.equal((await f.worker.runOne()).state,'review_required');assert.equal(rows(f.s,'memory_annotations').length,0);
   const bad=organizer(()=>({results:[{memory_id:'unselected-existing-source',revision:1,start:0,end:1,quote:'x'}]}));
   scheduleLibrary(f.s,f.jobs,{...f.options,organizer:bad,type:'summary'});
   const worker=new MemoryWorker(f.s,f.jobs,bad);assert.equal((await worker.runOne()).state,'review_required');assert.equal(rows(f.s,'memory_summaries').length,0);

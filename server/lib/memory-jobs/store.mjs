@@ -30,14 +30,15 @@ export class MemoryJobs {
       return id;
     });
   }
-  claim(worker,{userId=null,profile=null}={}){
+  claim(worker,{userId=null,profile=null,runId=null}={}){
+    const owner=this.store.consoleService?.owner;if(owner?.user){if(!runId)return null;owner.guard(runId);}
     if(typeof worker!=='string' || !worker || worker.length>128)fail('INVALID_WORKER');
     return this.store.memoryTransaction(()=>{
       const now=this.clock();
       if(this.db.prepare("SELECT COUNT(*) AS n FROM memory_jobs WHERE state='leased' AND lease_expires>?").get(now).n>=this.concurrency)return null;
       const job=this.db.prepare(`SELECT j.* FROM memory_jobs j LEFT JOIN memory_profile_state p ON p.profile=j.profile
-        WHERE COALESCE(p.state,'ready')='ready' AND (? IS NULL OR j.user_id=?) AND (? IS NULL OR j.profile=?) AND (? IS NOT NULL OR j.profile NOT LIKE 'console-%') AND ((j.state IN ('pending','retry_wait') AND j.run_after<=?) OR (j.state='leased' AND j.lease_expires<=?))
-        ORDER BY j.run_after,j.job_id LIMIT 1`).get(userId,userId,profile,profile,profile,now,now);
+        WHERE ${owner?.user?'EXISTS(SELECT 1 FROM owner_processing_jobs og WHERE og.job_id=j.job_id AND og.run_id=?) AND ':''}COALESCE(p.state,'ready')='ready' AND (? IS NULL OR j.user_id=?) AND (? IS NULL OR j.profile=?) AND (? IS NOT NULL OR j.profile NOT LIKE 'console-%') AND ((j.state IN ('pending','retry_wait') AND j.run_after<=?) OR (j.state='leased' AND j.lease_expires<=?))
+        ORDER BY j.run_after,j.job_id LIMIT 1`).get(...(owner?.user?[runId]:[]),userId,userId,profile,profile,profile,now,now);
       if(!job)return null;
       this.db.prepare("UPDATE memory_jobs SET state='leased',attempt_count=attempt_count+1,lease_owner=?,lease_expires=?,fence=fence+1,updated_at=? WHERE job_id=?")
         .run(worker,now+this.leaseMs,now,job.job_id);
@@ -53,6 +54,7 @@ export class MemoryJobs {
    * sources: the job items about to be sent. Reserving is the last step before every model call (a repair retry included),
    * so each source is revalidated here (lifecycle, status, revision, privacy): a stale one fails before any budget is used. */
   reserve(job,limit,quota=null,sources=null){return this.store.memoryTransaction(()=>{
+    this.store.consoleService?.owner.guardJob(job,{reserve:true});
     if(!this.owns(job))fail('LEASE_LOST');const day=new Date(this.clock()).toISOString().slice(0,10);
     if(sources?.some(item=>!this.store.derivedMemory.validateItem(item)))fail('STALE_INPUT');
     const manual=quota?quota(job,day).manual===true:false;
@@ -65,6 +67,7 @@ export class MemoryJobs {
       DO UPDATE SET reserved_calls=reserved_calls+1`).run(job.user_id,job.profile,day);
   });}
   saveChunk(job,items,results){return this.store.memoryTransaction(()=>{
+    this.store.consoleService?.owner.guardJob(job);
     if(!this.owns(job))fail('LEASE_LOST');
     for(const item of items) {
       const saved=this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? AND ordinal=?').get(job.job_id,item.ordinal);
@@ -79,6 +82,7 @@ export class MemoryJobs {
       .run(job.job_id,this.clock(),job.job_id);
   });}
   publish(job,callback){return this.store.memoryTransaction(()=>{
+    this.store.consoleService?.owner.guardJob(job);
     if(!this.owns(job))fail('LEASE_LOST');const items=this.items(job);
     if(items.some(i=>i.user_id!==job.user_id || i.scope_key!==job.scope_key || i.state!=='done' || !this.store.derivedMemory.validateItem(i)))fail('STALE_INPUT');
     const ref=callback(items,items.flatMap(i=>JSON.parse(i.result_json)));
@@ -87,11 +91,11 @@ export class MemoryJobs {
   });}
   failure(job,error,retry){
     if(!this.owns(job))return;
-    const code=error?.code || 'WORKER_ERROR',safe=['AUTH_FAILED','AUTH_NOT_CONFIGURED','BUDGET_EXHAUSTED','STALE_INPUT','INVALID_MODEL_OUTPUT','INVALID_SOURCE_SET',
+    const code=error?.code || error?.errorCode || 'WORKER_ERROR',safe=['EXECUTION_GRANT_REQUIRED','PROCESSING_PAUSED','FEATURE_DISABLED','SETTINGS_VERSION_CHANGED','MODEL_VERSION_CHANGED','OWNER_CREDENTIAL_INACTIVE','RUN_BUDGET_EXHAUSTED','AUTH_FAILED','AUTH_NOT_CONFIGURED','BUDGET_EXHAUSTED','STALE_TAXONOMY','STALE_INPUT','INVALID_MODEL_OUTPUT','INVALID_SOURCE_SET',
       'INPUT_TOO_LARGE','OUTPUT_TOO_LARGE','INVALID_JSON','INVALID_EMBEDDING','INCOMPLETE_OUTPUT','NOT_CONFIGURED','EGRESS_DENIED','SENSITIVITY_DENIED','RATE_LIMITED','REMOTE_UNAVAILABLE','REQUEST_TIMEOUT','NETWORK_ERROR','DNS_UNAVAILABLE','HTTP_REJECTED'];
-    let state=code==='AUTH_FAILED'?'blocked_auth':code==='BUDGET_EXHAUSTED'?'blocked_budget':code==='STALE_INPUT'?'stale':
+    let state=['EXECUTION_GRANT_REQUIRED','PROCESSING_PAUSED','FEATURE_DISABLED','SETTINGS_VERSION_CHANGED','MODEL_VERSION_CHANGED','OWNER_CREDENTIAL_INACTIVE','RUN_BUDGET_EXHAUSTED'].includes(code)?'blocked_config':code==='AUTH_FAILED'?'blocked_auth':code==='BUDGET_EXHAUSTED'?'blocked_budget':code==='STALE_INPUT'?'stale':
       ['INVALID_MODEL_OUTPUT','INVALID_SOURCE_SET','INPUT_TOO_LARGE','OUTPUT_TOO_LARGE','INVALID_JSON','INCOMPLETE_OUTPUT'].includes(code)?'review_required':
-      ['NOT_CONFIGURED','EGRESS_DENIED','SENSITIVITY_DENIED','AUTH_NOT_CONFIGURED','HTTP_REJECTED'].includes(code)?'blocked_config':job.attempt_count>=retry.max_attempts?'dead_letter':'retry_wait';
+      ['STALE_TAXONOMY','NOT_CONFIGURED','EGRESS_DENIED','SENSITIVITY_DENIED','AUTH_NOT_CONFIGURED','HTTP_REJECTED'].includes(code)?'blocked_config':job.attempt_count>=retry.max_attempts?'dead_letter':'retry_wait';
     const wait=Math.max(Math.min(retry.max_ms,retry.base_ms*2**Math.min(job.attempt_count-1,16)),Math.min(3600000,error?.retryAfterMs || 0));
     this.store.memoryTransaction(()=>{
       if(state==='blocked_auth')this.db.prepare('INSERT OR REPLACE INTO memory_profile_state VALUES (?,?)').run(job.profile,'blocked_auth');

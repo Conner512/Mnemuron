@@ -81,16 +81,18 @@ export class ConsoleModels {
       // Moving the embedder to another origin drops the old key on purpose; that profile then stops serving.
       if(new URL(c.base_url).origin!==new URL(now.base_url).origin)continue;
       const profile=this.profile(user,'embedder',c),{fingerprint:unused,...input}=profile;
-      const provider=new Embedder(input,{transport:async(p,route,body)=>{
+      const guard=()=>{const owner=this.store.consoleService?.owner;if(owner?.user){owner.require(user);if(!owner.allowed('vector_search')||!owner.allowed('memory'))fail('FEATURE_DISABLED');if(this.raw(user,'embedder')?.revision!==current.revision)fail('STALE_INPUT');}};
+      const provider=new Embedder(input,{transport:async(p,route,body)=>{guard();
         const live=this.raw(user,'embedder');if(!live||!JSON.parse(live.config_json).enabled)fail('NOT_CONFIGURED');
         const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
         const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
         const cipher=live.secret_cipher;
         const headers=cipher?{authorization:'Bearer '+this.state.unseal(user,'model:embedder',cipher)}:{};
-        return requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});
+        guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});guard();return response;
       }});
       provider.profile=Object.freeze({...profile,egress:Object.freeze({...profile.egress,approved:profile.egress.approved&&now.egress_approved===true,
         query_approved:profile.egress.query_approved&&now.query_approved===true,sensitivities:profile.egress.sensitivities.filter(x=>now.sensitivities.includes(x))})});
+      const embed=provider.embed.bind(provider);provider.embed=(texts,type,options)=>{if(this.store.consoleService?.owner.user&&type!=='query')fail('EXECUTION_GRANT_REQUIRED');return embed(texts,type,options);};
       out.push(provider);
     }
     return out;
@@ -148,24 +150,27 @@ export class ConsoleModels {
       ...(kind==='embedder'?{dimensions:c.dimensions,distance:'Cosine',query_prefix:'',document_prefix:'',normalization:'l2',chunker_version:'unicode-8k-v1'}:{})},{kind});
     return {...profile,fingerprint:'console-'+fingerprint([user,profile.fingerprint])};
   }
-  provider(user,kind) {
+  provider(user,kind,{runId=null,synthetic=false}={}) {
     const row=this.raw(user,kind),c=row&&JSON.parse(row.config_json);if(!c?.enabled)fail('NOT_CONFIGURED');
     const profile=this.profile(user,kind,c),ctor=kind==='organizer'?Organizer:Embedder;
     // validateProfile is reused, then the budget/index fingerprint is namespaced by owner.
     const {fingerprint:unused,...input}=profile;
-    const provider=new ctor(input,{transport:async(p,route,body)=>{
+    const guard=()=>{const owner=this.store.consoleService?.owner;if(owner?.user){owner.require(user);if(runId)owner.guard(runId);else if(!synthetic&&(kind!=='embedder'||!owner.allowed('vector_search')||!owner.allowed('memory')))fail('EXECUTION_GRANT_REQUIRED');}};
+    const provider=new ctor(input,{transport:async(p,route,body)=>{guard();
       const current=this.raw(user,kind);
       if(!current||current.revision!==row.revision)fail('STALE_INPUT');
       const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
       const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
-      if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');
+      if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');guard();
       // requestJSON rejects metadata, link-local, private/transition addresses and
       // redirects, and pins the validated lookup result to the actual socket.
       const target={...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}};
       const headers=row.secret_cipher?{authorization:'Bearer '+this.state.unseal(user,`model:${kind}`,row.secret_cipher)}:{};
-      return requestJSON(target,route,body,{resolve:async()=>addresses,headers});
+      const response=await requestJSON(target,route,body,{resolve:async()=>addresses,headers});guard();if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');return response;
     }});
-    provider.profile=Object.freeze(profile);return provider;
+    provider.profile=Object.freeze(profile);
+    if(kind==='embedder'){const embed=provider.embed.bind(provider);provider.embed=(texts,type,options)=>{if(this.store.consoleService?.owner.user&&!runId&&!synthetic&&type!=='query')fail('EXECUTION_GRANT_REQUIRED');return embed(texts,type,options);};}
+    return provider;
   }
   /** Model-list discovery for the editing form: one explicit, consented GET of the provider's list route at the draft
    * URL. It never saves settings, records verification, runs inference, queues work or changes egress settings, and it
@@ -213,7 +218,7 @@ export class ConsoleModels {
   }
   async test(auth,p) {
     object(p,['kind','mode']);const mode=p.mode===undefined?'connection':p.mode;if(!['connection','capabilities'].includes(mode))throw new ValidationError('Unknown model test mode.');
-    const row=this.raw(auth.user_id,p.kind),provider=this.provider(auth.user_id,p.kind),attempt=randomUUID();
+    const row=this.raw(auth.user_id,p.kind),provider=this.provider(auth.user_id,p.kind,{synthetic:true}),attempt=randomUUID();
     // Two bounded probes must fit inside the console BFF's 40-second request budget.
     if(mode==='capabilities')provider.profile=Object.freeze({...provider.profile,timeouts:{request_ms:15000}});
     this.db.prepare("INSERT OR REPLACE INTO console_model_tests VALUES(?,?,?,?,'running',NULL,NULL,?)").run(auth.user_id,p.kind,row.revision,attempt,Date.now());

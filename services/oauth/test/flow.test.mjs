@@ -4,6 +4,37 @@ import { createPublicKey, verify } from "node:crypto";
 import { fixture, validatedCallback } from "./fixture.mjs";
 import { randomSecret, seconds, readPrivate } from "../../../shared/oauth-common.mjs";
 
+test('HARDEN-AUTHORIZE missing/empty client is invalid_request; unknown clients and non-exact callbacks never redirect', async t => {
+  const f = await fixture(t);
+  const valid = {client_id: f.config.chatgpt_client.client_id, redirect_uri: f.config.chatgpt_client.redirect_uris[0],
+    response_type: 'code', scope: 'openid memory:read', resource: f.config.resource,
+    code_challenge: randomSecret(), code_challenge_method: 'S256', state: randomSecret()};
+  for (const method of ['GET', 'POST']) {
+    const request = params => method === 'GET' ? f.browser.request('/authorize?' + params) : f.browser.post('/authorize', params);
+    for (const id of [undefined, '', 'unknown-synthetic-client']) {
+      const params = new URLSearchParams(valid);
+      if (id === undefined) params.delete('client_id'); else params.set('client_id', id);
+      for (const redirect of [valid.redirect_uri, 'https://foreign.synthetic.example/callback']) {
+        params.set('redirect_uri', redirect);
+        const response = await request(params);
+        assert.equal(response.status, 400);
+        assert.equal(JSON.parse(response.text).error, id ? 'invalid_client' : 'invalid_request');
+        assert.equal(response.headers.get('location'), null);
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+      }
+    }
+    for (const redirect of [valid.redirect_uri + '/', valid.redirect_uri + '?extra=1',
+      valid.redirect_uri.replace('/callback', '/%63allback'), 'https://foreign.synthetic.example/callback']) {
+      const response = await request(new URLSearchParams({...valid, redirect_uri: redirect}));
+      assert.ok(response.status >= 400, redirect); assert.equal(response.headers.get('location'), null, redirect);
+    }
+    const duplicate = new URLSearchParams(valid); duplicate.append('client_id', 'unknown-synthetic-client');
+    const response = await request(duplicate);
+    assert.equal(response.status, 400); assert.equal(response.headers.get('location'), null);
+  }
+  assert.equal(f.app.store.summary().some(row => ['Grant', 'AuthorizationCode', 'AccessToken'].includes(row.model)), false);
+});
+
 test("PKCE-01/TOKEN-01 complete HTTP password, MFA, consent, PKCE and opaque introspection", async (t) => {
   const f = await fixture(t);
   const metadata = await (await fetch(`${f.config.issuer}/.well-known/oauth-authorization-server`)).json();

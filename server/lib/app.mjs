@@ -445,7 +445,7 @@ export function createMnemuronApp({
     }
   });
 
-  const consoleTimer=store.memoryConfig.console?.worker_enabled===true?setInterval(()=>{void store.consoleService.tick().catch(()=>logger?.({component:'console_worker',error_code:'WORKER_FAILED'}));},5000):null;
+  const consoleTimer=(store.memoryConfig.console?.worker_enabled===true||store.memoryConfig.console?.owner_user_id)?setInterval(()=>{void store.consoleService.tick().catch(()=>logger?.({component:'console_worker',error_code:'WORKER_FAILED'}));},5000):null;
   consoleTimer?.unref();
   return {
     server,
