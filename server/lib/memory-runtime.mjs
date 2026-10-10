@@ -53,6 +53,9 @@ export function memoryRuntime(input) {
       }
       if(conversation.max_chars!==undefined)integer(conversation.max_chars,8,1000);
     }
+    const retrieval=input.memory?.retrieval;
+    if(retrieval?.semantic_min_score!==undefined&&(!Number.isFinite(retrieval.semantic_min_score)||retrieval.semantic_min_score<0||retrieval.semantic_min_score>1))throw new Error('invalid semantic minimum');
+    if(retrieval?.semantic_max_distance!==undefined&&(!Number.isFinite(retrieval.semantic_max_distance)||retrieval.semantic_max_distance<0||retrieval.semantic_max_distance>1000000))throw new Error('invalid semantic distance');
     if(input.memory?.retrieval?.mode!==undefined && !['lexical','hybrid','semantic'].includes(input.memory.retrieval.mode))throw new Error('invalid retrieval');
   }catch{throw new ValidationError('Invalid model, vector or worker configuration.', 'INVALID_MEMORY_CONFIG');}
   for(const [section,key,value] of [[input.memory,'automatic_fact_overwrite',false],[input.memory,'preserve_atomic_records',true],[input.privacy,'include_body_in_logs',false],[input.privacy,'automatic_export',false]]){

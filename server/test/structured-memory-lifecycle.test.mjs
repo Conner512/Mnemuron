@@ -1,3 +1,4 @@
+import {recentCapture} from './helpers/recent-capture.mjs';
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -66,7 +67,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
       {
         event_id: miniDecisionEvent,
         event_type: "user_message",
-        captured_at: "2026-09-04T05:00:00.000Z",
+        captured_at: recentCapture("2026-09-04T05:00:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -77,7 +78,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-04T05:01:00.000Z",
+        captured_at: recentCapture("2026-09-04T05:01:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -89,7 +90,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
       {
         event_id: randomUUID(),
         event_type: "user_message",
-        captured_at: "2026-09-04T05:02:00.000Z",
+        captured_at: recentCapture("2026-09-04T05:02:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clienta",
@@ -100,7 +101,7 @@ test("memory retrieval ranks bounded results and presents only topic-keyed branc
         event_id: randomUUID(),
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-04T05:03:00.000Z",
+        captured_at: recentCapture("2026-09-04T05:03:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clienta",
