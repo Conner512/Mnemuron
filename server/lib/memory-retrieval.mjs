@@ -4,7 +4,7 @@ import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
 export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
-import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,wordVariants} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
 export const searchUnavailable = () => Object.assign(new Error('Memory search index is unavailable; rebuild or enable it before querying.'), {statusCode:503,errorCode:'SEARCH_UNAVAILABLE'});
@@ -128,10 +128,13 @@ export class MemorySearch {
     if(searchTokens(query).length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
     const filter=memoryScopeSql(scope,options);
     try {
-      let plan=this.plan(userId,query,scope,options);
+      let plan;
+      // Alias expansion is optional evidence: a bad alias row must not disable the whole index.
+      try{plan=this.plan(userId,query,scope,options);}catch(error){if(transientSql(error))throw error;plan=makeQueryPlan(query,[],true);}
       let tokens=[...new Set(plan.queries.flatMap(q=>queryTokens(q).length?queryTokens(q):searchTokens(q)))];
       if(tokens.length>256){plan=makeQueryPlan(query,[],true);tokens=queryTokens(query).length?queryTokens(query):searchTokens(query);}
       if(!tokens.length)return {rows:[],truncated:false,plan};
+      const variants=[...new Set(tokens.flatMap(wordVariants))];if(variants.length<=512)tokens=variants;
       const json=JSON.stringify(plan);
       const rows=this.db.prepare(`SELECT m.*,memory_search_relevance(m.content,m.topic,?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)

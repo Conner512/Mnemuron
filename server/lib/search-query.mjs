@@ -12,7 +12,20 @@ export function searchTokens(value) {
   for(const symbol of text.match(/\p{S}/gu)||[])tokens.add(symbol);
   return [...tokens];
 }
-const stopWords=new Set('a an the of to in on for and or is are was were what which how please find search show me my about tell'.split(' '));
+const stopWords=new Set(('a an the of to in on for and or is are was were be been being what which how please find search show me my about tell '
+  +'do does did done we us our you your i it its this that these those there here where when who whom whose why with from by at as '
+  +'can could should would will shall may might must has have had any some all get got give know need want let any other into onto over').split(' '));
+// Light inflection folding for plain Latin words only; identifiers, versions and short names stay exact.
+export function stemWord(word) {
+  if(!/^[a-z]{4,}$/.test(word))return word;
+  return word.replace(/(?<=[a-z]{3})(?:ing|ed)$/,'').replace(/(?<=[a-z]{3})(?<!s)(?:es|s)$/,'').replace(/(?<=[a-z]{3})e$/,'');
+}
+// Query-side inflection variants let the unchanged v3 token index find configured/configure/configuring.
+export function wordVariants(word) {
+  if(!/^[a-z]{4,}$/.test(word))return [word];
+  const stem=stemWord(word);
+  return [...new Set([word,...['','e','s','es','ed','ing'].map(suffix=>stem+suffix).filter(variant=>stemWord(variant)===stem)])];
+}
 const hanStopWords=new Set(['我','你','吗','呢','了','的','是']);
 const segmenter=new Intl.Segmenter('zh',{granularity:'word'});
 export function queryGroups(value) {
@@ -23,7 +36,7 @@ export function queryGroups(value) {
   for(const segment of text.split(/(\p{Script=Han}+)/u)) {
     if(/^\p{Script=Han}/u.test(segment)) {
       if(hanStopWords.has(segment))continue;
-      const chars=Array.from(segment);groups.push(chars.length===1?chars:[...new Set(chars.slice(1).map((c,i)=>chars[i]+c))]);
+      const chars=Array.from(segment);groups.push(Object.assign(chars.length===1?chars:[...new Set(chars.slice(1).map((c,i)=>chars[i]+c))],{source:segment}));
     } else for(const token of searchTokens(segment))if(!stopWords.has(token))groups.push([token]);
   }
   return groups;
@@ -45,13 +58,46 @@ export function containsTerm(text,term) {
   if(!/\p{Script=Han}/u.test(term)&&!/\s/u.test(term)&&/[\p{L}\p{N}]/u.test(term))return new Set(searchTokens(text)).has(term);
   return termPattern(term).test(text);
 }
+// ICU splits some compounds (定|时, 数据|库); rejoin single characters so every unit is a real word.
+function hanWords(source) {
+  const words=[];let single='';
+  for(const {segment} of segmenter.segment(source)) {
+    if(Array.from(segment).length===1){single+=segment;continue;}
+    if(Array.from(single).length===1&&words.length)words[words.length-1]+=single;else if(single)words.push(single);
+    single='';words.push(segment);
+  }
+  if(Array.from(single).length===1&&words.length)words[words.length-1]+=single;else if(single)words.push(single);
+  return words;
+}
+// Scoring groups are derived once per query string, not once per candidate row.
+const compiledQueries=new Map();
+function compiledQuery(query) {
+  let compiled=compiledQueries.get(query);
+  if(compiled)return compiled;
+  compiled=queryGroups(query).map(group=>{
+    // A multi-character Han run may be several words in a different order than the memory text.
+    // Word coverage applies only when every segment is a real multi-character word.
+    const words=group.source&&group.length>1?hanWords(group.source):[];
+    return {tokens:group,words:words.length>1?words:null};
+  });
+  if(compiledQueries.size>=64)compiledQueries.delete(compiledQueries.keys().next().value);
+  compiledQueries.set(query,compiled);
+  return compiled;
+}
 function literalScore(query,text) {
   if(containsTerm(text,query))return 1;
-  const groups=queryGroups(query),present=new Set(searchTokens(text));
+  const groups=compiledQuery(query);
   if(!groups.length)return 0;
-  const coverage=groups.map(group=>group.filter(token=>present.has(token)).length/group.length);
-  // A shared Han character or one unrelated keyword cannot be rescued by recency/confidence.
-  if(coverage.some(value=>value<2/3))return 0;
+  const tokens=searchTokens(text),present=new Set(tokens),stems=new Set(tokens.map(stemWord));
+  const coverage=groups.map(({tokens:group,words})=>{
+    const pairs=group.filter(token=>present.has(token)||stems.has(stemWord(token))).length/group.length;
+    // Reordered Han words count only when every word is present; otherwise keep the strict pair rule.
+    return words&&words.every(word=>text.includes(word))?1:pairs;
+  });
+  // A shared Han character or one unrelated keyword cannot be rescued by recency/confidence:
+  // short queries need every concept; longer natural-language queries need about two thirds.
+  const matched=coverage.filter(value=>value>=2/3).length,required=groups.length<3?groups.length:Math.ceil(groups.length*2/3);
+  if(matched<required)return 0;
   return coverage.reduce((a,b)=>a+b,0)/coverage.length*0.8;
 }
 export function aliasAnchorsMatch(plan,text) {return (plan?.anchors||[]).every(group=>group.some(term=>containsTerm(text,term)));}
