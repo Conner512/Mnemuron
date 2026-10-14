@@ -32,7 +32,7 @@
           "version": {"$ref": "#/$defs/name"}, "categories": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
             "contains": {"const": "uncategorized"}, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}}
         }},
-        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}}}
+        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}, "semantic_min_score": {"type": "number", "minimum": 0, "maximum": 1}, "semantic_max_distance": {"type": "number", "minimum": 0, "maximum": 1000000}}}
       }
     },
     "providers": {"type": "object", "additionalProperties": false, "properties": {"organizer": {"$ref": "#/$defs/profile"}, "embedder": {"$ref": "#/$defs/embeddingProfile"}}},

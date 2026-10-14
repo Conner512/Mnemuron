@@ -1,0 +1,159 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,embedder} from './helpers/memory-models.mjs';
+import {MockVectorStore} from './helpers/vector-mock.mjs';
+import {VectorIndex,surrogate} from '../lib/vector-stores/index.mjs';
+import {lexicalScore} from '../lib/memory-retrieval.mjs';
+import {consoleRead} from '../lib/console-read.mjs';
+
+const ids=result=>result.results.map(m=>m.memory_id);
+function consoleAuth(f){const c=f.s.issueCredential({label:'Synthetic console',userId:f.auth.user_id,deviceId:'test',agentId:'mnemuron-console',agentInstanceId:'synthetic-console',scopes:['memory:read','resume:read','console:read']});return f.s.authenticate(c.api_key);}
+async function vectorFixture(t){const f=fixture(t),e=embedder(),backend=new MockVectorStore(),index=new VectorIndex(f.s,backend,new Map([[e.profile.fingerprint,e]]));
+ const relevant=f.save('Network router access configuration.'),unrelated=f.save('Disk storage shopping list.');
+ const generation=index.begin(e.profile.fingerprint);await index.sync(generation);index.activate(generation);f.s.vectorIndex=index;
+ return {...f,e,backend,index,generation,relevant,unrelated};}
+
+test('SEARCH-01: omitted mode requests hybrid, explicit lexical stays no-embedding',async t=>{
+ const f=await vectorFixture(t);const result=await f.s.searchMemories(f.auth,{query:'网络设备'});
+ assert.equal(result.retrieval.requested_mode,'hybrid');assert.equal(result.retrieval.effective_mode,'hybrid');assert.deepEqual(ids(result),[f.relevant.memory_id]);
+ const calls=f.backend.searchCalls.length;await f.s.searchMemories(f.auth,{query:'router',mode:'lexical'});assert.equal(f.backend.searchCalls.length,calls);
+});
+test('SEARCH-02: console defaults to hybrid and reports missing personal allocation without using global model',async t=>{
+ const f=await vectorFixture(t),auth=consoleAuth(f),calls=f.backend.searchCalls.length;
+ const result=await consoleRead(f.s,auth,'memories',{query:'router'});
+ assert.equal(result.retrieval.requested_mode,'hybrid');assert.equal(result.retrieval.effective_mode,'lexical');assert.equal(result.retrieval.degraded,true);assert.equal(f.backend.searchCalls.length,calls);
+});
+test('SEARCH-03: Chinese single-character overlap and partial topic overlap are not relevant',t=>{
+ const f=fixture(t),target=f.save('星桥网络备份已完成。');f.save('桥梁维护方案。');f.save('网络设备接入状态正常。');
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'星桥'})),[target.memory_id]);
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'网络备份'})),[target.memory_id]);
+ assert.equal(lexicalScore('ali',{content:'quality validation'}),0);
+ assert.equal(lexicalScore('17.9.8',{content:'Version 17.9.80'}),0);
+});
+test('SEARCH-04: visible bilingual aliases expand one hop and retain the rest of the query',t=>{
+ const f=fixture(t);f.save('星桥（Orion）是合成测试供应商。');const target=f.save('Orion 的网络配置已经备份。');
+ f.save('Orion 的发票日期为月末。');f.save('其他供应商的网络配置。');
+ const result=f.s.queryMemories(f.auth,{query:'星桥 网络配置'});assert.deepEqual(ids(result),[target.memory_id]);assert.equal(result.retrieval.alias_expanded,true);
+ const reverse=f.save('星桥的路由策略已经更新。');assert.ok(ids(f.s.queryMemories(f.auth,{query:'Orion 路由策略'})).includes(reverse.memory_id));
+});
+test('SEARCH-05: aliases do not cross owners or explicit project boundaries; retired declarations do not expand',t=>{
+ const f=fixture(t);f.s.ensureProject(f.auth,'project-one','First');f.s.ensureProject(f.auth,'project-two','Second');
+ const declaration=f.save('星桥（Orion）是合成别名。',{scope:'project',project_id:'project-two'});
+ const target=f.save('Orion 网络配置。',{scope:'project',project_id:'project-one'});
+ assert.ok(!ids(f.s.queryMemories(f.auth,{query:'星桥 网络配置',project_id:'project-one'})).includes(target.memory_id));
+ f.s.retractMemory(f.auth,declaration.memory_id);assert.ok(!ids(f.s.queryMemories(f.auth,{query:'星桥 网络配置'})).includes(target.memory_id));
+ const c=f.s.issueCredential({label:'Synthetic other',userId:'other-owner',deviceId:'other',agentId:'test',agentInstanceId:'other',scopes:['memory:read','memory:write']});
+ f.s.saveMemory(f.s.authenticate(c.api_key),{scope:'user',content:'星桥（Orion）是另一用户的别名。'});
+ assert.ok(!ids(f.s.queryMemories(f.auth,{query:'星桥 网络配置'})).includes(target.memory_id));
+});
+test('SEARCH-06: ambiguous aliases are not silently expanded and Latin boundaries reject near names',t=>{
+ const f=fixture(t);f.save('星桥（Orion）是合成别名。');f.save('蓝港（Orion）是不同实体的合成别名。');
+ const a=f.save('星桥的网络配置。'),b=f.save('蓝港的网络配置。');f.save('Orionlite 网络配置。');
+ const result=f.s.queryMemories(f.auth,{query:'Orion 网络配置'});assert.ok(!ids(result).includes(a.memory_id));assert.ok(!ids(result).includes(b.memory_id));assert.equal(result.retrieval.alias_ambiguous,true);assert.equal(result.result_count,0);
+});
+test('SEARCH-07: weak CJK candidates cannot crowd out a relevant document before the candidate limit',t=>{
+ const f=fixture(t),target=f.save('星桥的备份已经完成。');f.s.db.exec('BEGIN');for(let i=0;i<650;i++)f.save(`桥梁巡检状态 ${i}`);f.s.db.exec('COMMIT');
+ const result=f.s.queryMemories(f.auth,{query:'星桥'});assert.deepEqual(ids(result),[target.memory_id]);
+});
+test('SEARCH-08: vector relevance gate runs before RRF; fewer than limit is valid',async t=>{
+ const f=await vectorFixture(t);const result=await f.index.search(f.auth,{query:'网络设备',mode:'hybrid',limit:20});
+ assert.deepEqual(ids(result),[f.relevant.memory_id]);assert.equal(result.retrieval.semantic_rejected,1);
+ assert.equal(result.results[0].ranking.semantic_score,1);
+});
+test('SEARCH-09: zero-result semantic query stays empty instead of returning nearest unrelated memories',async t=>{
+ const f=await vectorFixture(t),result=await f.index.search(f.auth,{query:'宇宙绘画日记',mode:'semantic'});
+ assert.equal(result.results.length,0);assert.equal(result.retrieval.degraded,false);
+});
+test('SEARCH-10: malformed/missing scores cannot enter fusion; chunk duplicates use their best score',async t=>{
+ const f=await vectorFixture(t),points=[...f.backend.collections.get(f.index.snapshot().collection_name).points.values()];
+ const point=id=>points.find(p=>p.payload.document===surrogate([f.auth.user_id,id]));
+ f.backend.search=async()=>[{...point(f.unrelated.memory_id),score:NaN},{...point(f.relevant.memory_id),score:0.9},{...point(f.relevant.memory_id),score:0.7}];
+ let result=await f.index.search(f.auth,{query:'网络设备',mode:'semantic'});assert.deepEqual(ids(result),[f.relevant.memory_id]);assert.equal(result.results[0].ranking.semantic_score,0.9);
+ f.backend.search=async()=>[{...point(f.unrelated.memory_id)}];result=await f.index.search(f.auth,{query:'网络设备',mode:'semantic'});assert.equal(result.results.length,0);
+});
+test('SEARCH-11: explicit keyword console path applies the same relevance gate, not raw OR candidates',async t=>{
+ const f=fixture(t),target=f.save('星桥运行正常。');f.save('桥梁计划。');
+ const result=await consoleRead(f.s,consoleAuth(f),'memories',{query:'星桥',mode:'lexical'});assert.deepEqual(ids(result),[target.memory_id]);
+});
+test('SEARCH-12: hidden alias source never expands Web-readable records',t=>{
+ const f=fixture(t),target=f.save('Orion 网络配置。');f.save('星桥（Orion）是私人映射。');
+ f.s.db.prepare('INSERT INTO memory_privacy(user_id,memory_id,sensitivity) VALUES(?,?,?) ON CONFLICT(user_id,memory_id) DO UPDATE SET sensitivity=excluded.sensitivity').run(f.auth.user_id,target.memory_id,'public');
+ const web={...f.auth,agent_id:'chatgpt-web'};
+ assert.equal(f.s.queryMemories(web,{query:'星桥 网络配置'}).results.length,0);
+});
+
+test('SEARCH-13: unambiguous owned project aliases match canonical terms without dropping the topic',t=>{
+ const f=fixture(t);f.s.ensureProject(f.auth,'project-orion','星桥');f.s.db.prepare('UPDATE projects SET aliases_json=? WHERE project_id=?').run(JSON.stringify(['Orion']),'project-orion');
+ const target=f.save('星桥的网络配置已完成。',{scope:'project',project_id:'project-orion'});f.save('星桥的发票已经寄出。');
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'Orion 网络配置'})),[target.memory_id]);
+});
+test('SEARCH-14: natural Chinese query ignores request boilerplate but not meaningful words',t=>{
+ const f=fixture(t),target=f.save('星桥网络配置已备份。');f.save('我的备忘录已经整理。');f.save('网络电缆的采购信息。');
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'请帮我查询星桥的网络配置'})),[target.memory_id]);
+});
+test('SEARCH-15: hybrid degradation preserves the existing multi-page keyword library',async t=>{
+ const f=fixture(t),auth=consoleAuth(f);for(let n=0;n<31;n++)f.save(`Synthetic pagination marker ${n}`);
+ const a=await consoleRead(f.s,auth,'memories',{query:'pagination marker',limit:25});const b=await consoleRead(f.s,auth,'memories',{query:'pagination marker',limit:25,offset:25});
+ assert.equal(a.results.length,25);assert.equal(a.next_offset,25);assert.equal(b.results.length,6);assert.equal(b.next_offset,null);assert.equal(a.retrieval.degraded,true);
+ assert.equal(new Set([...ids(a),...ids(b)]).size,31);
+});
+test('SEARCH-16: threshold is configurable, not a model-specific hardcoded name',async t=>{
+ const f=await vectorFixture(t),points=[...f.backend.collections.get(f.index.snapshot().collection_name).points.values()];
+ f.backend.search=async()=>points.map(p=>({...p,score:p.payload.document===surrogate([f.auth.user_id,f.relevant.memory_id])?0.8:0.3}));
+ f.s.memoryConfig={...f.s.memoryConfig,memory:{retrieval:{semantic_min_score:0.85}}};
+ assert.equal((await f.index.search(f.auth,{query:'网络设备',mode:'semantic'})).result_count,0);
+ f.s.memoryConfig.memory.retrieval.semantic_min_score=0.75;
+ assert.deepEqual(ids(await f.index.search(f.auth,{query:'网络设备',mode:'semantic'})),[f.relevant.memory_id]);
+});
+test('SEARCH-17: a known alias entity also gates high-scoring semantic neighbours',async t=>{
+ const f=fixture(t),e=embedder(()=>[[1,0,0]]),backend=new MockVectorStore();
+ f.save('星桥（Orion）是合成别名。');const target=f.save('Orion 的网络访问设置。'),noise=f.save('另一供应商的网络访问设置。');
+ const index=new VectorIndex(f.s,backend,new Map([[e.profile.fingerprint,e]])),generation=index.begin(e.profile.fingerprint);
+ // This fixture has a fixed vector for every document/query; deliberately unhelpful semantic scores.
+ e.mock=texts=>texts.map(()=>[1,0,0]);await index.sync(generation);index.activate(generation);
+ const result=await index.search(f.auth,{query:'星桥 网络配置',mode:'hybrid'});assert.ok(ids(result).includes(target.memory_id));assert.ok(!ids(result).includes(noise.memory_id));
+});
+test('SEARCH-18: score filtering diagnostics never count a foreign or hidden record',async t=>{
+ const f=await vectorFixture(t),c=f.s.issueCredential({label:'Synthetic other',userId:'foreign-score-owner',deviceId:'foreign',agentId:'test',agentInstanceId:'foreign',scopes:['memory:read','memory:write']});
+ f.s.saveMemory(f.s.authenticate(c.api_key),{scope:'user',content:'Foreign network record'});await f.index.sync(f.generation);
+ const backend=f.backend.search.bind(f.backend),foreign=[...f.backend.collections.get(f.index.snapshot().collection_name).points.values()].filter(p=>p.payload.owner!==surrogate(f.auth.user_id));
+ f.backend.search=async(...args)=>[...foreign.map(p=>({...p,score:0})),...await backend(...args)];
+ const result=await f.index.search(f.auth,{query:'network',mode:'hybrid'});assert.equal(result.retrieval.semantic_rejected,1);assert.ok(!JSON.stringify(result).includes('Foreign network'));
+});
+
+test('SEARCH-19: score direction respects distance and requires calibration for unnormalized metrics',async()=>{
+ const {semanticPolicy,acceptsSemanticScore}=await import('../lib/search-query.mjs');
+ const cosine=semanticPolicy({}, {distance:'Cosine'}),euclid=semanticPolicy({}, {distance:'Euclid',normalization:'l2'});
+ assert.equal(acceptsSemanticScore(0.8,cosine),true);assert.equal(acceptsSemanticScore(0.1,cosine),false);assert.equal(acceptsSemanticScore(2,cosine),false);
+ assert.equal(acceptsSemanticScore(0.1,euclid),true);assert.equal(acceptsSemanticScore(2,euclid),false);
+ assert.equal(semanticPolicy({}, {distance:'Dot',normalization:'none'}),null);assert.equal(semanticPolicy({}, {distance:'Euclid',normalization:'none'}),null);
+ assert.equal(acceptsSemanticScore(1,semanticPolicy({semantic_min_score:0.5},{distance:'Dot',normalization:'none'})),true);
+ for(const invalid of [NaN,Infinity,null,undefined,'0.9'])assert.equal(acceptsSemanticScore(invalid,cosine),false);
+});
+test('SEARCH-20: malformed relevance configuration fails before any provider request',async()=>{
+ const {memoryRuntime}=await import('../lib/memory-runtime.mjs'),{config}=await import('./helpers/memory-models.mjs');
+ for(const field of ['semantic_min_score','semantic_max_distance'])for(const value of [-1,Infinity,NaN,'0.7',null,{}])assert.throws(()=>memoryRuntime({...config,memory:{retrieval:{[field]:value}}}));
+ assert.equal(memoryRuntime({...config,memory:{retrieval:{mode:'hybrid',semantic_min_score:0.75}}}).memory,true);
+});
+
+
+test('SEARCH-21: alias expansion is non-transitive and a bounded source overflow disables expansion',async()=>{
+ const {makeQueryPlan}=await import('../lib/search-query.mjs');
+ const plan=makeQueryPlan('Orion network',[['Orion','星桥'],['星桥','blueharbor']]);
+ assert.ok(plan.queries.includes('星桥 network'));assert.ok(!plan.queries.some(q=>q.includes('blueharbor')));
+ const limited=makeQueryPlan('Orion network',[['Orion','星桥']],true);
+ assert.equal(limited.expanded,false);assert.deepEqual(limited.queries,['orion network']);assert.equal(limited.source_truncated,true);
+});
+test('SEARCH-22: meaningful Han compounds and short explicit words are not removed as request particles',t=>{
+ const f=fixture(t),target=f.save('货物的目的地是星桥。');f.save('货物的地面检查已完成。');
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'目的地'})),[target.memory_id]);
+ const short=f.save('云。');assert.ok(ids(f.s.queryMemories(f.auth,{query:'云'})).includes(short.memory_id));
+});
+test('SEARCH-23: a hidden project alias cannot influence an authorized cloud query',t=>{
+ const f=fixture(t);f.s.ensureProject(f.auth,'secret-alias-project','星桥');
+ f.s.db.prepare('UPDATE projects SET aliases_json=? WHERE project_id=?').run(JSON.stringify(['Orion']),'secret-alias-project');
+ const target=f.save('星桥网络配置。');
+ f.s.db.prepare('INSERT INTO memory_privacy(user_id,memory_id,sensitivity) VALUES(?,?,?) ON CONFLICT(user_id,memory_id) DO UPDATE SET sensitivity=excluded.sensitivity').run(f.auth.user_id,target.memory_id,'public');
+ const web={...f.auth,agent_id:'chatgpt-web'};
+ assert.equal(f.s.queryMemories(web,{query:'Orion 网络配置'}).result_count,0);
+});

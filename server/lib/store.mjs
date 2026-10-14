@@ -3902,7 +3902,7 @@ export class MnemuronStore {
   async searchMemories(auth,payload) {
     this.requireScope(auth,'memory:read');
     if(payload?.personal_model_only!==undefined&&typeof payload.personal_model_only!=='boolean')throw new ValidationError('Invalid model allocation guard.');
-    const mode=payload?.mode || this.memoryConfig.memory?.retrieval?.mode || 'lexical';
+    const mode=payload?.mode || this.memoryConfig.memory?.retrieval?.mode || 'hybrid';
     if(!['lexical','hybrid','semantic'].includes(mode))throw new ValidationError('Invalid retrieval mode.');
     if(mode==='lexical') {
       const result=this.queryMemories(auth,payload);
@@ -3912,7 +3912,7 @@ export class MnemuronStore {
     if(ownEmbedder||payload?.personal_model_only===true){
       try{if(!ownEmbedder)throw new ModelError('NOT_CONFIGURED');return await this.consoleService.vector(auth.user_id).search(auth,{...payload,mode});}
       catch(error){
-        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','AUTH_FAILED'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
       }
@@ -3967,7 +3967,7 @@ export class MnemuronStore {
     const candidates = rows
       .map((row) => this.memoryFromRow(row))
       .map((memory) => {
-        const lexical = lexicalScore(payload.query, memory);
+        const lexical = lexicalScore(payload.query, memory, selection.plan);
         if (lexical <= 0) return null;
         const confidence = Number.isFinite(memory.generation.confidence)
           ? memory.generation.confidence
@@ -4051,6 +4051,8 @@ export class MnemuronStore {
       results: candidates.slice(0, limit).map(memory => memorySummary(memory)),
       retrieval: {
         engine: 'sqlite_fts5', index_version: INDEX_VERSION, coverage: 'authorized_scope',
+        relevance_policy:'query-relevance-v1', alias_expanded:selection.plan.expanded,
+        alias_ambiguous:selection.plan.ambiguous, alias_source_truncated:selection.plan.source_truncated,
         execution_complete: true, degraded: false, candidate_limit: 500,
         candidate_truncated: selection.truncated, result_truncated: candidates.length > limit,
         conflict_truncated: selection.truncated || potentialConflicts.length > 20,

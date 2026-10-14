@@ -38,12 +38,19 @@ export async function consoleRead(store,auth,view,params={}) {
         WHERE m.user_id=?`;
       if(params.query?.trim()){
         const statuses=params.status?[params.status]:['active','superseded','retracted'];let rows,retrieval,truncated=false;
-        if(!params.mode||params.mode==='lexical'){
+        if(params.mode==='lexical'){
           const found=store.memorySearch.candidates(user,params.query,{}, {auth,statuses,memoryTypes:['fact','goal','constraint','decision','completed','blocker','remaining','next_step']});
-          rows=found.rows;truncated=found.truncated;retrieval={mode:'lexical',candidate_limit:500,degraded:false};
+          rows=found.rows;truncated=found.truncated;retrieval={mode:'lexical',requested_mode:'lexical',effective_mode:'lexical',candidate_limit:500,degraded:false,alias_expanded:found.plan.expanded,alias_ambiguous:found.plan.ambiguous,alias_source_truncated:found.plan.source_truncated};
         }else{
-          const found=await store.searchMemories(auth,{query:params.query,limit:20,mode:params.mode,statuses,personal_model_only:true});
+          const found=await store.searchMemories(auth,{query:params.query,limit:20,mode:params.mode||'hybrid',statuses,personal_model_only:true});
           rows=found.results;retrieval={...found.retrieval,window_limited:true,candidate_limit:20};truncated=found.truncated===true;
+          if(found.retrieval.effective_mode==='lexical') {
+            // A degraded hybrid search still has the existing 500-keyword paging window;
+            // never silently shrink an old 25-row console page to the MCP's 20-row limit.
+            const selection=store.memorySearch.candidates(user,params.query,{}, {auth,statuses,memoryTypes:['fact','goal','constraint','decision','completed','blocker','remaining','next_step']});
+            rows=selection.rows;truncated=selection.truncated;
+            retrieval={...retrieval,candidate_limit:500,candidate_truncated:selection.truncated,result_truncated:selection.truncated};
+          }
         }
         // Filter the bounded, owner-scoped candidate window before slicing a UI page.
         const categoryFor=db.prepare(`SELECT category FROM (${categorySelect}) WHERE memory_id=?`);

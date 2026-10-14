@@ -321,6 +321,7 @@ export const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
+        mode: { type: "string", enum: ["lexical", "hybrid", "semantic"], description: "Defaults to hybrid. Lexical makes no query-embedding call; hybrid reports fallback when unavailable." },
         query: { type: "string", minLength: 1, maxLength: 4096 },
         project_id: { type: "string" },
         task_id: { type: "string" },
@@ -1712,6 +1713,7 @@ async function callRemoteTool(name, args, runtimeEnv) {
     }
     return remoteRequest(runtimeEnv, "POST", "/v1/memories/query", {
       query: args.query,
+      ...(args.mode === undefined ? {} : { mode: args.mode }),
       ...(args.project_id === undefined ? {} : { project_id: args.project_id }),
       ...(args.task_id === undefined ? {} : { task_id: args.task_id }),
       ...(args.source_workstream_ids === undefined

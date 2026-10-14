@@ -1,33 +1,12 @@
 import { ValidationError } from './errors.mjs';
 import { memoryScopeSql } from './memory-scope.mjs';
-import {webMemorySql} from './memory/web-visibility.mjs';
+import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
-export const normalizeSearch = value => String(value ?? '').normalize('NFKC').toLowerCase();
-export function searchTokens(value) {
-  const text = normalizeSearch(value), tokens = new Set();
-  // Han boundaries must not split adjacent engineering identifiers into characters.
-  for (const segment of text.split(/(\p{Script=Han}+)/u)) {
-    if (/^\p{Script=Han}/u.test(segment)) {
-      const chars = Array.from(segment);
-      chars.forEach((char, i) => { tokens.add(char); if (chars[i+1]) tokens.add(char + chars[i+1]); });
-    } else for (const word of segment.match(/[\p{L}\p{N}]+(?:[._:/-][\p{L}\p{N}]+)*/gu) || []) {
-      tokens.add(word);
-      // Colons can separate labels from text; retain the full token as well.
-      for (const part of word.split(':')) tokens.add(part);
-    }
-  }
-  for (const symbol of text.match(/\p{S}/gu) || []) tokens.add(symbol);
-  return [...tokens];
-}
+export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
-export function lexicalScore(query, memory) {
-  const text = normalizeSearch(`${memory.content}\n${memory.topic || ''}`), normalized = normalizeSearch(query.trim());
-  if (text.includes(normalized)) return 1;
-  const tokens = searchTokens(query), present = new Set(searchTokens(text));
-  return tokens.length ? tokens.filter(token => present.has(token)).length / tokens.length * 0.8 : 0;
-}
 export const searchUnavailable = () => Object.assign(new Error('Memory search index is unavailable; rebuild or enable it before querying.'), {statusCode:503,errorCode:'SEARCH_UNAVAILABLE'});
 export function transientSql(error){return [5,6,9].includes(Number(error?.errcode)&255) || ['SQLITE_BUSY','SQLITE_LOCKED','SQLITE_INTERRUPT'].includes(error?.code);}
 const searchBusy=()=>Object.assign(new Error('Memory search is temporarily busy; retry the read.'),{statusCode:503,errorCode:'SEARCH_RETRYABLE'});
@@ -38,6 +17,13 @@ export class MemorySearch {
     this.enabled = enabled;
     db.function('memory_search_tokens', {deterministic:true}, indexText);
     db.function('memory_search_normalize', {deterministic:true}, normalizeSearch);
+    db.function('memory_search_contains', {deterministic:true}, (text,term)=>Number(containsTerm(text,term)));
+    db.function('memory_search_alias_seed', {deterministic:true}, (text,query)=>Number(declaredAliases(text).some(group=>group.some(term=>containsTerm(query,term)))));
+    let cachedJSON,cachedPlan;
+    db.function('memory_search_relevance', {deterministic:true}, (content,topic,json)=>{
+      if(cachedJSON!==json){cachedPlan=JSON.parse(json);cachedJSON=json;}
+      return lexicalScore(cachedPlan.queries[0],{content,topic},cachedPlan);
+    });
     this.state = 'unavailable';
     try { this.initialize(); } catch { this.state = 'unavailable'; }
   }
@@ -111,20 +97,50 @@ export class MemorySearch {
       return {index_version:INDEX_VERSION,state:this.enabled && this.state==='ready' && row?.state==='ready' && row.version===INDEX_VERSION && tables.n===8 ? 'ready':'unavailable',enabled:this.enabled};
     } catch { return {index_version:INDEX_VERSION,state:'unavailable',enabled:this.enabled}; }
   }
+  plan(userId,query,scope,options) {
+    const tokens=queryTokens(query),filter=memoryScopeSql(scope,options),groups=[];
+    let limited=false;
+    if(tokens.length) {
+      // Only current, authorized declarations are evidence for aliases. This is a bounded
+      // FTS probe, not a full-memory scan, and it never follows a chain of new aliases.
+      const seeds=this.db.prepare(`SELECT m.content FROM memory_search_fts
+        JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
+        WHERE memory_search_fts MATCH ? AND m.user_id=? AND m.status='active'
+          AND ${filter.sql} AND ${webMemorySql(options.auth)} AND memory_search_alias_seed(m.content,?)
+        ORDER BY memory_search_fts.rank,m.memory_id LIMIT 65`).all(
+          tokens.map(t=>'"'+encode(t)+'"').join(' OR '),userId,...filter.params,query);
+      limited=seeds.length>64;for(const seed of seeds.slice(0,64))groups.push(...declaredAliases(seed.content));
+    }
+    // Internal project aliases are not part of the Web visibility grant. Cloud clients may
+    // expand only explicit aliases contained in records they can actually read.
+    if(!isWebReader(options.auth))for(const [table,name,id] of [['projects','name','project_id'],['tasks','title','task_id']]) {
+      const rows=this.db.prepare(`SELECT ${name} name,aliases_json FROM ${table} WHERE user_id=?
+        AND (? IS NULL OR project_id=?) ${table==='tasks'?'AND (? IS NULL OR task_id=?)':''}
+        AND (memory_search_contains(?,${name}) OR EXISTS(SELECT 1 FROM json_each(aliases_json) a WHERE memory_search_contains(?,a.value)))
+        ORDER BY ${id} LIMIT 65`).all(userId,scope.project_id||null,scope.project_id||null,
+          ...(table==='tasks'?[scope.task_id||null,scope.task_id||null]:[]),query,query);
+      limited ||= rows.length>64;for(const row of rows.slice(0,64))groups.push([row.name,...JSON.parse(row.aliases_json)]);
+    }
+    return makeQueryPlan(query,groups,limited);
+  }
   candidates(userId, query, scope, options) {
     if (this.status().state!=='ready') throw searchUnavailable();
-    const tokens=searchTokens(query);
-    if(tokens.length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
+    if(searchTokens(query).length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
     const filter=memoryScopeSql(scope,options);
-    if(!tokens.length) return {rows:[],truncated:false};
     try {
-      const rows=this.db.prepare(`SELECT m.* FROM memory_search_fts
+      let plan=this.plan(userId,query,scope,options);
+      let tokens=[...new Set(plan.queries.flatMap(q=>queryTokens(q).length?queryTokens(q):searchTokens(q)))];
+      if(tokens.length>256){plan=makeQueryPlan(query,[],true);tokens=queryTokens(query).length?queryTokens(query):searchTokens(query);}
+      if(!tokens.length)return {rows:[],truncated:false,plan};
+      const json=JSON.stringify(plan);
+      const rows=this.db.prepare(`SELECT m.*,memory_search_relevance(m.content,m.topic,?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
         WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)}
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})
-        ORDER BY (instr(d.normalized,?)>0) DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
-      ).all(tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes,normalizeSearch(query.trim()));
-      return {rows:rows.slice(0,500),truncated:rows.length>500};
+        AND search_relevance>0
+        ORDER BY search_relevance DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
+      ).all(json,tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes);
+      return {rows:rows.slice(0,500),truncated:rows.length>500,plan};
     } catch(error) { if(transientSql(error))throw searchBusy();this.state='unavailable'; throw searchUnavailable(); }
   }
 }
