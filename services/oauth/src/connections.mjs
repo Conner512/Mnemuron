@@ -63,11 +63,13 @@ export class ConnectionRegistry {
    const owner=this.owner(account);fields(q,['kind','profile','state','search','offset','limit','section']);
    const limit=q.limit===undefined?20:Number(q.limit),offset=q.offset===undefined?0:Number(q.offset);
    if(!Number.isInteger(limit)||limit<1||limit>50||!Number.isInteger(offset)||offset<0||offset>100000||q.search!==undefined&&(typeof q.search!=='string'||q.search.length>120))fail();
+   // One definition of a ready-but-unbound connection for the state filter and the pending count.
+   const unbound='(c.binding_json IS NULL OR c.binding_version IS NULL OR c.binding_version<>c.version OR c.binding_account_version IS NULL OR c.binding_account_version<>?)';
    const clauses=['c.account_id=?'],args=[account];
    for(const [key,choices] of [['kind',['chatgpt_oauth','generic_mcp']],['profile',['readonly','memory_readwrite']],['state',['draft','ready','disabled','revoked']]])if(q[key]){
      if(!choices.includes(q[key]))fail();
      if(key==='state'){
-       clauses.push("(CASE WHEN c.state='ready' AND (c.binding_json IS NULL OR c.binding_version IS NULL OR c.binding_version<>c.version OR c.binding_account_version IS NULL OR c.binding_account_version<>?) THEN 'draft' ELSE c.state END)=?");args.push(owner.security_version,q[key]);
+       clauses.push(`(CASE WHEN c.state='ready' AND ${unbound} THEN 'draft' ELSE c.state END)=?`);args.push(owner.security_version,q[key]);
      }else{clauses.push(`c.${key}=?`);args.push(q[key]);}
    }
    if(q.search){clauses.push('instr(lower(c.label),lower(?))>0');args.push(q.search);}
@@ -76,7 +78,7 @@ export class ConnectionRegistry {
    const where=clauses.join(' AND '),total=this.db.prepare(`SELECT COUNT(*) n FROM identity_connections c WHERE ${where}`).get(...args).n;
    const rows=this.db.prepare(`SELECT c.* FROM identity_connections c WHERE ${where} ORDER BY c.updated DESC,c.connection_id LIMIT ? OFFSET ?`).all(...args,limit,offset);
    const current=`c.state NOT IN ('revoked','disabled') AND NOT ${expired}`;
-   const counts=this.db.prepare(`SELECT COUNT(*) total,SUM(${current}) active,SUM(${current} AND c.profile='readonly') readonly,SUM(${current} AND c.profile='memory_readwrite') memory_readwrite,SUM(NOT ${expired} AND (c.state='draft' OR (c.state='ready' AND (c.binding_version IS NULL OR c.binding_version<>c.version OR c.binding_account_version<>?)))) pending FROM identity_connections c WHERE c.account_id=?`).get(this.ids.byId(account).security_version,account);
+   const counts=this.db.prepare(`SELECT COUNT(*) total,SUM(${current}) active,SUM(${current} AND c.profile='readonly') readonly,SUM(${current} AND c.profile='memory_readwrite') memory_readwrite,SUM(NOT ${expired} AND (c.state='draft' OR (c.state='ready' AND ${unbound}))) pending FROM identity_connections c WHERE c.account_id=?`).get(this.ids.byId(account).security_version,account);
    // Inventory totals describe saved configurations; authorization totals must use live, owner-bound evidence.
    const grant=scope=>`EXISTS(SELECT 1 FROM oauth_records g,json_each(g.payload,'$.resources') s WHERE g.model='Grant' AND g.expires>:now AND json_extract(g.payload,'$.accountId')=:subject AND json_extract(g.payload,'$.clientId')=c.client_id AND s.key=:resource AND instr(' '||s.value||' ',' memory:read ')>0 AND instr(' '||s.value||' ',' ${scope} ')>0)`;
    const usable=`c.state='ready' AND c.binding_json IS NOT NULL AND c.binding_version=c.version AND c.binding_account_version=:security AND ((c.kind='chatgpt_oauth' AND ${grant('memory:read')}) OR (c.kind='generic_mcp' AND EXISTS(SELECT 1 FROM identity_connection_tokens t WHERE t.connection_id=c.connection_id AND t.account_id=c.account_id AND t.version=c.version AND t.security_version=:security AND t.revoked IS NULL AND t.expires>:now)))`;
@@ -139,7 +141,7 @@ export class ConnectionRegistry {
    await this.ids.console.proof(account,{current_password,otp});this.currentSession(account,session);
    return this.ids.store.transaction(()=>{
      const a=this.currentSession(account,session),prior=this.previous(account,session,action,p,operation);if(prior)return prior;
-     let r,secret;
+     let r,secret,metadataOnly=false;
      if(action==='connections.create'){
        if(!['chatgpt_oauth','generic_mcp'].includes(p.kind)||!text(p.label,80)||p.description!==undefined&&(!text(p.description,400)&&p.description!==''))fail();
        if(this.db.prepare("SELECT COUNT(*) n FROM identity_connections WHERE account_id=? AND state<>'revoked'").get(account).n>=policy.max_connections)fail('CONNECTION_QUOTA',409);
@@ -150,20 +152,24 @@ export class ConnectionRegistry {
        const keys=Object.keys(r);this.db.prepare(`INSERT INTO identity_connections(${keys.join(',')}) VALUES(${keys.map(()=>'?').join(',')})`).run(...keys.map(k=>r[k]));
      }else{
        r=this.row(account,p.connection_id);if(r.state==='revoked')fail('CONNECTION_REVOKED',409);
+       const before=[r.profile,r.callback,r.allow_submitted_revision_grant];
        if(action==='connections.update'){
          if(p.label!==undefined){if(!text(p.label,80))fail();r.label=p.label.trim();}if(p.description!==undefined){if(!text(p.description,400)&&p.description!=='')fail();r.description=p.description;}
          if(p.profile!==undefined)r.profile=p.profile;
          if(p.allow_submitted_revision_grant!==undefined){if(typeof p.allow_submitted_revision_grant!=='boolean')fail();r.allow_submitted_revision_grant=p.allow_submitted_revision_grant?1:0;}
          if(p.redirect_uri!==undefined){if(r.kind!=='chatgpt_oauth')fail();r.callback=exactChatgptCallback(p.redirect_uri,{isolated:this.config.isolated});}
        }
-       this.validateProfile(r,p);this.invalidate(r);r.version++;r.updated=seconds();r.health='never_used';r.last_error=null;
+       this.validateProfile(r,p);r.updated=seconds();
+       // A label/description edit changes no authority: keep grants, tokens, version and binding.
+       metadataOnly=action==='connections.update'&&p.ttl_seconds===undefined&&JSON.stringify([r.profile,r.callback,r.allow_submitted_revision_grant])===JSON.stringify(before);
+       if(!metadataOnly){this.invalidate(r);r.version++;r.health='never_used';r.last_error=null;
        // Editing a disabled connection keeps it disabled; only an explicit enable issues new credentials.
-       if(action==='connections.disable')r.state='disabled';else if(action==='connections.revoke')r.state='revoked';else if(action==='connections.enable'||action==='connections.update'&&r.state!=='disabled')r.state=r.kind==='generic_mcp'||r.callback?'ready':'draft';
+       if(action==='connections.disable')r.state='disabled';else if(action==='connections.revoke')r.state='revoked';else if(action==='connections.enable'||action==='connections.update'&&r.state!=='disabled')r.state=r.kind==='generic_mcp'||r.callback?'ready':'draft';}
        if(action==='connections.revoke')r.secret_cipher=null;
        if(['connections.rotate','connections.enable'].includes(action)&&r.kind==='chatgpt_oauth'){secret=randomSecret();r.secret_cipher=this.ids.seal(secret,account,`connection-client:${r.connection_id}`);}
-       this.db.prepare('UPDATE identity_connections SET label=?,description=?,profile=?,state=?,health=?,version=?,updated=?,callback=?,secret_cipher=?,allow_submitted_revision_grant=?,last_error=NULL WHERE account_id=? AND connection_id=?').run(r.label,r.description,r.profile,r.state,r.health,r.version,r.updated,r.callback,r.secret_cipher,r.allow_submitted_revision_grant,account,r.connection_id);
+       this.db.prepare('UPDATE identity_connections SET label=?,description=?,profile=?,state=?,health=?,version=?,updated=?,callback=?,secret_cipher=?,allow_submitted_revision_grant=?,last_error=? WHERE account_id=? AND connection_id=?').run(r.label,r.description,r.profile,r.state,r.health,r.version,r.updated,r.callback,r.secret_cipher,r.allow_submitted_revision_grant,r.last_error??null,account,r.connection_id);
      }
-     if(!['disabled','revoked'].includes(r.state)){
+     if(!metadataOnly&&!['disabled','revoked'].includes(r.state)){
        if(r.kind==='generic_mcp'){
          const ttl=p.ttl_seconds??policy.pat_default_ttl_seconds;if(!Number.isSafeInteger(ttl)||ttl<60||ttl>policy.pat_max_ttl_seconds)fail('INVALID_TOKEN_LIFETIME');
          secret=`mcp_pat_${randomSecret()}`;this.db.prepare('INSERT INTO identity_connection_tokens VALUES(?,?,?,?,?,?,?,?,NULL)').run(randomUUID(),account,r.connection_id,secretHash(secret),r.version,a.security_version,seconds(),seconds()+ttl);

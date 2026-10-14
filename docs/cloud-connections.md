@@ -142,8 +142,11 @@ Encrypted short-lived receipts are pruned; rotate if the secret was not saved.
 
 Rotation invalidates old access/refresh/PAT credentials immediately. Disable
 blocks all connection access; enable generates new credentials. Revoke is final
-for that logical record but never deletes memories. Callback/profile updates also
-invalidate old grants; refresh the client's tool definitions and authorize again.
+for that logical record but never deletes memories. Callback/profile/disclosure-grant
+updates also invalidate old grants; refresh the client's tool definitions and
+authorize again. Editing only the label or description keeps the current grants,
+PAT and version. Editing a disabled connection keeps it disabled; only Enable
+issues new credentials.
 After an account security-version change, recreate/rotate the connection binding
 from a fresh login. An old credential cannot inherit the new account version.
 

@@ -143,3 +143,20 @@ test('B-23: editing a disabled connection keeps it disabled and issues no creden
  const enabled=await x.execute(x.a,'connections.enable',{connection_id:id},'b23-enable');
  assert.equal(enabled.status,'ready');assert.ok(enabled.secret);
 });
+test('B-24: label/description edits keep grants, tokens and version; authority changes still rotate',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b24-create');
+ const id=c.connection.connection_id,resource=x.config.resource+'/generic';
+ const bind=()=>x.store.db.prepare("UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json='{}' WHERE connection_id=?").run(id);bind();
+ x.store.db.prepare("UPDATE identity_connections SET health='verified' WHERE connection_id=?").run(id);
+ // The console form always resends unchanged authority fields with the edit.
+ const renamed=await x.execute(x.a,'connections.update',{connection_id:id,label:'Renamed MCP',description:'notes',profile:'readonly',allow_submitted_revision_grant:false},'b24-rename');
+ assert.equal(renamed.secret,undefined);assert.equal(renamed.connection.version,1);assert.equal(renamed.connection.label,'Renamed MCP');assert.equal(renamed.connection.health,'verified');
+ assert.equal(x.registry.verifyPat(c.secret,resource).active,true);
+ const changed=await x.execute(x.a,'connections.update',{connection_id:id,profile:'memory_readwrite'},'b24-profile');
+ assert.equal(changed.connection.version,2);assert.ok(changed.secret);assert.equal(x.registry.verifyPat(c.secret,resource).active,false);
+});
+test('B-25: pending count uses the same unbound definition as the draft filter',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b25-create');
+ x.store.db.prepare("UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json=NULL WHERE connection_id=?").run(c.connection.connection_id);
+ const listed=x.registry.list(x.a.id,{});assert.equal(x.registry.list(x.a.id,{state:'draft'}).total,1);assert.equal(listed.counts.pending,1);
+});
