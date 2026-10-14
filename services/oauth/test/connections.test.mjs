@@ -131,3 +131,15 @@ test('B-26: setup guide matches registered OAuth client; expired or revoked gran
  x.store.db.prepare("DELETE FROM oauth_records WHERE id='synthetic-active'").run();assert.equal(detail().connection.active_grant_count,0);
  assert.ok(!JSON.stringify(detail()).includes(r.secret));
 });
+test('B-23: editing a disabled connection keeps it disabled and issues no credential',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b23-create');
+ const id=c.connection.connection_id,resource=x.config.resource+'/generic';
+ await x.execute(x.a,'connections.disable',{connection_id:id},'b23-disable');
+ const updated=await x.execute(x.a,'connections.update',{connection_id:id,label:'Renamed MCP'},'b23-update');
+ assert.equal(updated.status,'disabled');assert.equal(updated.secret,undefined);assert.equal(updated.connection.label,'Renamed MCP');
+ assert.equal(x.store.db.prepare('SELECT COUNT(*) n FROM identity_connection_tokens WHERE connection_id=? AND revoked IS NULL').get(id).n,0);
+ x.store.db.prepare('UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json=? WHERE connection_id=?').run('{}',id);
+ assert.equal(x.registry.verifyPat(c.secret,resource).active,false);
+ const enabled=await x.execute(x.a,'connections.enable',{connection_id:id},'b23-enable');
+ assert.equal(enabled.status,'ready');assert.ok(enabled.secret);
+});

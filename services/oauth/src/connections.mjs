@@ -157,7 +157,8 @@ export class ConnectionRegistry {
          if(p.redirect_uri!==undefined){if(r.kind!=='chatgpt_oauth')fail();r.callback=exactChatgptCallback(p.redirect_uri,{isolated:this.config.isolated});}
        }
        this.validateProfile(r,p);this.invalidate(r);r.version++;r.updated=seconds();r.health='never_used';r.last_error=null;
-       if(action==='connections.disable')r.state='disabled';else if(action==='connections.revoke')r.state='revoked';else if(action==='connections.enable'||action==='connections.update')r.state=r.kind==='generic_mcp'||r.callback?'ready':'draft';
+       // Editing a disabled connection keeps it disabled; only an explicit enable issues new credentials.
+       if(action==='connections.disable')r.state='disabled';else if(action==='connections.revoke')r.state='revoked';else if(action==='connections.enable'||action==='connections.update'&&r.state!=='disabled')r.state=r.kind==='generic_mcp'||r.callback?'ready':'draft';
        if(action==='connections.revoke')r.secret_cipher=null;
        if(['connections.rotate','connections.enable'].includes(action)&&r.kind==='chatgpt_oauth'){secret=randomSecret();r.secret_cipher=this.ids.seal(secret,account,`connection-client:${r.connection_id}`);}
        this.db.prepare('UPDATE identity_connections SET label=?,description=?,profile=?,state=?,health=?,version=?,updated=?,callback=?,secret_cipher=?,allow_submitted_revision_grant=?,last_error=NULL WHERE account_id=? AND connection_id=?').run(r.label,r.description,r.profile,r.state,r.health,r.version,r.updated,r.callback,r.secret_cipher,r.allow_submitted_revision_grant,account,r.connection_id);
