@@ -4,7 +4,7 @@ import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
 export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
-import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
 export function originalMatchKind(query,memory){
@@ -131,6 +131,15 @@ export class MemorySearch {
     }
     const reserved=authority?.terms||[];
     const plan=makeQueryPlan(query,groups.filter(g=>!g.some(term=>reserved.includes(normalizeSearch(term)))),limited);
+    // Names the query mentions must match exactly even where ordinary words may be relaxed. This
+    // includes names of deleted projects: their aliases never expand, and must not be dropped either.
+    const names=new Set(reserved.filter(term=>containsTerm(query,term)));
+    for(const group of groups)if(group.some(term=>containsTerm(query,term)))for(const term of group)names.add(normalizeSearch(term).trim());
+    if(!isWebReader(options.auth))for(const [table,name] of [['projects','name'],['tasks','title']])
+      for(const row of this.db.prepare(`SELECT ${name} name,aliases_json FROM ${table} WHERE user_id=?
+        AND (memory_search_contains(?,${name}) OR EXISTS(SELECT 1 FROM json_each(aliases_json) a WHERE memory_search_contains(?,a.value))) LIMIT 64`).all(userId,query,query))
+        for(const term of [row.name,...JSON.parse(row.aliases_json)])if(containsTerm(query,term))names.add(normalizeSearch(term).trim());
+    plan.required=[...names].filter(term=>term.length>=2);
     const known=reserved.some(term=>containsTerm(query,term));
     if(known){
       const expansion=this.entities.expand(auth,query,scope,options);
@@ -143,10 +152,13 @@ export class MemorySearch {
     if(searchTokens(query).length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
     const filter=memoryScopeSql(scope,options);
     try {
-      let plan=this.plan(userId,query,scope,options);
+      let plan;
+      // Alias expansion is optional evidence: a bad alias row must not disable the whole index.
+      try{plan=this.plan(userId,query,scope,options);}catch(error){if(transientSql(error))throw error;plan=makeQueryPlan(query,[],true);}
       let tokens=[...new Set(plan.queries.flatMap(q=>queryTokens(q).length?queryTokens(q):searchTokens(q)))];
       if(tokens.length>256){plan=makeQueryPlan(query,[],true);tokens=queryTokens(query).length?queryTokens(query):searchTokens(query);}
       if(!tokens.length)return {rows:[],truncated:false,plan};
+      const variants=[...new Set(tokens.flatMap(wordVariants))];if(variants.length<=512)tokens=variants;
       const json=JSON.stringify(plan);
       const rows=this.db.prepare(`SELECT m.*,memory_search_relevance(m.content,m.topic,?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
