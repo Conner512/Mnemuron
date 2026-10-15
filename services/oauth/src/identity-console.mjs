@@ -3,6 +3,7 @@ import {generateSecret,generateURI,verify} from 'otplib';
 import {BoundaryError,secretHash,randomSecret,seconds} from '../../../shared/oauth-common.mjs';
 import {passwordRecord} from './identity-repository.mjs';
 import {fingerprint} from '../../../server/lib/console/state.mjs';
+import {storedClient} from './session-client.mjs';
 const fail=(code='INVALID_CONSOLE_INPUT',status=400)=>{throw new BoundaryError(status,code);};
 const input=(p,keys)=>{if(!p||typeof p!=='object'||Array.isArray(p)||Object.keys(p).some(k=>!keys.includes(k)))fail();};
 const identifier=value=>{if(typeof value!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(value))fail();return value;};
@@ -28,7 +29,10 @@ export class IdentityConsole {
       WHEN a.status='provisioning' THEN 'provisioning' ELSE 'complete' END maintenance_state
     FROM identity_accounts a LEFT JOIN identity_console_roles r ON r.account_id=a.account_id ORDER BY a.created DESC LIMIT 500`).all();}
   invitations(actor){this.requireOperator(actor);return this.db.prepare('SELECT invitation_id,batch_id,issuer,created,expires,state FROM identity_invitations ORDER BY created DESC,rowid DESC LIMIT 1000').all().map(r=>({...r,effective_state:['issued','reserved'].includes(r.state)&&r.expires<=seconds()?'expired':r.state}));}
-  sessions(account,current){return this.db.prepare("SELECT digest,purpose,created,expires FROM identity_sessions WHERE account_id=? AND purpose='console' AND expires>? ORDER BY created DESC").all(account,seconds()).map(r=>({session_id:r.digest,purpose:r.purpose,created:r.created,expires:r.expires,current:r.digest===current}));}
+  // Each session shows only the snapshot stored when it was signed in; sessions from before that existed stay unknown
+  // (client_recorded false). The browser making this request is never used to describe another session.
+  sessions(account,current){return this.db.prepare("SELECT s.digest,s.purpose,s.created,s.expires,c.device,c.browser,c.os FROM identity_sessions s LEFT JOIN identity_session_clients c ON c.digest=s.digest WHERE s.account_id=? AND s.purpose='console' AND s.expires>? ORDER BY s.created DESC").all(account,seconds()).map(r=>{
+    const {recorded,...client}=storedClient(r.device==null?null:r);return {session_id:r.digest,purpose:r.purpose,created:r.created,expires:r.expires,current:r.digest===current,...client,client_recorded:recorded};});}
   grants(subject){return this.db.prepare("SELECT id,payload,expires FROM oauth_records WHERE model='Grant' AND json_extract(payload,'$.accountId')=? AND expires>?").all(subject,seconds()).map(r=>{const p=JSON.parse(r.payload);
     const scopes=[String(p.openid?.scope||''),...Object.values(p.resources||{}).map(String)].flatMap(s=>s.split(' ')).filter(Boolean);
     return {grant_id:r.id,client_id:p.clientId,expires:r.expires,created:Number.isSafeInteger(p.iat)?p.iat:null,scopes:[...new Set(scopes)]};});}

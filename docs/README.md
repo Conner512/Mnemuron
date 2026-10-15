@@ -25,7 +25,6 @@ Start with the local API, then choose an adapter. A deployment guide or versione
 - [Resume injection ACK](resume-injection-ack-v0.1.md) and [ChatGPT MCP Delivery Receipt](chatgpt-mcp-delivery-receipt-v0.1.4.md): adapter-specific delivery and completion contracts. The ChatGPT receipt flow is distinct from native adapter injection attempts.
 - [Checkpoints](checkpoint-v0.1.md), [automatic structured memory](automatic-structured-memory-v0.1.md), and [memory retrieval/lifecycle](structured-memory-retrieval-lifecycle-v0.1.md): derived context and explicit memory records.
 - [Canonical reconciliation](canonical-task-reconciliation-v0.1.md): proposal versions, reconciliation policy, and authoritative task updates.
-- [Sensitivity levels removed](sensitivity-levels-removed.md): every memory is treated the same; ChatGPT reads follow grants or the account-level read-all switch, and model egress is gated only by its approval switch.
 
 ## Operations
 
@@ -49,3 +48,5 @@ Version labels identify individual contracts or work packages. They are not a si
 ## Sharing safely
 
 [Publication policy](publication-policy.md) covers source, fixtures, reports, and historical Git content. Keep runtime data, personal memory, credentials, and environment-specific evidence outside public contributions.
+
+- [Release review and recovery](release-review.md) and [complete feature matrix](release-feature-matrix.md): candidate scope, verification, upgrade/rollback and remaining gates.

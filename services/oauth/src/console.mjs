@@ -1,11 +1,18 @@
 import QRCode from 'qrcode';
+import {createHash} from 'node:crypto';
+import {auditQuery,auditKind,auditGroup,auditUnclassified,auditGroupFilter} from '../../../shared/console-queries.mjs';
 import {BoundaryError,parseForm,readBody,sendJson} from '../../../shared/oauth-common.mjs';
-import {routeTitle,sendPage,label,escapeHtml,serveAsset} from '../../../web/console/render.mjs';
+import {routeTitle,sendPage,label,escapeHtml,serveAsset,removedPages} from '../../../web/console/render.mjs';
 import {icon} from '../../../web/console/visuals.mjs';
 import {text} from '../../../web/console/catalog.mjs';
+import {clientSnapshot} from './session-client.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
+import {CONSOLE_LIFECYCLE_CONFIRMS} from '../../../shared/console-contract.mjs';
 
-const field=(name,key,{type='text',autocomplete='off',pattern,maxlength=1024,value=''}={})=>`<label for="${name}" data-i18n="${key}">${text(key)}</label><input id="${name}" name="${name}" type="${type}" autocomplete="${autocomplete}" maxlength="${maxlength}"${pattern?` pattern="${pattern}" inputmode="numeric"`:''} value="${escapeHtml(value)}" required>${type==='password'?`<button type="button" data-password-toggle="${name}" data-i18n="showPassword">${text('showPassword')}</button>`:''}`;
+// A one-time-code field stays one submitted input; data-otp lets the shared asset draw six boxes over it.
+const otpHint=name=>`<small id="${name}-hint" class="field-hint" data-i18n="otpHint">${text('otpHint')}</small>`;
+const field=(name,key,{type='text',autocomplete='off',pattern,maxlength=1024,value=''}={})=>{const otp=autocomplete==='one-time-code';
+  return `<label for="${name}" data-i18n="${key}">${text(key)}</label><input id="${name}" name="${name}" type="${type}" autocomplete="${autocomplete}" maxlength="${maxlength}"${pattern?` pattern="${pattern}" inputmode="numeric"`:''}${otp?` data-otp aria-describedby="${name}-hint"`:''} value="${escapeHtml(value)}" required>${otp?otpHint(name):''}${type==='password'?`<button type="button" data-password-toggle="${name}" data-i18n="showPassword">${text('showPassword')}</button>`:''}`;};
 const form=(action,csrf,fields,submit='continue')=>`<form method="post" action="${action}"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}">${fields}<button class="primary" type="submit" data-i18n="${submit}">${text(submit)}</button></form>`;
 const steps=current=>`<ol class="auth-steps" data-i18n-aria-label="registrationStepsLabel" aria-label="${text('registrationStepsLabel')}">${['stepInvitation','stepAccount','stepTotp','stepRecovery'].map((key,i)=>`<li${i===current?' aria-current="step"':i<current?' data-done':''}>${label(key)}</li>`).join('')}</ol>`;
 const redirect=(response,to)=>{response.writeHead(303,{location:to,'cache-control':'no-store'});response.end();};
@@ -74,7 +81,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     throw new BoundaryError(404,'NOT_FOUND');
   }
   if(pathname.startsWith('/register')) {
-    if(!config.login.registration_enabled){
+    if(config.identity.owner_account_id||!config.login.registration_enabled){
       if(pathname==='/register'&&request.method==='GET')return show('register',`<div class="policy-box" data-policy="registration_disabled">${label('registrationDisabled','p')}</div><a href="/login">${label('signIn')}</a>`);
       throw new BoundaryError(403,'REGISTRATION_DISABLED');
     }
@@ -129,14 +136,17 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       const subject=await ids.authenticate(body.get('username'),body.get('password'),body.get('otp'));
       if(!subject)throw new BoundaryError(401,'LOGIN_FAILED');
       await invalidateAuthorization(subject);
-      const s=ids.newSession('console',{accountId:ids.account(subject).account_id});ids.revokeSession(old);
+      const s=ids.newSession('console',{accountId:ids.account(subject).account_id,client:clientSnapshot(request.headers['user-agent'])});ids.revokeSession(old);
       const previous=cookie(request,config,'console');if(previous)ids.revokeSession(previous);
       setCookie(response,config,'console',s.token,config.identity.console_session_ttl_seconds);redirect(response,'/app');return true;
     }
   }
+  // Removed web pages: old bookmarks go to the overview (sign-in first when needed); nothing is served for them.
+  if(request.method==='GET'&&removedPages.some(p=>pathname===`/app/${p}`||pathname===`/app/${p}/`)){redirect(response,'/app');return true;}
   const token=cookie(request,config,'console');let session;
   try{session=ids.session(token,'console');}catch(error){if(routeTitle(pathname)&&request.method==='GET'){redirect(response,'/login');return true;}throw error;}
   const account=ids.byId(session.account_id),principal=ids.principal(account.subject);
+  if(config.identity.owner_account_id&&account.account_id!==config.identity.owner_account_id)throw new BoundaryError(403,'OWNER_REQUIRED');
   if(routeTitle(pathname)&&request.method==='GET') {
     sendPage(response,{title:routeTitle(pathname),page:routeTitle(pathname),account,csrf:ids.formCsrf(token,'console')});return true;
   }
@@ -146,9 +156,9 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   if(pathname==='/console-api/capabilities'&&request.method==='GET'){
     let core;try{core=await coreFor(account.subject).view('capabilities',{});}catch{core={writable:false,actions:[],reason:'CONSOLE_CORE_UNAVAILABLE'};}
     ids.session(token,'console');
-    const operator=ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
+    const operator=config.identity.owner_account_id?account.account_id===config.identity.owner_account_id:ids.console.operator(account.account_id),allowed_actions=consoleAllowedActions(config,core,operator);
     sendJson(response,200,{...core,actions:(core.actions||[]).filter(action=>allowed_actions.includes(action)),allowed_actions,writable:allowed_actions.some(action=>(core.actions||[]).includes(action)),
-      enabled:config.identity.console_operations===true,operator,resource:config.resource,
+      enabled:config.identity.console_operations===true,operator,owner_mode:!!config.identity.owner_account_id,resource:config.resource,
       account_id:account.account_id,management:consoleManagement(config),connection_management:ids.connections.capabilities(),invitation_batch_limit:config.identity.invitation_batch_limit,
       maintenance_enabled:identityMaintenance?.enabled()===true,recovery_configured:!!config.identity.recovery_policy&&!identityMaintenance?.external()});return true;
   }
@@ -162,14 +172,35 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const action=body.get('action'),operation_id=body.get('operation_id');
     store.limit(`console:write:${account.account_id}`,60,60);
     let result;
-    if(action.startsWith('connections.'))result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);
+    if(action.startsWith('connections.')){if(config.identity.owner_account_id){const state=await coreFor(account.subject).view('system-health',{});ids.session(token,'console');if(state.owner?.flags?.connections!==true)throw new BoundaryError(403,'FEATURE_DISABLED');}result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);}
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
-    else if(action==='devices.revoke'){
-      // Revoking an agent key is a security change: fresh factors here, then only the target goes to Core.
-      if(Object.keys(payload).some(key=>!['agent_instance_id','current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+    else if(['features.save','schedule.save','processing.start','processing.resume'].includes(action)){
       await ids.console.reauthenticate(account.account_id,session,payload);
-      result=await coreFor(account.subject).action({action,operation_id,payload:{agent_instance_id:payload.agent_instance_id}});
+      const {current_password,otp,...safe}=payload;
+      result=await coreFor(account.subject).action({action,operation_id,payload:safe});
+    }
+    else if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){
+      // Deleting, restoring or merging a project changes what every agent can read and write: fresh password + OTP here,
+      // then only the confirm fields go to Core (factors never leave the BFF). Previews need no factors.
+      const fields=CONSOLE_LIFECYCLE_CONFIRMS[action];
+      if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      // A stale or expired preview is reported before the factors are checked, so it never consumes a re-authentication
+      // attempt or an OTP; the confirm still rechecks everything in its own transaction.
+      const kind={'projects.lifecycle_delete':'delete','projects.lifecycle_restore':'restore','projects.merge':'merge'}[action];
+      const check=await coreFor(account.subject).view('lifecycle-preview-check',{preview_id:String(payload.preview_id??''),action:kind,operation_id,...(kind==='delete'?{confirm_name:String(payload.confirm_name??'')}:{})});
+      if(check.current!==true)throw new BoundaryError(409,['PREVIEW_CHANGED','PREVIEW_EXPIRED','CONFIRMATION_MISMATCH'].includes(check.error_code)?check.error_code:'PREVIEW_CHANGED');
+      await ids.console.reauthenticate(account.account_id,session,payload);
+      result=await coreFor(account.subject).action({action,operation_id,payload:Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]))});
+    }
+    else if(['devices.revoke','devices.register','devices.rotate','retention.prune'].includes(action)){
+      // Revoking an agent key is a security change: fresh factors here, then only the target goes to Core.
+      const fields={'devices.revoke':['agent_instance_id'],'devices.register':['label','agent_id','device_id','access'],'devices.rotate':['credential_id'],'retention.prune':['confirmed','batch_size']}[action];
+      if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      await ids.console.reauthenticate(account.account_id,session,payload);
+      const corePayload=Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]));
+      if(['devices.register','devices.rotate'].includes(action))corePayload.receipt_session=createHash('sha256').update(token).digest('hex');
+      result=await coreFor(account.subject).action({action,operation_id,payload:corePayload});
     }
     else result=await coreFor(account.subject).action({action,operation_id,payload});
     if(result.login_required){await invalidateAuthorization();setCookie(response,config,'console','',0);}
@@ -200,11 +231,45 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       historical_grants:grants.filter(g=>g.client_id!==config.chatgpt_client.client_id&&!ids.connections.clientRow(g.client_id)),
       core_connections:core.connections,system_unavailable:core.unavailable===true,physical_device_verified:false});return true;
   }
+  // One stream per request (source=core|identity, default core), each with its own offset: the two are never merged
+  // into one page or one continuation. See auditPage (server/lib/console/audit.mjs) for the Core projection.
   if(pathname==='/console-api/audit'&&request.method==='GET') {
-    const core=await coreFor(account.subject).view('audit',Object.fromEntries(url.searchParams));ids.session(token,'console');
-    const offset=Number(url.searchParams.get('offset')??0),limit=Number(url.searchParams.get('limit')??50);
-    const rows=ids.db.prepare('SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?').all(account.account_id,limit+1,offset);
-    sendJson(response,200,{entries:rows.slice(0,limit),core_entries:core.entries,offset,limit,next_offset:rows.length>limit||core.next_offset!==null?offset+limit:null,read_only:true});return true;
+    let q;try{q=auditQuery(Object.fromEntries(url.searchParams));}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}
+    if(q.group){
+      // Merge independently filtered streams with per-stream cursors. Never merge arbitrary current pages,
+      // never trust an account identifier from a cursor, and recheck session after the awaited Core read.
+      let positions=[0,0];
+      if(q.cursor){try{positions=JSON.parse(Buffer.from(q.cursor,'base64url').toString('utf8'));}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}}
+      if(q.offset!==0||!Array.isArray(positions)||positions.length!==2||positions.some(n=>!Number.isSafeInteger(n)||n<0||n>1000000))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const {group,limit}=q,filters={group,limit,offset:positions[0],...Object.fromEntries(['action','outcome','from','to'].filter(k=>q[k]).map(k=>[k,q[k]]))};
+      const core=await coreFor(account.subject).view('audit',filters);ids.session(token,'console');
+      const f=auditGroupFilter(group),conditions=['account_id=?',f.sql],values=[account.account_id,...f.values];
+      for(const k of ['action','outcome'])if(q[k]){conditions.push(`${k}=?`);values.push(q[k]);}
+      if(q.from){conditions.push('created>=?');values.push(Math.ceil(Date.parse(q.from)/1000));}
+      if(q.to){conditions.push('created<=?');values.push(Math.floor(Date.parse(q.to)/1000));}
+      const rows=ids.db.prepare(`SELECT audit_id,action,outcome,created FROM identity_audit WHERE ${conditions.join(' AND ')} ORDER BY created DESC,audit_id LIMIT ? OFFSET ?`).all(...values,limit+1,positions[1]);
+      const identity=rows.slice(0,limit).map(e=>({...e,source:'identity',kind:auditKind(e.action),group:auditGroup(e.action),unclassified:auditUnclassified(e.action)}));
+      const stamp=e=>e.source==='identity'?e.created*1000:Date.parse(e.created_at);
+      const entries=[...core.entries.map(e=>({...e,source:'core'})),...identity].sort((a,b)=>stamp(b)-stamp(a)||a.source.localeCompare(b.source)||a.audit_id.localeCompare(b.audit_id)).slice(0,limit);
+      const consumed=[entries.filter(e=>e.source==='core').length,entries.filter(e=>e.source==='identity').length];
+      const more=core.entries.length>consumed[0]||core.next_offset!=null||identity.length>consumed[1]||rows.length>limit;
+      const next=positions.map((n,i)=>n+consumed[i]);
+      const refs=new Set(entries.filter(e=>e.source==='core').flatMap(e=>[e.target_type==='memory'?e.target_id:null,...(e.query?.result_refs||[])]).filter(Boolean));
+      const actors=new Set(entries.filter(e=>e.source==='core').map(e=>e.credential_id));
+      sendJson(response,200,{source:'grouped',group,entries,limit,next_cursor:more?Buffer.from(JSON.stringify(next)).toString('base64url'):null,
+        credentials:auditConnections(ids,account.account_id,Object.fromEntries(Object.entries(core.credentials||{}).filter(([id])=>actors.has(id)))),
+        memories:Object.fromEntries(Object.entries(core.memories||{}).filter(([id])=>refs.has(id))),memory_titles_truncated:core.memory_titles_truncated===true,read_only:true});return true;
+    }
+    const {source='core',...filters}=q,{offset,limit}=filters;
+    if(source==='core'){
+      const core=await coreFor(account.subject).view('audit',filters);ids.session(token,'console');
+      sendJson(response,200,{...core,source:'core',credentials:auditConnections(ids,account.account_id,core.credentials),read_only:true});return true;
+    }
+    const conditions=['account_id=?'],values=[account.account_id];
+    for(const key of ['action','outcome'])if(filters[key]){conditions.push(`${key}=?`);values.push(filters[key]);}
+    if(filters.from){conditions.push('created>=?');values.push(Math.ceil(Date.parse(filters.from)/1000));}if(filters.to){conditions.push('created<=?');values.push(Math.floor(Date.parse(filters.to)/1000));}
+    const rows=ids.db.prepare(`SELECT audit_id,action,outcome,created FROM identity_audit WHERE ${conditions.join(' AND ')} ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?`).all(...values,limit+1,offset);
+    sendJson(response,200,{source:'identity',entries:rows.slice(0,limit).map(r=>({...r,kind:auditKind(r.action)})),offset,limit,next_offset:rows.length>limit?offset+limit:null,read_only:true});return true;
   }
   if(pathname==='/console-api/invitations'&&request.method==='GET'){
     if(!consoleManagement(config).invitations)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{invitations:ids.console.invitations(account.account_id),batch_limit:config.identity.invitation_batch_limit});return true;
@@ -213,12 +278,34 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     if(!consoleManagement(config).accounts)throw new BoundaryError(403,'BLOCKED_POLICY');sendJson(response,200,{accounts:ids.console.listAccounts(account.account_id),maintenance_enabled:identityMaintenance?.enabled()===true});return true;
   }
   if(['/console-api/export','/console-api/operation'].includes(pathname)&&config.identity.console_operations!==true)throw new BoundaryError(403,'BLOCKED_POLICY');
-  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|operation)$/.test(pathname)) {
+  if(pathname==='/console-api/login-history'&&request.method==='GET'){
+    const p=Object.fromEntries(url.searchParams);let q;try{if(Object.keys(p).some(k=>!['limit','offset'].includes(k)))throw new Error();q=auditQuery(p);}catch{throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');}
+    const rows=ids.db.prepare("SELECT audit_id,action,outcome,created FROM identity_audit WHERE account_id=? AND action IN ('account.login','account.login.failed') ORDER BY created DESC,rowid DESC LIMIT ? OFFSET ?").all(account.account_id,q.limit+1,q.offset);
+    sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
+  }
+  if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
+  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|entities|operation)$/.test(pathname)) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     const result=await core.view(view,Object.fromEntries(url.searchParams));
     ids.session(token,'console'); // Do not send a response after revocation raced an awaited Core read.
+    if(['system-health','system-version','backups'].includes(view)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
     ids.audit(account.account_id,`console.read.${view}`);sendJson(response,200,result);return true;
   }
   if(pathname.startsWith('/console-api/')&&request.method!=='GET')throw new BoundaryError(403,'BLOCKED_POLICY');
   throw new BoundaryError(404,'NOT_FOUND');
+}
+
+// Current connection facts for credentials recorded in this owner's Core audit page: an exact owner-scoped mapping from
+// the credential to a personal connection (any version, revoked or not) or to the account's system Console/Web binding.
+// Unmapped credentials stay unmapped; nothing is inferred from agent names or times. Labels are current, not historical.
+function auditConnections(ids,accountId,credentials={}){
+  const out=Object.create(null),clip=v=>{const c=[...String(v??'')];return c.length>80?`${c.slice(0,79).join('')}…`:c.join('');};
+  const mapped=ids.db.prepare('SELECT c.connection_id,c.version,c.revoked,n.label,n.kind,n.state FROM identity_connection_credentials c LEFT JOIN identity_connections n ON n.connection_id=c.connection_id AND n.account_id=c.account_id WHERE c.account_id=? AND c.credential_id=?');
+  const system=ids.db.prepare('SELECT purpose FROM identity_bindings WHERE account_id=? AND credential_id=?');
+  for(const [id,facts] of Object.entries(credentials||{}).slice(0,100)){
+    const c=mapped.get(accountId,id),b=c?null:system.get(accountId,id);
+    out[id]={...facts,connection:c?{type:'personal',connection_id:c.connection_id,credential_version:c.version,credential_revoked:c.revoked===1,
+      ...(c.label!=null?{label:clip(c.label),kind:c.kind,state:c.state}:{missing:true})}:b?{type:'system',purpose:b.purpose}:{type:'unmapped'}};
+  }
+  return out;
 }

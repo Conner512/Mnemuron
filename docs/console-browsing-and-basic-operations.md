@@ -59,7 +59,7 @@ false. Unknown keys, arrays, nulls and non-boolean values are rejected.
 
 | Group | Permitted actions when explicitly enabled |
 | --- | --- |
-| `memory` | Create, correct, retract, classify and set Web visibility for the current owner's memories |
+| `memory` | Create, correct, retract, classify, set sensitivity and Web visibility for the current owner's memories |
 | `security` | Change own password/TOTP with required proofs; revoke own sessions |
 | `oauth` | Revoke own application grants |
 
@@ -67,8 +67,8 @@ This policy does not enable recovery-code rotation, recovery workflows, paid mod
 configuration/testing, scheduling, vector rebuilding, Agent credential issuance,
 imports/exports or role grants. Invitation/account administration retains its
 independent operator policy. ChatGPT MCP retains read-only credentials and tools;
-console memory writes do not grant Web access to every record. Explicit visibility and
-revision checks still apply.
+console memory writes do not grant Web access to every record. Explicit visibility,
+revision and sensitivity checks still apply.
 
 `/console-api/capabilities` returns `allowed_actions`, the intersection of server
 policy, account role and actual Core credential capabilities. Hiding a button is

@@ -13,7 +13,7 @@ This opt-in extension adds memory operations to the existing OAuth MCP gateway. 
 
 The deployment profile, current account, OAuth scope, immutable connection binding, internal credential and target visibility all constrain an operation. The model cannot supply owner, role, confirmation, key, URL, SQL or filesystem authority. OAuth tokens are never forwarded to Core. There is no shared mutable owner credential.
 
-The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned, currently Web-visible record, its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history. Supersede and retract apply only to records with an explicit grant for the current revision. The account-level ChatGPT `read_all` switch widens reads only and never makes other records changeable.
+The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned, currently Web-visible record, its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history.
 
 The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and `GET /v1/cloud-memory/operations/:operation_id?connection_id=...`. Keep these behind the existing loopback Core boundary; no new public Core route is required.
 
@@ -21,7 +21,7 @@ The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and 
 
 Save and correction require an explicit `cloud_read` value:
 
-- `keep_private`: no Web grant; result and receipt contain metadata only, never the submitted body. When the owner turns on the account-level ChatGPT `read_all` switch, the record is readable like every other record (there are no sensitivity levels).
+- `keep_private`: an explicit, owner-scoped Web denial, overriding account `read_all`, public classification and grants. Result and receipt contain metadata only, never the submitted body. The denial survives metadata/lifecycle changes and local corrections; only an explicit, reviewed current-version allow can release it.
 - `allow_submitted_revision`: disabled unless explicitly approved in the deployment, connection binding and OAuth consent. It grants **only the final version submitted by this operation**. The existing grant is account-level: other authorized cloud readers of this account may read it too. It is not a current-connection-only grant. It cannot grant arbitrary existing records, copy old sources, or change sensitive content to public. Secret records remain inaccessible.
 
 Until that deployment policy is approved, use `allow_submitted_revision_grant: false`. The permission failure is explicit; private saving still works. Changes to content, privacy or lifecycle invalidate old version grants.
@@ -72,7 +72,11 @@ Phase A supports the existing operator-registered OAuth client only. A trusted c
 
 ## Additive migration and downgrade
 
-Core adds `cloud_memory_bindings` and `cloud_memory_operations`; OAuth adds `identity_cloud_bindings` and reuses the existing encrypted durable operation queue. Existing memory IDs, subjects, users, revisions and sources are not rewritten. All new tables have explicit owner classifications.
+Core adds `cloud_memory_bindings`, `cloud_memory_operations` and `memory_web_denials`; OAuth adds `identity_cloud_bindings` and reuses the existing encrypted durable operation queue. Existing memory IDs, subjects, users, revisions and sources are not rewritten. All new tables have explicit owner classifications.
+
+The private-denial migration atomically backfills earlier committed `keep_private` choices and their local replacements, except records with a valid current explicit grant. A one-time settings marker prevents a later reviewed allow from being undone on restart. Original commit-snapshot receipts are not rewritten: an old receipt may still say `cloud_readable=true` even though present access is denied. Current reads, not historical receipts, determine current visibility. Portable exports preserve denials with optional `cloud_private: true`; imports validate that boolean and preserve the restriction. Legacy records without the field retain their existing import semantics.
+
+Do not roll back Core to code that ignores `memory_web_denials` while cloud reads remain enabled. Such a rollback would reopen the original privacy defect; retain the corrected enforcement layer or block cloud traffic until it is restored. The migration neither deletes original data nor changes the account-wide read policy.
 
 To disable writes without losing data: set gateway back to `readonly`, remove the four write-tool config entries, remove `memory:write` from advertised/requested scopes, disable all cloud flags, and revoke dedicated cloud credentials/grants through the existing private maintenance boundary. Never rotate or replace old readonly credentials just to enable or disable this feature. Keep receipts and history.
 
@@ -88,4 +92,4 @@ Protocol references checked during implementation: [OpenAI authentication](https
 
 ## 中文摘要
 
-本批只做 OAuth 云端记忆新增、版本化修订、撤回与持久回执。默认和旧连接仍只读；必须单独开启配置、为明确选定的账户供应独立写凭证，并完成新的 OAuth 授权。保存不等于允许外发，未批准自授权读取时保持私有。原记忆和 handoff 门禁保留，不增加连接管理 UI、通用令牌或模拟成功；上线、真实客户端验收和生产就绪分别记录。
+本批只做 OAuth 云端记忆新增、版本化修订、撤回与持久回执。默认和旧连接仍只读；必须单独开启配置、为明确选定的账户供应独立写凭证，并完成新的 OAuth 授权。保存不等于允许外发；明确选择“保持私有”优先于账户“读取全部”，本地修订和导入导出保留限制，只有审核当前版本后明确允许才能解除。旧私有选择会一次性回补，原提交回执保留历史快照而不伪装成当前权限。原记忆和 handoff 门禁保留，不增加连接管理 UI、通用令牌或模拟成功；上线、真实客户端验收和生产就绪分别记录。

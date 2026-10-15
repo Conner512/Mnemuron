@@ -18,19 +18,17 @@ profiles only need `enabled:false`. Enabled profiles require:
   `batch_size` (1–128), `concurrency` (1–16), `daily_requests`;
 - `retry`: `max_attempts` (1–10), `base_ms`, `max_ms`, optional `repair_once`;
 - `capabilities.native_schema`: explicit boolean, not an inferred capability;
-- `egress`: `approved`, exact `origins`, exact resolved `addresses`, `allow_private`
-  and a separate `query_approved` boolean. A `sensitivities` list from an older file is
-  accepted and ignored: sensitivity levels were removed, so every memory is eligible
-  once egress is approved.
+- `egress`: `approved`, exact `origins`, exact resolved `addresses`, `allow_private`,
+  permitted `sensitivities` and separate `query_approved` booleans.
 
 No real vendor, model, endpoint or key is selected by default. `mock` requires
 explicit test mode and synthetic data, and never falls back in production. Model
 errors contain bounded codes, not response pages or source text. Source text is
 data, never executable instructions; output has no tool or configuration actions.
 The embedding policy applies to document **text sent to the model**, not only vectors.
-There are no per-memory sensitivity levels: with egress approved, any memory may be
-sent to the configured provider. Keep egress off for a provider you do not trust with
-all of your memories.
+`secret` never enters a provider or summary. Unlabelled existing memories default
+to `sensitive`, requiring explicit approval of that class. Local maintenance can
+set the policy label; models cannot downgrade it.
 
 The embedder additionally requires `dimensions` (explicitly fixed), `distance`
 (`Cosine`, `Dot`, `Euclid`), `query_prefix`, `document_prefix`, `normalization`
@@ -159,6 +157,7 @@ read-only token. No maintenance scopes are added to existing credentials.
 | `worker-once` | `--user OWNER --max-jobs 100`; runs bounded ready jobs |
 | `worker-loop` | `--user OWNER`; explicit separate process, configurable poll interval; no service installed |
 | `category-set` | `--user OWNER --memory-id ID --value CATEGORY`; explicit locked override |
+| `sensitivity-set` | `--user OWNER --memory-id ID --value secret`; invalidate derived outputs |
 | `summaries` | `--user OWNER --type user`; exact scope read, no organization side effects |
 | `sources` | `--user OWNER --task-id ID --workstream-id ID --session-id ID`; bounded manifest, not full original |
 | `source-read` | `--user OWNER --event-id ID --offset 0 --limit 4096`; exact Unicode source page |

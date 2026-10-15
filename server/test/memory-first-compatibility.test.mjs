@@ -58,13 +58,13 @@ test('C-08: transient query errors keep readiness; actual broken projection requ
   f.s.db.exec('DROP TABLE memory_search_fts');assert.throws(()=>f.s.queryMemories(f.auth,{query:'Transient'}),e=>e.errorCode==='SEARCH_UNAVAILABLE');
   f.s.memorySearch.initialize();assert.equal(f.s.memorySearch.status().state,'ready');
 });
-test('S-08: lifecycle changes and category overrides invalidate current derived results immediately',async t=>{
+test('S-08: privacy changes and category overrides invalidate current derived results immediately',async t=>{
   const f=fixture(t),memory=f.save('Sensitive synthetic source'),model=organizer(),jobs=new MemoryJobs(f.s),auth=admin(f);
   scheduleLibrary(f.s,jobs,{userId:f.auth.user_id,organizer:model,taxonomy,type:'summary',includeOpen:true});await new MemoryWorker(f.s,jobs,model).drain();
   assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,2);
   f.s.derivedMemory.setCategory(auth,memory.memory_id,'preferences',taxonomy);assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,0);
   scheduleLibrary(f.s,jobs,{userId:f.auth.user_id,organizer:model,taxonomy,type:'summary',includeOpen:true});await new MemoryWorker(f.s,jobs,model).drain();
-  f.s.retractMemory(f.auth,memory.memory_id);assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,0);
+  f.s.memorySources.setSensitivity(auth,memory.memory_id,'secret');assert.equal(f.s.memorySummaries(f.auth,{scope:'user'}).results.length,0);
 });
 test('C-02 C-08: additive HTTP reads enforce source scopes and return actionable unavailable codes',async t=>{
   const f=fixture(t),app=createMnemuronApp({databasePath:f.root+'/http.sqlite3'}),address=await app.listen({host:'127.0.0.1',port:0});t.after(()=>app.close());

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { createPrivateKey } from "node:crypto";
 import {validateConnectionPolicy} from './connections.mjs';
+import {validateSecurityHeaders} from '../../../shared/security-headers.mjs';
 import {
   canonicalUrl, exactList, boundedInteger, requireConfig, readPrivate, readSecret,
   OAUTH_SCOPES, RESOURCE_SCOPES, publicOriginMode,validateCloudPolicy,resourceScopesFor,oauthScopesFor,
@@ -11,6 +12,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   requireConfig(isolated || !!process.release.lts, "production requires a supported Node.js LTS runtime");
   requireConfig(isolated || (!process.env.DEBUG && !process.env.NODE_DEBUG), "protocol debug logging must be disabled");
   const c = structuredClone(input);
+  validateSecurityHeaders(c);
   validateCloudPolicy(c);
   requireConfig(c.config_version === "mnemuron-oauth-config-v1", "config_version");
   requireConfig(["oauth", "bootstrap_metadata_only"].includes(c.mode), "mode");
@@ -26,6 +28,7 @@ export function validateAuthConfig(input, { isolated = false } = {}) {
   c.identity_mode ??= 'legacy_owner';
   requireConfig(['legacy_owner','multi_account_v1'].includes(c.identity_mode),'identity mode');
   if(c.identity_mode==='multi_account_v1') {
+    if(c.identity?.owner_account_id!==undefined)requireConfig(typeof c.identity.owner_account_id==='string'&&/^[A-Za-z0-9-]{1,128}$/.test(c.identity.owner_account_id),'owner account');
     validateConnectionPolicy(c.identity?.connection_management);
     requireConfig(typeof c.identity?.encryption_key_file==='string' && c.identity.encryption_key_file.startsWith('/'),'identity encryption key file');
     for(const [name,min,max] of [['invitation_batch_limit',1,1000],['console_session_ttl_seconds',60,28800]])

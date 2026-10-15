@@ -1,29 +1,36 @@
+import {mountAuditDates,auditDateRange} from './audit.mjs';
 // Console controller: account-bound requests, routing and the detail pane.
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
-import {actionButton,actionPage,mountActions,canAct} from './actions.mjs';
+import {actionButton,actionPage,mountActions,mountFeatureReads,canAct} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState} from './visuals.mjs';
+import {SELECTION_LIMIT,overviewView,libraryView,summariesView,auditView,memoryDetailView,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels,projectContextView} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
+import {mountEntities,entitiesPendingView} from './entities.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections;
-let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
-let query='',searchMode='hybrid',category='',status='',offset=0;
+let capabilities={enabled:false,writable:false},actions,connections,entities,featureReads,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
+let requestSequence=0,entityPendingSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
+let detailMeta=null,query='',searchMode='hybrid',category='',status='active',topic='',origin='',offset=0;
+// Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
+// selected maps memory_id → the text its list row already showed (kept for confirmations across pages).
+let selected=new Map(),selectAll=false,facets=null;
+// Tasks page: project and task list offsets, and the inline context request currently owned by each row.
+let projectOffset=0,projectArchived='false',taskOffset=0,contextGeneration=0;const contextRequests=new Map();
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 
-function readLocation(){const p=new URLSearchParams(location.search);query=p.get('query')||'';searchMode=p.get('mode')||'hybrid';category=p.get('category')||'';status=p.get('status')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
-function saveLocation(){const p=new URLSearchParams();if(query)p.set('query',query);if(searchMode!=='hybrid')p.set('mode',searchMode);if(category)p.set('category',category);if(status)p.set('status',status);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
-readLocation();
+function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=['system','memory','connections','security'].includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||capabilities.default_retrieval_mode||'hybrid';category=p.get('category')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
+function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!==(capabilities.default_retrieval_mode||'hybrid'))p.set('mode',searchMode);if(category)p.set('category',category);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
+readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
- actions?.clear();connections?.clear();state.clear();requestSequence++;detailSequence++;
- currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='hybrid';offset=0;
+ actions?.clear();connections?.clear();entities?.clear();featureReads?.clear();state.clear();requestSequence++;entityPendingSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
+ currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';category='';status='active';topic='';origin='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -54,54 +61,87 @@ async function mutate(action,payload,operation_id) {
  }finally{state.finish(ticket);}
 }
 
-const pagination=data=>`<div class="pagination">${offset?`<button type="button" data-offset="${Math.max(0,offset-(data.limit||25))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div>`;
+const pagination=data=>page==='audit'?`<div class="pagination">${auditCursor?`<button type="button" data-audit-prev>${l('previous')}</button>`:''}${data.next_cursor?`<button type="button" data-audit-next>${l('next')}</button>`:''}</div>`:`<div class="pagination">${offset?`<button type="button" data-offset="${Math.max(0,offset-(data.limit||25))}">${l('previous')}</button>`:''}${data.next_offset!=null?`<button type="button" data-offset="${data.next_offset}">${l('next')}</button>`:''}</div>`;
 const policy=(note,items)=>`<section class="card"><div class="policy-box"><span class="tag">${l('blocked')}</span>${l(note,'p')}<div class="actions">${items.map(key=>`<button type="button" disabled title="${esc(t('blocked'))}" data-i18n="${key}">${esc(t(key))}</button>`).join('')}</div></div></section>`;
 
 function heading() {
  if(page==='overview')return pageHeading(t,{title:'overview',note:'heroNote'});
  const pageActions={memories:['memory.create','memory.correct'],summaries:['jobs.schedule'],jobs:['jobs.schedule','jobs.cancel'],models:['models.save'],connections:['oauth.revoke','connections.create'],security:['security.password','security.sessions.revoke_others'],storage:['storage.export','storage.import']};
- const managing=capabilities.operator&&capabilities.management?.[page];
  const interactive=(pageActions[page]||[]).some(a=>canAct(capabilities,a));
  // New destinations are built from the feature map; their badge says how much of the page is live.
- const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):`<span class="tag">${l(managing?'operatorManagement':interactive?'interactive':'readOnly')}</span>`;
+ const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):`<span class="tag">${l(interactive?'interactive':'readOnly')}</span>`;
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
  return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
 }
 
 function render(data) {
+ // Replaced rows can never receive a context reply that was requested before this render.
+ contextGeneration++;contextRequests.clear();
  let html='';
- if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t)});
- else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),pagination:pagination(data)});
- else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data)});
- else if(page==='audit')html=auditView(t,{entries:[...data.entries||[],...(data.core_entries||[]).map(e=>({...e,created:e.created_at}))],pagination:pagination(data)});
+ if(page==='overview')html=overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{},taxonomy:capabilities.taxonomy?.categories||[],descriptions:capabilities.category_descriptions||{}});
+ else if(page==='memories')html=libraryView(t,{data,query,searchMode,category,status,topic,origin,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
+ else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data),labels:capabilities.category_labels||{}});
+ else if(page==='audit')html=auditView(t,{data,source:'grouped',group:auditGroup,pagination:pagination(data),filters:auditFilters});
  else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
  else if(page==='models')html=policy('modelsNote',['configure']);
- else if(['invitations','accounts'].includes(page))html=policy('platformNote',[page==='invitations'?'issue':'manage']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
+ if(!prototypePages.includes(page))html+=completedFeaturePanels(t,page,data,capabilities);
+ if(page==='memories'){entities?.setPending(data.features?.entities);html+=entitiesPendingView(t,data.features?.entities,capabilities);}
  if(!prototypePages.includes(page))html+=roadmapCard(t,page);
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
 }
+function updateMemorySelection() {
+ const toolbar=root.querySelector('[data-memory-selection]');if(!toolbar||selectAll)return;
+ const boxes=[...root.querySelectorAll('[data-batch-memory]')];
+ for(const box of boxes)if(box.checked)selected.set(box.dataset.batchMemory,(box.closest('tr')?.querySelector('.memory-text')||box.closest('tr')?.querySelector('.memory-title'))?.textContent||'');else selected.delete(box.dataset.batchMemory);
+ const count=selected.size,organize=canAct(capabilities,'memory.organize'),limit=organize?SELECTION_LIMIT:50;
+ toolbar.querySelector('[data-selection-count]').textContent=String(count);
+ // Batch retract (and the older batch classify) stay bounded at 50 per request.
+ for(const button of toolbar.querySelectorAll('[data-console-action]'))button.disabled=count===0||count>(button.dataset.consoleAction==='memory.organize'?SELECTION_LIMIT:50);
+ toolbar.querySelector('[data-clear-selection]').disabled=count===0;
+ for(const box of boxes){box.disabled=!box.checked&&count>=limit;box.closest('tr').toggleAttribute('data-batch-selected',box.checked);}
+}
+const resetSelection=()=>{selected=new Map();selectAll=false;};
+/** What the organize dialog acts on: the explicit selection, or the current filter (lexical, active only). */
+function librarySelection(){
+ if(!selectAll)return {memory_ids:[...selected.keys()],snippets:Object.fromEntries(selected)};
+ const filter={...(query?{query}:{}),...(category?{filter_category:category}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})};
+ return Object.keys(filter).length?filter:{all:true};
+}
 async function load() {
  const sequence=++requestSequence;
- if(['resume','system'].includes(page)||['invitations','accounts'].includes(page)&&(!capabilities.operator||!(capabilities.management?.[page]??capabilities.enabled))){currentData={};render(currentData);return;}
+ if(page==='resume'||page==='system'&&!capabilities.operator){currentData={};render(currentData);return;}
+ const extras=async()=>Object.fromEntries(await Promise.all((completedViews[page]||[]).map(async view=>{try{return [view,await api(view,view==='entities'?{status:'pending',limit:10}:{})];}catch{return [view,null];}})));
  // Prototype pages read existing views for their live cards; a failure only degrades that card.
- if(page==='tasks'||page==='privacy'){
-   const read=async view=>{try{return await api(view);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')throw e;return null;}};
+ if(page==='tasks'||page==='system'){
+   const read=async(view,params)=>{try{return await api(view,params);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')throw e;return null;}};
    let data;
    try{
-     if(page==='tasks')data=await read('projects')??{unavailable:true};
-     else{
-       const [models,caps]=await Promise.all([read('models'),read('capabilities')]);
-       data={...(models??{unavailable:true}),web_policy:caps?.web_policy};
-       if(caps?.web_policy)capabilities={...capabilities,web_policy:caps.web_policy};
+     if(page==='system')data={};
+     else if(page==='tasks'){
+       const [projects,tasks]=await Promise.all([read('projects',{offset:projectOffset,limit:25,archived:projectArchived}),read('task-branches',{offset:taskOffset,limit:10})]);
+       // A page emptied by a change (its last row archived, restored or moved) steps back to the previous page.
+       const emptied=(list,at)=>Array.isArray(list)&&!list.length&&at>0;
+       if(emptied(projects?.projects,projectOffset)||emptied(tasks?.tasks,taskOffset)){
+         if(sequence!==requestSequence||!state.account)return;
+         if(emptied(projects?.projects,projectOffset))projectOffset=Math.max(0,projectOffset-25);
+         if(emptied(tasks?.tasks,taskOffset))taskOffset=Math.max(0,taskOffset-10);
+         return load();
+       }
+       data={...(projects??{unavailable:true}),features:{'task-branches':tasks}};
+       if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
      }
+     data.features=await extras();
    }catch{return;}
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {
-   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status?{status}:{})}:['jobs','summaries','audit'].includes(page)?{offset,limit:25}:{};
-   const data=await api(page,params);
+   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(category?{category}:{}),...(status!=='all'?{status}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})}:['jobs','summaries','audit'].includes(page)?{...(page==='audit'?{...auditParams(),...(auditCursor?{cursor:auditCursor}:{})}:{offset}),limit:25}:{};
+   // Library facets are a separate read: if it fails only the sidebar degrades, never the list.
+   const facetRead=page==='memories'?api('memories',{part:'facets'}).catch(e=>{if(e.message==='STALE_ACCOUNT'||e.name==='AbortError')throw e;return null;}):null;
+   const [data,features,facetData]=await Promise.all([api(page,params),extras(),facetRead]);data.features=features;
+   if(page==='memories')facets=facetData;
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
    root.innerHTML=`${pageHeading(t,{title:page})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
@@ -109,60 +149,114 @@ async function load() {
 
 // Detail pane: docked beside the list on wide screens, modal on narrow ones.
 function openPane(title) {
- const heading=document.getElementById('detail-title');heading.dataset.i18n=title;heading.textContent=t(title);
+ setPaneTitle(title);
  if(pane.open)return;
  lastFocus=document.activeElement;
  if(WIDE_PANE.matches){pane.show();document.body.classList.add('pane-open');}else pane.showModal();
 }
-function closePane(){if(pane.open)pane.close();}
+// A catalog key is translated (and re-translated on language change); a memory title is shown as stored text.
+function setPaneTitle(key,text){const heading=document.getElementById('detail-title');
+ if(text){delete heading.dataset.i18n;heading.textContent=text;heading.title=text;}else{heading.dataset.i18n=key;heading.textContent=t(key);heading.removeAttribute('title');}}
+function closePane(){entities?.clearMemory();if(pane.open)pane.close();}
 function beginDetail(kind,title){detailKind=kind;detailStack=[];detail.innerHTML=l('loading','p');openPane(title);}
 function markSelected(){
  const memoryId=detailKind==='memory'?detailData?.memory?.memory_id:null,summaryId=detailKind==='summary'?detailData?.results?.[0]?.summary_id:null;
  for(const node of root.querySelectorAll('[data-memory],[data-summary]'))node.toggleAttribute('data-selected',(!!memoryId&&node.dataset.memory===memoryId)||(!!summaryId&&node.dataset.summary===summaryId));
 }
-const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],['memory.classify','classifyMemory'],['memory.visibility','webVisibility']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
-const changed=e=>`<div role="alert">${l(/VERSION_CHANGED|MANIFEST_CHANGED/.test(e.message)?'changed':'unavailable','p')}</div>`;
+const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],...(canAct(capabilities,'memory.organize')?[['memory.organize','moveToCategory']]:[['memory.classify','classifyMemory']]),['memory.sensitivity','sensitivity']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
+// A failed detail read keeps an in-pane way back to the list; nothing stale stays on screen.
+// A failed read opened from another detail (a summary's cited source) can also return to that detail.
+const changed=(e,returnable=false)=>`<div role="alert">${l(/VERSION_CHANGED|MANIFEST_CHANGED/.test(e.message)?'changed':'unavailable','p')}</div><div class="pagination">${returnable?`<button type="button" data-detail-return>${l('previous')}</button>`:''}<button type="button" data-close>${l('backToList')}</button></div>`;
 async function openMemory(params,first=false,back=false) {
+ entities?.clearMemory();
  const sequence=++detailSequence;
- if(first)beginDetail('memory','detail');
- try{const data=await api('memory',params);if(!state.account||sequence!==detailSequence)return;detailData=data;
+ if(first){detailMeta=null;beginDetail('memory','detail');}
+ try{
+   // Metadata (title, category, provenance) is optional: the body still renders if that read fails.
+   const cached=detailMeta?.memory_id===params.memory_id?detailMeta:null;
+   const [data,fetched]=await Promise.all([api('memory',params),cached||!params.memory_id?cached:api('memory-meta',{memory_id:params.memory_id}).catch(e=>{if(e.message==='STALE_ACCOUNT'||e.name==='AbortError')throw e;return null;})]);
+   if(!state.account||sequence!==detailSequence)return;detailData=data;
+   const meta=fetched?.memory_id===data.memory.memory_id?fetched:detailMeta?.memory_id===data.memory.memory_id?detailMeta:null;detailMeta=meta;
    if(!back)detailStack.push({kind:'memory',params:{...params,revision:data.revision,source_version:data.source_manifest?.source_version}});
-   detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1});markSelected();}
- catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e);}
+   setPaneTitle('detail',meta?.title);detailKind='memory';
+   detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1,meta,labels:capabilities.category_labels||{}});
+   const region=document.createElement('section');region.className='entity-memory';detail.append(region);
+   void entities.loadMemory(region,{...data.memory,revision:data.revision,current_revision:meta?.revision,current:meta?.revision===data.revision&&meta?.status==='active',title:meta?.title},()=>sequence===detailSequence&&pane.open&&detailKind==='memory'&&detailData===data);markSelected();}
+ catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
 }
 async function openSummary(params,first=false,back=false) {
+ entities?.clearMemory();
  const sequence=++detailSequence;
  if(first)beginDetail('summary','summaries');
  try{const data=await api('summary',params);if(!state.account||sequence!==detailSequence)return;detailData=data;if(!back)detailStack.push({kind:'summary',params});
+   setPaneTitle('summaries');detailKind='summary';
    detail.innerHTML=summaryDetailView(t,data,{canGoBack:detailStack.length>1});markSelected();}
- catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e);}
+ catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
 }
 
+// Inline project context. Each row owns at most one request; a reply is shown only while that row still
+// owns it: not closed or re-requested, not replaced by a render or page change, and not signed out.
+async function loadContext(button){
+ const project=button.dataset.projectContext,region=document.getElementById(button.getAttribute('aria-controls'));if(!project||!region)return;
+ const token={generation:contextGeneration};contextRequests.set(project,token);
+ const current=()=>contextRequests.get(project)===token&&token.generation===contextGeneration&&!!state.account&&region.isConnected&&!region.hidden;
+ region.hidden=false;region.setAttribute('aria-busy','true');region.innerHTML=l('loading','p');
+ try{const data=await api('project-context',{project_id:project});if(!current())return;region.innerHTML=projectContextView(t,data);}
+ catch(e){if(!current()||e.name==='AbortError')return;region.innerHTML=`<div role="alert">${l('contextFailed','p')}<button type="button" data-project-context-retry="${esc(project)}">${l('retry')}</button></div>`;}
+ finally{if(current()){region.removeAttribute('aria-busy');syncAppearance();}}
+}
+function toggleContext(button){
+ const region=document.getElementById(button.getAttribute('aria-controls'));if(!region)return;
+ if(button.getAttribute('aria-expanded')==='true'){contextRequests.delete(button.dataset.projectContext);button.setAttribute('aria-expanded','false');region.hidden=true;region.removeAttribute('aria-busy');region.replaceChildren();return;}
+ button.setAttribute('aria-expanded','true');void loadContext(button);
+}
 document.addEventListener('click',event=>{
- const memory=event.target.closest('[data-memory]');if(memory){void openMemory({memory_id:memory.dataset.memory,content_limit:1024,include_history:'true',...(memory.dataset.revision?{revision:memory.dataset.revision}:{})},true);return;}
+ const context=event.target.closest('[data-project-context]');if(context){toggleContext(context);return;}
+ const retry=event.target.closest('[data-project-context-retry]');if(retry){const button=[...root.querySelectorAll('[data-project-context]')].find(b=>b.dataset.projectContext===retry.dataset.projectContextRetry);if(button)void loadContext(button);return;}
+ const projectView=event.target.closest('[data-project-view]');if(projectView){projectArchived=['true','deleted'].includes(projectView.dataset.projectView)?projectView.dataset.projectView:'false';projectOffset=0;void load();return;}
+ const projectPage=event.target.closest('[data-project-offset]');if(projectPage){projectOffset=Number(projectPage.dataset.projectOffset);void load();return;}
+ const taskPage=event.target.closest('[data-task-offset]');if(taskPage){taskOffset=Number(taskPage.dataset.taskOffset);void load();return;}
+});
+document.addEventListener('click',event=>{
+ if(event.target.closest('[data-clear-selection]')){const all=selectAll;resetSelection();if(all)render(currentData);else{for(const box of root.querySelectorAll('[data-batch-memory]'))box.checked=false;updateMemorySelection();}return;}
+ // A source cited by the open summary stacks on it, so Back returns to that summary; any other
+ // memory link starts a fresh detail as before.
+ const memory=event.target.closest('[data-memory]');if(memory){const fromSummary=detailKind==='summary'&&!!memory.closest('#memory-content .claim-list');
+   void openMemory({memory_id:memory.dataset.memory,content_limit:1024,include_history:'true',...(memory.dataset.revision?{revision:memory.dataset.revision}:{})},!fromSummary);return;}
+ if(event.target.closest('[data-detail-return]')&&detailStack.length){const prior=detailStack.at(-1);void (prior.kind==='summary'?openSummary:openMemory)(prior.params,false,true);return;}
  const summary=event.target.closest('[data-summary]');if(summary){void openSummary({summary_id:summary.dataset.summary,revision:summary.dataset.revision},true);return;}
  if(event.target.closest('[data-close]')){closePane();return;}
  if(event.target.closest('[data-detail-back]')&&detailStack.length>1){detailStack.pop();const prior=detailStack.at(-1);void (prior.kind==='summary'?openSummary:openMemory)(prior.params,false,true);return;}
  if(event.target.closest('[data-detail-next]')&&detailData?.next_request)void (detailKind==='summary'?openSummary:openMemory)(detailData.next_request);
  if(event.target.closest('[data-source-next]')&&detailData?.next_source_request)void openMemory(detailData.next_source_request);
- const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);saveLocation();void load();}
- if(event.target.closest('[data-reset-filters]')){query='';category='';status='';searchMode='hybrid';offset=0;saveLocation();void load();}
+ const stream=event.target.closest('[data-audit-group]');if(stream&&page==='audit'&&['system','memory','connections','security'].includes(stream.dataset.auditGroup)){auditPages[auditGroup]={cursor:auditCursor,filters:{...auditFilters},history:auditPages[auditGroup]?.history||[]};auditGroup=stream.dataset.auditGroup;auditCursor=auditPages[auditGroup]?.cursor||'';auditFilters={...auditPages[auditGroup]?.filters};featureReads.invalidateAudit();auditDates?.close();closePane();saveLocation();void load();return;}
+ if(page==='audit'&&event.target.closest('[data-audit-next]')&&currentData?.next_cursor){const h=auditPages[auditGroup]?.history||[];h.push(auditCursor);auditPages[auditGroup]={...auditPages[auditGroup],history:h};auditCursor=currentData.next_cursor;saveLocation();void load();return;}
+ if(page==='audit'&&event.target.closest('[data-audit-prev]')){auditCursor=auditPages[auditGroup]?.history?.pop()||'';saveLocation();void load();return;}
+ const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);if(selectAll)resetSelection();saveLocation();void load();}
+ if(event.target.closest('[data-reset-filters]')){query='';category='';status='active';topic='';origin='';searchMode=capabilities.default_retrieval_mode||'hybrid';offset=0;resetSelection();saveLocation();void load();}
+ const facet=event.target.closest('[data-facet]');if(facet&&page==='memories'){const value=facet.dataset.value||'';
+   if(facet.dataset.facet==='category')category=category===value&&value?'':value;else if(facet.dataset.facet==='topic')topic=topic===value?'':value;else if(facet.dataset.facet==='origin')origin=origin===value?'':value;
+   offset=0;resetSelection();saveLocation();void load();return;}
+ const clearFacet=event.target.closest('[data-clear-facet]');if(clearFacet){if(clearFacet.dataset.clearFacet==='topic')topic='';else origin='';offset=0;resetSelection();saveLocation();void load();return;}
+ if(event.target.closest('[data-select-all]')){selectAll=true;selected=new Map();render(currentData);return;}
  if(event.target.closest('[data-retry]'))void load();
 });
+document.addEventListener('change',event=>{if(event.target.matches('[data-batch-memory]'))updateMemorySelection();});
 document.addEventListener('submit',event=>{
- if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'hybrid');category=String(f.get('category')||'');status=String(f.get('status')||'');offset=0;saveLocation();void load();}
- if(event.target.action?.endsWith('/console-api/logout')){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;}
+ if(event.target.id==='audit-filter'){event.preventDefault();const values=Object.fromEntries(new FormData(event.target));try{Object.assign(values,auditDateRange(values.from,values.to));}catch(e){const field=event.target.elements.to;field.setCustomValidity(t(e.message));field.reportValidity();return;}auditFilters=values;auditCursor='';auditPages[auditGroup]={history:[]};featureReads.invalidateAudit();saveLocation();void load();}
+ if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'hybrid');category=String(f.get('category')||'');status=String(f.get('status')||'active');offset=0;resetSelection();saveLocation();void load();}
+ if(event.target.getAttribute('action')==='/console-api/logout'){entities?.clear();requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;detailMeta=null;}
 });
-pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
-// Keyboard: "/" or Ctrl/Cmd+K focuses search; Escape closes a docked (non-modal) pane.
+pane.addEventListener('close',()=>{entities?.clearMemory();detailSequence++;detailData=null;detailMeta=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});
+// Keyboard shortcuts focus an existing page search only; never navigate from pages without search.
 document.addEventListener('keydown',event=>{
  if(event.key==='Escape'&&pane.open&&!document.querySelector('dialog[open]:modal')&&!document.querySelector('.select-popup:popover-open')){closePane();return;}
  const typing=event.target.closest?.('input,textarea,select,[contenteditable="true"]')||document.querySelector('dialog[open]:modal');
  // A page shortcut must not navigate away from an editor or an unacknowledged credential.
  if(typing||event.defaultPrevented||event.isComposing||document.querySelector('.select-popup:popover-open'))return;
  if(!(event.key==='/'||(event.key.toLowerCase?.()==='k'&&(event.metaKey||event.ctrlKey))))return;
- event.preventDefault();const field=document.querySelector('[data-search-input]');
- if(field){field.focus();field.select();}else location.assign('/app/memories');
+ const field=document.querySelector('[data-search-input]');
+ if(field){event.preventDefault();field.focus();field.select();}
 });
 WIDE_PANE.addEventListener('change',()=>{if(pane.open){const modal=pane.matches(':modal');if(modal===WIDE_PANE.matches){pane.close();}}});
 window.addEventListener('pagehide',clear);
@@ -172,10 +266,17 @@ document.addEventListener('appearancechange',()=>{
  document.title=`Mnemuron · ${t(page)}`;
 });
 
-actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,reload:async()=>{closePane();await load();},isActive:()=>!!state.account});
+function auditParams(){return {group:auditGroup,...Object.fromEntries(Object.entries(auditFilters).filter(([,v])=>v))};}
+featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:auditParams});
+actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
+  reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
+entities=mountEntities({api,mutate,getCaps:()=>capabilities,isActive:()=>!!state.account,t,syncAppearance,reloadPending:async(at=0)=>{
+ const seq=requestSequence,pendingSeq=++entityPendingSequence;try{const data=await api('entities',{status:'pending',limit:10,offset:at});if(!state.account||seq!==requestSequence||pendingSeq!==entityPendingSequence||page!=='memories')return;
+ currentData.features.entities=data;entities.setPending(data);const card=root.querySelector('[data-feature="MEM-08"]');if(card){card.outerHTML=entitiesPendingView(t,data,capabilities);syncAppearance();}}catch{}
+}});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}
- else{try{capabilities={...await api('capabilities'),security_version:me.security_version};}catch{capabilities={enabled:false,writable:false,unavailable:true};}for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
+ else{try{capabilities={...await api('capabilities'),security_version:me.security_version};}catch{capabilities={enabled:false,writable:false,unavailable:true};}readLocation();for(const field of document.querySelectorAll('input[name="csrf"]'))field.value=me.csrf;await load();}
 }catch(e){if(state.account)root.innerHTML=`<div class="card" role="alert">${l('unavailable','h2')}${l('errorNote','p')}</div>`;}

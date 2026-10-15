@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { resolveMemoryScope } from '../memory-scope.mjs';
+import { resolveMemoryScope, SCOPE_LIFECYCLE } from '../memory-scope.mjs';
+import { ProjectLifecycle } from '../lifecycle/resolver.mjs';
 import { exactText, fingerprint, FINGERPRINT_VERSION } from './revisions.mjs';
 import { labeledStatements, conversationStatements, legacyFingerprint, EXTRACTION_VERSION } from './rules.mjs';
 
@@ -19,7 +20,10 @@ export class MemoryService {
           task_id:event.task_id || origin?.task_id || null,workstream_id:event.workstream_id || origin?.workstream_id || null,
           session_id:event.session_id || origin?.session_id || null};
         context.scope = context.workstream_id?'workstream':context.task_id?'task':context.project_id?'project':context.session_id?'session':'user';
-        Object.assign(context,resolveMemoryScope(this.db,auth.user_id,context,{write:true}));
+        // Lifecycle inside the derivation transaction: deleted projects refuse (the capture is audited as failed); a merged
+        // project, explicit or inferred from a source-origin Task, routes the new memory to the canonical project (the
+        // Task row itself keeps its origin).
+        Object.assign(context,resolveMemoryScope(this.db,auth.user_id,context,{write:true,route:true}));
         const fp = fingerprint(context,c.content,c.topic);
         let row = this.db.prepare(`SELECT m.* FROM memory_fingerprints f JOIN memories m ON m.user_id=f.user_id AND m.memory_id=f.memory_id
           WHERE f.user_id=? AND f.fingerprint_version=? AND f.fingerprint=?`).get(auth.user_id,FINGERPRINT_VERSION,fp);
@@ -27,6 +31,16 @@ export class MemoryService {
           const legacy = this.db.prepare('SELECT * FROM memories WHERE user_id=? AND content_fingerprint=?').get(auth.user_id,legacyFingerprint(context,c.content,c.topic));
           if (legacy && exactText(legacy.content)===c.content && exactText(legacy.topic)===exactText(c.topic)
             && JSON.parse(legacy.source_event_ids_json || '[]').includes(event.event_id)) row=legacy;
+        }
+        // A replayed event derived before its project was merged: the fingerprint now names the canonical project, but the
+        // memory already derived from this exact event in a member project is the same record (never a second copy).
+        const members=context[SCOPE_LIFECYCLE].members;
+        if (!row && context.project_id && members) {
+          row = this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_type=? AND m.scope=?
+            AND m.project_id IN (SELECT value FROM json_each(?)) AND m.task_id IS ? AND m.workstream_id IS ? AND (m.scope<>'session' OR m.session_id IS ?)
+            AND EXISTS (SELECT 1 FROM json_each(m.source_event_ids_json) WHERE value=?) ORDER BY m.rowid`)
+            .all(auth.user_id,c.memory_type,context.scope,JSON.stringify(members),context.task_id,context.workstream_id,context.session_id,event.event_id)
+            .find(found=>exactText(found.content)===c.content && exactText(found.topic)===exactText(c.topic)) || null;
         }
         const fresh = !row;
         if (fresh) {
@@ -41,6 +55,8 @@ export class MemoryService {
             origin?.checkpoint_id || null,version,c.confidence ?? (user?0.95:0.75),c.confidence?'medium':user?'high':'medium',JSON.stringify(warnings),fp,c.topic,
             c.topic ? c.topic.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').trim() : null,timestamp,timestamp);
           row=this.db.prepare('SELECT * FROM memories WHERE memory_id=?').get(id);
+          const routedFrom=context[SCOPE_LIFECYCLE].routedFrom;
+          if(routedFrom)new ProjectLifecycle({db:this.db}).logRoute(auth.user_id,routedFrom,context.project_id,'memory',id);
           this.audit({auth,action:'memory.derive',targetType:'memory',targetId:id,metadata:{source_event_ids:[event.event_id],generation_method:version}});
         }
         this.db.prepare('INSERT OR IGNORE INTO memory_fingerprints VALUES (?,?,?,?)').run(auth.user_id,FINGERPRINT_VERSION,fp,row.memory_id);

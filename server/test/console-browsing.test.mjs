@@ -48,7 +48,7 @@ test('BROWSE-05: hybrid search awaits the result and never borrows a deployment-
  const f=await setup(t);f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic hybrid marker'});
  let borrowed=false;f.store.vectorIndex={search(){borrowed=true;throw new Error('must not borrow global model');}};
  const r=await f.get('memories',{query:'hybrid marker',mode:'hybrid'});
- assert.equal(r.status,200);assert.equal(r.body.results.length,1);assert.equal(r.body.retrieval.degraded,true);assert.equal(r.body.retrieval.window_limited,true);assert.equal(borrowed,false);
+ assert.equal(r.status,200);assert.equal(r.body.results.length,1);assert.equal(r.body.retrieval.degraded,true);assert.equal(r.body.retrieval.effective_mode,'lexical');assert.equal(r.body.retrieval.candidate_limit,500);assert.equal(r.body.next_offset,null);assert.equal(borrowed,false);
  const semantic=await f.get('memories',{query:'hybrid marker',mode:'semantic'});assert.notEqual(semantic.status,200);assert.equal(borrowed,false);
 });
 test('BROWSE-06: a bounded search advertises truncation rather than hiding matches past the window',async t=>{

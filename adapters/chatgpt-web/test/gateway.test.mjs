@@ -15,6 +15,8 @@ test("DISC-01/02/MCP-01/02/07 auth-only SDK connection, discovery, calls and not
   const metadata = await (await fetch(`${base}/.well-known/oauth-protected-resource/mcp`)).json();
   assert.deepEqual(metadata, await (await fetch(`${base}/.well-known/oauth-protected-resource`)).json());
   assert.equal(metadata.resource, f.gatewayConfig.resource);
+  assert.deepEqual(metadata.scopes_supported,['memory:read']);
+  assert.equal(denied.headers.get('www-authenticate').match(/scope="([^"]+)"/)[1],'openid offline_access memory:read');
   const tokens = (await f.exchange(await f.authorize())).data;
   const client = new Client({ name: "synthetic-mcp-client", version: "1.0.0" });
   const transport = new StreamableHTTPClientTransport(new URL(f.gatewayConfig.resource), { requestInit: { headers: { authorization: `Bearer ${tokens.access_token}` } } });

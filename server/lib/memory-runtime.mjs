@@ -21,7 +21,8 @@ export function memoryRuntime(input) {
   try {
     if(input.cloud_memory){strictObject(input.cloud_memory,['enabled','allow_submitted_revision_grant']);
       if(typeof input.cloud_memory.enabled!=='boolean'||typeof input.cloud_memory.allow_submitted_revision_grant!=='boolean')throw new Error('invalid cloud policy');}
-    if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins']);
+    if(input.console?.owner_user_id!==undefined&&(!/^[A-Za-z0-9][A-Za-z0-9_.:@-]{0,127}$/.test(input.console.owner_user_id)||typeof input.console.owner_user_id!=='string'))throw new Error('invalid owner');
+    if(input.console){strictObject(input.console,['key_file','worker_enabled','personal_vectors','allowed_private_origins','owner_user_id']);
       for(const k of ['worker_enabled','personal_vectors'])if(input.console[k]!==undefined&&typeof input.console[k]!=='boolean')throw new Error('invalid console switch');
       if(input.console.key_file!==undefined&&(typeof input.console.key_file!=='string'||!input.console.key_file.startsWith('/')))throw new Error('invalid console key');
       const origins=input.console.allowed_private_origins||[];if(!Array.isArray(origins)||origins.length>32||origins.some(o=>typeof o!=='string'||new URL(o).origin!==o))throw new Error('invalid private origins');
@@ -57,6 +58,8 @@ export function memoryRuntime(input) {
     if(retrieval?.semantic_min_score!==undefined&&(!Number.isFinite(retrieval.semantic_min_score)||retrieval.semantic_min_score<0||retrieval.semantic_min_score>1))throw new Error('invalid semantic minimum');
     if(retrieval?.semantic_max_distance!==undefined&&(!Number.isFinite(retrieval.semantic_max_distance)||retrieval.semantic_max_distance<0||retrieval.semantic_max_distance>1000000))throw new Error('invalid semantic distance');
     if(input.memory?.retrieval?.mode!==undefined && !['lexical','hybrid','semantic'].includes(input.memory.retrieval.mode))throw new Error('invalid retrieval');
+    // ChatGPT read policy. Absent = the per-memory filter. Changing it changes effective access: an operator step.
+    if(input.memory?.agent_read_policy!==undefined && !['chatgpt_per_memory_v1','active_uniform_v1'].includes(input.memory.agent_read_policy))throw new Error('invalid read policy');
   }catch{throw new ValidationError('Invalid model, vector or worker configuration.', 'INVALID_MEMORY_CONFIG');}
   for(const [section,key,value] of [[input.memory,'automatic_fact_overwrite',false],[input.memory,'preserve_atomic_records',true],[input.privacy,'include_body_in_logs',false],[input.privacy,'automatic_export',false]]){
     if(section?.[key]!==undefined && section[key]!==value)throw new ValidationError('Unsafe memory policy.','INVALID_MEMORY_CONFIG');
@@ -67,7 +70,8 @@ export function memoryRuntime(input) {
     captureExtraction:input.memory?.capture_extraction?.enabled === true,
     deploymentMode:input.deployment_mode || 'production', syntheticData:input.development?.synthetic_data === true,
     organizerConfigured:input.providers?.organizer?.enabled===true,embedderConfigured:input.providers?.embedder?.enabled===true,
-    vectorConfigured:input.vector_store?.enabled===true&&input.providers?.embedder?.enabled===true,workerConfigured:input.jobs?.enabled===true };
+    vectorConfigured:input.vector_store?.enabled===true&&input.providers?.embedder?.enabled===true,workerConfigured:input.jobs?.enabled===true,
+    agentReadPolicy:input.memory?.agent_read_policy || 'chatgpt_per_memory_v1' };
 }
 
 export function privateStoragePaths(config = {}, databasePath, configPath) {

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {randomBytes,createCipheriv,createDecipheriv,createHash} from 'node:crypto';
 import {storageDoctor} from '../storage-policy.mjs';
 import {ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
+import {protectTables} from '../lifecycle/protection.mjs';
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 function canonical(v,depth=0) {if(depth>16)throw new ValidationError('Console input is too deeply nested.','INVALID_CONSOLE_INPUT');return Array.isArray(v)?v.map(x=>canonical(x,depth+1)):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k],depth+1)])):v;}
 export const object = (value,keys) => {if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k)))throw new ValidationError('Invalid console payload.','INVALID_CONSOLE_INPUT');};
@@ -13,11 +14,13 @@ export class ConsoleState {
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_operations(user_id TEXT NOT NULL,operation_id TEXT NOT NULL,action TEXT NOT NULL,request_hash TEXT NOT NULL,
       state TEXT NOT NULL,result_json TEXT,error_code TEXT,created_at INTEGER NOT NULL,PRIMARY KEY(user_id,operation_id));
       CREATE TABLE IF NOT EXISTS console_models(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,config_json TEXT NOT NULL,secret_cipher TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,kind));
+      CREATE TABLE IF NOT EXISTS console_model_tests(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,attempt_id TEXT NOT NULL,state TEXT NOT NULL,result_json TEXT,error_code TEXT,updated_at INTEGER NOT NULL,PRIMARY KEY(user_id,kind));
       CREATE TABLE IF NOT EXISTS console_imports(user_id TEXT NOT NULL,source_key TEXT NOT NULL,memory_id TEXT NOT NULL,content_hash TEXT NOT NULL,PRIMARY KEY(user_id,source_key));
       CREATE TABLE IF NOT EXISTS console_vector_requests(user_id TEXT PRIMARY KEY,generation TEXT,profile TEXT NOT NULL,state TEXT NOT NULL,error_code TEXT,updated_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_owners(generation TEXT PRIMARY KEY,user_id TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memory_vector_owner_active(user_id TEXT PRIMARY KEY,generation TEXT NOT NULL,profile TEXT NOT NULL,collection_name TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS console_settings(user_id TEXT PRIMARY KEY,settings_json TEXT NOT NULL,revision INTEGER NOT NULL,updated_at INTEGER NOT NULL);`);
+    protectTables(this.db,['memory_vector_owners','memory_vector_owner_active']);
   }
   key() {
     const file=this.store.memoryConfig.console?.key_file;
@@ -42,9 +45,14 @@ export class ConsoleState {
     if(row.action!==action||row.request_hash!==fingerprint(payload))throw new ConflictError('Operation ID belongs to another request.','IDEMPOTENCY_CONFLICT');
     if(row.state==='running')throw new ConflictError('Operation is pending; do not resubmit under a new ID.','OPERATION_PENDING');
     if(row.state==='failed')throw new ConflictError('Previous operation failed. Inspect its result before retrying.','OPERATION_FAILED');
-    const stored=JSON.parse(row.result_json),result=stored.sealed?(Date.now()-row.created_at<=600000?this.unseal(user,operation,stored.sealed):{status:'completed',secret_expired:true}):stored;
-    const current=result.memory_id?this.db.prepare('SELECT status FROM memories WHERE user_id=? AND memory_id=?').get(user,result.memory_id):null;
-    return {...result,...(result.memory_id?{current_status:current?.status||'unavailable'}:{}),operation_id:operation,replayed:true};
+    const receiptTtl=['devices.register','devices.rotate'].includes(row.action)?300000:600000;
+    const stored=JSON.parse(row.result_json),result=stored.sealed?(Date.now()-row.created_at<=receiptTtl?this.unseal(user,operation,stored.sealed):{status:'completed',secret_expired:true}):stored;
+    const found=result.memory_id?this.db.prepare('SELECT status,project_id FROM memories WHERE user_id=? AND memory_id=?').get(user,result.memory_id):null;
+    // A replayed receipt never presents a deleted project's memory as current, and never returns content-derived fields
+    // (presentation, title, category metadata) of a memory that is no longer readable: only its identifying status.
+    const live=!found||this.store.lifecycle.liveProject(user,found.project_id),current=found&&live?found:null;
+    const safe=result.memory_id&&!live?{status:result.status,memory_id:result.memory_id,content_withheld:true}:result;
+    return {...safe,...(result.memory_id?{current_status:current?.status||'unavailable'}:{}),operation_id:operation,replayed:true};
   }
   sync(auth,action,payload,operation,callback,{secret=false}={}) {
     return this.store.memoryTransaction(()=>{

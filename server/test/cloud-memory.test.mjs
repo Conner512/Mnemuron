@@ -27,7 +27,7 @@ test('A-T07/09/10/11/12/16: durable exact receipts, concurrent retries and resta
   const receipt=attempts[0].body;assert.equal(receipt.status,'committed');assert.equal(receipt.saved,true);assert.equal(receipt.capture_mode,'tool_only');
   assert.equal(receipt.evidence_kind,'model_submitted');assert.equal(receipt.revision,1);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n,1);
-  for(const [table,count] of [['memory_revisions',1],['memory_sources',1],['memory_source_links',1],['memory_processing_outbox',2],['memory_index_outbox',1],['cloud_memory_operations',1]])
+  for(const [table,count] of [['memory_revisions',1],['memory_sources',1],['memory_source_links',1],['memory_processing_outbox',3],['memory_index_outbox',1],['cloud_memory_operations',1]])
     assert.equal(f.store.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n,count,table);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM audit_events WHERE target_id=?').get(receipt.memory_id).n,2);
   const childSource=`import {MnemuronStore} from ${JSON.stringify(new URL('../lib/store.mjs',import.meta.url).href)};
@@ -102,56 +102,4 @@ test('A-T18/20/23 and BASE-T04: gates, atomic grant failures and additive migrat
   assert.equal((await f.act('memory.save',f.save())).body.error_code,'CLOUD_MEMORY_DISABLED');
   const original=f.store.db.prepare('SELECT * FROM memories ORDER BY memory_id').all();
   const reopened=new MnemuronStore(f.databasePath);try{assert.deepEqual(reopened.db.prepare('SELECT * FROM memories ORDER BY memory_id').all(),original);}finally{reopened.close();}
-});
-
-// The owner's own administrative credential sets the read policy and per-memory grants.
-const ownerAdmin=f=>f.store.authenticate(f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-owner-admin',agentId:'synthetic-owner',
-  agentInstanceId:randomUUID(),scopes:['memory:read','memory:write','admin:tasks']}).api_key);
-
-test('A-T30: the read_all switch widens ChatGPT reads, never cloud corrections or retractions',async t=>{
-  const f=await setup(t),owned=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic owner note never granted to ChatGPT'}).memory;
-  const change=(action,extra={})=>f.act(action,{memory_id:owned.memory_id,expected_revision:1,reason:'synthetic',...extra});
-  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
-  assert.equal(f.store.webVisibility.visible({...f.a.auth,agent_id:'chatgpt-web'},owned.memory_id),true);
-  for(const [action,extra] of [['memory.retract',{}],['memory.supersede',{content:'Synthetic overwrite attempt',cloud_read:'keep_private'}]]){
-    const r=await change(action,extra);assert.equal(r.status,404,JSON.stringify(r.body));assert.equal(r.body.error_code,'MEMORY_NOT_FOUND');
-  }
-  assert.equal(f.store.db.prepare('SELECT status FROM memories WHERE memory_id=?').get(owned.memory_id).status,'active');
-  const {revision,state_hash}=f.store.revisions.latest(f.a.auth.user_id,owned.memory_id);
-  f.store.webVisibility.set(ownerAdmin(f),owned.memory_id,{allow:true,revision,state_hash});
-  const allowed=await change('memory.retract');assert.equal(allowed.status,200,JSON.stringify(allowed.body));assert.equal(allowed.body.memory_status,'retracted');
-});
-
-test('A-T31: a keep_private cloud save gets no grant; read_all makes it readable but never changeable',async t=>{
-  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
-  const kept=await f.act('memory.save',f.save('Synthetic keep-private submission','keep_private'));
-  assert.equal(kept.status,200,JSON.stringify(kept.body));assert.equal(kept.body.cloud_readable,false);
-  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
-  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),true);
-  assert.equal(f.store.webVisibility.writable(reader,kept.body.memory_id),false);
-  const r=await f.act('memory.retract',{memory_id:kept.body.memory_id,expected_revision:1,reason:'synthetic'});
-  assert.equal(r.status,404,JSON.stringify(r.body));assert.equal(r.body.error_code,'MEMORY_NOT_FOUND');
-  const later=await f.act('memory.save',f.save('Synthetic later keep-private submission','keep_private'));
-  assert.equal(later.body.cloud_readable,true); // receipts report actual readability under read_all
-});
-
-test('A-T32: the one-off v7 migration carries public records as grants and re-indexes secret ones',async t=>{
-  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
-  const pub=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic formerly public record'}).memory;
-  const sec=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic formerly secret record'}).memory;
-  // Database state as written by a release that still had sensitivity levels.
-  f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?),(?,?,?)').run(f.a.auth.user_id,pub.memory_id,'public',f.a.auth.user_id,sec.memory_id,'secret');
-  f.store.db.prepare("UPDATE memory_index_outbox SET action='hide',state='done' WHERE memory_id=?").run(sec.memory_id);
-  f.store.db.exec('PRAGMA user_version = 6');
-  assert.equal(f.store.webVisibility.visible(reader,pub.memory_id),false);
-  const reopened=new MnemuronStore(f.databasePath);t.after(()=>reopened.close());
-  assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version,7);
-  assert.equal(reopened.webVisibility.visible(reader,pub.memory_id),true);
-  assert.equal(reopened.webVisibility.visible(reader,sec.memory_id),false);
-  assert.deepEqual(reopened.db.prepare('SELECT action,state FROM memory_index_outbox WHERE memory_id=?').all(sec.memory_id).map(r=>[r.action,r.state]),[['upsert','pending']]);
-  // One-off: a later open does not re-grant a public record after its grant was withdrawn.
-  const {revision,state_hash}=reopened.revisions.latest(f.a.auth.user_id,pub.memory_id);
-  reopened.webVisibility.set(ownerAdmin({...f,store:reopened}),pub.memory_id,{allow:false,revision,state_hash});
-  const again=new MnemuronStore(f.databasePath);t.after(()=>again.close());
-  assert.equal(again.webVisibility.visible(reader,pub.memory_id),false);
 });

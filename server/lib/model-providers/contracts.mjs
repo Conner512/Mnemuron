@@ -39,10 +39,8 @@ export function validateProfile(input, {kind,synthetic=false}={}) {
   if(Object.hasOwn(p.auth,'secret_file') && (typeof p.auth.secret_file!=='string' || !p.auth.secret_file.startsWith('/')))fail('INVALID_CONFIG');
   strictObject(p.egress,['approved','origins','addresses','allow_private','sensitivities','query_approved']);
   for(const k of ['approved','allow_private','query_approved'])if(typeof p.egress[k]!=='boolean')fail('INVALID_CONFIG');
-  for(const k of ['origins','addresses'])if(!Array.isArray(p.egress[k]) || p.egress[k].length>64 || p.egress[k].some(v=>typeof v!=='string'))fail('INVALID_CONFIG');
-  // Sensitivity levels were removed; older runtime files may still list them. Accepted and ignored.
-  if(p.egress.sensitivities!==undefined && (!Array.isArray(p.egress.sensitivities) || p.egress.sensitivities.length>64 || p.egress.sensitivities.some(v=>typeof v!=='string')))fail('INVALID_CONFIG');
-  delete p.egress.sensitivities;
+  for(const k of ['origins','addresses','sensitivities'])if(!Array.isArray(p.egress[k]) || p.egress[k].length>64 || p.egress[k].some(v=>typeof v!=='string'))fail('INVALID_CONFIG');
+  if(p.egress.sensitivities.some(v=>!['public','internal','sensitive'].includes(v)))fail('INVALID_CONFIG');
   if(p.protocol!=='mock') {
     let url;try{url=new URL(p.base_url);}catch{fail('INVALID_CONFIG');}
     if(!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)fail('INVALID_CONFIG');
@@ -59,6 +57,25 @@ export function validateProfile(input, {kind,synthetic=false}={}) {
   // Credentials and budgets may rotate without reusing a different model's index space.
   p.fingerprint=digest([kind,p.protocol,p.base_url,p.model,p.profile_revision,p.paths,p.dimensions,p.distance,p.query_prefix,p.document_prefix,p.normalization,p.chunker_version]);
   return Object.freeze(p);
+}
+
+// The schema sent to a provider: its structure only (types, properties, required fields, string enums).
+// Gemini-backed gateways reject non-string enum members, and reject schemas over an internal complexity
+// budget with a bare INVALID_ARGUMENT; array length limits and numeric minimum/maximum bounds are the
+// documented main contributors, and they grow with the batch (a bounded summary of 8 sources asks for
+// 17 items, each with three ranged integers). These constraints are therefore left out of the request.
+// The reply is still validated locally against the full schema (all bounds and enums), then by the
+// exact source revision and span checks; the full schema is also stated in the prompt.
+const WIRE_OMITTED=new Set(['minItems','maxItems','minimum','maximum']);
+export function providerSchema(schema) {
+  if(Array.isArray(schema))return schema.map(providerSchema);
+  if(!schema || typeof schema!=='object')return schema;
+  const out={};
+  for(const [k,v] of Object.entries(schema)) {
+    if(WIRE_OMITTED.has(k) || k==='enum' && Array.isArray(v) && v.some(m=>typeof m!=='string'))continue;
+    out[k]=k==='properties'?Object.fromEntries(Object.entries(v).map(([name,s])=>[name,providerSchema(s)])):providerSchema(v);
+  }
+  return out;
 }
 
 // A deliberately small closed JSON-Schema subset; unsupported schemas fail closed.

@@ -7,7 +7,7 @@ This is an additive, opt-in extension of the existing Layout A console. It does 
 | Page | Real operation | Boundary |
 | --- | --- | --- |
 | Overview | Owner counts, recent records and navigation | No synthetic counts or connection assertions |
-| Memories | Create, version-checked correction, retraction, manual category, exact-revision ChatGPT grant | Own records only; correction creates a replacement; retraction retains history (sensitivity levels were removed) |
+| Memories | Create, version-checked correction, retraction, manual category, sensitivity, exact-revision ChatGPT grant | Own records only; correction creates a replacement; retraction retains history; secret is never granted |
 | Categories / summaries | Current category inventory, existing grounded summaries and source-version pagination; submit classification/summary jobs | Original text is not overwritten by an LLM |
 | Jobs | Queue, inspect, cancel, retry, periodic schedule, actual worker/index status | Existing persistent worker/leases/fences; retry does not reset usage or attempts |
 | Models | Save organizer/embedder separately, change/remove write-only API key, synthetic connectivity probe, disable and request personal vector build | Per-owner encryption/profile/budget; explicit egress and query consent; no browser-supplied file or environment secrets |

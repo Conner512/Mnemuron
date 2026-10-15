@@ -32,7 +32,8 @@
           "version": {"$ref": "#/$defs/name"}, "categories": {"type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
             "contains": {"const": "uncategorized"}, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$"}}
         }},
-        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}, "semantic_min_score": {"type": "number", "minimum": 0, "maximum": 1}, "semantic_max_distance": {"type": "number", "minimum": 0, "maximum": 1000000}}}
+        "agent_read_policy": {"enum": ["chatgpt_per_memory_v1", "active_uniform_v1"], "description": "ChatGPT read policy. Absent means chatgpt_per_memory_v1. Changing it changes effective access."},
+        "retrieval": {"type": "object", "properties": {"mode": {"enum": ["lexical", "hybrid", "semantic"]}, "semantic_min_score":{"type":"number","minimum":0,"maximum":1}, "semantic_max_distance":{"type":"number","minimum":0,"maximum":1000000}}}
       }
     },
     "providers": {"type": "object", "additionalProperties": false, "properties": {"organizer": {"$ref": "#/$defs/profile"}, "embedder": {"$ref": "#/$defs/embeddingProfile"}}},
@@ -47,6 +48,7 @@
       "enabled": {"type": "boolean"}, "protocol": {"const": "qdrant-rest-v1.19"}, "base_url": {"type": "string", "format": "uri"},
       "auth": {"type": "object", "minProperties": 1, "maxProperties": 1, "additionalProperties": false, "properties": {"env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,100}$"}, "secret_file": {"type": "string", "pattern": "^/"}}},
       "collection_prefix": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,39}$"},
+        "precreated_collections": {"type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,100}$"}, "description": "Operator pre-created collections; each starts with collection_prefix + \"_\". Never created by Mnemuron."},
       "egress": {"type": "object", "required": ["approved", "origins", "addresses", "allow_private"], "additionalProperties": false, "properties": {
         "approved": {"const": true}, "allow_private": {"const": true}, "origins": {"$ref": "#/$defs/stringList"}, "addresses": {"$ref": "#/$defs/stringList"}
       }},
@@ -77,10 +79,10 @@
           "max_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}, "repair_once": {"type": "boolean"}
         }},
         "capabilities": {"type": "object", "additionalProperties": false, "required": ["native_schema"], "properties": {"native_schema": {"type": "boolean"}}},
-        "egress": {"type": "object", "additionalProperties": false, "required": ["approved", "origins", "addresses", "allow_private", "query_approved"], "properties": {
+        "egress": {"type": "object", "additionalProperties": false, "required": ["approved", "origins", "addresses", "allow_private", "sensitivities", "query_approved"], "properties": {
           "approved": {"type": "boolean"}, "query_approved": {"type": "boolean"}, "allow_private": {"type": "boolean"},
           "origins": {"$ref": "#/$defs/stringList"}, "addresses": {"$ref": "#/$defs/stringList"},
-          "sensitivities": {"type": "array", "maxItems": 64, "items": {"type": "string"}, "description": "Deprecated and ignored: sensitivity levels were removed."}
+          "sensitivities": {"type": "array", "maxItems": 64, "items": {"enum": ["public", "internal", "sensitive"]}}
         }},
         "paths": {"type": "object", "additionalProperties": false, "properties": {"chat": {"type": "string", "pattern": "^/[a-zA-Z0-9_/-]+$"}, "embed": {"type": "string", "pattern": "^/[a-zA-Z0-9_/-]+$"}}},
         "dimensions": {"type": "integer", "minimum": 1, "maximum": 65536}, "distance": {"enum": ["Cosine", "Dot", "Euclid"]},

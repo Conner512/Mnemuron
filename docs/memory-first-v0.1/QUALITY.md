@@ -35,7 +35,7 @@ node server/bin/mnemuron-memory-quality.mjs \
 ```
 
 The existing runtime config selects the Organizer and Embedder independently.
-Enabled profiles require approved origin/address settings and private
+Enabled profiles require approved origin/address/sensitivity settings and private
 credential references. Only fixture text and queries are sent. This command ignores
 the configured database, vector store and worker enablement flags because it builds
 an isolated synthetic library; it does not enable them in the running application.

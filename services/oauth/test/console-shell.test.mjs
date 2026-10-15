@@ -124,14 +124,14 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar keeps three groups and all fifteen destinations as icon links',()=>{
+test('Shell: the sidebar keeps three groups and all twelve destinations as icon links',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
   assert.equal((nav.match(/class="nav-group"/g)||[]).length,3);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,15);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,15);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,12);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon"/g)||[]).length,12);
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
   assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
@@ -159,7 +159,7 @@ test('Shell: distribution includes every category in its total and folds overflo
    assert.equal((html.match(/class="arc /g)||[]).length,6);
    if(size>6){
     const other=categories.slice(5).reduce((sum,c)=>sum+c.count,0);
-    assert.match(html,new RegExp(`<strong>${other}</strong><small>${Math.round(other/total*100)}%</small>`));
+    assert.match(html,new RegExp(`<dd>${other}</dd>[\\s\\S]*?<dd>${Math.round(other/total*100)}%</dd>`));
     assert.ok(html.includes(text('otherCategories',locale)));
    }
   }
@@ -196,4 +196,36 @@ test('html template escapes interpolations, joins arrays and only trusts explici
  const user='<img src=x onerror=alert(1)> & "q"';
  const out=String(html`<p title="${user}">${user}${[html`<b>${1}</b>`,null,false,undefined,2]}${trusted('<i></i>')}</p>`);
  assert.equal(out,'<p title="&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;">&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;<b>1</b>2<i></i></p>');
+});
+test('Shell: the account menu caret is the same drawn chevron as the language select, not a text glyph',async()=>{
+ const {renderPage}=await import('../../../web/console/render.mjs');
+ const page=renderPage({title:'overview',account:{username:'Synthetic',account_id:'synthetic-account'},csrf:'synthetic',page:'overview'});
+ const summary=page.match(/<summary[^>]*>([\s\S]*?)<\/summary>/)[1];
+ assert.doesNotMatch(summary,/⌄|∨|▾|v<\/span>/);assert.match(summary,/<span class="account-chevron" aria-hidden="true"><\/span>/);
+ const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8'),controls=fs.readFileSync(new URL('../../../web/console/controls.css',import.meta.url),'utf8');
+ const geometry=rule=>rule.replace(/^[^{]+/,'');
+ assert.equal(geometry(css.match(/\.account-chevron\{[^}]+\}/)[0]),geometry(controls.match(/\.select-chevron\{[^}]+\}/)[0]));
+ assert.match(css,/\.account-menu\[open\] \.account-chevron\{transform:translateY\(2px\) rotate\(225deg\)\}/);
+});
+
+test('Category directory: all eleven IDs including zero counts, aggregation totals and custom labels stay visible',()=>{
+ const taxonomy=['technical','projects','workflows','documentation','personal','family','preferences','goals','decisions','lessons','uncategorized'];
+ for(const locale of ['zh-CN','en']){
+  const t=k=>text(k,locale),categories=taxonomy.slice(0,9).map((value,i)=>({value,count:9-i}));
+  const html=overviewView({insights:{categories}},{t,taxonomy,labels:{family:'<Family custom>'},memoryRows:()=>''});
+  assert.equal((html.match(/class="directory-heading"/g)||[]).length,11);
+  assert.equal((html.match(/class="directory-empty"/g)||[]).length,2);
+  assert.equal((html.match(/class="hue-/g)||[]).length,6);
+  assert.match(html,/&lt;Family custom&gt;/);assert.doesNotMatch(html,/<Family custom>/);
+  assert.ok(html.includes(t('categoryAggregateNote')));assert.ok(html.includes(t('categoryHint_technical')));
+  assert.match(html,/href="\/app\/memories\?category=lessons"/);
+ }
+});
+
+test('Shell header contains language/account only; page search has no cross-page shortcut',()=>{
+ const shell=renderPage({title:'audit',page:'audit',account:{username:'Synthetic',account_id:'a'},csrf:'synthetic'});
+ assert.doesNotMatch(shell,/top-search|data-search-shortcut/);
+ const script=fs.readFileSync(new URL('../../../web/console/app.mjs',import.meta.url),'utf8');
+ assert.doesNotMatch(script,/else location\.assign\('\/app\/memories'\)/);
+ assert.match(script,/if\(field\)\{event.preventDefault\(\);field.focus\(\);field.select\(\);\}/);
 });

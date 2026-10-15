@@ -12,7 +12,7 @@ export async function evaluateQualityProjection({store,auth,byMemoryId,fixture,c
   let backend,index,generation,collection,owned=false;
   try{
     backend=new QdrantStore(vectorAcceptanceTarget(config),{transport:vectorTransport});
-    if(!embedder.profile.egress.query_approved)fail('QUERY_EGRESS_NOT_APPROVED');
+    if(!embedder.profile.egress.sensitivities.includes('sensitive') || !embedder.profile.egress.query_approved)fail('QUERY_EGRESS_NOT_APPROVED');
     result.health=await backend.health();
     index=new VectorIndex(store,backend,new Map([[embedder.profile.fingerprint,embedder]]),{prefix:'quality_'+randomUUID().replaceAll('-','').slice(0,16)});
     generation=index.begin(embedder.profile.fingerprint);

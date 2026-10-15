@@ -1,4 +1,5 @@
 import { ConflictError } from './errors.mjs';
+import { protectGroup } from './lifecycle/protection.mjs';
 
 export class HandoffPolicy {
   constructor(db, runtime) {
@@ -6,6 +7,8 @@ export class HandoffPolicy {
     db.exec(`CREATE TABLE IF NOT EXISTS handoff_module_state (id INTEGER PRIMARY KEY CHECK(id=1), enabled INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS handoff_drain_resumes (user_id TEXT NOT NULL, resume_id TEXT NOT NULL, preview_version INTEGER NOT NULL,
         PRIMARY KEY(user_id,resume_id));`);
+    // Protected before the drain snapshot below writes to it.
+    protectGroup(db, 'handoff');
     if (!runtime.legacy) {
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -18,6 +21,10 @@ export class HandoffPolicy {
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }
+  }
+  setEnabled(enabled) {
+    if(!enabled&&this.enabled())this.db.exec(`DELETE FROM handoff_drain_resumes; INSERT INTO handoff_drain_resumes SELECT user_id,resume_id,preview_version FROM resumes WHERE status='confirmed';`);
+    this.db.prepare('INSERT INTO handoff_module_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled').run(Number(enabled));
   }
   enabled() { return this.db.prepare('SELECT enabled FROM handoff_module_state WHERE id=1').get()?.enabled !== 0; }
   requireNew() { if (!this.enabled()) throw new ConflictError('New handoff operations are disabled; existing deliveries may drain.', 'HANDOFF_DISABLED'); }

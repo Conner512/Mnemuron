@@ -36,7 +36,7 @@ test('ISO-01..05 ISO-11..12 UI-07 INT-06: real console sessions isolate every re
    const other=owners[1-index];
    const account=ids.byId(owner.account.account_id);
    for(let n=0;n<6;n++)ids.audit(account.account_id,`synthetic.audit.page.${n}`);
-   const auditA=await json(owner.browser,'/console-api/audit?limit=2'),auditB=await json(owner.browser,'/console-api/audit?limit=2&offset=2');
+   const auditA=await json(owner.browser,'/console-api/audit?source=identity&limit=2'),auditB=await json(owner.browser,'/console-api/audit?source=identity&limit=2&offset=2');
    assert.equal(auditA.status,200);assert.equal(auditB.status,200);assert.equal(auditA.data.entries.length,2);
    assert.equal(new Set([...auditA.data.entries,...auditB.data.entries].map(e=>e.audit_id)).size,4);
    for(const view of ['overview','memories','summaries','jobs','connections','audit','security','storage','models']) {

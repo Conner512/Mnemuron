@@ -69,12 +69,12 @@ test('Q-09: dropped summary leaves and irrelevant semantic hits fail quality eve
     assert.ok(result.calls.organizer<=2 && result.calls.embedder<=12);
   }
 });
-test('Q-09: private output, fixed model budget and explicit query egress cannot be bypassed',async t=>{
+test('Q-09: private output, fixed model budget and explicit sensitive-query egress cannot be bypassed',async t=>{
   const root=directory(t),cfg=config(root);
   for(const change of [p=>p.retry.repair_once=true,p=>p.retry.max_attempts=2,p=>p.limits.daily_requests=1]){
     const bad=structuredClone(cfg);change(bad.providers.organizer);assert.throws(()=>jointConfig(bad),e=>e.code==='JOINT_BUDGET_OR_POLICY_INVALID');
   }
-  const denied=structuredClone(cfg);denied.providers.embedder.egress.query_approved=false;assert.throws(()=>jointConfig(denied),e=>e.code==='QUERY_EGRESS_NOT_APPROVED');
+  const denied=structuredClone(cfg);denied.providers.embedder.egress.sensitivities=['public'];assert.throws(()=>jointConfig(denied),e=>e.code==='QUERY_EGRESS_NOT_APPROVED');
   chmodSync(root,0o755);await assert.rejects(evaluateJoint({output:root,config:cfg,allowNetwork:true}),e=>e.code==='PRIVATE_EVIDENCE_DIRECTORY_REQUIRED');chmodSync(root,0o700);
   await assert.rejects(evaluateJoint({output:path.resolve(import.meta.dirname,'../..'),config:cfg,allowNetwork:true}),e=>e.errorCode==='PRIVATE_PATH_IN_SOURCE');
   const filename=root+'/config.json';writeFileSync(filename,JSON.stringify(cfg),{mode:0o600});chmodSync(filename,0o644);

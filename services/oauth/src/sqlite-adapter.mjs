@@ -14,7 +14,7 @@ export class AuthStore {
     this.db = new DatabaseSync(file);
     try {
       const tables = new Set(["oauth_records", "oauth_revoked_grants", "oauth_mfa_steps", "oauth_rate_limits", "oauth_csrf"]);
-      if (identity) for (const name of ['identity_accounts','identity_invitations','identity_sessions',
+      if (identity) for (const name of ['identity_accounts','identity_invitations','identity_sessions','identity_session_clients',
         'identity_bindings','identity_operations','identity_audit','identity_recovery_claims','identity_console_roles','identity_console_operations','identity_console_enrollments','identity_cloud_bindings',
         'identity_connections','identity_connection_tokens','identity_connection_operations','identity_connection_activity','identity_connection_credentials']) tables.add(name);
       const existing = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();

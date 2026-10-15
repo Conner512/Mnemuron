@@ -36,12 +36,9 @@ test('L-04 L-05: schema closes unknown fields and source data never executes act
   let n=0;const repaired=organizer(()=>++n===1?'{broken':{ok:true},{retry:{max_attempts:2,base_ms:10,max_ms:100,repair_once:true}});
   assert.equal((await repaired.generateStructured({},schema,{sensitivity:'sensitive'})).data.ok,true);assert.equal(n,2);
 });
-test('L-06 L-08: egress, query, metadata, redirect, DNS and address pinning fail closed',async t=>{
-  let calls=0;const o=organizer(()=>{calls++;return {ok:true};},{egress:{...profile().egress,approved:false}});
-  await assert.rejects(o.generateStructured({},schema),e=>e.code==='EGRESS_DENIED');assert.equal(calls,0);
-  // Sensitivity levels were removed: a legacy list in an older runtime file is accepted and dropped.
-  assert.equal(validateProfile(profile(),{kind:'organizer',synthetic:true}).egress.sensitivities,undefined);
-  assert.throws(()=>validateProfile(profile('organizer',{egress:{...profile().egress,sensitivities:'all'}}),{kind:'organizer',synthetic:true}),e=>e.code==='INVALID_CONFIG');
+test('L-06 L-08: egress, secret/query, metadata, redirect, DNS and address pinning fail closed',async t=>{
+  let calls=0;const o=organizer(()=>{calls++;return {ok:true};});
+  await assert.rejects(o.generateStructured({},schema,{sensitivity:'secret'}),e=>e.code==='SENSITIVITY_DENIED');assert.equal(calls,0);
   await assert.rejects(embedder(undefined,{egress:{...profile().egress,query_approved:false}}).embed(['hello'],'query',{sensitivity:'sensitive'}),e=>e.code==='EGRESS_DENIED');
   const denied=live('organizer','http://169.254.169.254');denied.egress.addresses=['169.254.169.254'];
   await assert.rejects(approvedTarget(denied),e=>e.code==='ADDRESS_DENIED');

@@ -2,17 +2,15 @@
 
 ## Behavior
 
-Search now defaults to **hybrid** in the desktop console, the cloud MCP personal-model path, and Core when the deployment has not explicitly selected another default. Existing `mode: lexical` requests and an explicit Core runtime default are honored. The local MCP search tool now accepts and forwards `mode`; it is not necessary to change its storage or handoff protocol.
+Search now defaults to **hybrid** in the desktop console, the cloud MCP personal-model path, and Core when the deployment has not explicitly selected another default. Explicit request modes, saved owner preferences and Core runtime defaults are honored in that order. The local MCP search tool now accepts and forwards `mode`; it is not necessary to change its storage or handoff protocol.
 
 Hybrid means keyword plus an authorized, ready vector index; it does **not** enable a provider, approve query egress, share another account's model key or allocate a new budget. Without those prerequisites it returns filtered keyword results and `requested_mode: hybrid`, `effective_mode: lexical`, `degraded: true` with a safe reason. The console displays that reason. Explicit semantic-only queries still report an error rather than claiming keyword results are semantic results. A successful search with zero relevant results is not an error and is never padded to `limit`.
 
-The console reset and a URL without a mode select hybrid. Explicit keyword bookmarks retain `mode=lexical`. Blank queries still browse the existing account-scoped inventory without an embedding request. Keyword mode is described as keyword retrieval, not guaranteed exact-string matching.
+The console reset and a URL without a mode select the effective saved/runtime default, falling back to hybrid. Explicit keyword bookmarks retain `mode=lexical`. Blank queries still browse the existing account-scoped inventory without an embedding request. Keyword mode is described as keyword retrieval, not guaranteed exact-string matching.
 
 ## Why results changed
 
 Previously Chinese unigrams and bigrams were all joined with OR, and any nonzero token match could acquire confidence, recency and scope boosts. The console's lexical path also exposed raw candidates. Now multi-character Chinese queries use meaningful bigrams and must cover at least two thirds of each meaningful query group; isolated common characters cannot rescue an unrelated result. Literal terms, Unicode-normalized engineering identifiers and explicit one-character queries remain supported. English identifier prefixes such as `17.9.8` / `17.9.80` and `ali` / `quality` are not equivalent.
-
-Natural-language queries keep recall: common English function words (`did`, `we`, `where`, …) are ignored, and plain Latin words of four or more letters fold simple inflections (`configure` / `configured` / `configuring`). Identifiers, versions and short names stay exact. Queries with one or two meaningful groups still need every group; with three or more, about two thirds of the groups must match, so one shared keyword is still not enough. A Chinese run whose segmented words all appear in the memory matches even when the word order differs (`配置定时备份` / `备份每天定时执行，配置在 cron 里`); a missing word falls back to the strict bigram rule. Inflection variants are added on the query side only, so the `memory-search-v3` index needs no rebuild. An alias-planning failure disables expansion for that query but no longer marks the whole index unavailable.
 
 This relevance filter runs **before** the existing bounded 500-candidate window. Confidence and recency only rank candidates that have passed it. A degraded hybrid console query preserves the existing 25-row paging within that 500-keyword window; an actual fused result remains bounded by the current 20-result Core contract. Category filters still operate on the bounded candidate window. This change is not an unbounded retrieval or pagination redesign.
 
@@ -66,7 +64,7 @@ Preserve the existing query-egress consent, per-user allocation, budget, scope, 
 
 `server/test/search-relevance.test.mjs` covers defaults, no-egress overrides, Chinese noise, bidirectional/ambiguous/retired/scoped aliases, near identifiers, over-500 candidate noise, low/malformed vector scores, chunk deduplication, no-answer results, configured thresholds, metric directions and Web privacy. Cloud adapter and real-browser tests cover mode forwarding, URL/reload/reset and visible degradation while preserving existing workflows.
 
-The original baseline also contained six failures in four older Core suites: their fixed September capture dates had crossed the production 30-day retention period. Those fixtures now shift their original relative capture intervals to a recent fixed reference per test process. Ordering, assertions, explicit expired-record tests and the production clock/retention are unchanged. This is a test-fixture maintenance change, not a workaround that disables retention.
+The integrated deployment baseline already has current capture fixtures. Its retention behavior and expired-record assertions are preserved; this integration does not alter the production clock or retention policy.
 
 Run in isolated data:
 
@@ -80,3 +78,9 @@ node scripts/check-secrets.mjs --history
 ```
 
 Real provider calibration, production deployment, installed-host behavior and live ChatGPT authorization are separate acceptance steps. This patch does not claim they have been performed.
+
+## Integration with owner controls and entity evidence
+
+An explicit request mode wins, followed by the saved owner preference, runtime mode, and finally hybrid. Console capabilities and self-scoped identity metadata expose that effective default so UI and cloud adapters preserve saved lexical settings. No production preference is rewritten.
+
+Existing entity names reserve their meaning against text-derived and project/task aliases, including removed names. Only currently visible, owner-scoped sources participate; existing proof validation, tombstones, non-transitive graph expansion and post-embedding lifecycle checks remain authoritative. Graph-linked results must match the remaining query subject. Semantic neighbours cannot bypass a reserved entity’s currently proved membership.

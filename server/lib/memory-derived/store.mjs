@@ -1,12 +1,12 @@
 import {digest,fail,strictObject,text} from '../model-providers/contracts.mjs';
 import {hash as digestText} from '../memory/revisions.mjs';
 import {SummaryPagination} from './pagination.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
 
 export const scopeKey = row => JSON.stringify([row.user_id,row.scope,row.project_id || null,row.task_id || null,row.workstream_id || null,row.session_id || null]);
 export class DerivedMemory {
   constructor(store) {this.store=store;this.db=store.db;this.migrate();this.pagination=new SummaryPagination(this);}
   migrate(){this.db.exec(`
-    -- Legacy: sensitivity levels were removed. Kept (unused) so older databases still open and roll back.
     CREATE TABLE IF NOT EXISTS memory_privacy (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,sensitivity TEXT NOT NULL DEFAULT 'sensitive',PRIMARY KEY(user_id,memory_id));
     CREATE TABLE IF NOT EXISTS memory_annotations (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,taxonomy_version TEXT NOT NULL,
       category TEXT NOT NULL,tags_json TEXT NOT NULL,suggestion TEXT,profile TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(user_id,memory_id,revision,taxonomy_version));
@@ -34,10 +34,14 @@ export class DerivedMemory {
       UPDATE memory_summaries SET status='stale' WHERE summary_id IN (SELECT summary_id FROM memory_summary_dependencies WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id);
       INSERT OR REPLACE INTO memory_derived_outbox SELECT summary_id,'hide','pending' FROM memory_summary_dependencies WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id;
     END;
-  `);}
+  `);protectGroup(this.db,'derived');}
   currentSource(user,id){
-    const row=this.db.prepare('SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=?').get(user,id);
-    if(!row || row.status!=='active')return null;
+    const row=this.db.prepare(`SELECT m.*,COALESCE(p.sensitivity,'sensitive') AS sensitivity FROM memories m LEFT JOIN memory_privacy p
+      ON p.user_id=m.user_id AND p.memory_id=m.memory_id WHERE m.user_id=? AND m.memory_id=?`).get(user,id);
+    if(!row || row.status!=='active' || row.sensitivity==='secret')return null;
+    // Every derived consumer (summary pages, vector delivery, job input and publication) revalidates here: a record
+    // of an effectively deleted project is no longer a current source.
+    if(!this.store.lifecycle.liveProject(user,row.project_id))return null;
     const revision=this.store.revisions.latest(user,id);
     if(!revision || revision.status!=='active' || revision.content_hash!==digestText(row.content))return null;
     const captured=this.db.prepare(`SELECT s.content_hash,e.content,e.expires_at,e.expired_at,e.event_id FROM memory_source_links l JOIN memory_sources s
@@ -46,9 +50,7 @@ export class DerivedMemory {
     if(captured.some(source=>source.content===null || source.content===undefined || source.expired_at || digestText(source.content)!==source.content_hash ||
       source.expires_at && Date.parse(source.expires_at)<=Date.now() && !this.db.prepare('SELECT 1 FROM memory_source_pins WHERE user_id=? AND event_id=?').get(user,source.event_id)))return null;
     const override=this.db.prepare('SELECT category,locked FROM memory_category_overrides WHERE user_id=? AND memory_id=?').get(user,id);
-    // 'sensitive' was the default classification; keeping it in the digest leaves existing derived
-    // state hashes valid now that sensitivity levels are gone.
-    return {...row,revision:revision.revision,state_hash:digest([revision.state_hash,'sensitive',override || null]),evidence_kind:revision.evidence_kind,scope_key:scopeKey(row)};
+    return {...row,revision:revision.revision,state_hash:digest([revision.state_hash,row.sensitivity,override || null]),evidence_kind:revision.evidence_kind,scope_key:scopeKey(row)};
   }
   validateItem(item){const row=this.currentSource(item.user_id,item.memory_id);return row && row.revision===item.revision && row.state_hash===item.state_hash && row.scope_key===item.scope_key?row:null;}
   taxonomy(input){
@@ -64,13 +66,24 @@ export class DerivedMemory {
   }
   setCategory(auth,id,category,taxonomy){
     this.store.requireScope(auth,'memory:organize');this.taxonomy(taxonomy);
-    if(!taxonomy.categories.includes(category) || !this.currentSource(auth.user_id,id))fail('INVALID_CATEGORY_TARGET');
+    // A manual category is local metadata: any active owned memory may carry one, including secret
+    // records and records whose captured source expired. Model egress still uses currentSource.
+    if(!taxonomy.categories.includes(category) || !this.manualTarget(auth.user_id,id))fail('INVALID_CATEGORY_TARGET');
     return this.store.memoryTransaction(()=>{
+      // Re-checked under the write lock (status and lifecycle may have changed since the check above).
+      if(!this.manualTarget(auth.user_id,id))fail('INVALID_CATEGORY_TARGET');
       this.db.prepare('INSERT OR REPLACE INTO memory_category_overrides VALUES (?,?,?,1)').run(auth.user_id,id,category);
       this.db.prepare("UPDATE memory_summaries SET status='stale' WHERE summary_id IN (SELECT summary_id FROM memory_summary_dependencies WHERE user_id=? AND memory_id=?)").run(auth.user_id,id);
       this.db.prepare("INSERT OR REPLACE INTO memory_derived_outbox SELECT summary_id,'hide','pending' FROM memory_summary_dependencies WHERE user_id=? AND memory_id=?").run(auth.user_id,id);
       this.store.audit({auth,action:'memory.category.set',targetType:'memory',targetId:id,metadata:{locked:true}});return {locked:true,category};
     });
+  }
+  // Active, owned and of a live project (never a deleted, dangling or foreign one); a NULL project is neutral and live.
+  manualTarget(user,id){const row=this.db.prepare('SELECT status,project_id FROM memories WHERE user_id=? AND memory_id=?').get(user,id);
+    return row?.status==='active'&&this.store.lifecycle.liveProject(user,row.project_id);}
+  // A correction keeps the user's manual category; model annotations are per revision and re-derived.
+  inheritCategory(user,previousId,replacementId){
+    this.db.prepare('INSERT OR IGNORE INTO memory_category_overrides SELECT user_id,?,category,locked FROM memory_category_overrides WHERE user_id=? AND memory_id=? AND locked=1').run(replacementId,user,previousId);
   }
   publishAnnotations(job,items,outputs){
     const taxonomy=job.metadata.taxonomy;this.taxonomy(taxonomy);

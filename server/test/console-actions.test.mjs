@@ -16,20 +16,21 @@ async function setup(t){const f=await memoryFixture(t);const secret=f.root+'/con
   const act=(action,payload,owner=a,operation_id=randomUUID())=>f.request('POST','/v1/console/action',{action,payload,operation_id},owner);
   const get=(view,p={},owner=a)=>f.request('GET','/v1/console/'+view+'?'+new URLSearchParams(p),undefined,owner);
   return {...f,a,b,read,act,get};}
-const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,egress_approved:true,query_approved:true};
-const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create',{content:text,scope:'user',memory_type:'fact'},owner);
+const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
+const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create',{content:text,scope:'user',memory_type:'fact',sensitivity:'sensitive'},owner);
 
 test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
   const caps=(await f.get('capabilities',{},basic)).body;
-  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.visibility','memory.web_policy','devices.revoke']);
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','entity.create','entity.alias','entity.alias_remove','entity.alias_correct','entity.link','entity.unlink','entity.resolve','memory.organize','memory.organize_undo','category.create','category.rename','category.delete','devices.revoke']);
   const m=(await create(f,basic)).body.memory_id;assert.ok(m);
   let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true},basic)).status,200);
-  meta=(await f.get('memory-meta',{memory_id:m},basic)).body;assert.equal(meta.web_allowed,true);assert.equal(meta.sensitivity,undefined);
-  // Sensitivity levels were removed; the old action is no longer offered or accepted.
-  assert.notEqual((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'},basic)).status,200);
+  // Per-memory ChatGPT visibility is no longer a console action, for any credential.
+  for(const [action,payload] of [['memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true}],['memory.web_policy',{read_all:true,expected_revision:0}]])
+    assert.equal((await f.act(action,payload,basic)).status,403,action);
+  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'},basic)).status,200);
+  meta=(await f.get('memory-meta',{memory_id:m},basic)).body;assert.equal(meta.web_allowed,undefined);assert.equal(meta.sensitivity,'secret');
   const corrected=await f.act('memory.correct',{memory_id:m,revision:meta.revision,content:'Synthetic basic correction'},basic);assert.equal(corrected.status,200);
   assert.equal((await f.act('memory.retract',{memory_id:corrected.body.memory_id,revision:1},basic)).status,200);
   const foreign=(await create(f,f.b)).body.memory_id;
@@ -48,7 +49,7 @@ test('CON-01: old readers, other agents and MCP credentials cannot call console 
   assert.deepEqual(businessSnapshot(f.store),before);
 });
 test('CON-02: own-memory create is persisted and repeated operations do not duplicate writes',async t=>{
-  const f=await setup(t),op=randomUUID(),input={content:'合成网络型号C9800-CL 😀',scope:'user',memory_type:'fact'};
+  const f=await setup(t),op=randomUUID(),input={content:'合成网络型号C9800-CL 😀',scope:'user',memory_type:'fact',sensitivity:'sensitive'};
   const first=await f.act('memory.create',input,f.a,op);assert.equal(first.status,200,JSON.stringify(first.body));
   for(let i=0;i<20;i++)assert.equal((await f.act('memory.create',input,f.a,op)).body.memory_id,first.body.memory_id);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memories WHERE user_id=?').get(f.a.auth.user_id).n,1);
@@ -70,16 +71,17 @@ test('CON-03: correction/retraction use exact revisions and leave task/handoff s
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(),before);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM resumes').get().n,0);
 });
-test('CON-04: grants stay version-pinned and can be withdrawn',async t=>{
+test('CON-04: ChatGPT visibility is not a console action; sensitivity stays a version-checked control and the read policy is read-only',async t=>{
   const f=await setup(t),m=(await create(f)).body.memory_id;let meta=(await f.get('memory-meta',{memory_id:m})).body;
-  assert.equal(meta.web_allowed,false);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:'bad',allow:true})).status,409);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true})).status,200);
-  assert.equal((await f.get('memory-meta',{memory_id:m})).body.web_allowed,true);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:false})).status,200);
-  assert.equal((await f.get('memory-meta',{memory_id:m})).body.web_allowed,false);
-  const corrected=await f.act('memory.correct',{memory_id:m,revision:meta.revision,content:'Synthetic corrected grant target'});
-  assert.equal((await f.get('memory-meta',{memory_id:corrected.body.memory_id})).body.web_allowed,false);
+  const before=f.store.db.prepare('SELECT (SELECT COUNT(*) FROM memory_web_grants)+(SELECT COUNT(*) FROM memory_web_policy) n').get().n;
+  for(const [action,payload] of [['memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true}],['memory.web_policy',{read_all:true,expected_revision:0}]])
+    assert.equal((await f.act(action,payload)).status,404,action);
+  assert.equal(f.store.db.prepare('SELECT (SELECT COUNT(*) FROM memory_web_grants)+(SELECT COUNT(*) FROM memory_web_policy) n').get().n,before);
+  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:99,sensitivity:'secret'})).status,409);
+  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'})).status,200);
+  const caps=(await f.get('capabilities')).body;
+  assert.equal(caps.web_policy,undefined);
+  assert.deepEqual(caps.read_policy,{policy:'web-memory-visibility-v1',setting:'chatgpt_per_memory_v1',active_records_uniform:false,legacy_read_all:false,history_and_secret_filtered:true,configured_by:'operator'});
 });
 test('CON-05: manual categories validate taxonomy and foreign ownership',async t=>{
   const f=await setup(t),m=(await create(f)).body.memory_id,revision=1;
@@ -165,7 +167,7 @@ test('CON-12: malformed identities, stale operation IDs and oversized input fail
 test('CON-13: every memory mutation requires a reviewed revision, and audit failure rolls the entire operation back',async t=>{
  const f=await setup(t),s=f.store.consoleService;const action=(action,payload)=>s.execute(f.a.auth,{action,payload,operation_id:randomUUID()});
  const created=await action('memory.create',{scope:'user',content:'Synthetic atomic operation'}),mid=created.memory_id;
- for(const action of ['memory.correct','memory.retract','memory.classify','memory.visibility'])
+ for(const action of ['memory.correct','memory.retract','memory.classify','memory.sensitivity'])
    await assert.rejects(()=>s.execute(f.a.auth,{action,payload:{memory_id:mid},operation_id:randomUUID()}),/Invalid number/);
  const audit=f.store.audit.bind(f.store),before=f.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n;
  f.store.audit=args=>{if(args.action==='console.memory.create')throw new Error('Synthetic audit failure');return audit(args);};
@@ -198,18 +200,14 @@ test('CON-15: replay identifies current lifecycle; category counts include curre
  assert.equal((await f.get('summaries')).body.categories.length,0);
 });
 
-test('CON-BASIC-02: the account ChatGPT read policy is a versioned, idempotent memory action',async t=>{
+test('CON-BASIC-02: the ChatGPT read policy is reported read-only and no console credential can change it',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
-  assert.deepEqual((await f.get('capabilities',{},basic)).body.web_policy,{read_all:false,revision:0,policy:'web-memory-visibility-v1'});
-  const operation_id=randomUUID(),enable=await f.act('memory.web_policy',{read_all:true,expected_revision:0},basic,operation_id);
-  assert.equal(enable.status,200);assert.equal(enable.body.read_all,true);assert.equal(enable.body.revision,1);
-  const replay=await f.act('memory.web_policy',{read_all:true,expected_revision:0},basic,operation_id);
-  assert.equal(replay.status,200);assert.equal(replay.body.revision,1);
-  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:0},basic)).body.error_code,'SETTINGS_VERSION_CHANGED');
-  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1,memory_id:'x'},basic)).status,400);
-  assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1},f.read)).status,403);
-  assert.equal((await f.get('capabilities',{},f.b)).body.web_policy.read_all,false);
-  assert.deepEqual((await f.get('capabilities',{},basic)).body.web_policy,{read_all:true,revision:1,policy:'web-memory-visibility-v1'});
+  // An existing legacy account setting is retained as data (for rollback), but is no longer a console action.
+  f.store.webVisibility.setPolicy(f.a.auth,{read_all:true,expected_revision:0});
+  for(const [owner,status] of [[basic,403],[f.a,404],[f.read,403]])
+    assert.equal((await f.act('memory.web_policy',{read_all:false,expected_revision:1},owner)).status,status);
+  assert.equal(f.store.webVisibility.policy(f.a.auth).read_all,true,'retained, unchanged');
+  for(const owner of [basic,f.b])assert.equal((await f.get('capabilities',{},owner)).body.read_policy.active_records_uniform,false);
 });
 
 test('CON-DEVICES-01: owners revoke their own agent keys from the console; managed, admin and foreign keys are refused',async t=>{

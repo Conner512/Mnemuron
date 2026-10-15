@@ -59,6 +59,8 @@ test("CFG-01..06 insecure configuration, credential aliasing, secret permissions
   assert.equal(app.provider, undefined);
   const metadata = await (await fetch(`${bootstrap.issuer}/.well-known/oauth-authorization-server`)).json();
   assert.equal(metadata.mnemuron_mode, "bootstrap_metadata_only");
+  assert.deepEqual(metadata.scopes_supported,['openid','offline_access','memory:read']);
+  assert.deepEqual((await (await fetch(`${bootstrap.issuer}/.well-known/openid-configuration`)).json()).scopes_supported,metadata.scopes_supported);
   assert.equal((await fetch(`${bootstrap.issuer}/readyz`)).status, 503);
   assert.equal((await fetch(`${bootstrap.issuer}/token`, { method: "POST" })).status, 503);
   assert.equal((await fetch(`${bootstrap.issuer}/.env`)).status, 404);

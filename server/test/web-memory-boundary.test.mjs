@@ -38,11 +38,12 @@ test('WEB-MEM-01: Web destination cannot read secret/default-sensitive memories;
   assert.ok(!JSON.stringify(taskScoped).includes(f.alpha.project_id));
 });
 
-test('WEB-MEM-01: current grants, the read_all switch, lifecycle and Core route boundaries',async t=>{
+test('WEB-MEM-01: current grants, public classification, lifecycle and Core route boundaries',async t=>{
   const f=await memoryFixture(t),web=reader(f);
   const m=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic allowed route marker'}).memory;
   const secret=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic denied route marker'}).memory;
-  assert.throws(()=>f.store.memoryDetail(web,secret.memory_id),e=>e.errorCode==='MEMORY_NOT_FOUND');
+  f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?)').run(web.user_id,secret.memory_id,'secret');
+  assert.throws(()=>grant(f,secret),e=>e.errorCode==='WEB_VISIBILITY_DENIED');
   assert.throws(()=>f.store.webVisibility.set(web,m.memory_id,{allow:true}),e=>e.statusCode===403);
   grant(f,m);assert.equal(f.store.memoryDetail(web,m.memory_id).memory.content,m.content);
   const original=f.store.revisions.latest(web.user_id,m.memory_id);
@@ -53,13 +54,11 @@ test('WEB-MEM-01: current grants, the read_all switch, lifecycle and Core route 
   grant(f,m);const body=JSON.stringify(f.store.memoryDetail(web,m.memory_id));
   assert.ok(!body.includes('synthetic-private-path') && !body.includes(secret.memory_id));
   grant(f,m,false);assert.equal(f.store.queryMemories(web,{query:'route marker',include_shared:true,statuses:['active','retracted','superseded']}).matched_candidate_count,0);
-  // Legacy sensitivity rows no longer affect ChatGPT reads in either direction.
   f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?)').run(web.user_id,m.memory_id,'public');
   assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,0);
-  f.store.db.prepare("INSERT INTO memory_web_policy VALUES (?,1,1,?)").run(web.user_id,new Date().toISOString());
+  grant(f,m); // Classification changes alone cannot undo an explicit denial.
+  assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,1);
   f.store.db.prepare("UPDATE memory_privacy SET sensitivity='secret' WHERE memory_id=?").run(m.memory_id);
-  assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,2);
-  f.store.db.prepare('DELETE FROM memory_web_policy WHERE user_id=?').run(web.user_id);
   assert.equal(f.store.queryMemories(web,{query:'route marker'}).result_count,0);
   assert.equal(f.store.queryMemories(f.a.auth,{query:'route marker'}).result_count,2);
 });
