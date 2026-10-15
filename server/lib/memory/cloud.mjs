@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto';
 import {AuthorizationError,ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
 import {memoryContent,memoryType,memoryTopic,memoryOperationId} from '../memory-validation.mjs';
 import {isWebReader,GRANT_LEGACY_COLUMN} from './web-visibility.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
 
 export const CLOUD_CORE_SCOPES=Object.freeze(['memory:read','resume:read','memory:write']);
 const sameScopes=(a,b)=>Array.isArray(a)&&a.length===b.length&&new Set(a).size===a.length&&b.every(s=>a.includes(s));
@@ -20,6 +21,7 @@ export class CloudMemory {
       user_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,operation_id TEXT NOT NULL,
       request_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,credential_id TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(user_id,connection_id,action,operation_id),UNIQUE(user_id,connection_id,operation_id));`);
+    protectGroup(this.db,'cloud');
   }
   // Local provisioning only: this function is never exposed as an HTTP route.
   bind(auth,input){
@@ -65,8 +67,10 @@ export class CloudMemory {
       let prior;
       if(!saving){
         prior=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,payload.memory_id);
-        // read_all widens what ChatGPT may read, never what it may correct or retract.
-        if(!prior||!this.store.webVisibility.writable(auth,payload.memory_id))throw missing();
+        // Inside the operation transaction: a memory of a deleted (or dangling/foreign) project is not writable and,
+        // for this narrow cloud credential, reads exactly like any memory it cannot see.
+        // read_all and the active-uniform read policy widen reads only, never corrections or retractions.
+        if(!prior||!this.store.webVisibility.writable(auth,payload.memory_id)||!this.store.lifecycle.liveProject(auth.user_id,prior.project_id))throw missing();
         if(this.store.revisions.latest(auth.user_id,payload.memory_id)?.revision!==payload.expected_revision)throw new ConflictError('Memory changed.','MEMORY_VERSION_CHANGED');
         if(prior.status!=='active')throw new ConflictError('Memory is no longer active.','MEMORY_VERSION_CHANGED');
       }
@@ -76,7 +80,8 @@ export class CloudMemory {
       else if(writing)result=this.store.supersedeMemory(auth,payload.memory_id,args,{evidenceKind:'model_submitted'}).replacement_memory;
       else result=this.store.retractMemory(auth,payload.memory_id,args).memory;
       const id=result.memory_id,revision=this.store.revisions.latest(auth.user_id,id);
-      // keep_private only means "no per-revision grant"; the owner's read_all switch still applies.
+      // keep_private only means "no per-revision grant"; the owner's read_all switch or the
+      // active-uniform read policy still make the record readable (there are no sensitivity levels).
       if(grant)this.db.prepare('INSERT INTO memory_web_grants VALUES(?,?,?,?,?)').run(auth.user_id,id,revision.revision,revision.state_hash,GRANT_LEGACY_COLUMN);
       const receipt={schema_version:'cloud-memory-operation-v1',status:'committed',saved:true,action,operation_id,
         memory_id:id,revision:revision.revision,memory_status:result.status,...(prior?{previous_memory_id:prior.memory_id}:{}),

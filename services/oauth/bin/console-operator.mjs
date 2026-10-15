@@ -6,6 +6,8 @@ import {AuthStore} from '../src/sqlite-adapter.mjs';
 import {IdentityRepository} from '../src/identity-repository.mjs';
 import {IdentityMaintenance} from '../src/identity-maintenance.mjs';
 import {RecoveryService} from '../src/recovery.mjs';
+import {runConsoleCapability} from '../src/isolated-maintenance.mjs';
+import {acquireAuthorizationLease} from '../src/process-lease.mjs';
 import {loadAuthConfig} from '../src/config.mjs';
 import {MnemuronStore} from '../../../server/lib/store.mjs';
 import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
@@ -16,7 +18,11 @@ export async function main(argv){
 core-key --output /private/new-console-key --confirm
 enable-console --config /private/auth.json --core-database /private/core.sqlite3 --account-id ID --confirm
 enable-console-basic --config /private/auth.json --core-database /private/core.sqlite3 --account-id ID --confirm
+enable-console | enable-console-basic --worker-config /private/identity-worker.json --account-id ID --confirm
+  (split service UIDs: run as root; OAuth and Core steps run under their own service UIDs)
 grant-operator | revoke-operator --config /private/auth.json --account-id ID --confirm
+disable-account | enable-account --config /private/auth.json --account-id ID --confirm
+  (multi-account member lockout; needs configured local maintenance; the last active operator stays protected)
 provision-once --config /private/auth.json --confirm
 recovery-begin --config /private/auth.json --proof-file /private/proofs.json --output /private/new-session.json --confirm
 recovery-complete --config /private/auth.json --session-file /private/session.json --proof-file /private/new-factor.json --confirm
@@ -24,13 +30,23 @@ The recovery commands enforce the same explicit proof policy as web recovery.
 No command downloads memories, enables MCP writes, or restores shared databases.`);return;}
   const [command,...rest]=argv,args=new Map();
   for(let i=0;i<rest.length;i++){const k=rest[i];requireConfig(/^--[a-z-]+$/.test(k)&&!args.has(k),'unique CLI flag');args.set(k,['--confirm','--isolated-fixture'].includes(k)?true:rest[++i]);}
+  const enable=args.has('--worker-config')?['--worker-config','--account-id']:['--config','--core-database','--account-id'];
   const allowed={
-    'core-key':['--output'], 'enable-console':['--config','--core-database','--account-id'],'enable-console-basic':['--config','--core-database','--account-id'],
-    'grant-operator':['--config','--account-id'],'revoke-operator':['--config','--account-id'],'provision-once':['--config'],
+    'core-key':['--output'], 'enable-console':enable,'enable-console-basic':enable,
+    'grant-operator':['--config','--account-id'],'revoke-operator':['--config','--account-id'],
+    'disable-account':['--config','--account-id'],'enable-account':['--config','--account-id'],'provision-once':['--config'],
     'recovery-begin':['--config','--proof-file','--output'],'recovery-complete':['--config','--session-file','--proof-file']
   }[command];requireConfig(!!allowed&&args.has('--confirm'),'explicit command confirmation');
   requireConfig([...args].every(([k,v])=>[...allowed,'--confirm','--isolated-fixture'].includes(k)&&(v===true||typeof v==='string'&&!v.startsWith('--')))&&allowed.every(k=>args.has(k)),'complete command arguments');
   if(command==='core-key'){const output=args.get('--output');storageDoctor({console_key:output});writePrivate(output,randomSecret());console.log(JSON.stringify({status:'created',secret:'written_to_private_file'}));return;}
+  if(args.has('--worker-config')){
+    // Split service UIDs: root reads only its own worker config; each step runs under the owning service UID.
+    const isolated=args.has('--isolated-fixture');requireConfig(isolated||process.getuid()===0,'local privileged coordinator');
+    const file=args.get('--worker-config'),workerConfig=readPrivate(file,{json:true}),release=acquireAuthorizationLease(file);
+    try{console.log(JSON.stringify(runConsoleCapability(workerConfig,{account_id:args.get('--account-id'),access:command==='enable-console-basic'?'basic':'full'},{isolated})));}
+    finally{release();}
+    return;
+  }
   const config=loadAuthConfig(args.get('--config'),{isolated:args.has('--isolated-fixture')});requireConfig(config.identity_mode==='multi_account_v1','multi-account mode');
   storageDoctor({auth_database:config.database_file,identity_key:config.identity.encryption_key_file});
   const store=new AuthStore(config.database_file,{identity:true}),ids=new IdentityRepository(store,{keyFile:config.identity.encryption_key_file,issuer:config.issuer,batchLimit:config.identity.invitation_batch_limit,sessionTtl:config.identity.console_session_ttl_seconds});
@@ -51,6 +67,12 @@ No command downloads memories, enables MCP writes, or restores shared databases.
     }else if(command==='grant-operator'||command==='revoke-operator'){
       const account=args.get('--account-id'),a=ids.byId(account);requireConfig(a&&ids.eligible(a.subject),'active exact account');
       ids.store.transaction(()=>{ids.console.role(account,command==='grant-operator');ids.audit(account,`operator.${command}`);});result={status:'updated',account_id:account,operator:ids.console.operator(account)};
+    }else if(command==='disable-account'||command==='enable-account'){
+      // Same local maintenance path the removed web Accounts page used: disable revokes the account's sessions,
+      // grants and Core credentials; enable restores it. The last active operator cannot be disabled.
+      const maintenance=new IdentityMaintenance(ids,config);requireConfig(maintenance.enabled(),'configured local maintenance');
+      const account=args.get('--account-id');requireConfig(ids.byId(account),'exact account');
+      result=await maintenance.setState(account,command==='disable-account'?'disable':'enable');
     }else{
       const maintenance=new IdentityMaintenance(ids,config);
       if(command==='provision-once'){requireConfig(maintenance.enabled(),'configured local maintenance');result=await maintenance.run();}

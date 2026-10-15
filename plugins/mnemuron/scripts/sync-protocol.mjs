@@ -81,7 +81,11 @@ export function immutableEnvelope(file, value) {
   }finally{unlinkSync(temporary);}
   return file;
 }
-const alive = pid => {try {process.kill(pid,0);return true;}catch(error){return error.code!=='ESRCH';}};
+// A killed owner that was never reaped (a zombie, e.g. under a container init that does not reap
+// orphans) still answers kill(pid,0) but can no longer run or hold the lane. Linux reports it in /proc;
+// elsewhere the check is skipped and the previous behaviour applies.
+const zombie = pid => {try {const stat=readFileSync(`/proc/${pid}/stat`,'utf8');return stat[stat.lastIndexOf(')')+2]==='Z';}catch {return false;}};
+const alive = pid => {try {process.kill(pid,0);}catch(error){return error.code!=='ESRCH';}return !zombie(pid);};
 export function claimLane(root,lane) {
   const parent=path.join(root,'sync-locks');mkdirSync(parent,{recursive:true,mode:0o700});
   const directory=path.join(parent,hash(lane));

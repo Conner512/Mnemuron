@@ -31,7 +31,7 @@ const segmenter=new Intl.Segmenter('zh',{granularity:'word'});
 export function queryGroups(value) {
   // Segment only the particle: never remove 的 from a noun such as 目的地.
   const particles=[...segmenter.segment(normalizeSearch(value))].map(part=>part.segment==='的'?' ':part.segment).join('');
-  const text=particles.replace(/请帮我|帮我|帮忙|查一下|找一下|我想知道|告诉我|查询|搜索|有关|关于|哪些|哪个|如何|怎么|是否/gu,' ');
+  const text=particles.replace(/请帮我|帮我|帮忙|查一下|找一下|我想知道|告诉我|查询|搜索|查看|有关|关于|哪些|哪个|如何|怎么|是否/gu,' ');
   const groups=[];
   for(const segment of text.split(/(\p{Script=Han}+)/u)) {
     if(/^\p{Script=Han}/u.test(segment)) {
@@ -84,8 +84,11 @@ function compiledQuery(query) {
   compiledQueries.set(query,compiled);
   return compiled;
 }
-function literalScore(query,text) {
+function literalScore(query,text,entities=[]) {
   if(containsTerm(text,query))return 1;
+  // Known names (project/task names and aliases, declared aliases, entity names) are never
+  // relaxed away: a query naming an object only matches records about that object.
+  if(entities.some(term=>containsTerm(query,term)&&!containsTerm(text,term)))return 0;
   const groups=compiledQuery(query);
   if(!groups.length)return 0;
   const tokens=searchTokens(text),present=new Set(tokens),stems=new Set(tokens.map(stemWord));
@@ -95,7 +98,8 @@ function literalScore(query,text) {
     return words&&words.every(word=>text.includes(word))?1:pairs;
   });
   // A shared Han character or one unrelated keyword cannot be rescued by recency/confidence:
-  // short queries need every concept; longer natural-language queries need about two thirds.
+  // short queries need every concept; longer natural-language queries need about two thirds
+  // of their ordinary words (names were checked above).
   const matched=coverage.filter(value=>value>=2/3).length,required=groups.length<3?groups.length:Math.ceil(groups.length*2/3);
   if(matched<required)return 0;
   return coverage.reduce((a,b)=>a+b,0)/coverage.length*0.8;
@@ -104,7 +108,7 @@ export function aliasAnchorsMatch(plan,text) {return (plan?.anchors||[]).every(g
 export function lexicalScore(query,memory,plan) {
   const text=normalizeSearch(`${memory.content||''}\n${memory.topic||''}`);
   if(!aliasAnchorsMatch(plan,text))return 0;
-  return Math.max(0,...(plan?.queries||[query]).map((q,i)=>literalScore(normalizeSearch(q).trim(),text)*(i?0.96:1)));
+  return Math.max(0,...(plan?.queries||[query]).map((q,i)=>literalScore(normalizeSearch(q).trim(),text,plan?.required||[])*(i?0.96:1)));
 }
 
 // Only explicit name equivalences, never generated synonym guesses or recursive expansion.
@@ -146,4 +150,9 @@ export function acceptsSemanticScore(score,policy) {
   if(policy.bounded&&(score< -1.000001||score>1.000001))return false;
   if(policy.direction==='maximum')return score>=0&&score<=policy.threshold;
   return score>=policy.threshold;
+}
+
+export function aliasSubjectMatches(query,name,memory){
+  const rest=normalizeSearch(query).replace(termPattern(normalizeSearch(name)),' ').trim();
+  return !queryGroups(rest).length||lexicalScore(rest,memory)>0;
 }

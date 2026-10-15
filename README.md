@@ -35,7 +35,7 @@ To resume work: **Preview → explicit Confirm → next ordinary turn → delive
 
 ## Quick start: run the local API
 
-Requirements: **Node.js 24+** with `node:sqlite` and FTS5, Git, and a POSIX shell. The server has no third-party npm runtime dependencies. Python 3 is needed for the Hermes adapter and the full test suite.
+Requirements: **Node.js 24 LTS** (see `.node-version`) with `node:sqlite` and FTS5, Git, and a POSIX shell. The server has no third-party npm runtime dependencies. Python 3 is needed for the Hermes adapter and the full test suite.
 
 ```bash
 git clone https://github.com/Conner512/Mnemuron.git

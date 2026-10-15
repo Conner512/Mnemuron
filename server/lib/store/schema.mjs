@@ -1,6 +1,9 @@
+import {migrateEntities} from '../memory-entities/schema.mjs';
 // Core database schema as ordered, versioned migrations (PRAGMA user_version).
 // Every step is idempotent so databases created before versioning adopt it safely.
-import { applyMigrations } from "./migrations.mjs";
+import { applyMigrations, schemaVersion, SchemaVersionError } from "./migrations.mjs";
+import { LIFECYCLE_TABLES, LIFECYCLE_ENFORCEMENT_TABLES, protectGroup, assertInitializedGenerationGuards } from "../lifecycle/protection.mjs";
+import { assertLifecycleConsistent } from "../lifecycle/resolver.mjs";
 
 const CORE_TABLES = `
       CREATE TABLE IF NOT EXISTS credentials (
@@ -370,22 +373,45 @@ const addColumns = (table, columns) => (db) => {
   for (const [column, sql] of columns) if (!existing.has(column)) db.exec(sql);
 };
 
-// Sensitivity levels were removed. One-off, non-destructive carry-over for existing databases:
-// records classified public stay readable by ChatGPT through a grant for their current revision,
-// and records classified secret (hidden from the vector index) are queued to be indexed again.
+// Sensitivity levels were removed (single-owner use; ChatGPT may read everything the owner allows).
+// One-off carry-over for existing databases:
+// - records classified public get a ChatGPT grant for their current revision, so they stay readable
+//   with read_all off;
+// - records classified secret (hidden from the vector index) are queued to be indexed again;
+// - denials Mnemuron created automatically (cloud keep_private saves, console "new memory" defaults,
+//   imports) are cleared. A denial the owner set explicitly - latest memory.web_visibility audit with
+//   allow=false, or a local correction of such a record - is kept.
 // memory_privacy itself is left in place, unused, so an older release can still open the file.
 const hasTable = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
 function retireSensitivityLevels(db) {
-  if (!hasTable(db, "memory_privacy")) return;
-  if (hasTable(db, "memory_web_grants") && hasTable(db, "memory_revisions")) db.exec(`
+  // Like an owner grant, the carry-over never grants a memory whose project is (effectively) deleted:
+  // follow merged_into to the canonical project, as the lifecycle resolver does.
+  if (hasTable(db, "memory_privacy") && hasTable(db, "memory_web_grants") && hasTable(db, "memory_revisions")) db.exec(`
+    WITH RECURSIVE chain(user_id,start,cur,depth) AS (
+      SELECT user_id,project_id,project_id,0 FROM project_lifecycle
+      UNION ALL
+      SELECT c.user_id,c.start,pl.merged_into,c.depth+1 FROM chain c
+        JOIN project_lifecycle pl ON pl.user_id=c.user_id AND pl.project_id=c.cur AND pl.state='merged' WHERE c.depth<64),
+    dead(user_id,project_id) AS (
+      SELECT c.user_id,c.start FROM chain c JOIN project_lifecycle pl ON pl.user_id=c.user_id AND pl.project_id=c.cur AND pl.state='deleted')
     INSERT OR IGNORE INTO memory_web_grants (user_id,memory_id,revision,state_hash,sensitivity)
       SELECT p.user_id,p.memory_id,r.revision,r.state_hash,'unclassified' FROM memory_privacy p
+      JOIN memories m ON m.user_id=p.user_id AND m.memory_id=p.memory_id
       JOIN memory_revisions r ON r.user_id=p.user_id AND r.memory_id=p.memory_id
         AND r.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=p.user_id AND memory_id=p.memory_id)
-      WHERE p.sensitivity='public';`);
-  if (hasTable(db, "memory_index_outbox")) db.exec(`
+      WHERE p.sensitivity='public'
+        AND NOT EXISTS (SELECT 1 FROM dead d WHERE d.user_id=m.user_id AND d.project_id=m.project_id);`);
+  if (hasTable(db, "memory_privacy") && hasTable(db, "memory_index_outbox")) db.exec(`
     UPDATE memory_index_outbox SET state='pending',action='upsert' WHERE action='hide'
       AND EXISTS (SELECT 1 FROM memory_privacy p WHERE p.user_id=memory_index_outbox.user_id AND p.memory_id=memory_index_outbox.memory_id AND p.sensitivity='secret');`);
+  if (hasTable(db, "memory_web_denials")) db.exec(`
+    WITH RECURSIVE explicit(user_id,memory_id) AS (
+      SELECT a.user_id,a.target_id FROM audit_events a
+        WHERE a.action='memory.web_visibility' AND json_extract(a.metadata_json,'$.allow')=0
+          AND a.rowid=(SELECT MAX(b.rowid) FROM audit_events b WHERE b.user_id=a.user_id AND b.action='memory.web_visibility' AND b.target_id=a.target_id)
+      UNION
+      SELECT m.user_id,m.memory_id FROM memories m JOIN explicit e ON m.user_id=e.user_id AND m.supersedes_memory_id=e.memory_id)
+    DELETE FROM memory_web_denials WHERE NOT EXISTS (SELECT 1 FROM explicit e WHERE e.user_id=memory_web_denials.user_id AND e.memory_id=memory_web_denials.memory_id);`);
 }
 
 export const CORE_MIGRATIONS = Object.freeze([
@@ -433,8 +459,42 @@ export const CORE_MIGRATIONS = Object.freeze([
       CREATE INDEX IF NOT EXISTS memories_user_created_idx
         ON memories(user_id, created_at DESC, memory_id);
     `) },
-  { version: 7, name: "retire-sensitivity-levels", up: retireSensitivityLevels },
+  // Older readers ignore explicit private denials. A schema boundary must prevent
+  // rolling back to those readers even though the change is structurally additive.
+  { version: 7, repeatable: true, name: "memory-web-private-denials", up: (db) => db.exec(`
+      CREATE TABLE IF NOT EXISTS memory_web_denials (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,state_hash TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
+    `) },
+  // Additive lifecycle foundation: no project gets a row (no row means active), no history is rewritten.
+  // Repeatable: the tables and the Core epoch triggers are re-ensured (and repaired) on every open.
+  { version: 8, repeatable: true, name: "project-lifecycle-foundation", up: (db) => { db.exec(LIFECYCLE_TABLES); protectGroup(db, "core"); } },
+  // Enforcement groundwork (still fenced: this schema refuses deleted/merged projects at open). Additive only.
+  { version: 9, repeatable: true, name: "project-lifecycle-enforcement-groundwork", up: (db) => db.exec(LIFECYCLE_ENFORCEMENT_TABLES) },
+  // The first fully enforcing schema: reads, writes and jobs enforce deleted and merged projects, so this build opens
+  // such databases. The version itself is the boundary: every earlier reader (including the fenced v9 builds) refuses
+  // a v10 database before reading or writing a record. The marker records when full enforcement first applied.
+  { version: 10, repeatable: true, name: "project-lifecycle-enforced", up: (db) => db.exec(`
+      CREATE TABLE IF NOT EXISTS project_lifecycle_enforcement (id INTEGER PRIMARY KEY CHECK (id = 1), enforced_since TEXT NOT NULL);
+      INSERT OR IGNORE INTO project_lifecycle_enforcement (id, enforced_since) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+    `) },
+  // Derived identity and tombstones affect retrieval. Older readers must not silently ignore this boundary.
+  {version:11,repeatable:true,name:'source-grounded-entities',up:migrateEntities},
+  // One-off: sensitivity levels removed; carries public/secret records and clears automatic denials.
+  {version:12,name:'retire-sensitivity-levels',up:retireSensitivityLevels},
 ]);
 
 export const CORE_SCHEMA_VERSION = CORE_MIGRATIONS.at(-1).version;
-export const migrateCoreSchema = (db) => applyMigrations(db, CORE_MIGRATIONS);
+// Order matters for a refused open to write nothing: first the version boundary (a newer database is refused), then
+// the read-only lifecycle consistency check, then the generation-guard check, and only then any migration, repeatable
+// ensure or repair write. From v10 on, consistent deleted and merged projects are enforced and open normally (the fenced
+// v8/v9 builds refused every one of them here); inconsistent lifecycle metadata is still refused at open.
+export const migrateCoreSchema = (db) => {
+  const version = schemaVersion(db);
+  if (version > CORE_SCHEMA_VERSION) throw new SchemaVersionError(`Database schema version ${version} is newer than this release supports (${CORE_SCHEMA_VERSION}).`);
+  // Consistent deleted/merged state opens; inconsistent lifecycle metadata still refuses the open, read-only, here.
+  assertLifecycleConsistent(db);
+  // Initialized generation guards that went missing or were altered are refused here, before the repeatable v9 step
+  // could silently reinstall them over a generation that may have been reset while unguarded.
+  assertInitializedGenerationGuards(db);
+  return applyMigrations(db, CORE_MIGRATIONS);
+};

@@ -157,7 +157,19 @@ test('SEARCH-23: a hidden project alias cannot influence an authorized cloud que
  const web={...f.auth,agent_id:'chatgpt-web'};
  assert.equal(f.s.queryMemories(web,{query:'Orion 网络配置'}).result_count,0);
 });
-test('SEARCH-24: natural English questions keep recall through stop words and inflections',t=>{
+
+test('SEARCH-24: project metadata aliases honor deletion and canonical merged scope',t=>{
+ const f=fixture(t);for(const [id,name,alias] of [['alias-src','星桥','Orion'],['alias-target','合并目标','MergeTarget'],['alias-dead','蓝港','Blueport']]){
+  f.s.ensureProject(f.auth,id,name);f.s.db.prepare('UPDATE projects SET aliases_json=? WHERE project_id=?').run(JSON.stringify([alias]),id);
+ }
+ const target=f.save('星桥 network configuration',{scope:'project',project_id:'alias-target'}),hiddenAliasTarget=f.save('蓝港 network configuration');
+ f.s.db.prepare('INSERT INTO project_lifecycle VALUES (?,?,?,?,1,?)').run(f.auth.user_id,'alias-src','merged','alias-target',new Date().toISOString());
+ f.s.db.prepare('INSERT INTO project_lifecycle VALUES (?,?,?,?,1,?)').run(f.auth.user_id,'alias-dead','deleted',null,new Date().toISOString());
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'Orion network configuration',project_id:'alias-target'})),[target.memory_id]);
+ assert.ok(!ids(f.s.queryMemories(f.auth,{query:'Blueport network configuration'})).includes(hiddenAliasTarget.memory_id));
+});
+
+test('SEARCH-25: natural English questions keep recall through stop words and inflections',t=>{
  const f=fixture(t),backup=f.save('Qdrant backup is configured nightly via cron.'),deploy=f.save('The deploy script lives in server/install.');
  f.save('Deploy notes for the invoice service.');f.save('Kitchen cleaning schedule.');
  assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'how did we configure qdrant backup'})),[backup.memory_id]);
@@ -166,16 +178,24 @@ test('SEARCH-24: natural English questions keep recall through stop words and in
  assert.equal(lexicalScore('configuring',{content:'Backups were configured.'})>0,true);
  assert.equal(lexicalScore('17.9.8',{content:'Version 17.9.80'}),0);
 });
-test('SEARCH-25: reordered Chinese words match only when every word is present',t=>{
+test('SEARCH-26: reordered Chinese words match only when every word is present',t=>{
  const f=fixture(t),target=f.save('备份每天定时执行，配置在 cron 里。');f.save('定时任务配置完成。');f.save('数据迁移库存计划。');
  const migration=f.save('下周完成数据库迁移，计划分三步。');
  assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'配置定时备份'})),[target.memory_id]);
  assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'数据库迁移计划'})),[migration.memory_id]);
 });
-test('SEARCH-26: an alias planning failure degrades expansion without disabling the index',t=>{
+test('SEARCH-27: an alias planning failure degrades expansion without disabling the index',t=>{
  const f=fixture(t),target=f.save('Qdrant backup is configured nightly.');
  f.s.memorySearch.plan=()=>{throw new TypeError('synthetic alias failure');};
  const result=f.s.queryMemories(f.auth,{query:'qdrant backup'});
  assert.deepEqual(ids(result),[target.memory_id]);assert.equal(result.retrieval.alias_source_truncated,true);
  assert.equal(f.s.memorySearch.status().state,'ready');
+});
+
+test('SEARCH-28: relaxed recall drops ordinary words, never a known project name',t=>{
+ const f=fixture(t);f.s.ensureProject(f.auth,'project-kestrel','Kestrel');
+ const other=f.save('Harbour network configuration was reviewed.'),own=f.save('Kestrel network configuration was reviewed.');
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'kestrel network configuration'})),[own.memory_id]);
+ // Without a known name, three ordinary words still allow one to be missing.
+ assert.deepEqual(ids(f.s.queryMemories(f.auth,{query:'network configuration review'})).sort(),[other.memory_id,own.memory_id].sort());
 });

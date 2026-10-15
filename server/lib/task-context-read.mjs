@@ -26,9 +26,18 @@ export function readTaskContext(store, auth, payload) {
   const limit = integer('content_limit', 4096, 1, 8192);
   const expectedVersion = payload.canonical_version === undefined ? null : integer('canonical_version', 1, 1, Number.MAX_SAFE_INTEGER);
   if ((index > 0 || offset > 0) && expectedVersion === null) throw new ValidationError('Continuation requires canonical_version.', 'TASK_VERSION_REQUIRED');
+  // A deleted project (requested, or the Task's own) is PROJECT_DELETED for its owner. Otherwise the requested project
+  // and the Task's origin project must be the same canonical project: a Task of a merged source is read through its
+  // canonical target (or its own ID). Unknown, foreign and mismatched pairs share one generic not found.
+  const lifecycle = store.lifecycle;
+  if (lifecycle.projectState(auth.user_id, payload.project_id) === 'deleted') throw new ConflictError('This project was deleted.', 'PROJECT_DELETED');
   const row = store.db.prepare(`SELECT t.* FROM tasks t JOIN projects p ON p.project_id=t.project_id AND p.user_id=t.user_id
-    WHERE t.user_id=? AND t.project_id=? AND t.task_id=?`).get(auth.user_id, payload.project_id, payload.task_id);
-  if (!row) throw new NotFoundError('Task context not found.', 'TASK_CONTEXT_NOT_FOUND');
+    WHERE t.user_id=? AND t.task_id=?`).get(auth.user_id, payload.task_id);
+  if (row && lifecycle.projectState(auth.user_id, row.project_id) === 'deleted') throw new ConflictError('This project was deleted.', 'PROJECT_DELETED');
+  const live = row && row.project_id !== payload.project_id ? lifecycle.live(auth.user_id) : null;
+  if (!row || (live && (live.canonicalOf(payload.project_id) === null || live.canonicalOf(payload.project_id) !== live.canonicalOf(row.project_id)))) {
+    throw new NotFoundError('Task context not found.', 'TASK_CONTEXT_NOT_FOUND');
+  }
   const task = store.taskFromRow(row);
   if (expectedVersion !== null && expectedVersion !== task.canonical_version) {
     throw new ConflictError('Canonical Task changed; restart the read instead of combining versions.', 'TASK_VERSION_CHANGED');

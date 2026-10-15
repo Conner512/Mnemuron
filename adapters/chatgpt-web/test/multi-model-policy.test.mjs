@@ -49,3 +49,12 @@ test('SEARCH-GW-01: default hybrid is forwarded with a personal allocation guard
  const fallback=await client.call('mnemuron_search_memories',{query:'synthetic'},{});
  assert.equal(calls[2].body.mode,'lexical');assert.equal(fallback.retrieval.requested_mode,'hybrid');assert.equal(fallback.retrieval.degradation_code,'NOT_CONFIGURED');
 });
+
+test('SEARCH-GW-02: saved lexical preference is preserved with and without a personal model',async()=>{
+ const client=Object.create(ReadonlyCoreClient.prototype);client.config={identity_mode:'multi_account_v1'};
+ for(const configured of [false,true]){
+  client.checkIdentity=async()=>({personal_retrieval:{configured,default_mode:'lexical'}});
+  client.request=async(route,body)=>{assert.equal(body.mode,'lexical');return {results:[],retrieval:{requested_mode:body.mode,effective_mode:'lexical',degraded:false}};};
+  const result=await client.call('mnemuron_search_memories',{query:'synthetic'},{});assert.equal(result.retrieval.requested_mode,'lexical');assert.equal(result.retrieval.degraded,false);
+ }
+});

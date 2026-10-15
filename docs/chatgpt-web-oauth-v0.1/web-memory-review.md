@@ -14,30 +14,37 @@ still has exactly `memory:read` and `resume:read`; it cannot call other Core rou
 The gateway also verifies the Core policy marker, owner and agent instance on
 each business call. No positive OAuth/introspection cache was introduced.
 
-There are no sensitivity levels (`public`/`internal`/`sensitive`/`secret` were removed;
-see [the change note](../sensitivity-levels-removed.md)). ChatGPT reads a record when
-either rule holds:
+There are no sensitivity levels (`public`/`internal`/`sensitive`/`secret` were removed; see
+[the change note](../sensitivity-levels-removed.md)). Under the default per-memory policy ChatGPT
+reads a record when either rule holds and the owner has not explicitly denied it:
 
 | Rule | Web read |
 | --- | --- |
-| The owner's account-level `read_all` switch is on | Every record of that account, including ones added or corrected later |
+| The account's legacy `read_all` setting is on | Every record of that account, including ones added or corrected later |
 | An explicit local grant exists for the record's current revision/state | That revision only |
+
+Under the operator-selected **active-uniform** policy (`memory.agent_read_policy:
+"active_uniform_v1"`, see [memory-read-policy-and-embedding-first-run.md](../memory-read-policy-and-embedding-first-run.md))
+ChatGPT reads every **active** record of the account, like the account's other agents; superseded
+and retracted history keeps the per-memory rule above. This is the setting to use when ChatGPT
+should read everything.
 
 No grant is inferred from OAuth consent, a provider's egress approval, a remembered
 instruction, or a previous successful read. Memory updates and revisions revoke grants.
-Core local readers keep their original owner/scope behavior.
+An owner's explicit denial survives version changes and local corrections. Core local
+readers keep their original owner/scope behavior.
 
-The switch is the console action `memory.web_policy` (Privacy & retention → ChatGPT
-read scope). It is versioned (`expected_revision`, conflicts return
-`SETTINGS_VERSION_CHANGED`), idempotent per operation ID and audited as
-`memory.web_policy`. Other accounts are unaffected. Switching it off restores the
-explicit-grant rule; existing grants are kept.
+> **Changed:** the console no longer offers per-memory grants (`memory.visibility`) or
+> the read-all switch (`memory.web_policy`). Existing grants, denials and read-all
+> settings are retained as data and stay in force under the default policy. Switching
+> the deployment to active-uniform is a separately approved operator change.
 
-`read_all` widens **reads only**. Cloud corrections and retractions (`memory.supersede`,
-`memory.retract`) still require an explicit grant for the record's current revision, so
-switching reads on never lets a write connection change records the owner did not
-individually allow. `cloud_read=keep_private` on a cloud save means "no grant"; with
-`read_all` on, that record is still readable like every other record.
+Read policies widen **reads only**. Cloud corrections and retractions (`memory.supersede`,
+`memory.retract`) still require an explicit grant for the record's current revision and no
+denial, so neither `read_all` nor active-uniform lets a write connection change records the
+owner did not individually allow. `cloud_read=keep_private` on a cloud save means "no grant";
+it no longer creates a denial, so the record is readable wherever the account's read scope
+already allows it.
 
 Filtering occurs before lexical candidate limits, counters and conflict creation,
 and again after awaited vector requests. Details and historical lifecycle records
@@ -64,7 +71,7 @@ node server/bin/mnemuron-admin.mjs memory-web-visibility \
   --memory MEMORY_ID --revision REVIEWED_REVISION --state-hash REVIEWED_STATE_HASH --allow
 ```
 
-Use `--deny` with the current version/hash to revoke a grant.
+Use `--deny` with the current version/hash to revoke a grant (this also records an owner denial).
 `--inspect` does not return memory text. Stale versions are rejected; there is no
 Web grant endpoint, wildcard grant, automatic batch approval or Web scope change.
 

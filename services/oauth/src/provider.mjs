@@ -1,5 +1,5 @@
 import { Provider, errors } from "oidc-provider";
-import { seconds,oauthScopesFor,resourceScopesFor } from "../../../shared/oauth-common.mjs";
+import { seconds,oauthScopesFor,resourceScopesFor,DISCOVERY_OAUTH_SCOPES } from "../../../shared/oauth-common.mjs";
 
 export function makeProvider(config, secrets, store, accounts) {
   const p = config.token_policy;
@@ -68,10 +68,12 @@ export function makeProvider(config, secrets, store, accounts) {
     renderError: async (ctx) => { ctx.type = "html"; ctx.body = "<!doctype html><title>Authorization failed</title><h1>Authorization failed</h1><p>Return to the client and start a new authorization request.</p>"; },
   });
   provider.proxy = !config.isolated;
-  // Keep discovery tied to the library's enabled endpoints; only endpoint-specific authentication metadata is added.
+  // Preserve provider endpoints and accepted grants, while publishing a safe
+  // initial scope set shared by readonly and read/write personal clients.
   provider.use(async (ctx, next) => {
     await next();
     if (ctx.path === "/.well-known/openid-configuration" && ctx.status === 200) {
+      ctx.body.scopes_supported = [...(ctx.req.mnemuronDiscoveryScopes||DISCOVERY_OAUTH_SCOPES)];
       ctx.body.introspection_endpoint_auth_methods_supported = ["client_secret_basic"];
       ctx.body.revocation_endpoint_auth_methods_supported = ["client_secret_post"];
       ctx.body.token_endpoint_auth_methods_supported = ["client_secret_post"];

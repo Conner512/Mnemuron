@@ -33,10 +33,10 @@ test('M-01 M-02 M-08: memory-only saves, reads, revises and enqueues without any
   const detail=s.memoryDetail(f.auth,saved.memory_id);
   assert.equal(detail.content_complete,true);assert.equal(detail.source_manifest.revision,1);
   assert.equal(detail.source_manifest.sources[0].source_kind,'explicit_memory');
-  assert.equal(count(s,'memory_processing_outbox'),2);assert.equal(count(s,'memory_index_outbox'),1);
-  assert.deepEqual(s.db.prepare('SELECT DISTINCT state FROM memory_processing_outbox').all().map(r=>r.state),['blocked_config']);
+  assert.equal(count(s,'memory_processing_outbox'),3);assert.equal(count(s,'memory_index_outbox'),1);
+  assert.deepEqual(s.db.prepare('SELECT job_type,state FROM memory_processing_outbox ORDER BY job_type').all().map(r=>[r.job_type,r.state]),[['classification','blocked_config'],['entities','pending'],['summary','blocked_config']]);
   s.saveMemory(f.auth,{content:saved.content,scope:'user',operation_id:'save-1'});
-  assert.equal(count(s,'memory_processing_outbox'),2);
+  assert.equal(count(s,'memory_processing_outbox'),3);
   s.appendEvents(f.auth,{event:{event_id:'independent-source',event_type:'assistant_message',content:'事实：来源保留完整标点 1-2-3。'}});
   assert.equal(count(s,'memories'),2);assert.equal(count(s,'checkpoints'),0);assert.equal(count(s,'task_reconciliation_proposals'),0);
   assert.equal(count(s,'tasks'),0);assert.equal(count(s,'resumes'),0);

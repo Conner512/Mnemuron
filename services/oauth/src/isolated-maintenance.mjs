@@ -11,7 +11,8 @@ import {prepareConnectionBinding,connectionWorkCurrent,finishConnectionBinding,a
 import {revokeCoreIdentity} from './identity-maintenance.mjs';
 import {MnemuronStore} from '../../../server/lib/store.mjs';
 import {loadMemoryRuntimeFile} from '../../../server/lib/memory-runtime.mjs';
-import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
+import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,exactScopes} from '../../../shared/console-contract.mjs';
+import {hashKey} from '../../../server/lib/store/helpers.mjs';
 import {readPrivate,writePrivate,requireConfig,CORE_SCOPES,MEMORY_WRITE_CORE_SCOPES,validateCloudPolicy} from '../../../shared/oauth-common.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 
@@ -66,6 +67,19 @@ function validWork(work,c){
     requireConfig(b.credential_file===path.join(directory,`${a.account_id}-${b.purpose}-v${a.security_version}.key`),'fixed credential destination');
   }
 }
+// Console capability upgrade (the existing enable-console) across split service UIDs: the OAuth phase
+// binds the exact account and console credential; the Core phase changes only that credential's scopes.
+const CAPABILITY_ACTIONS=['console-capability-plan','console-capability-current','console-capability-apply','console-capability-restore'];
+function validCapability(input,action){
+  const r=input.request;
+  requireConfig(r&&id(r.account_id)&&['full','basic'].includes(r.access)&&Object.keys(r).every(k=>['account_id','access'].includes(k)),'exact console capability request');
+  if(action==='console-capability-plan')return;
+  const t=input.target;
+  requireConfig(t&&t.account_id===r.account_id&&id(t.user_id)&&id(t.subject)&&id(t.credential_id)&&id(t.agent_instance_id)
+    &&Number.isInteger(t.security_version)&&t.security_version>0&&/^[a-f0-9]{64}$/.test(t.key_hash),'bound console credential');
+  if(action==='console-capability-restore')requireConfig([CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES].some(s=>exactScopes(input.prior,s))
+    &&[CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES].some(s=>exactScopes(input.applied,s)),'bounded restore');
+}
 function publish(file,value){if(fs.existsSync(file)){requireConfig(readPrivate(file)===value,'credential file collision');}else writePrivate(file,value);}
 
 // Each child is launched under the existing service uid/gid. Secrets travel over
@@ -74,6 +88,7 @@ export function workerPhase(phase,input,{isolated=false}={}){
   const c=validateWorkerConfig(input.config,{isolated,phase});requireConfig(['auth','core','web'].includes(phase)&&process.getuid()===c[phase].uid,'phase identity');
   const action=input.action;
   if(input.work)validWork(input.work,c);
+  if(CAPABILITY_ACTIONS.includes(action))validCapability(input,action);
   if(phase==='auth'){
     const config=loadAuthConfig(c.auth.config_file,{isolated});
     requireConfig(config.identity_mode==='multi_account_v1'&&config.identity.provisioning?.enabled===true&&config.identity.provisioning.mode==='external_worker','external maintenance enabled');
@@ -96,6 +111,20 @@ export function workerPhase(phase,input,{isolated=false}={}){
         const r=input.revocation;requireConfig(r&&id(r.operation_id)&&id(r.account_id),'revocation operation');
         const a=ids.byId(r.account_id);requireConfig(a?.status==='disabled'&&a.security_version===r.security_version,'current revocation');
         ids.db.prepare("UPDATE identity_operations SET state='completed',last_error=NULL WHERE operation_id=? AND account_id=? AND kind LIKE 'console-disable:%' AND state='revocation_pending'").run(r.operation_id,r.account_id);return {completed:true};
+      }
+      if(action==='console-capability-plan'){
+        const r=input.request;
+        if(r.access==='basic')requireConfig(config.identity.console_basic_operations?.memory===true,'basic-only console policy');
+        const a=ids.byId(r.account_id);requireConfig(a&&ids.eligible(a.subject),'active exact account');
+        const binding=ids.bindings(a.subject).find(b=>b.purpose==='console');requireConfig(binding,'existing console binding');
+        // The console key never leaves this phase; Core proves the exact credential by its hash.
+        return {target:{account_id:a.account_id,user_id:a.user_id,subject:a.subject,security_version:a.security_version,
+          credential_id:binding.credential_id,agent_instance_id:binding.agent_instance_id,key_hash:hashKey(readPrivate(binding.credential_file))}};
+      }
+      if(action==='console-capability-current'){
+        const t=input.target,a=ids.byId(t.account_id);
+        if(!a||!ids.eligible(a.subject)||a.security_version!==t.security_version)return {current:false};
+        return {current:ids.bindings(a.subject).find(b=>b.purpose==='console')?.credential_id===t.credential_id};
       }
       if(action==='map')return identityMapSnapshot(ids);
       if(action==='connection-current')return {current:connectionWorkCurrent(ids,input.work)};
@@ -121,11 +150,34 @@ export function workerPhase(phase,input,{isolated=false}={}){
     }finally{store.close();}
   }
   if(phase==='core'){
-    requireConfig(['apply','apply-cloud','apply-connection','revoke-connection','revoke','discard'].includes(action),'core maintenance action');
+    requireConfig(['apply','apply-cloud','apply-connection','revoke-connection','revoke','discard','console-capability-apply','console-capability-restore'].includes(action),'core maintenance action');
     const memoryConfig=c.core.memory_config_file?loadMemoryRuntimeFile(c.core.memory_config_file):undefined;
     requireConfig(fs.existsSync(c.core.database_file),'existing Core database');
     const core=new MnemuronStore(c.core.database_file,{memoryConfig,memoryConfigPath:c.core.memory_config_file});
     try{
+      if(action==='console-capability-apply'||action==='console-capability-restore'){
+        const t=input.target,row=core.db.prepare('SELECT * FROM credentials WHERE credential_id=?').get(t.credential_id);
+        requireConfig(row&&row.key_hash===t.key_hash&&row.user_id===t.user_id&&row.agent_id==='mnemuron-console'&&row.agent_instance_id===t.agent_instance_id
+          &&!row.revoked_at&&!(row.expires_at&&Date.parse(row.expires_at)<=Date.now()),'exact Core binding');
+        const scopes=JSON.parse(row.scopes_json);
+        const auth={credential_id:row.credential_id,user_id:row.user_id,device_id:row.device_id,agent_id:row.agent_id,agent_instance_id:row.agent_instance_id,scopes};
+        // Compare-and-set on the exact credential: a concurrent change fails this step instead of being overwritten.
+        const set=(next,audit)=>core.memoryTransaction(()=>{
+          const changed=core.db.prepare('UPDATE credentials SET scopes_json=? WHERE credential_id=? AND user_id=? AND key_hash=? AND revoked_at IS NULL AND scopes_json=?')
+            .run(JSON.stringify(next),row.credential_id,row.user_id,row.key_hash,row.scopes_json).changes;
+          requireConfig(changed===1,'unchanged console credential');
+          core.audit({auth,action:audit,targetType:'credential',targetId:row.credential_id,metadata:{split_uid:true}});
+        });
+        if(action==='console-capability-restore'){
+          if(!exactScopes(scopes,input.applied))return {restored:false};
+          set(input.prior,'console.capability.restore');return {restored:true};
+        }
+        const basic=input.request.access==='basic',target=basic?CONSOLE_BASIC_SCOPES:CONSOLE_WRITE_SCOPES;
+        requireConfig([CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,...(basic?[]:[CONSOLE_WRITE_SCOPES])].some(expected=>exactScopes(scopes,expected)),'expected Core scopes');
+        const changed=!exactScopes(scopes,target);
+        if(changed)set([...target],basic?'console.capability.enable_basic':'console.capability.enable');
+        return {changed,prior:scopes,applied:[...target]};
+      }
       if(action==='apply')applyIdentityBindings(core,input.work.account,input.work.bindings);
       if(action==='apply-cloud'){requireConfig(input.work.kind==='cloud','cloud work');applyCloudBinding(core,input.work);}
       if(action==='apply-connection'){requireConfig(input.work.kind==='connection','connection work');applyConnectionBinding(core,input.work);}
@@ -150,9 +202,8 @@ export function workerPhase(phase,input,{isolated=false}={}){
   throw new Error('UNSUPPORTED_WORKER_ACTION');
 }
 
-export function runIsolatedMaintenance(input,{isolated=false,afterPhase=()=>{}}={}){
-  const config=validateWorkerConfig(input,{isolated});requireConfig(isolated||process.getuid()===0,'local privileged coordinator');
-  const call=(phase,action,data={})=>{
+function phaseCaller(config,{isolated,afterPhase}){
+  return (phase,action,data={})=>{
     const target=config[phase],r=spawnSync(process.execPath,[filename,'--phase',phase,...(isolated?['--isolated-fixture']:[])],{
       uid:target.uid,gid:target.gid,input:JSON.stringify({config,action,...data}),encoding:'utf8',timeout:20000,maxBuffer:2*1024*1024,
       env:{NODE_ENV:'production',NODE_NO_WARNINGS:'1'}});
@@ -160,6 +211,25 @@ export function runIsolatedMaintenance(input,{isolated=false,afterPhase=()=>{}}=
     if(r.status!==0)throw new Error(`IDENTITY_WORKER_${phase.toUpperCase()}_FAILED`);
     const result=JSON.parse(r.stdout);afterPhase(`${phase}.${action}`);return result;
   };
+}
+/** enable-console / enable-console-basic for split service UIDs, through the worker's fixed phases. */
+export function runConsoleCapability(input,request,{isolated=false,afterPhase=()=>{}}={}){
+  const config=validateWorkerConfig(input,{isolated});requireConfig(isolated||process.getuid()===0,'local privileged coordinator');
+  validCapability({request},'console-capability-plan');const call=phaseCaller(config,{isolated,afterPhase});
+  const {target}=call('auth','console-capability-plan',{request});requireConfig(target.account_id===request.account_id,'bound account');
+  const applied=call('core','console-capability-apply',{request,target});
+  // The account must still be the same eligible account with the same binding; otherwise (or if that cannot be
+  // confirmed) undo exactly this change.
+  let current=false;try{current=call('auth','console-capability-current',{request,target}).current===true;}catch{current=false;}
+  if(!current){
+    if(applied.changed)call('core','console-capability-restore',{request,target,prior:applied.prior,applied:applied.applied});
+    throw new Error('CONSOLE_CAPABILITY_STALE');
+  }
+  return {status:'enabled',account_id:target.account_id,access:request.access==='basic'?'basic_memory':'full',changed:applied.changed,chatgpt_scopes_unchanged:true,split_uid:true};
+}
+export function runIsolatedMaintenance(input,{isolated=false,afterPhase=()=>{}}={}){
+  const config=validateWorkerConfig(input,{isolated});requireConfig(isolated||process.getuid()===0,'local privileged coordinator');
+  const call=phaseCaller(config,{isolated,afterPhase});
   const plan=call('auth','plan');let revoked=0,completed=0,cloud_completed=0,connection_completed=0;
   for(const revocation of plan.revocations){call('core','revoke',{revocation});call('auth','ack-revocation',{revocation});revoked++;}
   for(const revocation of plan.connectionRevocations){call('core','revoke-connection',{revocation});call('auth','ack-connection-revocation',{revocation});}

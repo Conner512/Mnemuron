@@ -100,7 +100,7 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
-        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|operation)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
         || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
       if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){
@@ -128,7 +128,7 @@ export function createMnemuronApp({
 
       if (request.method === "GET" && pathname === "/v1/identity") {
         responseStatus = 200;
-        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes,personal_retrieval:{configured:!!store.consoleService.models.raw(auth.user_id,'embedder')} });
+        return sendJson(response, 200, { identity: store.publicIdentity(auth), scopes: auth.scopes,personal_retrieval:{default_mode:store.defaultRetrievalMode(auth),configured:!!store.consoleService.models.raw(auth.user_id,'embedder')} });
       }
 
       if (request.method === "GET" && pathname === "/readyz/search") {
@@ -432,7 +432,7 @@ export function createMnemuronApp({
           error: responseStatus >= 500 ? "Internal server error." : error.message,
           error_code: responseStatus >= 500 && !['SEARCH_UNAVAILABLE','SEARCH_RETRYABLE','SEMANTIC_UNAVAILABLE'].includes(error.errorCode) ? "INTERNAL_ERROR" : error.errorCode
             || (responseStatus === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_FAILED"),
-          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
+          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
         });
       }
     } finally {
@@ -445,7 +445,7 @@ export function createMnemuronApp({
     }
   });
 
-  const consoleTimer=store.memoryConfig.console?.worker_enabled===true?setInterval(()=>{void store.consoleService.tick().catch(()=>logger?.({component:'console_worker',error_code:'WORKER_FAILED'}));},5000):null;
+  const consoleTimer=(store.memoryConfig.console?.worker_enabled===true||store.memoryConfig.console?.owner_user_id)?setInterval(()=>{void store.consoleService.tick().catch(()=>logger?.({component:'console_worker',error_code:'WORKER_FAILED'}));},5000):null;
   consoleTimer?.unref();
   return {
     server,

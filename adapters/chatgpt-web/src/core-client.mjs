@@ -1,4 +1,6 @@
 import { BoundaryError, fetchJson, readPrivate, CORE_SCOPES, MEMORY_WRITE_CORE_SCOPES } from "../../../shared/oauth-common.mjs";
+// Core reports which read policy it enforces for this credential; anything else fails closed.
+export const WEB_READ_POLICIES=Object.freeze(['web-memory-visibility-v1','web-memory-active-uniform-v1']);
 
 export class ReadonlyCoreClient {
   constructor(config, writeBinding=null) {
@@ -28,6 +30,9 @@ export class ReadonlyCoreClient {
       if(result.status===400)throw new BoundaryError(400,'INVALID_CORE_QUERY');
       if(result.status>=500 && body)throw new BoundaryError(503,'OPERATION_STATUS_UNKNOWN');
     }
+    // A project the owner deleted: not an outage and not worth retrying. One non-retryable code for reads and writes
+    // (it does not name the lifecycle state; other accounts get Core's generic not found for unknown IDs).
+    if (result.status === 409 && result.data?.error_code === 'PROJECT_DELETED') throw new BoundaryError(409, 'PROJECT_UNAVAILABLE');
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
       const error=new BoundaryError(503, result.data.error_code);
@@ -52,7 +57,7 @@ export class ReadonlyCoreClient {
     if (!identity || identity.user_id !== mapping.mnemuron_user_id
       || (expected.credential_id && identity.credential_id!==expected.credential_id)
       || identity.agent_instance_id !== expected.agent_instance_id || identity.identity_status !== "server_verified"
-      || identity.agent_id!=='chatgpt-web' || identity.web_read_policy!=='web-memory-visibility-v1'
+      || identity.agent_id!=='chatgpt-web' || !WEB_READ_POLICIES.includes(identity.web_read_policy)
       || !Array.isArray(result.scopes) || result.scopes.length !== scopes.length
       || !scopes.every((scope) => result.scopes.includes(scope))) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if(this.writeBinding){
@@ -87,10 +92,11 @@ export class ReadonlyCoreClient {
         if(this.config.identity_mode!=='multi_account_v1')return this.request('/v1/memories/query',args);
         // This flag is self-scoped Core metadata, not a tool argument. Pin the allocation
         // guard so a model removed between identity/read cannot fall back to a shared key.
-        if(identity?.personal_retrieval?.configured===true)return this.request('/v1/memories/query',{...args,mode:args.mode||'hybrid',personal_model_only:true});
-        if(args.mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
+        const mode=args.mode||identity?.personal_retrieval?.default_mode||'hybrid';
+        if(identity?.personal_retrieval?.configured===true)return this.request('/v1/memories/query',{...args,mode,personal_model_only:true});
+        if(mode==='semantic')throw Object.assign(new BoundaryError(503,'SEMANTIC_UNAVAILABLE'),{degradation_code:'NOT_CONFIGURED'});
         const result=await this.request('/v1/memories/query',{...args,mode:'lexical'});
-        if(!args.mode||args.mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};
+        if(mode==='hybrid')result.retrieval={...result.retrieval,mode:'hybrid',requested_mode:'hybrid',effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:'NOT_CONFIGURED'};
         return result;
       }
       case "mnemuron_get_summary": return this.request("/v1/memory-summaries/query", args);

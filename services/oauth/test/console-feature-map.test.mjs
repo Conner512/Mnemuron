@@ -3,8 +3,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {pages,renderPage} from '../../../web/console/render.mjs';
-import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState} from '../../../web/console/visuals.mjs';
+import {pages,removedPages,renderPage} from '../../../web/console/render.mjs';
+import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {consoleAllowedActions} from '../src/console-policy.mjs';
@@ -19,6 +19,13 @@ const bff=read('services/oauth/src/console.mjs');
 const servedViews=new Set([...bff.matchAll(/'\/console-api\/([a-z-]+)'/g)].map(m=>m[1]).concat(bff.match(/\/\^\\\/console-api\\\/\(([^)]+)\)\$\//)[1].split('|')));
 const ingress=read('docs/console-ingress.example.yml');
 const ingressGroup=name=>new Set(ingress.match({app:/app\(\/\(([a-z|]+)\)\)/,'console-api':/console-api\/\(([a-z|-]+)\)/}[name])[1].split('|'));
+
+test('Revision comparison preserves exact Unicode and highlights the changed region',()=>{
+  for(const pair of [['A😀旧文末','A😃新文末'],['same','same'],['','insert'],['delete',''],['<script>','<img>']]){
+    const diff=revisionDifference(...pair);diff.forEach((d,i)=>assert.equal(d.prefix+d.changed+d.suffix,pair[i]));
+  }
+  assert.deepEqual(revisionDifference('A😀旧文末','A😃新文末'),[{prefix:'A',changed:'😀旧',suffix:'文末'},{prefix:'A',changed:'😃新',suffix:'文末'}]);
+});
 
 test('Feature map: one entry per menu page, in navigation order',()=>{
  assert.deepEqual(Object.keys(featureMap),pages);
@@ -85,14 +92,14 @@ test('Placeholders render every feature and never trigger a request',()=>{
   for(const f of featureMap[page].filter(f=>f.status==='planned'))assert.ok(html.includes(`console-feature-standard.md`)&&html.includes(`${f.id}</summary>`),`${page}: ${f.id} has developer notes`);
  }
  assert.equal(roadmapCard(t,'jobs'),'','a page with nothing planned shows no roadmap');
- assert.deepEqual(prototypePages.map(pageState),['partial','planned','partial','partial']);
+ assert.deepEqual(prototypePages.map(pageState),['partial','planned','live']);
 });
 
 test('Live cards on prototype pages escape data and degrade on their own',()=>{
  const tasks=prototypeView(t,'tasks',{data:{projects:[{project_id:'p"1',name:'<img src=x onerror=alert(1)>'}]}});
  assert.ok(tasks.includes('&lt;img src=x onerror=alert(1)&gt;'));assert.ok(tasks.includes('p&quot;1'));
  assert.doesNotMatch(tasks,/<img/);
- for(const page of ['tasks','privacy']){
+ for(const page of ['tasks']){
   const html=prototypeView(t,page,{data:{unavailable:true}});
   assert.match(html,/data-i18n="unavailable"/,page);
   assert.equal((html.match(/data-status="planned" data-feature=/g)||[]).length,featureMap[page].filter(f=>f.status==='planned').length,page);
@@ -109,18 +116,17 @@ test('The development standard lists every feature with its current status and e
  for(const page of pages)assert.match(doc,new RegExp(`\\| \`/app/${page}\` \\| \`${featureMap[page][0].id.slice(0,3)}\` \\|`),page);
 });
 
-test('The ingress example routes every menu page',()=>{
- assert.deepEqual([...ingressGroup('app')].sort(),[...pages].sort());
+test('The ingress example routes every menu page and the removed pages it redirects',()=>{
+ assert.deepEqual([...ingressGroup('app')].sort(),[...pages,...removedPages].sort());
+ for(const page of removedPages)assert.ok(!pages.includes(page)&&!featureMap[page],`${page} is no longer a Console page`);
 });
 
-test('PRV-06: the ChatGPT read scope card shows the real policy and offers only the permitted switch',()=>{
- const caps={allowed_actions:['memory.web_policy']};
- const card=(data,c=caps)=>prototypeView(t,'privacy',{data,caps:c}).match(/<section class="card feature-card" data-status="live" data-feature="PRV-06">[\s\S]*?<\/section>/)[0];
- const off=card({web_policy:{read_all:false,revision:0}});
- assert.match(off,/data-state="disabled"/);assert.match(off,/data-console-action="memory.web_policy" data-enabled="true"/);assert.match(off,/data-i18n="webPolicyEnable"/);
- const on=card({web_policy:{read_all:true,revision:3}});
- assert.match(on,/data-state="enabled"/);assert.match(on,/data-console-action="memory.web_policy" data-enabled="false"/);assert.match(on,/data-i18n="webReadAllOn"/);
- assert.doesNotMatch(card({web_policy:{read_all:false,revision:0}},{allowed_actions:[]}),/data-console-action/);
- assert.match(card({}),/data-i18n="unavailable"/);
- assert.equal(prototypeOrder('privacy')[1].id,'PRV-06','live features come first on prototype pages');
+test('TSK-01 shows the Deleted view and lifecycle actions only when the server grants them',()=>{
+ const projects=[{project_id:'synthetic-p',name:'Synthetic P',archived:false}];
+ const all=['projects.update','projects.archive','projects.restore','projects.lifecycle_preview','projects.lifecycle_delete','projects.lifecycle_restore','projects.merge'];
+ const full=prototypeView(t,'tasks',{data:{view:'active',projects,active_count:1,archived_count:0,deleted_count:0},caps:{allowed_actions:all}});
+ assert.match(full,/data-project-view="deleted"/);assert.match(full,/data-console-action="projects.lifecycle_delete"/);assert.match(full,/data-console-action="projects.merge"/);
+ // A read-only or basic credential gets no deleted count from the server: no Deleted tab and no lifecycle actions.
+ const narrow=prototypeView(t,'tasks',{data:{view:'active',projects,active_count:1,archived_count:0},caps:{allowed_actions:['projects.update']}});
+ assert.doesNotMatch(narrow,/data-project-view="deleted"/);assert.doesNotMatch(narrow,/projects\.lifecycle_|projects\.merge/);
 });

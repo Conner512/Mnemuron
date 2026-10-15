@@ -1,7 +1,7 @@
-import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_ACTIONS,CONSOLE_ORGANIZE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {connectionActions} from './connections.mjs';
 const basicActions={
-  memory:['memory.create','memory.correct','memory.retract','memory.classify','memory.visibility','memory.web_policy'],
+  memory:['memory.create','memory.correct','memory.retract','memory.classify',...CONSOLE_ORGANIZE_ACTIONS],
   security:['security.password','security.totp.begin','security.totp.complete','security.session.revoke','security.sessions.revoke_others','devices.revoke'],
   oauth:['oauth.revoke'],
 };
@@ -9,6 +9,7 @@ const identityActions=[...basicActions.security,...basicActions.oauth,'security.
 // An explicit management policy overrides the older all-operations switch.
 // Roles stay independently gated; browser policy never grants operator status.
 export function consoleManagement(config) {
+  if(config.identity.owner_account_id)return {invitations:false,accounts:false,roles:false};
   const configured=config.identity.console_management;
   const legacy=config.identity.console_operations===true;
   return Object.fromEntries(['invitations','accounts','roles'].map(key=>

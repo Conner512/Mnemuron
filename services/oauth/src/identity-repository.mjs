@@ -1,5 +1,6 @@
 import {IdentityConsole} from './identity-console.mjs';
 import {ConnectionRegistry} from './connections.mjs';
+import {storedClient} from './session-client.mjs';
 import {randomBytes,randomUUID,createCipheriv,createDecipheriv,scrypt} from 'node:crypto';
 import {promisify} from 'node:util';
 import {generateSecret,generateURI,verify} from 'otplib';
@@ -38,6 +39,10 @@ export class IdentityRepository {
       CREATE TABLE IF NOT EXISTS identity_sessions (
         digest TEXT PRIMARY KEY,purpose TEXT NOT NULL,account_id TEXT,security_version INTEGER,
         csrf_digest TEXT NOT NULL,expires INTEGER NOT NULL,created INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS identity_session_clients (
+        digest TEXT PRIMARY KEY,device TEXT NOT NULL,browser TEXT NOT NULL,os TEXT NOT NULL);
+      CREATE TRIGGER IF NOT EXISTS identity_session_clients_cleanup AFTER DELETE ON identity_sessions
+        BEGIN DELETE FROM identity_session_clients WHERE digest=OLD.digest; END;
       CREATE TABLE IF NOT EXISTS identity_bindings (
         account_id TEXT NOT NULL,purpose TEXT NOT NULL,credential_id TEXT NOT NULL UNIQUE,
         agent_instance_id TEXT NOT NULL,credential_file TEXT NOT NULL,checked INTEGER NOT NULL,
@@ -78,11 +83,15 @@ export class IdentityRepository {
     const a=this.account(subject);if(!this.eligible(subject)) throw new BoundaryError(403,'SUBJECT_DENIED');
     return Object.freeze({account_id:a.account_id,issuer:a.issuer,subject:a.subject,user_id:a.user_id,security_version:a.security_version});
   }
-  newSession(purpose,{accountId=null,ttl}={}) {
+  /** `client` is the coarse sign-in snapshot (session-client.mjs), stored only for a new Console sign-in. */
+  newSession(purpose,{accountId=null,ttl,client=null}={}) {
     const lifetime=ttl??this.sessionTtl;
     if(!Number.isInteger(lifetime)||lifetime<60||lifetime>28800) throw new BoundaryError(503,'SESSION_POLICY_REQUIRED');
-    const token=randomSecret(),csrf=randomSecret();const a=accountId?this.byId(accountId):null;
-    this.db.prepare('INSERT INTO identity_sessions VALUES(?,?,?,?,?,?,?)').run(secretHash(token),purpose,accountId,a?.security_version??null,secretHash(csrf),seconds()+lifetime,seconds());
+    const token=randomSecret(),csrf=randomSecret();const a=accountId?this.byId(accountId):null,digest=secretHash(token);
+    this.store.transaction(()=>{
+      this.db.prepare('INSERT INTO identity_sessions(digest,purpose,account_id,security_version,csrf_digest,expires,created) VALUES(?,?,?,?,?,?,?)').run(digest,purpose,accountId,a?.security_version??null,secretHash(csrf),seconds()+lifetime,seconds());
+      if(client&&purpose==='console'){const c=storedClient(client);if(c.recorded)this.db.prepare('INSERT INTO identity_session_clients VALUES(?,?,?,?)').run(digest,c.device,c.browser,c.os);}
+    });
     return {token,csrf};
   }
   session(token,purpose,{csrf}={}) {
@@ -225,15 +234,16 @@ export class IdentityRepository {
   async authenticate(username,password,otp) {
     let key;try{key=usernameKey(username);}catch{return null;}
     const a=this.db.prepare('SELECT * FROM identity_accounts WHERE username_key=?').get(key);
+    const failed=()=>{if(a)this.audit(a.account_id,'account.login.failed','failure');return null;};
     const record=a?JSON.parse(a.password_json):{salt:'synthetic-constant-cost-unknown-user',hash:''};
     const value=typeof password==='string'&&password.length<=1024?password:'';
     const hash=(await derive(value,record.salt,64,SCRYPT)).toString('base64url');
-    if(!a||!equalSecret(hash,record.hash)||!this.eligible(a.subject)||!/^\d{6}$/.test(otp||'')) return null;
+    if(!a||!equalSecret(hash,record.hash)||!this.eligible(a.subject)||!/^\d{6}$/.test(otp||'')) return failed();
     const result=await verify({secret:this.unseal(a.mfa_cipher,a.account_id,'totp'),token:otp,epochTolerance:30});
-    if(!result.valid) return null;
+    if(!result.valid) return failed();
     return this.store.transaction(()=>{
       const current=this.byId(a.account_id);
-      if(!this.eligible(a.subject)||current.security_version!==a.security_version||current.password_json!==a.password_json||current.mfa_cipher!==a.mfa_cipher||!this.store.consumeStep(a.subject,result.epoch)) return null;
+      if(!this.eligible(a.subject)||current.security_version!==a.security_version||current.password_json!==a.password_json||current.mfa_cipher!==a.mfa_cipher||!this.store.consumeStep(a.subject,result.epoch)) return failed();
       this.audit(a.account_id,'account.login');return a.subject;
     });
   }

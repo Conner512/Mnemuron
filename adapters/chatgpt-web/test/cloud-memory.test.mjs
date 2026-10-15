@@ -60,7 +60,16 @@ test('A-T01..06/09/19/24: OAuth scope intersection, real SDK lifecycle and no im
   const f=await setup(t),before=businessSnapshot(f.core.store);
   const old=(await f.mcp('tools/list',undefined,f.readonly.access_token)).data.result.tools;
   assert.equal(old.some(x=>x.name==='mnemuron_save_memory'),false);
-  assert.equal((await f.call('mnemuron_save_memory',save(),f.readonly.access_token)).status,403);
+  for(const [name,args] of [
+    ['mnemuron_save_memory',save()],
+    ['mnemuron_supersede_memory',{memory_id:'synthetic-denied',expected_revision:1,content:'Denied',reason:'Synthetic',operation_id:randomUUID(),cloud_read:'keep_private'}],
+    ['mnemuron_retract_memory',{memory_id:'synthetic-denied',expected_revision:1,reason:'Synthetic',operation_id:randomUUID()}],
+    ['mnemuron_get_operation',{operation_id:randomUUID()}],
+  ]){
+    assert.equal(old.some(x=>x.name===name),false);
+    assert.equal((await f.call(name,args,f.readonly.access_token)).status,403,name);
+  }
+  assert.equal(f.core.store.db.prepare('SELECT COUNT(*) n FROM cloud_memory_operations').get().n,0);
   assert.deepEqual(businessSnapshot(f.core.store),before);
   const refreshed=await f.tokenRequest({grant_type:'refresh_token',refresh_token:f.readonly.refresh_token,resource:f.config.resource});
   assert.equal(refreshed.status,200);assert.equal(refreshed.data.scope.includes('memory:write'),false);
@@ -94,6 +103,19 @@ test('A-T11/18/21/23: explicit private choice, bounded errors and unknown input 
   for(const more of [{confirmed:true},{user_id:'foreign'},{agent_id:'mnemuron-console'},{url:'http://127.0.0.1/admin'}])assert.equal((await f.call('mnemuron_save_memory',{...save(),...more})).data.result.isError,true);
   for(const bad of [f.secret,f.token.id_token,f.token.refresh_token,f.coreCredential.api_key])assert.equal((await f.call('mnemuron_save_memory',args,bad)).status,401);
   for(const secret of [args.content,f.token.access_token,f.token.refresh_token,f.secret])assert.equal(JSON.stringify(f.gatewayLogs).includes(secret),false);
+});
+
+test('a keep_private MCP save gets no grant but follows account read-all; shared writes stay readable',async t=>{
+  const f=await setup(t),user=f.core.store.authenticate(f.coreCredential.api_key).user_id;
+  const local=f.core.store.issueCredential({userId:user,deviceId:'synthetic-operator',agentId:'test',agentInstanceId:randomUUID(),scopes:['admin:tasks']});
+  f.core.store.webVisibility.setPolicy(f.core.store.authenticate(local.api_key),{read_all:true,expected_revision:0});
+  const args={...save(),cloud_read:'keep_private'},created=(await f.call('mnemuron_save_memory',args)).data.result.structuredContent;
+  assert.equal(created.status,'committed');assert.equal(created.cloud_readable,true);
+  assert.equal((await f.call('mnemuron_get_memory',{memory_id:created.memory_id})).data.result.structuredContent.memory.memory_id,created.memory_id);
+  assert.equal((await f.call('mnemuron_search_memories',{query:'Synthetic cloud memory'})).data.result.structuredContent.result_count,1);
+  assert.deepEqual((await f.call('mnemuron_get_operation',{operation_id:args.operation_id})).data.result.structuredContent,created);
+  const shared=(await f.call('mnemuron_save_memory',save())).data.result.structuredContent;assert.equal(shared.cloud_readable,true);
+  assert.equal((await f.call('mnemuron_search_memories',{query:'Synthetic cloud memory'})).data.result.structuredContent.result_count,2);
 });
 
 test('A-T12/23: dropped post-COMMIT response is uncertain, same receipt recovers without duplicate effects',async t=>{

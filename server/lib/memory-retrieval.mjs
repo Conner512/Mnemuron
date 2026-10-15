@@ -1,20 +1,25 @@
 import { ValidationError } from './errors.mjs';
-import { memoryScopeSql } from './memory-scope.mjs';
+import { memoryScopeSql, SCOPE_LIFECYCLE } from './memory-scope.mjs';
 import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
 export const INDEX_VERSION = 'memory-search-v3';
 export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
-import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,wordVariants} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
+export function originalMatchKind(query,memory){
+  const score=lexicalScore(query,memory);
+  return score===1?'raw_query':score>0?'original_terms':null;
+}
 export const searchUnavailable = () => Object.assign(new Error('Memory search index is unavailable; rebuild or enable it before querying.'), {statusCode:503,errorCode:'SEARCH_UNAVAILABLE'});
 export function transientSql(error){return [5,6,9].includes(Number(error?.errcode)&255) || ['SQLITE_BUSY','SQLITE_LOCKED','SQLITE_INTERRUPT'].includes(error?.code);}
 const searchBusy=()=>Object.assign(new Error('Memory search is temporarily busy; retry the read.'),{statusCode:503,errorCode:'SEARCH_RETRYABLE'});
 
 export class MemorySearch {
-  constructor(db, { enabled = true } = {}) {
+  constructor(db, { enabled = true, entities = null } = {}) {
     this.db = db;
     this.enabled = enabled;
+    this.entities = entities;
     db.function('memory_search_tokens', {deterministic:true}, indexText);
     db.function('memory_search_normalize', {deterministic:true}, normalizeSearch);
     db.function('memory_search_contains', {deterministic:true}, (text,term)=>Number(containsTerm(text,term)));
@@ -99,7 +104,8 @@ export class MemorySearch {
   }
   plan(userId,query,scope,options) {
     const tokens=queryTokens(query),filter=memoryScopeSql(scope,options),groups=[];
-    let limited=false;
+    const auth=options.auth||{user_id:userId},authority=this.entities?.queryAuthority(auth,scope,options);
+    let limited=authority?.truncated===true;
     if(tokens.length) {
       // Only current, authorized declarations are evidence for aliases. This is a bounded
       // FTS probe, not a full-memory scan, and it never follows a chain of new aliases.
@@ -109,19 +115,37 @@ export class MemorySearch {
           AND ${filter.sql} AND ${webMemorySql(options.auth)} AND memory_search_alias_seed(m.content,?)
         ORDER BY memory_search_fts.rank,m.memory_id LIMIT 65`).all(
           tokens.map(t=>'"'+encode(t)+'"').join(' OR '),userId,...filter.params,query);
-      limited=seeds.length>64;for(const seed of seeds.slice(0,64))groups.push(...declaredAliases(seed.content));
+      limited ||= seeds.length>64;for(const seed of seeds.slice(0,64))groups.push(...declaredAliases(seed.content));
     }
     // Internal project aliases are not part of the Web visibility grant. Cloud clients may
     // expand only explicit aliases contained in records they can actually read.
     if(!isWebReader(options.auth))for(const [table,name,id] of [['projects','name','project_id'],['tasks','title','task_id']]) {
+      const lifecycle=scope[SCOPE_LIFECYCLE],live=lifecycle.live.sql('project_id');
+      const members=scope.project_id?JSON.stringify(lifecycle.members||[scope.project_id]):null;
       const rows=this.db.prepare(`SELECT ${name} name,aliases_json FROM ${table} WHERE user_id=?
-        AND (? IS NULL OR project_id=?) ${table==='tasks'?'AND (? IS NULL OR task_id=?)':''}
+        AND (? IS NULL OR project_id IN (SELECT value FROM json_each(?))) ${table==='tasks'?'AND (? IS NULL OR task_id=?)':''} AND ${live.sql}
         AND (memory_search_contains(?,${name}) OR EXISTS(SELECT 1 FROM json_each(aliases_json) a WHERE memory_search_contains(?,a.value)))
-        ORDER BY ${id} LIMIT 65`).all(userId,scope.project_id||null,scope.project_id||null,
-          ...(table==='tasks'?[scope.task_id||null,scope.task_id||null]:[]),query,query);
+        ORDER BY ${id} LIMIT 65`).all(userId,members,members,
+          ...(table==='tasks'?[scope.task_id||null,scope.task_id||null]:[]),...live.params,query,query);
       limited ||= rows.length>64;for(const row of rows.slice(0,64))groups.push([row.name,...JSON.parse(row.aliases_json)]);
     }
-    return makeQueryPlan(query,groups,limited);
+    const reserved=authority?.terms||[];
+    const plan=makeQueryPlan(query,groups.filter(g=>!g.some(term=>reserved.includes(normalizeSearch(term)))),limited);
+    // Names the query mentions must match exactly even where ordinary words may be relaxed. This
+    // includes names of deleted projects: their aliases never expand, and must not be dropped either.
+    const names=new Set(reserved.filter(term=>containsTerm(query,term)));
+    for(const group of groups)if(group.some(term=>containsTerm(query,term)))for(const term of group)names.add(normalizeSearch(term).trim());
+    if(!isWebReader(options.auth))for(const [table,name] of [['projects','name'],['tasks','title']])
+      for(const row of this.db.prepare(`SELECT ${name} name,aliases_json FROM ${table} WHERE user_id=?
+        AND (memory_search_contains(?,${name}) OR EXISTS(SELECT 1 FROM json_each(aliases_json) a WHERE memory_search_contains(?,a.value))) LIMIT 64`).all(userId,query,query))
+        for(const term of [row.name,...JSON.parse(row.aliases_json)])if(containsTerm(query,term))names.add(normalizeSearch(term).trim());
+    plan.required=[...names].filter(term=>term.length>=2);
+    const known=reserved.some(term=>containsTerm(query,term));
+    if(known){
+      const expansion=this.entities.expand(auth,query,scope,options);
+      plan.authority_ids=[...expansion.matches].filter(([,m])=>aliasSubjectMatches(query,m.explanation.matched_name,m.row)).map(([id])=>id);
+    }
+    return plan;
   }
   candidates(userId, query, scope, options) {
     if (this.status().state!=='ready') throw searchUnavailable();
@@ -143,7 +167,12 @@ export class MemorySearch {
         AND search_relevance>0
         ORDER BY search_relevance DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
       ).all(json,tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes);
-      return {rows:rows.slice(0,500),truncated:rows.length>500,plan};
-    } catch(error) { if(transientSql(error))throw searchBusy();this.state='unavailable'; throw searchUnavailable(); }
+      const expansion=this.entities?.expand(options.auth||{user_id:userId},query,scope,options);
+      const matches=new Map(rows.map(row=>[row.memory_id,{row,kind:originalMatchKind(query,row)||'alias'}]));
+      for(const [id,match] of expansion?.matches||[])if(!matches.has(id)&&aliasSubjectMatches(query,match.explanation.matched_name,match.row))matches.set(id,{row:match.row,kind:'alias',explanation:match.explanation});
+      const priority={raw_query:0,original_terms:1,alias:2},ordered=[...matches.values()].sort((a,b)=>priority[a.kind]-priority[b.kind]||lexicalScore(query,b.row,plan)-lexicalScore(query,a.row,plan)||String(b.row.updated_at||b.row.created_at).localeCompare(String(a.row.updated_at||a.row.created_at))||a.row.memory_id.localeCompare(b.row.memory_id));
+      return {plan,rows:ordered.slice(0,500).map(x=>({...x.row,_entity_match:{match_kind:x.kind,...(x.explanation?{alias:x.explanation}:{})}})),truncated:rows.length>500||ordered.length>500||expansion?.truncated===true,
+        aliases:{expanded:!!expansion?.matches.size,truncated:expansion?.truncated===true,ambiguous:expansion?.ambiguous===true,ambiguity_complete:expansion?.ambiguity_complete!==false},dependency_token:expansion?.dependency_token||null};
+    } catch(error) { if(transientSql(error))throw searchBusy();if(error?.errorCode==='ENTITY_PROOF_INVALID'||error?.errorCode?.startsWith('PROJECT_'))throw error;this.state='unavailable'; throw searchUnavailable(); }
   }
 }

@@ -1,17 +1,23 @@
 import {consoleMemoryWritable} from '../../../shared/console-contract.mjs';
 import {hash} from './revisions.mjs';
 import {integer,fail} from '../model-providers/contracts.mjs';
+import {protectGroup} from '../lifecycle/protection.mjs';
+import {ConflictError} from '../errors.mjs';
 
 export class MemorySources {
   constructor(store){this.store=store;this.db=store.db;this.db.exec(`CREATE TABLE IF NOT EXISTS memory_source_pins
     (user_id TEXT NOT NULL,event_id TEXT NOT NULL,pin_id TEXT NOT NULL,reason TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(user_id,event_id,pin_id));
-    CREATE INDEX IF NOT EXISTS memory_source_pin_event ON memory_source_pins(user_id,event_id);`);}
+    CREATE INDEX IF NOT EXISTS memory_source_pin_event ON memory_source_pins(user_id,event_id);`);protectGroup(this.db,'sources');}
   manifest(auth,{task_id,workstream_id,session_id,after=0,highwater,limit=20}={}){
     this.store.requireScope(auth,'memory:sources:read');integer(after,0,Number.MAX_SAFE_INTEGER);integer(limit,1,100);
     if(!task_id || !workstream_id || !session_id || [task_id,workstream_id,session_id].some(s=>typeof s!=='string' || s.length>200))fail('EXACT_SOURCE_SCOPE_REQUIRED');
     const high=highwater===undefined?this.db.prepare('SELECT COALESCE(MAX(rowid),0) AS n FROM events').get().n:integer(highwater,0,Number.MAX_SAFE_INTEGER);
-    const params=[auth.user_id,task_id,workstream_id,session_id];
-    const query='FROM events WHERE user_id=? AND task_id=? AND workstream_id=? AND session_id=? AND rowid<=?';
+    // The Task's current project decides PROJECT_DELETED; every event is also filtered on its own project (a moved Task
+    // keeps an earlier project's events) before the count and the page are cut.
+    this.store.assertTaskLive(auth.user_id,task_id);
+    const live=this.store.lifecycle.live(auth.user_id).sql('project_id');
+    const params=[auth.user_id,task_id,workstream_id,session_id,...live.params];
+    const query=`FROM events WHERE user_id=? AND task_id=? AND workstream_id=? AND session_id=? AND ${live.sql} AND rowid<=?`;
     const total=this.db.prepare('SELECT COUNT(*) AS n '+query).get(...params,high).n;
     const rows=this.db.prepare('SELECT rowid AS cursor_id,event_id,event_type,content,expires_at,expired_at '+query+' AND rowid>? ORDER BY rowid LIMIT ?').all(...params,high,after,limit+1);
     return {kind:'source_manifest',read_only:true,content_complete:false,total,highwater:high,entries:rows.slice(0,limit).map(r=>{
@@ -23,7 +29,12 @@ export class MemorySources {
   }
   content(auth,eventId,{offset=0,limit=4096}={}){
     this.store.requireScope(auth,'memory:sources:read');integer(offset,0,Number.MAX_SAFE_INTEGER);integer(limit,1,16384);
-    const row=this.db.prepare('SELECT content,expires_at,expired_at FROM events WHERE user_id=? AND event_id=?').get(auth.user_id,eventId);
+    const row=this.db.prepare('SELECT content,expires_at,expired_at,project_id FROM events WHERE user_id=? AND event_id=?').get(auth.user_id,eventId);
+    // A deleted project's raw source is retained history: PROJECT_DELETED for its owner. A dangling or foreign project
+    // reference reads exactly like a missing source.
+    const state=row?this.store.lifecycle.projectState(auth.user_id,row.project_id):'neutral';
+    if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
+    if(state==='unavailable')return {event_id:eventId,availability:'unavailable',content:null,content_complete:false};
     const pinned=!!this.db.prepare('SELECT 1 FROM memory_source_pins WHERE user_id=? AND event_id=?').get(auth.user_id,eventId);
     if(!row || row.content===null || row.expired_at || !pinned && row.expires_at && Date.parse(row.expires_at)<=Date.now())return {event_id:eventId,availability:'unavailable',content:null,content_complete:false};
     const chars=Array.from(row.content),slice=chars.slice(offset,offset+limit).join('');

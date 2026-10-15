@@ -10,8 +10,11 @@ import {setTimeout as delay} from 'node:timers/promises';
 import {enqueueOutbox, listOutbox,authorizeMcpSession,stageTaskScopeForSession,queueResumeInjection,
   claimMcpResumeDelivery,markMcpResumeContextReturned,listDeliveryReceiptOutbox,pendingMcpDeliveryAcknowledgements} from '../scripts/storage.mjs';
 import {normalizeHookEvent} from '../scripts/hook.mjs';
+import {claimLane} from '../scripts/sync-protocol.mjs';
 
 const hook=fileURLToPath(new URL('../scripts/hook.mjs',import.meta.url));
+// Dead for scheduling purposes: gone, or killed but not yet reaped (a zombie under a non-reaping init).
+const gone=pid=>{try{process.kill(pid,0);}catch{return true;}try{const stat=readFileSync(`/proc/${pid}/stat`,'utf8');return stat[stat.lastIndexOf(')')+2]==='Z';}catch{return false;}};
 async function until(predicate, timeout=12000) {
   const end=Date.now()+timeout;
   while(!predicate()) {assert.ok(Date.now()<end,'background synchronization deadline');await delay(30);}
@@ -78,7 +81,7 @@ test('a killed pump restarts from the immutable envelope and accepts a proven du
   await until(()=>f.seen.length===1);
   const first=listOutbox(f.root)[0],bytes=readFileSync(first.filePath,'utf8');
   const state=JSON.parse(readFileSync(f.root+'/background-sync.state','utf8'));process.kill(state.pid,'SIGKILL');
-  await until(()=>{try{process.kill(state.pid,0);return false;}catch{return true;}});
+  await until(()=>gone(state.pid));
   assert.equal(readFileSync(first.filePath,'utf8'),bytes);
   await invoke(f.env);await until(()=>listOutbox(f.root).length===0);
   assert.equal(new Set(f.seen).size,2);assert.equal(f.seen.filter(id=>id===f.seen[0]).length,2);
@@ -97,4 +100,17 @@ test('Stop journals exact Session and turn ACK before exit; only the background 
   await until(()=>listOutbox(f.root).length===0&&listDeliveryReceiptOutbox(f.root).length===0);
   assert.equal(pendingMcpDeliveryAcknowledgements(f.root).length,0);assert.equal(f.receipts.length,1);
   assert.equal(f.receipts[0].receipt_id,claimed.receipt_id);assert.equal(f.receipts[0].turn_id,'synthetic-turn');
+});
+test('a lane held by a killed owner is reclaimed even before the process is reaped',async t=>{
+  const root=mkdtempSync(path.join(os.tmpdir(),'mnemuron-lane-test-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+  // A short-lived parent leaves a detached orphan, as the hook leaves the pump; the orphan takes the lane.
+  const parent=spawn(process.execPath,['--input-type=module','-e',`import {claimLane} from ${JSON.stringify(new URL('../scripts/sync-protocol.mjs',import.meta.url).href)};
+    import {spawn} from 'node:child_process';
+    const child=spawn(process.execPath,['--input-type=module','-e',"import {claimLane} from "+JSON.stringify(${JSON.stringify(new URL('../scripts/sync-protocol.mjs',import.meta.url).href)})+";if(!claimLane(process.argv[1],'synthetic-lane'))process.exit(2);process.stdout.write('held');setInterval(()=>{},1000);",${JSON.stringify(root)}],{detached:true,stdio:['ignore','pipe','ignore']});
+    child.stdout.once('data',()=>{console.log(child.pid);child.unref();child.stdout.destroy();process.exit(0);});`],{stdio:['ignore','pipe','inherit']});
+  let out='';parent.stdout.on('data',b=>out+=b);await new Promise(r=>parent.on('close',r));
+  const pid=Number(out.trim());assert.ok(pid>0,'synthetic owner started');
+  assert.equal(claimLane(root,'synthetic-lane'),null,'a live owner keeps the lane');
+  process.kill(pid,'SIGKILL');await until(()=>gone(pid));
+  const release=claimLane(root,'synthetic-lane');assert.equal(typeof release,'function','the killed owner no longer blocks the lane');release();
 });
