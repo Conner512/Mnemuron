@@ -125,21 +125,21 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
     const verifier = randomSecret();
     const request = { client_id: config.chatgpt_client.client_id, redirect_uri: config.chatgpt_client.redirect_uris[0], response_type: "code", scope,
       resource: config.resource, state: randomSecret(), code_challenge_method: "S256", code_challenge: createHash("sha256").update(verifier).digest("base64url"), ...params };
-    let response = await browser.request(`/authorize?${new URLSearchParams(request)}`);
+    let step = "/authorize", response = await browser.request(`/authorize?${new URLSearchParams(request)}`);
     for (let i = 0; i < 12; i++) {
       const location = response.headers.get("location");
       if (location) {
         const target = new URL(location, config.issuer);
         if (target.origin !== config.issuer) return { callback: validatedCallback(target, config.issuer, request), verifier, request, response };
-        response = await browser.request(target);
+        step = `GET ${target.pathname}`;response = await browser.request(target);
       } else if (response.status === 200) {
         const csrf = response.text.match(/name="csrf" value="([^"]+)"/)?.[1];
         const action = response.text.match(/action="([^"]+)"/)?.[1];
         if (!csrf || !action) throw new Error(`Unexpected interaction page (${response.status})`);
         const fields = { csrf };
         if (action.endsWith("/login")) Object.assign(fields, { username: "synthetic-owner", password, otp: await generate({ secret: seed }) });
-        response = await browser.post(decision === "abort" ? action.replace(/\/(login|confirm)$/, "/abort") : action, fields);
-      } else throw new Error(`Authorization fixture stopped: ${response.status} ${response.text}`);
+        step = `POST ${action}`;response = await browser.post(decision === "abort" ? action.replace(/\/(login|confirm)$/, "/abort") : action, fields);
+      } else throw new Error(`Authorization fixture stopped at ${step}: ${response.status} ${response.text}`);
     }
     throw new Error("Authorization redirect loop");
   };
