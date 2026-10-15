@@ -18,7 +18,7 @@ const embedding=text=>text==='8.4.1'?basis(0):text.includes('version 8.4.1 is')?
 const model=revision=>new Embedder({enabled:true,provider_id:'synthetic-qdrant-contract',protocol:'mock',model:'deterministic-basis',profile_revision:revision,auth:{none:true},
   timeouts:{request_ms:1000},limits:{input_bytes:1000000,input_tokens:4096,output_bytes:1000000,output_tokens:10000,batch_size:8,concurrency:1,daily_requests:10000},
   retry:{max_attempts:1,base_ms:100,max_ms:100,repair_once:false},capabilities:{native_schema:true},
-  egress:{approved:true,origins:[],addresses:[],allow_private:false,sensitivities:['public','internal','sensitive'],query_approved:true},
+  egress:{approved:true,origins:[],addresses:[],allow_private:false,query_approved:true},
   dimensions:768,distance:'Cosine',query_prefix:'',document_prefix:'',normalization:'l2',chunker_version:'utf8-chunks-v1'},
   {synthetic:true,mock:async texts=>texts.map(embedding)});
 
@@ -139,7 +139,7 @@ export async function evaluateVector(options={}){
       const snap=index.snapshot(),before=(await scroll(snap.collection_name)).find(p=>p.payload.document===surrogate([auth.user_id,memories.disk.memory_id]));
       s.retractMemory(auth,memories.disk.memory_id);await backend.upsert(snap.collection_name,[{...before,vector:basis(1)}]);
       assert.ok(!(await index.search(auth,{query:'disk',mode:'semantic',...bindings})).results.some(m=>m.memory_id===memories.disk.memory_id));
-      s.memorySources.setSensitivity(auth,memories.long.memory_id,'secret');
+      s.retractMemory(auth,memories.long.memory_id);
       assert.ok(!(await index.search(auth,{query:'network',mode:'semantic',...bindings,limit:20})).results.some(m=>m.memory_id===memories.long.memory_id));
       await index.sync(generation);const rows=await scroll(snap.collection_name);assert.ok(rows.every(p=>![memories.disk,memories.long].some(m=>p.payload.document===surrogate([auth.user_id,m.memory_id]))));
     });

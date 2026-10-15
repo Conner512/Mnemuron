@@ -16,20 +16,20 @@ async function setup(t){const f=await memoryFixture(t);const secret=f.root+'/con
   const act=(action,payload,owner=a,operation_id=randomUUID())=>f.request('POST','/v1/console/action',{action,payload,operation_id},owner);
   const get=(view,p={},owner=a)=>f.request('GET','/v1/console/'+view+'?'+new URLSearchParams(p),undefined,owner);
   return {...f,a,b,read,act,get};}
-const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
-const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create',{content:text,scope:'user',memory_type:'fact',sensitivity:'sensitive'},owner);
+const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,egress_approved:true,query_approved:true};
+const create=(f,owner=f.a,text='Synthetic console memory')=>f.act('memory.create',{content:text,scope:'user',memory_type:'fact'},owner);
 
 test('CON-BASIC-01: narrow credentials allow own memory operations but no non-memory writes or export',async t=>{
   const f=await setup(t),basic=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-basic',agentId:'mnemuron-console',agentInstanceId:'synthetic-basic',scopes:[...CONSOLE_READ_SCOPES,'memory:write','memory:organize']});
   const caps=(await f.get('capabilities',{},basic)).body;
-  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility','memory.web_policy','devices.revoke']);
+  assert.deepEqual(caps.actions,['memory.create','memory.correct','memory.retract','memory.classify','memory.visibility','memory.web_policy','devices.revoke']);
   const m=(await create(f,basic)).body.memory_id;assert.ok(m);
   let meta=(await f.get('memory-meta',{memory_id:m},basic)).body;
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:meta.revision,category:'technical'},basic)).status,200);
   assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true},basic)).status,200);
-  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'},basic)).status,200);
-  meta=(await f.get('memory-meta',{memory_id:m},basic)).body;assert.equal(meta.web_allowed,false);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true},basic)).status,400);
+  meta=(await f.get('memory-meta',{memory_id:m},basic)).body;assert.equal(meta.web_allowed,true);assert.equal(meta.sensitivity,undefined);
+  // Sensitivity levels were removed; the old action is no longer offered or accepted.
+  assert.notEqual((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'},basic)).status,200);
   const corrected=await f.act('memory.correct',{memory_id:m,revision:meta.revision,content:'Synthetic basic correction'},basic);assert.equal(corrected.status,200);
   assert.equal((await f.act('memory.retract',{memory_id:corrected.body.memory_id,revision:1},basic)).status,200);
   const foreign=(await create(f,f.b)).body.memory_id;
@@ -48,7 +48,7 @@ test('CON-01: old readers, other agents and MCP credentials cannot call console 
   assert.deepEqual(businessSnapshot(f.store),before);
 });
 test('CON-02: own-memory create is persisted and repeated operations do not duplicate writes',async t=>{
-  const f=await setup(t),op=randomUUID(),input={content:'合成网络型号C9800-CL 😀',scope:'user',memory_type:'fact',sensitivity:'sensitive'};
+  const f=await setup(t),op=randomUUID(),input={content:'合成网络型号C9800-CL 😀',scope:'user',memory_type:'fact'};
   const first=await f.act('memory.create',input,f.a,op);assert.equal(first.status,200,JSON.stringify(first.body));
   for(let i=0;i<20;i++)assert.equal((await f.act('memory.create',input,f.a,op)).body.memory_id,first.body.memory_id);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM memories WHERE user_id=?').get(f.a.auth.user_id).n,1);
@@ -70,15 +70,16 @@ test('CON-03: correction/retraction use exact revisions and leave task/handoff s
   assert.deepEqual(f.store.db.prepare('SELECT * FROM tasks').all(),before);
   assert.equal(f.store.db.prepare('SELECT COUNT(*) n FROM resumes').get().n,0);
 });
-test('CON-04: privacy and grants stay version-pinned, secret records cannot be granted',async t=>{
+test('CON-04: grants stay version-pinned and can be withdrawn',async t=>{
   const f=await setup(t),m=(await create(f)).body.memory_id;let meta=(await f.get('memory-meta',{memory_id:m})).body;
   assert.equal(meta.web_allowed,false);
   assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:'bad',allow:true})).status,409);
   assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true})).status,200);
   assert.equal((await f.get('memory-meta',{memory_id:m})).body.web_allowed,true);
-  assert.equal((await f.act('memory.sensitivity',{memory_id:m,revision:meta.revision,sensitivity:'secret'})).status,200);
-  meta=(await f.get('memory-meta',{memory_id:m})).body;assert.equal(meta.web_allowed,false);
-  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:true})).status,400);
+  assert.equal((await f.act('memory.visibility',{memory_id:m,revision:meta.revision,state_hash:meta.state_hash,allow:false})).status,200);
+  assert.equal((await f.get('memory-meta',{memory_id:m})).body.web_allowed,false);
+  const corrected=await f.act('memory.correct',{memory_id:m,revision:meta.revision,content:'Synthetic corrected grant target'});
+  assert.equal((await f.get('memory-meta',{memory_id:corrected.body.memory_id})).body.web_allowed,false);
 });
 test('CON-05: manual categories validate taxonomy and foreign ownership',async t=>{
   const f=await setup(t),m=(await create(f)).body.memory_id,revision=1;
@@ -164,7 +165,7 @@ test('CON-12: malformed identities, stale operation IDs and oversized input fail
 test('CON-13: every memory mutation requires a reviewed revision, and audit failure rolls the entire operation back',async t=>{
  const f=await setup(t),s=f.store.consoleService;const action=(action,payload)=>s.execute(f.a.auth,{action,payload,operation_id:randomUUID()});
  const created=await action('memory.create',{scope:'user',content:'Synthetic atomic operation'}),mid=created.memory_id;
- for(const action of ['memory.correct','memory.retract','memory.classify','memory.sensitivity','memory.visibility'])
+ for(const action of ['memory.correct','memory.retract','memory.classify','memory.visibility'])
    await assert.rejects(()=>s.execute(f.a.auth,{action,payload:{memory_id:mid},operation_id:randomUUID()}),/Invalid number/);
  const audit=f.store.audit.bind(f.store),before=f.store.db.prepare('SELECT COUNT(*) n FROM memories').get().n;
  f.store.audit=args=>{if(args.action==='console.memory.create')throw new Error('Synthetic audit failure');return audit(args);};

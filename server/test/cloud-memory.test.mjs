@@ -4,7 +4,6 @@ import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {memoryFixture,businessSnapshot} from './helpers/core-memory-fixture.mjs';
 import {MnemuronStore} from '../lib/store.mjs';
-import {CloudMemory} from '../lib/memory/cloud.mjs';
 
 async function setup(t){
   const f=await memoryFixture(t);
@@ -123,27 +122,36 @@ test('A-T30: the read_all switch widens ChatGPT reads, never cloud corrections o
   const allowed=await change('memory.retract');assert.equal(allowed.status,200,JSON.stringify(allowed.body));assert.equal(allowed.body.memory_status,'retracted');
 });
 
-test('A-T31: a keep_private cloud save stays private under read_all until the owner grants it',async t=>{
+test('A-T31: a keep_private cloud save gets no grant; read_all makes it readable but never changeable',async t=>{
   const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
-  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
   const kept=await f.act('memory.save',f.save('Synthetic keep-private submission','keep_private'));
   assert.equal(kept.status,200,JSON.stringify(kept.body));assert.equal(kept.body.cloud_readable,false);
-  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),false);
-  const replaced=await f.act('memory.save',f.save('Synthetic readable submission','allow_submitted_revision'));
-  assert.equal(replaced.body.cloud_readable,true);
-  const corrected=await f.act('memory.supersede',{memory_id:replaced.body.memory_id,expected_revision:1,reason:'synthetic',content:'Synthetic private correction',cloud_read:'keep_private'});
-  assert.equal(corrected.status,200,JSON.stringify(corrected.body));assert.equal(corrected.body.cloud_readable,false);
-  const {revision,state_hash}=f.store.revisions.latest(f.a.auth.user_id,kept.body.memory_id);
-  f.store.webVisibility.set(ownerAdmin(f),kept.body.memory_id,{allow:true,revision,state_hash});
-  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),true);
-});
-
-test('A-T32: keep_private saves committed before the read_all switch are backfilled as private',async t=>{
-  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
-  const kept=await f.act('memory.save',f.save('Synthetic earlier keep-private submission','keep_private'));
-  f.store.db.prepare('DELETE FROM memory_web_private').run(); // as stored before this table existed
   f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
   assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),true);
-  new CloudMemory(f.store);
-  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),false);
+  assert.equal(f.store.webVisibility.writable(reader,kept.body.memory_id),false);
+  const r=await f.act('memory.retract',{memory_id:kept.body.memory_id,expected_revision:1,reason:'synthetic'});
+  assert.equal(r.status,404,JSON.stringify(r.body));assert.equal(r.body.error_code,'MEMORY_NOT_FOUND');
+  const later=await f.act('memory.save',f.save('Synthetic later keep-private submission','keep_private'));
+  assert.equal(later.body.cloud_readable,true); // receipts report actual readability under read_all
+});
+
+test('A-T32: the one-off v7 migration carries public records as grants and re-indexes secret ones',async t=>{
+  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
+  const pub=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic formerly public record'}).memory;
+  const sec=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic formerly secret record'}).memory;
+  // Database state as written by a release that still had sensitivity levels.
+  f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?),(?,?,?)').run(f.a.auth.user_id,pub.memory_id,'public',f.a.auth.user_id,sec.memory_id,'secret');
+  f.store.db.prepare("UPDATE memory_index_outbox SET action='hide',state='done' WHERE memory_id=?").run(sec.memory_id);
+  f.store.db.exec('PRAGMA user_version = 6');
+  assert.equal(f.store.webVisibility.visible(reader,pub.memory_id),false);
+  const reopened=new MnemuronStore(f.databasePath);t.after(()=>reopened.close());
+  assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version,7);
+  assert.equal(reopened.webVisibility.visible(reader,pub.memory_id),true);
+  assert.equal(reopened.webVisibility.visible(reader,sec.memory_id),false);
+  assert.deepEqual(reopened.db.prepare('SELECT action,state FROM memory_index_outbox WHERE memory_id=?').all(sec.memory_id).map(r=>[r.action,r.state]),[['upsert','pending']]);
+  // One-off: a later open does not re-grant a public record after its grant was withdrawn.
+  const {revision,state_hash}=reopened.revisions.latest(f.a.auth.user_id,pub.memory_id);
+  reopened.webVisibility.set(ownerAdmin({...f,store:reopened}),pub.memory_id,{allow:false,revision,state_hash});
+  const again=new MnemuronStore(f.databasePath);t.after(()=>again.close());
+  assert.equal(again.webVisibility.visible(reader,pub.memory_id),false);
 });

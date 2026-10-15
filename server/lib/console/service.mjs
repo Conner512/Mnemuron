@@ -19,9 +19,8 @@ export class ConsoleService {
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
   meta(auth,p){object(p,['memory_id']);const {row,current}=this.memory(auth,p.memory_id);
-    const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,row.memory_id)?.sensitivity||'sensitive';
     const category=this.store.derivedMemory.category({user_id:auth.user_id,memory_id:row.memory_id,revision:current.revision},this.taxonomy().version);
-    return {memory_id:row.memory_id,revision:current.revision,state_hash:current.state_hash,sensitivity,category,
+    return {memory_id:row.memory_id,revision:current.revision,state_hash:current.state_hash,category,
       web_allowed:row.status==='active'&&this.store.webVisibility.visible({...auth,agent_id:'chatgpt-web'},row.memory_id),scope:row.scope,topic:row.topic,memory_type:row.memory_type,status:row.status};}
   job(auth,jobId){const job=this.store.memoryJobs.get(id(jobId));if(!job||job.user_id!==auth.user_id)throw new NotFoundError('Job not found.','JOB_NOT_FOUND');return job;}
   settings(user){const row=this.db.prepare('SELECT * FROM console_settings WHERE user_id=?').get(user);return {revision:row?.revision||0,...(row?JSON.parse(row.settings_json):{schedule_enabled:false,timezone:'UTC',periods:['daily','weekly']})};}
@@ -33,14 +32,11 @@ export class ConsoleService {
   }
   apply(auth,action,p){const store=this.store;
     if(action.startsWith('memory.')&&!['memory.create','memory.web_policy'].includes(action))number(p.revision,1,2147483647);
-    if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id','sensitivity']);
-      const {sensitivity='sensitive',...input}=p;this.sensitivity(sensitivity);const result=store.saveMemory(auth,{...input,source:'console_explicit'});
-      store.memorySources.setSensitivity(auth,result.memory.memory_id,sensitivity);return receipt(result);}
+    if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id']);
+      return receipt(store.saveMemory(auth,{...p,source:'console_explicit'}));}
     if(action==='memory.correct'){object(p,['memory_id','revision','content','memory_type','topic','reason']);this.memory(auth,p.memory_id,p.revision);
-      const sensitivity=this.meta(auth,{memory_id:p.memory_id}).sensitivity;const result=store.supersedeMemory(auth,p.memory_id,{content:p.content,memory_type:p.memory_type,topic:p.topic,reason:p.reason||'Explicit console correction.'});
-      store.memorySources.setSensitivity(auth,result.replacement_memory.memory_id,sensitivity);return receipt(result);}
+      return receipt(store.supersedeMemory(auth,p.memory_id,{content:p.content,memory_type:p.memory_type,topic:p.topic,reason:p.reason||'Explicit console correction.'}));}
     if(action==='memory.retract'){object(p,['memory_id','revision','reason']);this.memory(auth,p.memory_id,p.revision);return receipt(store.retractMemory(auth,p.memory_id,{reason:p.reason||'Explicit console retraction.'}));}
-    if(action==='memory.sensitivity'){object(p,['memory_id','revision','sensitivity']);this.memory(auth,p.memory_id,p.revision);this.sensitivity(p.sensitivity);store.memorySources.setSensitivity(auth,p.memory_id,p.sensitivity);return {status:'updated',...this.meta(auth,{memory_id:p.memory_id})};}
     if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);return {status:'classified',...store.derivedMemory.setCategory(auth,p.memory_id,p.category,this.taxonomy())};}
     if(action==='memory.visibility'){object(p,['memory_id','revision','state_hash','allow']);this.memory(auth,p.memory_id,p.revision);return {status:'updated',...store.webVisibility.set(auth,p.memory_id,p)};}
     if(action==='memory.web_policy'){object(p,['read_all','expected_revision']);return {status:'updated',...store.webVisibility.setPolicy(auth,p)};}
@@ -91,14 +87,13 @@ export class ConsoleService {
     if(action==='storage.import')return this.import(auth,p);
     throw new NotFoundError('Action not found.');
   }
-  sensitivity(value){if(!['public','internal','sensitive','secret'].includes(value))throw new ValidationError('Invalid sensitivity.');}
   export(auth,p){this.require(auth);object(p,['after','highwater','limit']);const after=number(Number(p.after||0),0,Number.MAX_SAFE_INTEGER),limit=number(Number(p.limit||10),1,20);
     const highwater=p.highwater===undefined?this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(auth.user_id).n:number(Number(p.highwater),0,Number.MAX_SAFE_INTEGER);
     const rows=this.db.prepare('SELECT rowid AS position,* FROM memories WHERE user_id=? AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?').all(auth.user_id,after,highwater,limit+1);
     const records=[];let size=0;
     for(const row of rows.slice(0,limit)){
       const revision=this.store.revisions.latest(auth.user_id,row.memory_id);const item={original_id:row.memory_id,revision:revision.revision,content:row.content,memory_type:row.memory_type,status:row.status,topic:row.topic,
-        sensitivity:this.meta(auth,{memory_id:row.memory_id}).sensitivity,original_scope:{scope:row.scope,project_id:row.project_id,task_id:row.task_id,workstream_id:row.workstream_id,session_id:row.session_id},created_at:row.created_at};
+        original_scope:{scope:row.scope,project_id:row.project_id,task_id:row.task_id,workstream_id:row.workstream_id,session_id:row.session_id},created_at:row.created_at};
       const bytes=Buffer.byteLength(JSON.stringify(item));if(bytes>180000)throw new ValidationError('One legacy record exceeds the portable page limit. Use the offline export procedure.','EXPORT_RECORD_TOO_LARGE');
       if(size+bytes>200000)break;records.push(item);size+=bytes;
     }
@@ -107,12 +102,12 @@ export class ConsoleService {
   }
   import(auth,p){object(p,['format','records','confirm_personal_scope']);if(p.format!=='mnemuron-personal-portable-v1'||p.confirm_personal_scope!==true||!Array.isArray(p.records)||!p.records.length||p.records.length>20)throw new ValidationError('Invalid portable import.');
     const imported=[],existing=[];
-    for(const r of p.records){object(r,['original_id','revision','content','memory_type','status','topic','sensitivity','original_scope','created_at']);id(r.original_id);number(r.revision,1,2147483647);this.sensitivity(r.sensitivity);
+    // Older exports carry a sensitivity field; it is accepted and ignored now that levels are gone.
+    for(const r of p.records){object(r,['original_id','revision','content','memory_type','status','topic','sensitivity','original_scope','created_at']);id(r.original_id);number(r.revision,1,2147483647);
       if(!['active','superseded','retracted'].includes(r.status))throw new ValidationError('Invalid imported lifecycle.');
       const hash=fingerprint(r),key=fingerprint([r.original_id,r.revision]);const previous=this.db.prepare('SELECT * FROM console_imports WHERE user_id=? AND source_key=?').get(auth.user_id,key);
       if(previous){if(previous.content_hash!==hash)throw new ConflictError('Imported version has different content.','IMPORT_CONFLICT');existing.push(previous.memory_id);continue;}
       const result=this.store.saveMemory(auth,{content:r.content,memory_type:r.memory_type,topic:r.topic,scope:'user',source:`user_import:${r.original_id}:r${r.revision}`}),memoryId=result.memory.memory_id;
-      this.store.memorySources.setSensitivity(auth,memoryId,r.sensitivity);
       if(r.status!=='active')this.store.retractMemory(auth,memoryId,{reason:'Imported non-active record; retained as a tombstone, not reactivated.'});
       this.db.prepare('INSERT INTO console_imports VALUES(?,?,?,?)').run(auth.user_id,key,memoryId,hash);imported.push(memoryId);
     }

@@ -120,7 +120,7 @@ function markSelected(){
  const memoryId=detailKind==='memory'?detailData?.memory?.memory_id:null,summaryId=detailKind==='summary'?detailData?.results?.[0]?.summary_id:null;
  for(const node of root.querySelectorAll('[data-memory],[data-summary]'))node.toggleAttribute('data-selected',(!!memoryId&&node.dataset.memory===memoryId)||(!!summaryId&&node.dataset.summary===summaryId));
 }
-const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],['memory.classify','classifyMemory'],['memory.sensitivity','sensitivity'],['memory.visibility','webVisibility']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
+const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],['memory.classify','classifyMemory'],['memory.visibility','webVisibility']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
 const changed=e=>`<div role="alert">${l(/VERSION_CHANGED|MANIFEST_CHANGED/.test(e.message)?'changed':'unavailable','p')}</div>`;
 async function openMemory(params,first=false,back=false) {
  const sequence=++detailSequence;

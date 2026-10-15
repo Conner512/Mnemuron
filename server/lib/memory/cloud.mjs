@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto';
 import {AuthorizationError,ConflictError,NotFoundError,ValidationError} from '../errors.mjs';
 import {memoryContent,memoryType,memoryTopic,memoryOperationId} from '../memory-validation.mjs';
-import {isWebReader} from './web-visibility.mjs';
+import {isWebReader,GRANT_LEGACY_COLUMN} from './web-visibility.mjs';
 
 export const CLOUD_CORE_SCOPES=Object.freeze(['memory:read','resume:read','memory:write']);
 const sameScopes=(a,b)=>Array.isArray(a)&&a.length===b.length&&new Set(a).size===a.length&&b.every(s=>a.includes(s));
@@ -20,9 +20,6 @@ export class CloudMemory {
       user_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,operation_id TEXT NOT NULL,
       request_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,credential_id TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(user_id,connection_id,action,operation_id),UNIQUE(user_id,connection_id,operation_id));`);
-    // Saves committed with keep_private before the read_all switch existed stay private under it.
-    this.db.prepare(`INSERT OR IGNORE INTO memory_web_private SELECT user_id,json_extract(receipt_json,'$.memory_id') FROM cloud_memory_operations
-      WHERE json_extract(receipt_json,'$.cloud_read_choice')='keep_private' AND json_extract(receipt_json,'$.memory_id') IS NOT NULL`).run();
   }
   // Local provisioning only: this function is never exposed as an HTTP route.
   bind(auth,input){
@@ -79,16 +76,8 @@ export class CloudMemory {
       else if(writing)result=this.store.supersedeMemory(auth,payload.memory_id,args,{evidenceKind:'model_submitted'}).replacement_memory;
       else result=this.store.retractMemory(auth,payload.memory_id,args).memory;
       const id=result.memory_id,revision=this.store.revisions.latest(auth.user_id,id);
-      if(writing){
-        const sensitivity=prior?this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,prior.memory_id)?.sensitivity||'sensitive':'sensitive';
-        // A remote correction never inherits a public classification implicitly.
-        this.db.prepare('INSERT OR REPLACE INTO memory_privacy VALUES(?,?,?)').run(auth.user_id,id,sensitivity==='public'?'sensitive':sensitivity);
-        if(cloud_read==='keep_private')this.store.webVisibility.keepPrivate(auth.user_id,id);
-        if(grant){
-          if(!['internal','sensitive','public'].includes(sensitivity))throw new ValidationError('This revision cannot be shared.','CLOUD_READ_POLICY_DENIED');
-          this.db.prepare('INSERT INTO memory_web_grants VALUES(?,?,?,?,?)').run(auth.user_id,id,revision.revision,revision.state_hash,sensitivity==='public'?'sensitive':sensitivity);
-        }
-      }
+      // keep_private only means "no per-revision grant"; the owner's read_all switch still applies.
+      if(grant)this.db.prepare('INSERT INTO memory_web_grants VALUES(?,?,?,?,?)').run(auth.user_id,id,revision.revision,revision.state_hash,GRANT_LEGACY_COLUMN);
       const receipt={schema_version:'cloud-memory-operation-v1',status:'committed',saved:true,action,operation_id,
         memory_id:id,revision:revision.revision,memory_status:result.status,...(prior?{previous_memory_id:prior.memory_id}:{}),
         cloud_readable:this.store.webVisibility.visible(auth,id),cloud_read_choice:writing?cloud_read:null,

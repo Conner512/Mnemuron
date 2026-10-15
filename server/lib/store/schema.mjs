@@ -370,6 +370,24 @@ const addColumns = (table, columns) => (db) => {
   for (const [column, sql] of columns) if (!existing.has(column)) db.exec(sql);
 };
 
+// Sensitivity levels were removed. One-off, non-destructive carry-over for existing databases:
+// records classified public stay readable by ChatGPT through a grant for their current revision,
+// and records classified secret (hidden from the vector index) are queued to be indexed again.
+// memory_privacy itself is left in place, unused, so an older release can still open the file.
+const hasTable = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+function retireSensitivityLevels(db) {
+  if (!hasTable(db, "memory_privacy")) return;
+  if (hasTable(db, "memory_web_grants") && hasTable(db, "memory_revisions")) db.exec(`
+    INSERT OR IGNORE INTO memory_web_grants (user_id,memory_id,revision,state_hash,sensitivity)
+      SELECT p.user_id,p.memory_id,r.revision,r.state_hash,'unclassified' FROM memory_privacy p
+      JOIN memory_revisions r ON r.user_id=p.user_id AND r.memory_id=p.memory_id
+        AND r.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=p.user_id AND memory_id=p.memory_id)
+      WHERE p.sensitivity='public';`);
+  if (hasTable(db, "memory_index_outbox")) db.exec(`
+    UPDATE memory_index_outbox SET state='pending',action='upsert' WHERE action='hide'
+      AND EXISTS (SELECT 1 FROM memory_privacy p WHERE p.user_id=memory_index_outbox.user_id AND p.memory_id=memory_index_outbox.memory_id AND p.sensitivity='secret');`);
+}
+
 export const CORE_MIGRATIONS = Object.freeze([
   { version: 1, repeatable: true, name: "core-tables", up: (db) => db.exec(CORE_TABLES) },
   { version: 2, repeatable: true, name: "tasks-canonical-version", up: addColumns("tasks", [
@@ -415,6 +433,7 @@ export const CORE_MIGRATIONS = Object.freeze([
       CREATE INDEX IF NOT EXISTS memories_user_created_idx
         ON memories(user_id, created_at DESC, memory_id);
     `) },
+  { version: 7, name: "retire-sensitivity-levels", up: retireSensitivityLevels },
 ]);
 
 export const CORE_SCHEMA_VERSION = CORE_MIGRATIONS.at(-1).version;
