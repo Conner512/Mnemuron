@@ -12,18 +12,18 @@ const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
 let capabilities={enabled:false,writable:false},actions,connections;
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
-let query='',searchMode='lexical',category='',status='',offset=0;
+let query='',searchMode='hybrid',category='',status='',offset=0;
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 
-function readLocation(){const p=new URLSearchParams(location.search);query=p.get('query')||'';searchMode=p.get('mode')||'lexical';category=p.get('category')||'';status=p.get('status')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
-function saveLocation(){const p=new URLSearchParams();if(query)p.set('query',query);if(searchMode!=='lexical')p.set('mode',searchMode);if(category)p.set('category',category);if(status)p.set('status',status);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
+function readLocation(){const p=new URLSearchParams(location.search);query=p.get('query')||'';searchMode=p.get('mode')||'hybrid';category=p.get('category')||'';status=p.get('status')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
+function saveLocation(){const p=new URLSearchParams();if(query)p.set('query',query);if(searchMode!=='hybrid')p.set('mode',searchMode);if(category)p.set('category',category);if(status)p.set('status',status);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
 readLocation();
 
 function clear() {
  actions?.clear();connections?.clear();state.clear();requestSequence++;detailSequence++;
- currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='lexical';offset=0;
+ currentData=null;detailData=null;detailStack=[];query='';category='';status='';searchMode='hybrid';offset=0;
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -146,11 +146,11 @@ document.addEventListener('click',event=>{
  if(event.target.closest('[data-detail-next]')&&detailData?.next_request)void (detailKind==='summary'?openSummary:openMemory)(detailData.next_request);
  if(event.target.closest('[data-source-next]')&&detailData?.next_source_request)void openMemory(detailData.next_source_request);
  const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);saveLocation();void load();}
- if(event.target.closest('[data-reset-filters]')){query='';category='';status='';searchMode='lexical';offset=0;saveLocation();void load();}
+ if(event.target.closest('[data-reset-filters]')){query='';category='';status='';searchMode='hybrid';offset=0;saveLocation();void load();}
  if(event.target.closest('[data-retry]'))void load();
 });
 document.addEventListener('submit',event=>{
- if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'lexical');category=String(f.get('category')||'');status=String(f.get('status')||'');offset=0;saveLocation();void load();}
+ if(event.target.id==='search-form'){event.preventDefault();const f=new FormData(event.target);query=String(f.get('query')||'');searchMode=String(f.get('search_mode')||'hybrid');category=String(f.get('category')||'');status=String(f.get('status')||'');offset=0;saveLocation();void load();}
  if(event.target.action?.endsWith('/console-api/logout')){requestSequence++;detailSequence++;for(const c of state.controllers)c.abort();root.replaceChildren();detail.replaceChildren();closePane();currentData=null;detailData=null;}
 });
 pane.addEventListener('close',()=>{detailSequence++;detailData=null;detailStack=[];detail.replaceChildren();document.body.classList.remove('pane-open');markSelected();lastFocus?.isConnected&&lastFocus.focus();lastFocus=null;});

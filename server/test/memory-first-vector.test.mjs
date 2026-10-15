@@ -108,13 +108,13 @@ test('R-04: exact identifiers beat longer prefixes even when semantic rank prefe
   const f=await indexed(t),near=f.save('Network router version 17.9.80 is NOT the requested release.');await f.index.sync(f.generation);
   const rows=[...f.backend.collections.get(f.index.snapshot().collection_name).points.values()];
   const point=m=>rows.find(p=>p.payload.document===surrogate([f.auth.user_id,m.memory_id]));
-  f.backend.search=async()=>[point(near),point(f.a)];
+  f.backend.search=async()=>[{...point(near),score:0.95},{...point(f.a),score:0.9}];
   const result=await f.index.search(f.auth,{query:'17.9.8',mode:'semantic'});
   assert.equal(result.results[0].memory_id,f.a.memory_id);
 });
 test('R-04 R-08: exact prioritization reads the authoritative source, not its truncated result preview',async t=>{
   const f=await indexed(t),late=f.save('Synthetic network filler '.repeat(65)+'Pinned release 28.4.2.'),near=f.save('Network release 28.4.20 is different.');await f.index.sync(f.generation);
   const rows=[...f.backend.collections.get(f.index.snapshot().collection_name).points.values()];
-  const point=m=>rows.find(p=>p.payload.document===surrogate([f.auth.user_id,m.memory_id]));f.backend.search=async()=>[point(near),point(late)];
+  const point=m=>rows.find(p=>p.payload.document===surrogate([f.auth.user_id,m.memory_id]));f.backend.search=async()=>[{...point(near),score:0.95},{...point(late),score:0.9}];
   const result=await f.index.search(f.auth,{query:'28.4.2',mode:'semantic'});assert.equal(result.results[0].memory_id,late.memory_id);assert.equal(result.results[0].content_truncated,true);
 });

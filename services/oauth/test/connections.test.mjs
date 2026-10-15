@@ -96,3 +96,32 @@ test('B/C: pending bindings filter as draft; metadata and guides contain no reco
  assert.equal(x.registry.list(x.a.id).counts.pending,1);
  assert.equal(x.registry.verifyPat(r.secret,x.config.resource+'/generic').active,false);
 });
+test('B-23: editing a disabled connection keeps it disabled and issues no credential',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b23-create');
+ const id=c.connection.connection_id,resource=x.config.resource+'/generic';
+ await x.execute(x.a,'connections.disable',{connection_id:id},'b23-disable');
+ const updated=await x.execute(x.a,'connections.update',{connection_id:id,label:'Renamed MCP'},'b23-update');
+ assert.equal(updated.status,'disabled');assert.equal(updated.secret,undefined);assert.equal(updated.connection.label,'Renamed MCP');
+ assert.equal(x.store.db.prepare('SELECT COUNT(*) n FROM identity_connection_tokens WHERE connection_id=? AND revoked IS NULL').get(id).n,0);
+ x.store.db.prepare('UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json=? WHERE connection_id=?').run('{}',id);
+ assert.equal(x.registry.verifyPat(c.secret,resource).active,false);
+ const enabled=await x.execute(x.a,'connections.enable',{connection_id:id},'b23-enable');
+ assert.equal(enabled.status,'ready');assert.ok(enabled.secret);
+});
+test('B-24: label/description edits keep grants, tokens and version; authority changes still rotate',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b24-create');
+ const id=c.connection.connection_id,resource=x.config.resource+'/generic';
+ const bind=()=>x.store.db.prepare("UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json='{}' WHERE connection_id=?").run(id);bind();
+ x.store.db.prepare("UPDATE identity_connections SET health='verified' WHERE connection_id=?").run(id);
+ // The console form always resends unchanged authority fields with the edit.
+ const renamed=await x.execute(x.a,'connections.update',{connection_id:id,label:'Renamed MCP',description:'notes',profile:'readonly',allow_submitted_revision_grant:false},'b24-rename');
+ assert.equal(renamed.secret,undefined);assert.equal(renamed.connection.version,1);assert.equal(renamed.connection.label,'Renamed MCP');assert.equal(renamed.connection.health,'verified');
+ assert.equal(x.registry.verifyPat(c.secret,resource).active,true);
+ const changed=await x.execute(x.a,'connections.update',{connection_id:id,profile:'memory_readwrite'},'b24-profile');
+ assert.equal(changed.connection.version,2);assert.ok(changed.secret);assert.equal(x.registry.verifyPat(c.secret,resource).active,false);
+});
+test('B-25: pending count uses the same unbound definition as the draft filter',async t=>{
+ const x=await accountFixture(t),c=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic MCP',profile:'readonly'},'b25-create');
+ x.store.db.prepare("UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json=NULL WHERE connection_id=?").run(c.connection.connection_id);
+ const listed=x.registry.list(x.a.id,{});assert.equal(x.registry.list(x.a.id,{state:'draft'}).total,1);assert.equal(listed.counts.pending,1);
+});

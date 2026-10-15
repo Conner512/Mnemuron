@@ -1,3 +1,4 @@
+import {recentCapture} from './helpers/recent-capture.mjs';
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -68,7 +69,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
       {
         event_id: userEventId,
         event_type: "user_message",
-        captured_at: "2026-09-04T01:00:00.000Z",
+        captured_at: recentCapture("2026-09-04T01:00:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -79,7 +80,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
         event_id: assistantEventId,
         event_type: "assistant_message",
         hook_event_name: "Stop",
-        captured_at: "2026-09-04T01:01:00.000Z",
+        captured_at: recentCapture("2026-09-04T01:01:00.000Z"),
         project_id: task.project_id,
         task_id: task.task_id,
         workstream_id: "workstream-clientb",
@@ -145,7 +146,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
         {
           event_id: randomUUID(),
           event_type: "user_message",
-          captured_at: "2026-09-04T01:10:00.000Z",
+          captured_at: recentCapture("2026-09-04T01:10:00.000Z"),
           project_id: task.project_id,
           task_id: task.task_id,
           workstream_id: "workstream-clientb",
@@ -156,7 +157,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           event_id: randomUUID(),
           event_type: "assistant_message",
           hook_event_name: "Stop",
-          captured_at: "2026-09-04T01:11:00.000Z",
+          captured_at: recentCapture("2026-09-04T01:11:00.000Z"),
           project_id: task.project_id,
           task_id: task.task_id,
           workstream_id: "workstream-clientb",
@@ -175,7 +176,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
         {
           event_id: branchDecisionEventId,
           event_type: "user_message",
-          captured_at: "2026-09-04T02:00:00.000Z",
+          captured_at: recentCapture("2026-09-04T02:00:00.000Z"),
           project_id: task.project_id,
           task_id: task.task_id,
           workstream_id: "workstream-clienta",
@@ -186,7 +187,7 @@ test("automatic structured memories are strict, traceable, idempotent, and branc
           event_id: randomUUID(),
           event_type: "assistant_message",
           hook_event_name: "Stop",
-          captured_at: "2026-09-04T02:01:00.000Z",
+          captured_at: recentCapture("2026-09-04T02:01:00.000Z"),
           project_id: task.project_id,
           task_id: task.task_id,
           workstream_id: "workstream-clienta",

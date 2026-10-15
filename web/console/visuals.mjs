@@ -147,7 +147,7 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
 }
 
 /** Library: filters, a four-column table, and a pager. The detail opens in the side pane. */
-export function libraryView(t, {data, query = '', searchMode = 'lexical', category = '', status = '', categories = [], focusSources = false, readOnly = false, pagination = ''}) {
+export function libraryView(t, {data, query = '', searchMode = 'hybrid', category = '', status = '', categories = [], focusSources = false, readOnly = false, pagination = ''}) {
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
   const rows = data.results || [];
   const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>

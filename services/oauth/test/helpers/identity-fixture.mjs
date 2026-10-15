@@ -4,8 +4,8 @@ import path from 'node:path';
 import {AuthStore} from '../../src/sqlite-adapter.mjs';
 import {IdentityRepository} from '../../src/identity-repository.mjs';
 import {randomSecret,writePrivate} from '../../../../shared/oauth-common.mjs';
-import {previousStepCode} from './totp.mjs';
 import {fixture} from '../fixture.mjs';
+import {previousStepCode} from './totp.mjs';
 export function identityFixture(t) {
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'mnemuron-identity-test-'));fs.chmodSync(directory,0o700);
  const keyFile=path.join(directory,'key');writePrivate(keyFile,randomSecret());
