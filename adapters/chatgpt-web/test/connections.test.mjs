@@ -196,6 +196,9 @@ test('B-32: scoped discovery fails closed for unavailable clients and rejects am
  for(const suffix of ['?client_id=','?client_id=unknown','?client_id='+r.connection.client_id+'&client_id=other','?client_id='+r.connection.client_id+'&scope=memory:write'])assert.ok(await status(suffix)>=400);
  await x.execute(a,'connections.disable',{connection_id:r.connection.connection_id});assert.equal(await status(query),404);
  await x.execute(a,'connections.update',{connection_id:r.connection.connection_id,profile:'readonly'});assert.equal(await status(query),404);x.provision();
+ // Editing a disabled connection keeps it disabled; only an explicit enable restores discovery.
+ assert.equal(await status(query),404);
+ await x.execute(a,'connections.enable',{connection_id:r.connection.connection_id});x.provision();
  const downgraded=await fetch(endpoint+query).then(r=>r.json());assert.deepEqual(downgraded.scopes_supported,['openid','offline_access','memory:read']);
  await x.execute(a,'connections.revoke',{connection_id:r.connection.connection_id});assert.equal(await status(query),404);
  assert.equal(await status(''),200,'common read discovery remains compatible');
