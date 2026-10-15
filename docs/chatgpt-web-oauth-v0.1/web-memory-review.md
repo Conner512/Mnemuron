@@ -37,6 +37,14 @@ unaffected. The switch is versioned (`expected_revision`, conflicts return
 `memory.web_policy`. Switching it off restores the explicit-grant rule; existing grants
 are kept.
 
+`read_all` widens **reads only**. Cloud corrections and retractions (`memory.supersede`,
+`memory.retract`) still require a `public` record or an explicit grant for its current
+revision, so switching reads on never lets a write connection change records the owner
+did not individually allow. A save or correction submitted with `cloud_read=keep_private`
+is recorded in `memory_web_private` and stays out of `read_all`; the owner can still grant
+it explicitly. Keep-private saves committed before this rule are backfilled from their
+operation receipts when Core starts.
+
 Filtering occurs before lexical candidate limits, counters and conflict creation,
 and again after awaited vector requests. Details and historical lifecycle records
 apply the same rule. A summary requires **every dependency**, including omitted

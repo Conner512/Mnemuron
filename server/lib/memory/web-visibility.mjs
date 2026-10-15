@@ -8,12 +8,16 @@ export const isWebReader = auth => auth?.agent_id === 'chatgpt-web';
 // Destination comes from the authenticated credential, never from a tool argument or header.
 // Internal/sensitive records need a grant for their current revision, unless the owner switched
 // ChatGPT reads to all records (memory_web_policy.read_all). Secret records are never visible.
-export function webMemorySql(auth, alias='m') {
+// read_all widens reads only: writes pass readAll:false, and a save the model submitted with
+// cloud_read=keep_private (memory_web_private) stays out of read_all.
+export function webMemorySql(auth, alias='m', {readAll=true}={}) {
   if (!isWebReader(auth)) return '1=1';
+  const allRecords=readAll?`(EXISTS (SELECT 1 FROM memory_web_policy wpol WHERE wpol.user_id=${alias}.user_id AND wpol.read_all=1)
+        AND NOT EXISTS (SELECT 1 FROM memory_web_private wpv WHERE wpv.user_id=${alias}.user_id AND wpv.memory_id=${alias}.memory_id))
+      OR `:'';
   return `(EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id AND wp.sensitivity='public')
     OR (COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive') IN ('internal','sensitive')
-      AND (EXISTS (SELECT 1 FROM memory_web_policy wpol WHERE wpol.user_id=${alias}.user_id AND wpol.read_all=1)
-      OR EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
+      AND (${allRecords}EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
         ON wr.user_id=wg.user_id AND wr.memory_id=wg.memory_id AND wr.revision=wg.revision AND wr.state_hash=wg.state_hash
         WHERE wg.user_id=${alias}.user_id AND wg.memory_id=${alias}.memory_id
         AND wg.sensitivity=COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive')
@@ -28,6 +32,7 @@ export class WebMemoryVisibility {
       revision INTEGER NOT NULL,state_hash TEXT NOT NULL,sensitivity TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
       CREATE TABLE IF NOT EXISTS memory_web_policy (user_id TEXT PRIMARY KEY,read_all INTEGER NOT NULL CHECK(read_all IN (0,1)),
         revision INTEGER NOT NULL,updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS memory_web_private (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,PRIMARY KEY(user_id,memory_id));
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_privacy_insert AFTER INSERT ON memory_privacy BEGIN
         DELETE FROM memory_web_grants WHERE user_id=NEW.user_id AND memory_id=NEW.memory_id; END;
       CREATE TRIGGER IF NOT EXISTS memory_web_revoke_privacy_update AFTER UPDATE ON memory_privacy BEGIN
@@ -58,6 +63,14 @@ export class WebMemoryVisibility {
   }
   visible(auth,id) {
     return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${webMemorySql(auth)}`).get(auth.user_id,id);
+  }
+  /** Cloud writes: public or explicitly granted records only, never via the read_all switch. */
+  writable(auth,id) {
+    return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${webMemorySql(auth,'m',{readAll:false})}`).get(auth.user_id,id);
+  }
+  /** The submitter chose keep_private for this record; read_all must not expose it. */
+  keepPrivate(userId,id) {
+    this.db.prepare('INSERT OR IGNORE INTO memory_web_private VALUES(?,?)').run(userId,id);
   }
   project(auth,memory) {
     const revision=this.db.prepare('SELECT MAX(revision) revision FROM memory_revisions WHERE user_id=? AND memory_id=?').get(auth.user_id,memory.memory_id)?.revision;
