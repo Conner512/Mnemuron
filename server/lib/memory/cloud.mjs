@@ -71,7 +71,8 @@ export class CloudMemory {
         prior=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,payload.memory_id);
         // Inside the operation transaction: a memory of a deleted (or dangling/foreign) project is not writable and,
         // for this narrow cloud credential, reads exactly like any memory it cannot see.
-        if(!prior||!this.store.webVisibility.visible(auth,payload.memory_id)||!this.store.lifecycle.liveProject(auth.user_id,prior.project_id))throw missing();
+        // read_all and the active-uniform read policy widen reads only, never corrections or retractions.
+        if(!prior||!this.store.webVisibility.writable(auth,payload.memory_id)||!this.store.lifecycle.liveProject(auth.user_id,prior.project_id))throw missing();
         if(this.store.revisions.latest(auth.user_id,payload.memory_id)?.revision!==payload.expected_revision)throw new ConflictError('Memory changed.','MEMORY_VERSION_CHANGED');
         if(prior.status!=='active')throw new ConflictError('Memory is no longer active.','MEMORY_VERSION_CHANGED');
       }

@@ -117,6 +117,14 @@ export class WebMemoryVisibility {
   visible(auth,id) {
     return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${webMemorySql(auth)}`).get(auth.user_id,id);
   }
+  /** Cloud corrections/retractions: an explicit grant for the current revision, never read_all or the
+   *  active-uniform read policy. Those widen what ChatGPT may read, not what it may change. */
+  writable(auth,id) {
+    return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=?
+      AND NOT EXISTS (SELECT 1 FROM memory_web_denials wd WHERE wd.user_id=m.user_id AND wd.memory_id=m.memory_id)
+      AND (EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=m.user_id AND wp.memory_id=m.memory_id AND wp.sensitivity='public')
+        OR ${currentGrantSql('m')})`).get(auth.user_id,id);
+  }
   project(auth,memory) {
     const revision=this.db.prepare('SELECT MAX(revision) revision FROM memory_revisions WHERE user_id=? AND memory_id=?').get(auth.user_id,memory.memory_id)?.revision;
     return webMemoryProjection({...memory,revision:revision ?? null});

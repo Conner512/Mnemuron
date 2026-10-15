@@ -103,3 +103,25 @@ test('A-T18/20/23 and BASE-T04: gates, atomic grant failures and additive migrat
   const original=f.store.db.prepare('SELECT * FROM memories ORDER BY memory_id').all();
   const reopened=new MnemuronStore(f.databasePath);try{assert.deepEqual(reopened.db.prepare('SELECT * FROM memories ORDER BY memory_id').all(),original);}finally{reopened.close();}
 });
+
+// The owner's own administrative credential sets the read policy and per-memory grants.
+const ownerAdmin=f=>f.store.authenticate(f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-owner-admin',agentId:'synthetic-owner',
+  agentInstanceId:randomUUID(),scopes:['memory:read','memory:write','admin:tasks']}).api_key);
+
+test('A-T30: read_all and the active-uniform read policy widen ChatGPT reads, never cloud corrections or retractions',async t=>{
+  const f=await setup(t),owned=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic owner note never granted to ChatGPT'}).memory;
+  const change=(action,extra={})=>f.act(action,{memory_id:owned.memory_id,expected_revision:1,reason:'synthetic',...extra});
+  const refused=async()=>{for(const [action,extra] of [['memory.retract',{}],['memory.supersede',{content:'Synthetic overwrite attempt',cloud_read:'keep_private'}]]){
+    const r=await change(action,extra);assert.equal(r.status,404,JSON.stringify(r.body));assert.equal(r.body.error_code,'MEMORY_NOT_FOUND');}};
+  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
+  assert.equal(f.store.webVisibility.visible({...f.a.auth,agent_id:'chatgpt-web'},owned.memory_id),true);
+  await refused();
+  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:false,expected_revision:1});
+  f.store.runtime.agentReadPolicy='active_uniform_v1';
+  assert.equal(f.store.webVisibility.visible(f.store.authenticate(f.a.api_key),owned.memory_id),true);
+  await refused();
+  assert.equal(f.store.db.prepare('SELECT status FROM memories WHERE memory_id=?').get(owned.memory_id).status,'active');
+  const {revision,state_hash}=f.store.revisions.latest(f.a.auth.user_id,owned.memory_id);
+  f.store.webVisibility.set(ownerAdmin(f),owned.memory_id,{allow:true,revision,state_hash});
+  const allowed=await change('memory.retract');assert.equal(allowed.status,200,JSON.stringify(allowed.body));assert.equal(allowed.body.memory_status,'retracted');
+});
