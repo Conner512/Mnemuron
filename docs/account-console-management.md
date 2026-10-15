@@ -130,7 +130,6 @@ from the page. Existing operation receipts are encrypted and short-lived.
 ```bash
 node --test services/oauth/test/console-actions.test.mjs \
   services/oauth/test/registration-console.test.mjs \
-  services/oauth/test/console-management-ui.test.mjs \
   services/oauth/test/boundaries.test.mjs
 node scripts/test-all.mjs
 ```
