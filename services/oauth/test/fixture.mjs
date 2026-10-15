@@ -10,13 +10,19 @@ import { AuthStore } from "../src/sqlite-adapter.mjs";
 import { createAuthorizationServer } from "../src/server.mjs";
 import { randomSecret, readPrivate, writePrivate, seconds } from "../../../shared/oauth-common.mjs";
 
+// Linux may hand a just-released ephemeral port straight back. Two fixture roles on one port
+// silently reroute traffic (an auth-port callback is followed as a 404), so never reuse one.
+const reservedPorts = new Set();
 export async function freePort() {
-  const server = net.createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const port = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
+  for (let attempt = 0; attempt < 64; attempt++) {
+    const server = net.createServer();
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = server.address().port;
+    await new Promise((resolve) => server.close(resolve));
+    if (!reservedPorts.has(port)) { reservedPorts.add(port); return port; }
+  }
+  throw new Error("No distinct free port for the test fixture");
 }
 export async function listen(server, port) { server.listen(port, "127.0.0.1"); await once(server, "listening"); }
 export async function close(server) {
@@ -95,6 +101,9 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
   await createOwner(config.accounts_file, "synthetic-owner", password);
   const seed = readPrivate(config.accounts_file, { json: true }).mfa.secret;
   const enrollmentStore = new AuthStore(config.database_file);
+  // The previous-step code keeps the later login code unreplayed; do not let it age out mid-verify.
+  const untilNextStep = 30_000 - (Date.now() % 30_000);
+  if (untilNextStep < 2_000) await new Promise((resolve) => setTimeout(resolve, untilNextStep + 50));
   try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await generate({ secret: seed, epoch: seconds() - 30 }), path.join(directory, "recovery.json")); }
   finally { enrollmentStore.close(); }
   const subject = readPrivate(config.accounts_file, { json: true }).subject;
@@ -109,21 +118,21 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
     const verifier = randomSecret();
     const request = { client_id: config.chatgpt_client.client_id, redirect_uri: config.chatgpt_client.redirect_uris[0], response_type: "code", scope,
       resource: config.resource, state: randomSecret(), code_challenge_method: "S256", code_challenge: createHash("sha256").update(verifier).digest("base64url"), ...params };
-    let response = await browser.request(`/authorize?${new URLSearchParams(request)}`);
+    let step = "/authorize", response = await browser.request(`/authorize?${new URLSearchParams(request)}`);
     for (let i = 0; i < 12; i++) {
       const location = response.headers.get("location");
       if (location) {
         const target = new URL(location, config.issuer);
         if (target.origin !== config.issuer) return { callback: validatedCallback(target, config.issuer, request), verifier, request, response };
-        response = await browser.request(target);
+        step = `GET ${target.pathname}`;response = await browser.request(target);
       } else if (response.status === 200) {
         const csrf = response.text.match(/name="csrf" value="([^"]+)"/)?.[1];
         const action = response.text.match(/action="([^"]+)"/)?.[1];
         if (!csrf || !action) throw new Error(`Unexpected interaction page (${response.status})`);
         const fields = { csrf };
         if (action.endsWith("/login")) Object.assign(fields, { username: "synthetic-owner", password, otp: await generate({ secret: seed }) });
-        response = await browser.post(decision === "abort" ? action.replace(/\/(login|confirm)$/, "/abort") : action, fields);
-      } else throw new Error(`Authorization fixture stopped: ${response.status} ${response.text}`);
+        step = `POST ${action}`;response = await browser.post(decision === "abort" ? action.replace(/\/(login|confirm)$/, "/abort") : action, fields);
+      } else throw new Error(`Authorization fixture stopped at ${step}: ${response.status} ${response.text}`);
     }
     throw new Error("Authorization redirect loop");
   };
