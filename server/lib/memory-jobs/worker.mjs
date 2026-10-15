@@ -58,7 +58,6 @@ export class MemoryWorker {
         this.jobs.renew(job);
         const items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size));
         const sources=items.map(item=>{const row=this.store.derivedMemory.validateItem(item);if(!row)fail('STALE_INPUT');return row;});
-        if(sources.some(s=>!profile.egress.sensitivities.includes(s.sensitivity)))fail('SENSITIVITY_DENIED');
         const multiSpan=['grounded-extractive-v4','grounded-extractive-v5'].includes(job.metadata.prompt_version);
         let summaryInstruction=multiSpan?
           `Account for every source, including long or repetitive sources. Select exact, nonempty, non-overlapping source spans in source order, at most ${MAX_SOURCE_SPANS} spans per source. Keep uncertainty, negation, versions, numbers, decisions, role and quoted-data disclaimers. For sources of at most ${WHOLE_ATOM_LIMIT} UTF-16 code units quote the entire content once, start=0 and end=content_length. For longer sources select complete statements retaining all material qualifications and final decisions; separate distant statements into separate spans so redundant observations and background can be omitted. Aim to select less than half of a long source when it has redundant background, but retain faithful meaning over compression. If this cannot be done safely within the span bound, quote the entire source. Never join non-contiguous text inside a quote, invent transitions or omit contradictory evidence. Omit a source only when no faithful quote can represent it. Quotes are not independently verified facts.`:
@@ -71,7 +70,7 @@ export class MemoryWorker {
           sources:sources.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
             current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})),
           instruction:job.job_type==='summary'?summaryInstruction:classificationInstruction};
-        const reply=await this.organizer.generateStructured(input,outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2'}),{sensitivity:sources.some(s=>s.sensitivity==='sensitive')?'sensitive':sources.some(s=>s.sensitivity==='internal')?'internal':'public',
+        const reply=await this.organizer.generateStructured(input,outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2'}),{
           reserve:()=>this.jobs.reserve(job,profile.limits.daily_requests)});
         let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
@@ -102,7 +101,7 @@ export function scheduleLibrary(store,jobs,{userId,organizer,taxonomy,periods=['
       if(!rows.length)break;
       for(const raw of rows){
         scanned++;const source=store.derivedMemory.currentSource(userId,raw.memory_id);
-        if(!source || !organizer.profile.egress.sensitivities.includes(source.sensitivity)){excluded++;continue;}
+        if(!source){excluded++;continue;}
         const category=type==='classification'?'uncategorized':store.derivedMemory.category(source,taxonomy.version);
         const windows=type==='classification'?[null]:periods.map(period=>calendarWindow(Date.parse(source.created_at),{timezone,period}));
         for(const window of windows){

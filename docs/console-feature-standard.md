@@ -140,7 +140,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
 | MEM-04 | 记忆库 | 修订与撤回 | live | — | memory.correct, memory.retract |
-| MEM-05 | 记忆库 | 分类、敏感级别与 ChatGPT 可见性 | live | — | memory.classify, memory.sensitivity, memory.visibility |
+| MEM-05 | 记忆库 | 分类与 ChatGPT 可见性 | live | — | memory.classify, memory.visibility |
 | MEM-06 | 记忆库 | 批量整理 | planned | — | memory.batch_classify, memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | planned | memory | — |
 | SUM-01 | 分类与摘要 | 分类索引与派生摘要 | live | summaries, summary | — |

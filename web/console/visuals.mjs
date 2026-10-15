@@ -237,7 +237,7 @@ export const featureMap = {
     {id: 'MEM-02', status: 'live', read: ['memory', 'memory-meta']},
     {id: 'MEM-03', status: 'live', write: ['memory.create']},
     {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
-    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity', 'memory.visibility']},
+    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.visibility']},
     {id: 'MEM-06', status: 'planned', write: ['memory.batch_classify', 'memory.batch_retract']},
     {id: 'MEM-07', status: 'planned', read: ['memory']},
   ],
@@ -292,7 +292,7 @@ export const featureMap = {
   privacy: [
     {id: 'PRV-01', status: 'live', read: ['models']},
     {id: 'PRV-02', status: 'planned', read: ['privacy-defaults'], write: ['privacy.defaults'],
-      ui: {form: ['select:defaultSensitivity', 'check:defaultWebVisibility'], submit: 'save'}},
+      ui: {form: ['check:defaultWebVisibility'], submit: 'save'}},
     {id: 'PRV-03', status: 'planned', read: ['retention'], write: ['retention.save'], core: ['GET /v1/retention', 'PUT /v1/retention'], scope: ['admin:retention'],
       ui: {form: ['number:eventRetentionDays', 'number:checkpointRetentionDays'], submit: 'save'}},
     {id: 'PRV-04', status: 'planned', write: ['retention.prune'], core: ['POST /v1/retention/prune'], scope: ['admin:retention'], reauth: true,

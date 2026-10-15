@@ -7,7 +7,6 @@ class Provider {
   }
   async call(input,options,callback) {
     const p=this.profile;if(!p.enabled)fail('NOT_CONFIGURED');
-    if(options?.sensitivity==='secret' || !p.egress.sensitivities.includes(options?.sensitivity || 'sensitive'))fail('SENSITIVITY_DENIED');
     if(!p.egress.approved || options?.inputType==='query' && !p.egress.query_approved)fail('EGRESS_DENIED');
     const bytes=Buffer.byteLength(JSON.stringify(input));
     // UTF-8 bytes conservatively bound tokens without a model-specific tokenizer.

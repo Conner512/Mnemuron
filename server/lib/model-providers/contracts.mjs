@@ -39,8 +39,10 @@ export function validateProfile(input, {kind,synthetic=false}={}) {
   if(Object.hasOwn(p.auth,'secret_file') && (typeof p.auth.secret_file!=='string' || !p.auth.secret_file.startsWith('/')))fail('INVALID_CONFIG');
   strictObject(p.egress,['approved','origins','addresses','allow_private','sensitivities','query_approved']);
   for(const k of ['approved','allow_private','query_approved'])if(typeof p.egress[k]!=='boolean')fail('INVALID_CONFIG');
-  for(const k of ['origins','addresses','sensitivities'])if(!Array.isArray(p.egress[k]) || p.egress[k].length>64 || p.egress[k].some(v=>typeof v!=='string'))fail('INVALID_CONFIG');
-  if(p.egress.sensitivities.some(v=>!['public','internal','sensitive'].includes(v)))fail('INVALID_CONFIG');
+  for(const k of ['origins','addresses'])if(!Array.isArray(p.egress[k]) || p.egress[k].length>64 || p.egress[k].some(v=>typeof v!=='string'))fail('INVALID_CONFIG');
+  // Sensitivity levels were removed; older runtime files may still list them. Accepted and ignored.
+  if(p.egress.sensitivities!==undefined && (!Array.isArray(p.egress.sensitivities) || p.egress.sensitivities.length>64 || p.egress.sensitivities.some(v=>typeof v!=='string')))fail('INVALID_CONFIG');
+  delete p.egress.sensitivities;
   if(p.protocol!=='mock') {
     let url;try{url=new URL(p.base_url);}catch{fail('INVALID_CONFIG');}
     if(!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)fail('INVALID_CONFIG');

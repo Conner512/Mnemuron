@@ -13,7 +13,7 @@ This opt-in extension adds memory operations to the existing OAuth MCP gateway. 
 
 The deployment profile, current account, OAuth scope, immutable connection binding, internal credential and target visibility all constrain an operation. The model cannot supply owner, role, confirmation, key, URL, SQL or filesystem authority. OAuth tokens are never forwarded to Core. There is no shared mutable owner credential.
 
-The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned, currently Web-visible record, its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history. Supersede and retract apply only to records ChatGPT may change: `public` ones or ones with an explicit grant for the current revision. The account-level ChatGPT `read_all` switch widens reads only and never makes other records changeable.
+The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned, currently Web-visible record, its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history. Supersede and retract apply only to records with an explicit grant for the current revision. The account-level ChatGPT `read_all` switch widens reads only and never makes other records changeable.
 
 The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and `GET /v1/cloud-memory/operations/:operation_id?connection_id=...`. Keep these behind the existing loopback Core boundary; no new public Core route is required.
 
@@ -21,7 +21,7 @@ The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and 
 
 Save and correction require an explicit `cloud_read` value:
 
-- `keep_private`: no Web grant; result and receipt contain metadata only, never the submitted body. The record also stays private when the owner turns on the account-level ChatGPT `read_all` switch, until the owner grants it explicitly.
+- `keep_private`: no Web grant; result and receipt contain metadata only, never the submitted body. When the owner turns on the account-level ChatGPT `read_all` switch, the record is readable like every other record (there are no sensitivity levels).
 - `allow_submitted_revision`: disabled unless explicitly approved in the deployment, connection binding and OAuth consent. It grants **only the final version submitted by this operation**. The existing grant is account-level: other authorized cloud readers of this account may read it too. It is not a current-connection-only grant. It cannot grant arbitrary existing records, copy old sources, or change sensitive content to public. Secret records remain inaccessible.
 
 Until that deployment policy is approved, use `allow_submitted_revision_grant: false`. The permission failure is explicit; private saving still works. Changes to content, privacy or lifecycle invalidate old version grants.
