@@ -37,7 +37,7 @@ export class ConsoleService {
   // legacy_read_all is this account's earlier "ChatGPT may read all memories" setting: still in force under the
   // per-memory policy, shown so the console never understates what ChatGPT can read.
   readPolicy(auth){const key=this.store.runtime.agentReadPolicy||'chatgpt_per_memory_v1';
-    return {policy:AGENT_READ_POLICIES[key],setting:key,active_records_uniform:key==='active_uniform_v1',legacy_read_all:this.store.webVisibility.policy(auth).read_all,history_and_secret_filtered:true,configured_by:'operator'};}
+    return {policy:AGENT_READ_POLICIES[key],setting:key,active_records_uniform:key==='active_uniform_v1',legacy_read_all:this.store.webVisibility.policy(auth).read_all,history_filtered:true,configured_by:'operator'};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     // Normal Console reads and memory actions are live-only; the owner learns a deleted project, nothing else does.
     const state=this.store.lifecycle.projectState(auth.user_id,row.project_id);
@@ -45,10 +45,9 @@ export class ConsoleService {
     if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
   meta(auth,p){object(p,['memory_id']);const {row,current}=this.memory(auth,p.memory_id);
-    const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,row.memory_id)?.sensitivity||'sensitive';
     const category=this.store.derivedMemory.category({user_id:auth.user_id,memory_id:row.memory_id,revision:current.revision},this.taxonomy(auth.user_id).version);
     const imported=this.db.prepare('SELECT original_created_at FROM console_import_records WHERE user_id=? AND memory_id=?').get(auth.user_id,row.memory_id);
-    return {memory_id:row.memory_id,revision:current.revision,state_hash:current.state_hash,sensitivity,category,...memoryPresentation(row),origin:memoryOrigin(row.source,imported),
+    return {memory_id:row.memory_id,revision:current.revision,state_hash:current.state_hash,category,...memoryPresentation(row),origin:memoryOrigin(row.source,imported),
       scope:row.scope,topic:row.topic,memory_type:row.memory_type,status:row.status};}
   job(auth,jobId){const job=this.store.memoryJobs.get(id(jobId));if(!job||job.user_id!==auth.user_id)throw new NotFoundError('Job not found.','JOB_NOT_FOUND');return job;}
   settings(user){if(this.owner?.user===user){const p=this.owner.policy();return {revision:p.revision,schedule_enabled:p.schedule.enabled,timezone:'UTC',periods:[],interval_minutes:p.schedule.interval_minutes,new_memories_only:true};}const row=this.db.prepare('SELECT * FROM console_settings WHERE user_id=?').get(user);return {revision:row?.revision||0,...(row?JSON.parse(row.settings_json):{schedule_enabled:false,timezone:'UTC',periods:['daily','weekly']})};}
@@ -91,14 +90,13 @@ export class ConsoleService {
       build:request?.state||'prepared',error_code:request?.error_code||null,manifest:{count:items.length,digest:manifestDigest(items),...counts},
       budget:this.models.budget(user),catch_up:false};
   }
-  /** The owner's current, active, non-secret records the embedder may receive, as a frozen revision-bound list. */
+  /** The owner's current, active records the embedder may receive, as a frozen revision-bound list. */
   manifestCandidates(user,profile){
-    const excluded={inactive:0,secret_or_unavailable:0,sensitivity_not_approved:0},items=[];
+    const excluded={inactive:0,unavailable:0},items=[];
     for(const row of this.db.prepare('SELECT memory_id,status FROM memories WHERE user_id=? ORDER BY memory_id').all(user)){
       if(row.status!=='active'){excluded.inactive++;continue;}
       const source=this.store.derivedMemory.currentSource(user,row.memory_id);
-      if(!source){excluded.secret_or_unavailable++;continue;}
-      if(!profile.egress.sensitivities.includes(source.sensitivity)){excluded.sensitivity_not_approved++;continue;}
+      if(!source){excluded.unavailable++;continue;}
       items.push({memory_id:source.memory_id,revision:source.revision,state_hash:source.state_hash});
     }
     return {items,excluded};
@@ -125,15 +123,13 @@ export class ConsoleService {
     if(action==='projects.lifecycle_preview')return this.lifecycleMutations.preview(auth,p);
     if(action.startsWith('memory.')&&!['memory.create','memory.organize','memory.organize_undo'].includes(action))number(p.revision,1,2147483647);
     if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id','sensitivity']);
-      const defaults=this.features.privacy(auth.user_id),{sensitivity=defaults.sensitivity,...input}=p;this.sensitivity(sensitivity);const result=store.saveMemory(auth,{...input,source:'console_explicit'});
-      store.memorySources.setSensitivity(auth,result.memory.memory_id,sensitivity);
-      if(defaults.revision>0&&!result.idempotent)store.webVisibility.keepPrivate(auth.user_id,result.memory.memory_id,store.revisions.latest(auth.user_id,result.memory.memory_id));
-      return receipt(result);}
+      const {sensitivity,...input}=p; // sensitivity levels were removed; older clients may still send one
+      // New memories follow the account's ChatGPT read scope (read_all / per-revision grants); there is no
+      // per-memory sensitivity and no automatic denial for console-created records.
+      return receipt(store.saveMemory(auth,{...input,source:'console_explicit'}));}
     if(action==='memory.correct'){object(p,['memory_id','revision','content','memory_type','topic','reason']);this.memory(auth,p.memory_id,p.revision);
-      const sensitivity=this.meta(auth,{memory_id:p.memory_id}).sensitivity;const result=store.supersedeMemory(auth,p.memory_id,{content:p.content,memory_type:p.memory_type,topic:p.topic,reason:p.reason||'Explicit console correction.'});
-      store.memorySources.setSensitivity(auth,result.replacement_memory.memory_id,sensitivity);return receipt(result);}
+      return receipt(store.supersedeMemory(auth,p.memory_id,{content:p.content,memory_type:p.memory_type,topic:p.topic,reason:p.reason||'Explicit console correction.'}));}
     if(action==='memory.retract'){object(p,['memory_id','revision','reason']);this.memory(auth,p.memory_id,p.revision);return receipt(store.retractMemory(auth,p.memory_id,{reason:p.reason||'Explicit console retraction.'}));}
-    if(action==='memory.sensitivity'){object(p,['memory_id','revision','sensitivity']);this.memory(auth,p.memory_id,p.revision);this.sensitivity(p.sensitivity);store.memorySources.setSensitivity(auth,p.memory_id,p.sensitivity);return {status:'updated',...this.meta(auth,{memory_id:p.memory_id})};}
     if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);store.requireScope(auth,'memory:organize');
       const {results:[r],batch}=this.organizer.classify(auth,[{memory_id:p.memory_id,revision:p.revision}],p.category,{kind:'classify'});
       if(!r.ok)throw new ValidationError('This memory cannot be categorized.','INVALID_CATEGORY_TARGET');
@@ -286,7 +282,6 @@ export class ConsoleService {
     store.audit({auth,action:'console.jobs.reschedule',targetType:'memory_job',targetId:job.job_id,metadata:{superseded,queued:result.jobs.length,job_type:job.job_type}});
     return {status:result.jobs.length?'rescheduled':'no_work',job_id:job.job_id,superseded,jobs:result.jobs,job_type:job.job_type,worker_enabled:store.memoryConfig.console?.worker_enabled===true};
   }
-  sensitivity(value){if(!['public','internal','sensitive','secret'].includes(value))throw new ValidationError('Invalid sensitivity.');}
   export(auth,p){this.require(auth);object(p,['after','highwater','limit']);const after=number(Number(p.after||0),0,Number.MAX_SAFE_INTEGER),limit=number(Number(p.limit||10),1,20);
     const highwater=p.highwater===undefined?this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(auth.user_id).n:number(Number(p.highwater),0,Number.MAX_SAFE_INTEGER);
     // A live export: records of deleted projects are retained history and are not exported by this normal path.
@@ -295,7 +290,7 @@ export class ConsoleService {
     const records=[];let size=0;
     for(const row of rows.slice(0,limit)){
       const revision=this.store.revisions.latest(auth.user_id,row.memory_id);const item={original_id:row.memory_id,revision:revision.revision,content:row.content,memory_type:row.memory_type,status:row.status,topic:row.topic,
-        sensitivity:this.meta(auth,{memory_id:row.memory_id}).sensitivity,...(this.store.webVisibility.denied(auth.user_id,row.memory_id)?{cloud_private:true}:{}),
+        ...(this.store.webVisibility.denied(auth.user_id,row.memory_id)?{cloud_private:true}:{}),
         original_scope:{scope:row.scope,project_id:row.project_id,task_id:row.task_id,workstream_id:row.workstream_id,session_id:row.session_id},created_at:row.created_at};
       const bytes=Buffer.byteLength(JSON.stringify(item));if(bytes>180000)throw new ValidationError('One legacy record exceeds the portable page limit. Use the offline export procedure.','EXPORT_RECORD_TOO_LARGE');
       if(size+bytes>200000)break;records.push(item);size+=bytes;
@@ -305,13 +300,13 @@ export class ConsoleService {
   }
   import(auth,p){object(p,['format','records','confirm_personal_scope']);if(p.format!=='mnemuron-personal-portable-v1'||p.confirm_personal_scope!==true||!Array.isArray(p.records)||!p.records.length||p.records.length>20)throw new ValidationError('Invalid portable import.');
     const imported=[],existing=[];
-    for(const r of p.records){object(r,['original_id','revision','content','memory_type','status','topic','sensitivity','cloud_private','original_scope','created_at']);id(r.original_id);number(r.revision,1,2147483647);this.sensitivity(r.sensitivity);
+    // Older exports carry a sensitivity field; it is accepted and ignored now that levels are gone.
+    for(const r of p.records){object(r,['original_id','revision','content','memory_type','status','topic','sensitivity','cloud_private','original_scope','created_at']);id(r.original_id);number(r.revision,1,2147483647);
       if(r.cloud_private!==undefined&&typeof r.cloud_private!=='boolean')throw new ValidationError('Invalid imported cloud privacy.');
       if(!['active','superseded','retracted'].includes(r.status))throw new ValidationError('Invalid imported lifecycle.');
       const hash=fingerprint(r),key=fingerprint([r.original_id,r.revision]);const previous=this.db.prepare('SELECT * FROM console_imports WHERE user_id=? AND source_key=?').get(auth.user_id,key);
       if(previous){if(previous.content_hash!==hash)throw new ConflictError('Imported version has different content.','IMPORT_CONFLICT');existing.push(previous.memory_id);continue;}
       const result=this.store.saveMemory(auth,{content:r.content,memory_type:r.memory_type,topic:r.topic,scope:'user',source:`user_import:${r.original_id}:r${r.revision}`}),memoryId=result.memory.memory_id;
-      this.store.memorySources.setSensitivity(auth,memoryId,r.sensitivity);
       if(r.status!=='active')this.store.retractMemory(auth,memoryId,{reason:'Imported non-active record; retained as a tombstone, not reactivated.'});
       if(r.cloud_private===true)this.store.webVisibility.keepPrivate(auth.user_id,memoryId,this.store.revisions.latest(auth.user_id,memoryId));
       this.db.prepare('INSERT INTO console_imports VALUES(?,?,?,?)').run(auth.user_id,key,memoryId,hash);this.organizer.recordImport(auth.user_id,memoryId,r.created_at);imported.push(memoryId);

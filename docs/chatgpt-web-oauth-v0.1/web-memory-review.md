@@ -14,35 +14,37 @@ still has exactly `memory:read` and `resume:read`; it cannot call other Core rou
 The gateway also verifies the Core policy marker, owner and agent instance on
 each business call. No positive OAuth/introspection cache was introduced.
 
-| Classification | Web read rule |
+There are no sensitivity levels (`public`/`internal`/`sensitive`/`secret` were removed; see
+[the change note](../sensitivity-levels-removed.md)). Under the default per-memory policy ChatGPT
+reads a record when either rule holds and the owner has not explicitly denied it:
+
+| Rule | Web read |
 | --- | --- |
-| `public` | Visible following explicit local classification |
-| `internal` | Requires a local grant for the current revision/state/classification |
-| `sensitive`, including unclassified records | Same explicit grant requirement |
-| `secret`, unknown classifications | Not visible; a grant cannot override this |
+| The account's legacy `read_all` setting is on | Every record of that account, including ones added or corrected later |
+| An explicit local grant exists for the record's current revision/state | That revision only |
+
+Under the operator-selected **active-uniform** policy (`memory.agent_read_policy:
+"active_uniform_v1"`, see [memory-read-policy-and-embedding-first-run.md](../memory-read-policy-and-embedding-first-run.md))
+ChatGPT reads every **active** record of the account, like the account's other agents; superseded
+and retracted history keeps the per-memory rule above. This is the setting to use when ChatGPT
+should read everything.
 
 No grant is inferred from OAuth consent, a provider's egress approval, a remembered
-instruction, or a previous successful read. The additive `memory_web_grants`
-table starts empty. Memory updates/revisions and privacy changes revoke grants.
-Changing a public classification is a separate local operation, not a grant
-revocation. Core local readers keep their original owner/scope behavior.
+instruction, or a previous successful read. Memory updates and revisions revoke grants.
+An owner's explicit denial survives version changes and local corrections. Core local
+readers keep their original owner/scope behavior.
 
 > **Changed:** the console no longer offers per-memory grants (`memory.visibility`) or
 > the read-all switch (`memory.web_policy`). Existing grants, denials and read-all
-> settings are retained as data and stay in force under the default policy. An operator
-> can switch the deployment to the active-uniform read policy described in
-> [memory-read-policy-and-embedding-first-run.md](../memory-read-policy-and-embedding-first-run.md);
-> that is a separately approved access change.
+> settings are retained as data and stay in force under the default policy. Switching
+> the deployment to active-uniform is a separately approved operator change.
 
-Before that change, an owner could switch ChatGPT reads to **all** of their records with the
-console action `memory.web_policy` (Privacy & retention → ChatGPT read scope). While
-`memory_web_policy.read_all` is on, every `internal` and `sensitive` record of that
-account is readable, including records added or corrected later, without per-revision
-grants. `secret` and unknown classifications stay invisible, and other accounts are
-unaffected. The switch is versioned (`expected_revision`, conflicts return
-`SETTINGS_VERSION_CHANGED`), idempotent per operation ID and audited as
-`memory.web_policy`. Switching it off restores the explicit-grant rule; existing grants
-are kept.
+Read policies widen **reads only**. Cloud corrections and retractions (`memory.supersede`,
+`memory.retract`) still require an explicit grant for the record's current revision and no
+denial, so neither `read_all` nor active-uniform lets a write connection change records the
+owner did not individually allow. `cloud_read=keep_private` on a cloud save means "no grant";
+it no longer creates a denial, so the record is readable wherever the account's read scope
+already allows it.
 
 Filtering occurs before lexical candidate limits, counters and conflict creation,
 and again after awaited vector requests. Details and historical lifecycle records
@@ -69,7 +71,7 @@ node server/bin/mnemuron-admin.mjs memory-web-visibility \
   --memory MEMORY_ID --revision REVIEWED_REVISION --state-hash REVIEWED_STATE_HASH --allow
 ```
 
-Use `--deny` with the current version/hash to revoke an internal/sensitive grant.
+Use `--deny` with the current version/hash to revoke a grant (this also records an owner denial).
 `--inspect` does not return memory text. Stale versions are rejected; there is no
 Web grant endpoint, wildcard grant, automatic batch approval or Web scope change.
 

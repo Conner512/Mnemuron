@@ -163,7 +163,7 @@ function markSelected(){
  const memoryId=detailKind==='memory'?detailData?.memory?.memory_id:null,summaryId=detailKind==='summary'?detailData?.results?.[0]?.summary_id:null;
  for(const node of root.querySelectorAll('[data-memory],[data-summary]'))node.toggleAttribute('data-selected',(!!memoryId&&node.dataset.memory===memoryId)||(!!summaryId&&node.dataset.summary===summaryId));
 }
-const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],...(canAct(capabilities,'memory.organize')?[['memory.organize','moveToCategory']]:[['memory.classify','classifyMemory']]),['memory.sensitivity','sensitivity']].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
+const detailActions=memoryId=>[['memory.correct','editMemory'],['memory.retract','retractMemory'],...(canAct(capabilities,'memory.organize')?[['memory.organize','moveToCategory']]:[['memory.classify','classifyMemory']])].filter(([a])=>canAct(capabilities,a)).map(([a,k])=>actionButton(a,k,{id:memoryId})).join('');
 // A failed detail read keeps an in-pane way back to the list; nothing stale stays on screen.
 // A failed read opened from another detail (a summary's cited source) can also return to that detail.
 const changed=(e,returnable=false)=>`<div role="alert">${l(/VERSION_CHANGED|MANIFEST_CHANGED/.test(e.message)?'changed':'unavailable','p')}</div><div class="pagination">${returnable?`<button type="button" data-detail-return>${l('previous')}</button>`:''}<button type="button" data-close>${l('backToList')}</button></div>`;

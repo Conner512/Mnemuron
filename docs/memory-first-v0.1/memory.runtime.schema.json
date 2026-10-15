@@ -79,10 +79,10 @@
           "max_ms": {"type": "integer", "minimum": 1, "maximum": 3600000}, "repair_once": {"type": "boolean"}
         }},
         "capabilities": {"type": "object", "additionalProperties": false, "required": ["native_schema"], "properties": {"native_schema": {"type": "boolean"}}},
-        "egress": {"type": "object", "additionalProperties": false, "required": ["approved", "origins", "addresses", "allow_private", "sensitivities", "query_approved"], "properties": {
+        "egress": {"type": "object", "additionalProperties": false, "required": ["approved", "origins", "addresses", "allow_private", "query_approved"], "properties": {
           "approved": {"type": "boolean"}, "query_approved": {"type": "boolean"}, "allow_private": {"type": "boolean"},
           "origins": {"$ref": "#/$defs/stringList"}, "addresses": {"$ref": "#/$defs/stringList"},
-          "sensitivities": {"type": "array", "maxItems": 64, "items": {"enum": ["public", "internal", "sensitive"]}}
+          "sensitivities": {"type": "array", "maxItems": 64, "items": {"type": "string"}, "description": "Deprecated and ignored: sensitivity levels were removed."}
         }},
         "paths": {"type": "object", "additionalProperties": false, "properties": {"chat": {"type": "string", "pattern": "^/[a-zA-Z0-9_/-]+$"}, "embed": {"type": "string", "pattern": "^/[a-zA-Z0-9_/-]+$"}}},
         "dimensions": {"type": "integer", "minimum": 1, "maximum": 65536}, "distance": {"enum": ["Cosine", "Dot", "Euclid"]},

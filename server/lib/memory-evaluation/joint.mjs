@@ -25,7 +25,6 @@ export function jointFixture(){
     {id:'other-owner',content:'Synthetic other owner: disk capacity is 900 GB.',kind:'owner'},
     {id:'other-session',content:'Synthetic other session: keep exactly 99 replicas.',kind:'session'},
     {id:'other-project',content:'Synthetic other project: router release 17.9.8 is approved.',kind:'project'},
-    {id:'secret',content:'FORBIDDEN_SYNTHETIC_DATA secret source must not leave SQLite.',kind:'secret'},
   ],queries:[
     {id:'exact-release',kind:'exact',mode:'hybrid',query:'17.9.8',expected:['release']},
     {id:'semantic-disk',kind:'semantic',mode:'semantic',query:'How much disk space is available in the experiment?',expected:['disk']},
@@ -41,8 +40,8 @@ export function jointConfig(input){
     const p=validateProfile(input.providers[kind],{kind});
     if(!p.enabled || p.protocol==='mock')fail('REAL_PROVIDER_REQUIRED');
     if(p.retry.max_attempts!==1 || p.retry.repair_once || p.limits.daily_requests<fixture.call_limits[kind] ||
-      p.limits.batch_size<fixture.documents.length || !p.egress.sensitivities.includes('public'))fail('JOINT_BUDGET_OR_POLICY_INVALID');
-    if(kind==='embedder' && (!p.egress.query_approved || !p.egress.sensitivities.includes('sensitive')))fail('QUERY_EGRESS_NOT_APPROVED');
+      p.limits.batch_size<fixture.documents.length)fail('JOINT_BUDGET_OR_POLICY_INVALID');
+    if(kind==='embedder' && !p.egress.query_approved)fail('QUERY_EGRESS_NOT_APPROVED');
   }
   return {...input,vector_store:vectorAcceptanceTarget(input.vector_store)};
 }
@@ -70,7 +69,7 @@ export async function evaluateJoint(options={}){
       const sources=JSON.parse(body.messages[1].content).input.sources;
       if(sources.some(s=>!fixture.documents.some(d=>d.content===s.content && memories.get(d.id)?.memory_id===s.memory_id)))fail('SYNTHETIC_EGRESS_VIOLATION');
     }else{
-      const allowed=[...fixture.documents,...fixture.guards.filter(d=>d.kind!=='secret')].map(d=>p.document_prefix+d.content)
+      const allowed=[...fixture.documents,...fixture.guards].map(d=>p.document_prefix+d.content)
         .concat([...fixture.queries.map(q=>q.query),fixture.retraction_query].map(q=>p.query_prefix+q));
       if(body.input.some(text=>!allowed.includes(text)))fail('SYNTHETIC_EGRESS_VIOLATION');
     }
@@ -86,7 +85,7 @@ export async function evaluateJoint(options={}){
   const authFor=userId=>s.authenticate(s.issueCredential({userId,label:'Synthetic joint fixture',deviceId:'synthetic-device',agentId:'synthetic',agentInstanceId:'synthetic-joint',scopes:['memory:read','memory:write','memory:retention']}).api_key);
   const auth=authFor('synthetic-joint-owner'),other=authFor('synthetic-joint-other'),bindings={project_id:'synthetic-project-a',session_id:'synthetic-session-a'};
   const save=(d,owner=auth,extras={})=>{const memory=s.saveMemory(owner,{scope:'user',content:d.content,...extras}).memory;
-    memories.set(d.id,memory);byId.set(memory.memory_id,d.id);s.memorySources.setSensitivity(owner,memory.memory_id,d.kind==='secret'?'secret':'public');return memory;};
+    memories.set(d.id,memory);byId.set(memory.memory_id,d.id);return memory;};
   const organizer=new Organizer(config.providers.organizer,{transport:remote('organizer')}),embedder=new Embedder(config.providers.embedder,{transport:remote('embedder')});
   const backend=new QdrantStore(config.vector_store,{transport:vectorTransport});
   let index=new VectorIndex(s,backend,new Map([[embedder.profile.fingerprint,embedder]]),{prefix}),generation,summaryBefore=[],baseline=[];

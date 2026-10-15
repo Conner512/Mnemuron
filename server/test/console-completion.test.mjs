@@ -54,15 +54,17 @@ test('Console completion: taxonomy and privacy preferences cannot affect other o
   assert.equal((await f.act('taxonomy.save',{expected_revision:1,categories:['bad category']})).status,400);
   assert.equal((await f.act('memory.classify',{memory_id:m,revision:1,category:'synthetic'})).status,200);
   assert.equal((await f.act('taxonomy.save',{expected_revision:1,categories:['uncategorized']})).status,409);
+  // Sensitivity levels were removed: an older client's default sensitivity is accepted and ignored.
   assert.equal((await f.act('privacy.defaults',{expected_revision:0,sensitivity:'secret',cloud_readable:false})).status,200);
-  const secret=await f.create();assert.equal((await f.get('memory-meta',{memory_id:secret})).body.sensitivity,'secret');
-  assert.equal((await f.act('privacy.defaults',{expected_revision:1,sensitivity:'public',cloud_readable:true})).status,403);
-  // Legacy account read-all (retained data, no longer a console action) still never opens default-private records.
-  const owner=f.owner.auth;f.store.webVisibility.setPolicy(owner,{read_all:true,expected_revision:0});
-  assert.equal((await f.act('privacy.defaults',{expected_revision:1,sensitivity:'public',cloud_readable:false})).status,200);
-  const privatePublic=await f.create();assert.equal(f.store.webVisibility.visible({...owner,agent_id:'chatgpt-web'},privatePublic),false);
-  assert.equal((await f.get('memory-meta',{memory_id:m})).body.sensitivity,'sensitive');
-  assert.equal((await f.get('privacy-defaults',{},f.other)).body.sensitivity,'sensitive');
+  const created=await f.create();assert.equal((await f.get('memory-meta',{memory_id:created})).body.sensitivity,undefined);
+  assert.equal((await f.act('privacy.defaults',{expected_revision:1,cloud_readable:true})).status,403);
+  // New memories follow the account read scope: with read-all on they are readable, with no automatic denial.
+  const owner=f.owner.auth,web={...owner,agent_id:'chatgpt-web'};f.store.webVisibility.setPolicy(owner,{read_all:true,expected_revision:0});
+  assert.equal(f.store.webVisibility.visible(web,created),true);
+  assert.equal((await f.act('privacy.defaults',{expected_revision:1,cloud_readable:false})).status,200);
+  assert.equal(f.store.webVisibility.visible(web,await f.create()),true);
+  assert.equal((await f.get('privacy-defaults',{},f.other)).body.sensitivity,undefined);
+  assert.equal((await f.get('privacy-defaults',{},f.other)).body.cloud_readable,false);
 });
 
 test('Console completion: revision pages and diffs preserve Unicode, ownership and exact termination',async t=>{
@@ -93,7 +95,7 @@ test('Console completion: capture and model-usage observations contain only owne
   const f=await fixture(t);const event=(o,content)=>f.store.appendEvents(o.auth,{events:[{event_id:randomUUID(),event_type:'user_message',content,captured_at:new Date().toISOString()}]});
   event(f.a,'OWN PRIVATE BODY');event(f.issue(f.other.auth.user_id,'agent-c'),'FOREIGN PRIVATE BODY');
   const r=await f.get('capture-status');assert.equal(r.status,200);assert.equal(r.body.agents.length,1);assert.equal(r.body.agents[0].events,1);assert.doesNotMatch(JSON.stringify(r.body),/PRIVATE BODY|agent-c/);
-  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic',profile_revision:'1',daily_requests:10,output_tokens:1024,batch_size:1,sensitivities:['public'],egress_approved:false,query_approved:false};
+  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic',profile_revision:'1',daily_requests:10,output_tokens:1024,batch_size:1,egress_approved:false,query_approved:false};
   assert.equal((await f.act('models.save',{kind:'organizer',expected_revision:0,config})).status,200);
   const profile=f.store.consoleService.models.profile(f.owner.auth.user_id,'organizer',config).fingerprint,day=new Date().toISOString().slice(0,10);
   f.store.db.prepare('INSERT INTO memory_owner_model_usage VALUES(?,?,?,?)').run(f.owner.auth.user_id,profile,day,3);
@@ -145,7 +147,7 @@ test('Console completion: task reads use explicit own identifiers without Resume
 test('Console completion: scheduled worker uses the owning account taxonomy without manual scheduling',async t=>{
   const f=await fixture(t),user=f.owner.auth.user_id,service=f.store.consoleService;
   await f.create();await f.create(f.other);await f.act('taxonomy.save',{expected_revision:0,categories:['uncategorized','synthetic']});
-  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic',profile_revision:'1',daily_requests:10,output_tokens:1024,batch_size:1,sensitivities:['public'],egress_approved:false,query_approved:false};
+  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic',profile_revision:'1',daily_requests:10,output_tokens:1024,batch_size:1,egress_approved:false,query_approved:false};
   await f.act('models.save',{kind:'organizer',expected_revision:0,config});
   const model=organizer(input=>({results:input.sources.map(s=>input.operation==='entities'?{memory_id:s.memory_id,revision:s.revision,objects:[]}:{memory_id:s.memory_id,category:'synthetic',tags:[]})}));
   service.models.provider=(owner,kind)=>{assert.equal(owner,user);assert.equal(kind,'organizer');return model;};
@@ -182,12 +184,12 @@ test('Console completion: taxonomy changes fence old leases and stale retries wi
 test('Console completion: additive preference initialization is repeatable and persists without rewriting memories',async t=>{
   const f=await fixture(t),user=f.owner.auth.user_id;await f.create();
   const before=f.store.db.prepare('SELECT * FROM memories').all();
-  await f.act('privacy.defaults',{expected_revision:0,sensitivity:'internal',cloud_readable:false});
+  await f.act('privacy.defaults',{expected_revision:0,cloud_readable:false});
   await f.act('retention.save',{expected_revision:0,raw_retention_days:'permanent'});
   await f.act('taxonomy.save',{expected_revision:0,categories:['uncategorized','synthetic']});
   for(let i=0;i<2;i++){
     const reopened=new MnemuronStore(f.databasePath);
-    try{assert.equal(reopened.consoleService.features.privacy(user).sensitivity,'internal');assert.equal(reopened.consoleService.features.retention(user).raw_retention_days,'permanent');
+    try{assert.equal(reopened.consoleService.features.privacy(user).revision,1);assert.equal(reopened.consoleService.features.privacy(user).cloud_readable,false);assert.equal(reopened.consoleService.features.retention(user).raw_retention_days,'permanent');
       assert.deepEqual(reopened.consoleService.taxonomy(user).categories,['uncategorized','synthetic']);assert.deepEqual(reopened.db.prepare('SELECT * FROM memories').all(),before);
     }finally{reopened.close();}
   }

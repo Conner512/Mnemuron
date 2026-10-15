@@ -373,6 +373,47 @@ const addColumns = (table, columns) => (db) => {
   for (const [column, sql] of columns) if (!existing.has(column)) db.exec(sql);
 };
 
+// Sensitivity levels were removed (single-owner use; ChatGPT may read everything the owner allows).
+// One-off carry-over for existing databases:
+// - records classified public get a ChatGPT grant for their current revision, so they stay readable
+//   with read_all off;
+// - records classified secret (hidden from the vector index) are queued to be indexed again;
+// - denials Mnemuron created automatically (cloud keep_private saves, console "new memory" defaults,
+//   imports) are cleared. A denial the owner set explicitly - latest memory.web_visibility audit with
+//   allow=false, or a local correction of such a record - is kept.
+// memory_privacy itself is left in place, unused, so an older release can still open the file.
+const hasTable = (db, name) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+function retireSensitivityLevels(db) {
+  // Like an owner grant, the carry-over never grants a memory whose project is (effectively) deleted:
+  // follow merged_into to the canonical project, as the lifecycle resolver does.
+  if (hasTable(db, "memory_privacy") && hasTable(db, "memory_web_grants") && hasTable(db, "memory_revisions")) db.exec(`
+    WITH RECURSIVE chain(user_id,start,cur,depth) AS (
+      SELECT user_id,project_id,project_id,0 FROM project_lifecycle
+      UNION ALL
+      SELECT c.user_id,c.start,pl.merged_into,c.depth+1 FROM chain c
+        JOIN project_lifecycle pl ON pl.user_id=c.user_id AND pl.project_id=c.cur AND pl.state='merged' WHERE c.depth<64),
+    dead(user_id,project_id) AS (
+      SELECT c.user_id,c.start FROM chain c JOIN project_lifecycle pl ON pl.user_id=c.user_id AND pl.project_id=c.cur AND pl.state='deleted')
+    INSERT OR IGNORE INTO memory_web_grants (user_id,memory_id,revision,state_hash,sensitivity)
+      SELECT p.user_id,p.memory_id,r.revision,r.state_hash,'unclassified' FROM memory_privacy p
+      JOIN memories m ON m.user_id=p.user_id AND m.memory_id=p.memory_id
+      JOIN memory_revisions r ON r.user_id=p.user_id AND r.memory_id=p.memory_id
+        AND r.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=p.user_id AND memory_id=p.memory_id)
+      WHERE p.sensitivity='public'
+        AND NOT EXISTS (SELECT 1 FROM dead d WHERE d.user_id=m.user_id AND d.project_id=m.project_id);`);
+  if (hasTable(db, "memory_privacy") && hasTable(db, "memory_index_outbox")) db.exec(`
+    UPDATE memory_index_outbox SET state='pending',action='upsert' WHERE action='hide'
+      AND EXISTS (SELECT 1 FROM memory_privacy p WHERE p.user_id=memory_index_outbox.user_id AND p.memory_id=memory_index_outbox.memory_id AND p.sensitivity='secret');`);
+  if (hasTable(db, "memory_web_denials")) db.exec(`
+    WITH RECURSIVE explicit(user_id,memory_id) AS (
+      SELECT a.user_id,a.target_id FROM audit_events a
+        WHERE a.action='memory.web_visibility' AND json_extract(a.metadata_json,'$.allow')=0
+          AND a.rowid=(SELECT MAX(b.rowid) FROM audit_events b WHERE b.user_id=a.user_id AND b.action='memory.web_visibility' AND b.target_id=a.target_id)
+      UNION
+      SELECT m.user_id,m.memory_id FROM memories m JOIN explicit e ON m.user_id=e.user_id AND m.supersedes_memory_id=e.memory_id)
+    DELETE FROM memory_web_denials WHERE NOT EXISTS (SELECT 1 FROM explicit e WHERE e.user_id=memory_web_denials.user_id AND e.memory_id=memory_web_denials.memory_id);`);
+}
+
 export const CORE_MIGRATIONS = Object.freeze([
   { version: 1, repeatable: true, name: "core-tables", up: (db) => db.exec(CORE_TABLES) },
   { version: 2, repeatable: true, name: "tasks-canonical-version", up: addColumns("tasks", [
@@ -438,6 +479,8 @@ export const CORE_MIGRATIONS = Object.freeze([
     `) },
   // Derived identity and tombstones affect retrieval. Older readers must not silently ignore this boundary.
   {version:11,repeatable:true,name:'source-grounded-entities',up:migrateEntities},
+  // One-off: sensitivity levels removed; carries public/secret records and clears automatic denials.
+  {version:12,name:'retire-sensitivity-levels',up:retireSensitivityLevels},
 ]);
 
 export const CORE_SCHEMA_VERSION = CORE_MIGRATIONS.at(-1).version;

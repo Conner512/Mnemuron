@@ -62,7 +62,6 @@ export class MemoryWorker {
         taxonomyFence();this.jobs.renew(job);
         const items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size,job.job_type==='entities'?ENTITY_LIMITS.batch:128));
         const sources=items.map(item=>{const row=this.store.derivedMemory.validateItem(item);if(!row)fail('STALE_INPUT');return row;});
-        if(sources.some(s=>!profile.egress.sensitivities.includes(s.sensitivity)))fail('SENSITIVITY_DENIED');
         const entityFence=()=>{if(job.job_type==='entities'&&job.metadata.lifecycle_stamp!==this.store.entities.lifecycleStamp(job.user_id,sources[0].project_id))fail('STALE_INPUT');};entityFence();
         const multiSpan=['grounded-extractive-v4','grounded-extractive-v5'].includes(job.metadata.prompt_version);
         let summaryInstruction=multiSpan?
@@ -78,7 +77,7 @@ export class MemoryWorker {
           sources:sources.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
             ...(job.job_type==='entities'?{}:{current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})})),
           instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction};
-        const reply=await this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null}),{sensitivity:sources.some(s=>s.sensitivity==='sensitive')?'sensitive':sources.some(s=>s.sensitivity==='internal')?'internal':'public',
+        const reply=await this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null}),{
           reserve:()=>this.store.memoryTransaction(()=>{taxonomyFence();entityFence();return this.jobs.reserve(job,profile.limits.daily_requests,this.quota,items);})});
         taxonomyFence();entityFence();let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
@@ -110,7 +109,7 @@ export function scheduleLibrary(store,jobs,{userId,organizer,taxonomy,periods=['
       if(!rows.length)break;
       for(const raw of rows){
         scanned++;const source=store.derivedMemory.currentSource(userId,raw.memory_id);
-        if(!source || !organizer.profile.egress.sensitivities.includes(source.sensitivity)){excluded++;continue;}
+        if(!source){excluded++;continue;}
         const category=type==='classification'?'uncategorized':store.derivedMemory.category(source,taxonomy.version);
         const windows=type==='classification'?[null]:periods.map(period=>calendarWindow(Date.parse(source.created_at),{timezone,period}));
         for(const window of windows){

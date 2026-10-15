@@ -39,7 +39,7 @@ function persisted(t){
 }
 
 test('LV-01: the current schema retains v10 enforcement and opens a database with persisted deleted and merged projects, enforcing them after reopen',async t=>{
-  assert.equal(CORE_SCHEMA_VERSION,11);
+  assert.equal(CORE_SCHEMA_VERSION,12); // 12: sensitivity levels retired (one-off data step)
   const {file,m,preview}=persisted(t),store=new MnemuronStore(file);t.after(()=>store.close());
   const a=owner(store,A),b=owner(store,B);
   assert.equal(store.db.prepare('PRAGMA user_version').get().user_version,CORE_SCHEMA_VERSION);

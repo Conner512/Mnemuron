@@ -73,8 +73,9 @@ test('DISPLAY-03: list and detail markup show a title, a labelled original tag a
   const longer={memory_id:'m-7',content:'第一句是标题。第二句补充细节。',status:'active',...memoryPresentation({content:'第一句是标题。第二句补充细节。'})};
   assert.match(libraryView(t,{data:{results:[longer]}}),/<span class="memory-title" data-title-source="content">第一句是标题<\/span><span class="memory-text">第一句是标题。第二句补充细节。<\/span>/);
   const detail=memoryDetailView(t,{revision:3,content_offset:0,content_length:10,content_complete:true,memory:{memory_id:'m-1',content:'用户喜欢在周末徒步。',memory_type:'goal',status:'active'}},
-    {meta:{memory_id:'m-1',category:'personal',sensitivity:'sensitive',tag:'AgentMemory/observation/Mnemuron',origin:{kind:'imported',original_created_at:'2025-01-01T00:00:00.000Z'}},labels:{personal:'个人'}});
-  for(const key of ['memoryType','category','status','revisions','originFacet','originalTag','sensitivity'])assert.match(detail,new RegExp(`<dt><span data-i18n="${key}">`),key);
+    {meta:{memory_id:'m-1',category:'personal',tag:'AgentMemory/observation/Mnemuron',origin:{kind:'imported',original_created_at:'2025-01-01T00:00:00.000Z'}},labels:{personal:'个人'}});
+  for(const key of ['memoryType','category','status','revisions','originFacet','originalTag'])assert.match(detail,new RegExp(`<dt><span data-i18n="${key}">`),key);
+  assert.doesNotMatch(detail,/data-i18n="sensitivity"/,'sensitivity levels were removed');
   assert.match(detail,/<code class="tag-value">AgentMemory\/observation\/Mnemuron<\/code>/);
   assert.match(detail,/>个人</);assert.match(detail,/\[importedOrigin\]/);
   assert.doesNotMatch(detail,/webVisibility|ChatGPT/);

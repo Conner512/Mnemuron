@@ -514,7 +514,7 @@
   },
   "server/lib/memory/sources.mjs": {
    "memories": {
-    "read": 3,
+    "read": 1,
     "write": 0
    },
    "events": {
@@ -532,11 +532,11 @@
   },
   "server/lib/memory/web-visibility.mjs": {
    "memories": {
-    "read": 7,
+    "read": 5,
     "write": 0
    },
    "memory_revisions": {
-    "read": 5,
+    "read": 3,
     "write": 0
    }
   },
@@ -580,6 +580,20 @@
    "resolver_selections": {
     "read": 1,
     "write": 1
+   }
+  },
+  "server/lib/store/schema.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 2,
+    "write": 0
+   },
+   "project_lifecycle": {
+    "read": 3,
+    "write": 0
    }
   },
   "server/lib/task-context-read.mjs": {

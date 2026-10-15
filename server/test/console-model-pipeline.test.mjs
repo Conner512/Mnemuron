@@ -21,7 +21,7 @@ async function setup(t){
  const origin=`http://127.0.0.1:${model.address().port}`;f.store.memoryConfig.console={key_file:key,worker_enabled:false,allowed_private_origins:[origin]};
  const issue=user=>{const c=f.store.issueCredential({userId:user,deviceId:'synthetic-model-test',agentId:'mnemuron-console',agentInstanceId:randomUUID(),scopes:CONSOLE_WRITE_SCOPES});return {...c,auth:f.store.authenticate(c.api_key)};};
  const a=issue(f.a.auth.user_id),b=issue(f.other.auth.user_id),service=f.store.consoleService;
- const config={enabled:true,protocol:'openai_compatible',base_url:origin,model:'synthetic-model',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
+ const config={enabled:true,protocol:'openai_compatible',base_url:origin,model:'synthetic-model',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,egress_approved:true,query_approved:true};
  const act=(action,payload,owner=a,operation_id=randomUUID())=>service.execute(owner.auth,{action,payload,operation_id});
  const save=(kind,overrides={},revision=0,owner=a)=>act('models.save',{kind,expected_revision:revision,config:{...config,...(kind==='embedder'?{dimensions:3}:{}),...overrides}},owner);
  const read=(owner=a)=>f.request('GET','/v1/console/models',undefined,owner).then(r=>{assert.equal(r.status,200);return r.body;});
@@ -74,7 +74,6 @@ test('MOD-05: changing configuration during a probe cannot mark the new revision
 test('MOD-06: configured HTTP LLM classifies and summarizes, embeddings index only authorized sources',async t=>{
  const f=await setup(t);await f.save('organizer');await f.save('embedder');
  const own=await f.act('memory.create',{scope:'user',content:'Synthetic local network decision.'});
- await f.act('memory.create',{scope:'user',content:'Synthetic SECRET exclusion',sensitivity:'secret'});
  await f.act('memory.create',{scope:'user',content:'Synthetic FOREIGN exclusion'},f.b);
  f.store.memoryConfig.console.worker_enabled=true;
  const schedule=type=>f.act('jobs.schedule',{type,timezone:'UTC',periods:['daily'],include_open:true});
@@ -89,7 +88,7 @@ test('MOD-06: configured HTTP LLM classifies and summarizes, embeddings index on
  await f.act('vector.schedule',{});await f.service.tick();const p=(await f.read()).processing;
  assert.equal(p.vector.state,'succeeded');assert.equal(p.vector.search_ready,true);assert.equal(p.vector.indexed_documents,1);
  const found=await f.store.searchMemories(f.a.auth,{query:'network',mode:'semantic',personal_model_only:true});assert.equal(found.results[0].memory_id,own.memory_id);
- assert.ok(!JSON.stringify(f.calls).match(/SECRET exclusion|FOREIGN exclusion/));
+ assert.ok(!JSON.stringify(f.calls).match(/FOREIGN exclusion/));
  // A model change no longer silently breaks the serving index: the generation keeps the profile it was built with.
  await f.save('embedder',{model:'synthetic-next'},1);const after=(await f.read()).processing.vector;
  assert.equal(after.search_ready,true);assert.equal(after.serving_profile_differs,true);assert.ok(!after.search_blockers.includes('VECTOR_PROFILE_MISMATCH'));

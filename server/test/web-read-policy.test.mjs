@@ -7,8 +7,9 @@ import {VectorIndex} from '../lib/vector-stores/index.mjs';
 import {MockVectorStore} from './helpers/vector-mock.mjs';
 import {memoryRuntime} from '../lib/memory-runtime.mjs';
 
-// READ-POLICY: the operator-only active-uniform policy opens ACTIVE, non-secret records of the same account
-// to ChatGPT. History (superseded/retracted) and secret records keep the legacy per-memory rules.
+// READ-POLICY: the operator-only active-uniform policy opens every ACTIVE record of the same account to ChatGPT.
+// History (superseded/retracted) keeps the per-memory rules. Sensitivity levels were removed, so the legacy
+// classification rows written by seed() (public/internal/secret) must not change any result.
 const chatgpt=f=>f.store.authenticate(f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'web',agentId:'chatgpt-web',agentInstanceId:'web',scopes:['memory:read','resume:read']}).api_key);
 const policy=(store,value)=>{store.runtime.agentReadPolicy=value;};
 const privacy=(f,m,value)=>f.store.db.prepare('INSERT OR REPLACE INTO memory_privacy VALUES (?,?,?)').run(f.a.auth.user_id,m.memory_id,value);
@@ -39,9 +40,9 @@ function seed(f){
   f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?)').run(f.other.auth.user_id,r.foreign.memory_id,'public');
   return r;
 }
-const LEGACY=['publicActive','grantedActive'];
-const UNIFORM=['publicActive','grantedActive','deniedActive','internalActive','defaultActive','deniedReplacement'];
-const NEVER=['secretActive','deniedRetracted','secretRetracted','grantedRetracted','deniedOld','foreign'];
+const LEGACY=['grantedActive'];
+const UNIFORM=['publicActive','grantedActive','deniedActive','internalActive','defaultActive','secretActive','deniedReplacement'];
+const NEVER=['deniedRetracted','secretRetracted','grantedRetracted','deniedOld','foreign'];
 
 function readable(f,web,r){
   const all=f.store.queryMemories(web,{query:'Synthetic policy marker',statuses:['active','superseded','retracted'],include_shared:true,limit:50});
@@ -55,7 +56,7 @@ function readable(f,web,r){
   return {names:names.sort(),body:JSON.stringify(all)};
 }
 
-test('READ-POLICY-01: default stays per-memory; active-uniform opens only active non-secret records of the account; rollback restores it',async t=>{
+test('READ-POLICY-01: default stays per-memory; active-uniform opens every active record of the account; rollback restores it',async t=>{
   const f=await memoryFixture(t),r=seed(f);
   const denialsBefore=f.store.db.prepare('SELECT * FROM memory_web_denials ORDER BY rowid').all();
   // Default (no config key): identical to the legacy per-memory rule.
@@ -71,11 +72,11 @@ test('READ-POLICY-01: default stays per-memory; active-uniform opens only active
   assert.equal(f.store.queryMemories(web,{query:'Synthetic policy marker',limit:50}).visibility_policy,'web-memory-active-uniform-v1');
   // Local agents are unaffected; they always read everything of their own account.
   assert.equal(f.store.queryMemories(f.a.auth,{query:'Synthetic policy marker',statuses:['active','superseded','retracted'],limit:50}).result_count,11);
-  // HTTP: the policy is bound at authentication; identity reports it, and secret/history stay hidden.
+  // HTTP: the policy is bound at authentication; identity reports it, and history stays hidden.
   const key=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'w3',agentId:'chatgpt-web',agentInstanceId:'w3',scopes:['memory:read','resume:read']}).api_key;
   assert.equal((await f.request('GET','/v1/identity',undefined,{api_key:key})).body.identity.web_read_policy,'web-memory-active-uniform-v1');
   assert.equal((await f.request('GET','/v1/memories/'+r.deniedActive.memory_id,undefined,{api_key:key})).status,200);
-  for(const name of ['secretActive','deniedRetracted','foreign'])assert.equal((await f.request('GET',`/v1/memories/${r[name].memory_id}?include_history=true`,undefined,{api_key:key})).status,404,name);
+  for(const name of ['deniedRetracted','foreign'])assert.equal((await f.request('GET',`/v1/memories/${r[name].memory_id}?include_history=true`,undefined,{api_key:key})).status,404,name);
   // A record that leaves the active state goes back under the per-memory rule immediately.
   f.store.retractMemory(f.a.auth,r.deniedActive.memory_id,{reason:'Synthetic'});
   assert.equal(f.store.webVisibility.visible(web,r.deniedActive.memory_id),false);
@@ -99,9 +100,9 @@ test('READ-POLICY-02: hybrid/semantic and summaries follow the same rule under a
   policy(f.store,'active_uniform_v1');const web=chatgpt(f);
   for(const mode of ['hybrid','semantic']){
     const result=await f.store.searchMemories(web,{query:'network router',mode,statuses:['active','retracted']});
-    assert.deepEqual(result.results.map(m=>m.memory_id),[denied.memory_id],mode);
+    assert.deepEqual(result.results.map(m=>m.memory_id).sort(),[denied.memory_id,secret.memory_id].sort(),mode);
     assert.equal(result.retrieval.degraded,false,mode);
-    for(const hidden of [history,secret])assert.ok(!JSON.stringify(result).includes(hidden.memory_id));
+    assert.ok(!JSON.stringify(result).includes(history.memory_id));
   }
 });
 

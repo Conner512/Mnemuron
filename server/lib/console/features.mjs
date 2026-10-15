@@ -39,7 +39,7 @@ export class ConsoleFeatures {
     this.db.prepare('INSERT INTO console_preferences VALUES(?,?,?,?) ON CONFLICT(user_id,kind) DO UPDATE SET revision=excluded.revision,value_json=excluded.value_json').run(user,kind,previous.revision+1,JSON.stringify(value));
     return {status:'saved',revision:previous.revision+1,...value};
   }
-  privacy(user){return this.preference(user,'privacy',{sensitivity:'sensitive',cloud_readable:false});}
+  privacy(user){const {sensitivity,...current}=this.preference(user,'privacy',{cloud_readable:false});return current;} // sensitivity: removed, ignored if stored
   retention(user){return {...this.preference(user,'retention',{raw_retention_days:this.store.getRetention().raw_retention_days}),applies_to_existing_events:false,checkpoints:'permanent',memories:'permanent',pinned_sources_preserved:true};}
   taxonomy(user,fallback){const p=this.preference(user,'taxonomy',fallback);return {version:p.version,categories:p.categories};}
   // Display names for category IDs. Built-in IDs without a stored name are translated by the browser.
@@ -152,9 +152,9 @@ export class ConsoleFeatures {
       return {...saved,labels:undefined};
     }
     if(action==='privacy.defaults'){
-      object(p,['expected_revision','sensitivity','cloud_readable']);service.sensitivity(p.sensitivity);
+      object(p,['expected_revision','sensitivity','cloud_readable']); // a sent sensitivity is ignored
       if(p.cloud_readable!==false)throw new AuthorizationError('explicit per-revision cloud grant');
-      return this.save(user,'privacy',p,{sensitivity:p.sensitivity,cloud_readable:false});
+      return this.save(user,'privacy',p,{cloud_readable:false});
     }
     if(action==='retention.save'){
       object(p,['expected_revision','raw_retention_days']);if(p.raw_retention_days!=='permanent')number(p.raw_retention_days,1,3650);

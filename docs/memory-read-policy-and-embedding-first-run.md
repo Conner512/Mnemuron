@@ -16,8 +16,8 @@ and the removal of the console visibility controls in part 2.
 - A leading text is shown as a file path only when it is clearly one: it starts with `/`, `~/`,
   `./`, a drive letter, `[...]` or a backtick, or it has a file extension.
 - The detail pane is headed by the title. It lists type (`memory_type`), category, status,
-  revision, origin (imported with the original date, console, AI tool, or agent), the original
-  tag and the sensitivity.
+  revision, origin (imported with the original date, console, AI tool, or agent) and the original
+  tag. (Sensitivity levels were removed; see [sensitivity-levels-removed.md](sensitivity-levels-removed.md).)
 - Nothing is stored or rewritten. Topics, content and sources are unchanged, and the topic facet
   and filter still use the stored topic.
 - Migration: none.
@@ -50,13 +50,14 @@ force, but they can no longer be edited from the console. The operator CLI
 
 | Record | Before (default) | After activation |
 |---|---|---|
-| active, public | readable | readable |
-| active, internal/sensitive with a current grant or read-all | readable | readable |
-| active, internal/sensitive without a grant | hidden | **readable** |
-| active, explicitly denied (keep_private, console deny, private default, imported `cloud_private`) | hidden | **readable** |
-| active, secret | hidden | hidden |
-| superseded or retracted (any classification) | legacy rule | legacy rule (denials and secret stay hidden) |
+| active, with a current grant or read-all | readable | readable |
+| active, without a grant | hidden | **readable** |
+| active, explicitly denied by the owner (console/CLI deny, imported `cloud_private`) | hidden | **readable** |
+| superseded or retracted | legacy rule | legacy rule (denials stay hidden) |
 | another account | hidden | hidden |
+
+There are no sensitivity levels any more, so former `public`/`secret` classifications do not
+change these results. A cloud `keep_private` save is an ordinary record without a grant.
 
 - The same predicate applies to every ChatGPT read path:
   - get
@@ -69,8 +70,8 @@ force, but they can no longer be edited from the console. The operator CLI
 - **Rollback:** remove the key (or set it to `chatgpt_per_memory_v1`) and restart Core. No grant
   or denial row is written or deleted by the new policy, so the previous result is restored
   exactly.
-- Sensitivity remains the model-egress control: organizer and embedding models never receive
-  `secret`.
+- Model egress is controlled only by each model's egress approval (and query approval for
+  query embedding). With egress approved, any memory of the account may be sent to that model.
 
 ## 3. Embedding first run (personal index)
 
@@ -125,7 +126,6 @@ force, but they can no longer be edited from the console. The operator CLI
 | Vector dimensions | the configured size, for example `768` (sent as `dimensions`; the probe verifies the actual length) |
 | Daily requests | unchanged (for example 25); the first-run budget replaces it for build calls only. Owner call limits, once set, replace it (see below). |
 | Batch size | at least 1. Each record usually needs one call. |
-| Highest allowed sensitivity | the highest class among the records to embed. Records without a classification count as `sensitive`. |
 | Approve egress / approve queries | explicit choices |
 | API key | entered once and sealed with the console key. Shown only as "saved". |
 
@@ -136,10 +136,8 @@ bundled approval.
 
 1. **Prepare and freeze the list.** Action `vector.prepare {budget_calls: N}`, where 1 ≤ N ≤ 150.
    - It freezes a manifest of `(memory_id, revision, state_hash)` for this account's **active**
-     records. Secret records are excluded, and only sensitivities the embedder may receive are
-     included.
-   - It reports the manifest count, the digest, and the excluded counts (inactive,
-     secret/unavailable, sensitivity not approved).
+     records.
+   - It reports the manifest count, the digest, and the excluded counts (inactive, unavailable).
    - It opens the budget and picks the pre-created collection.
    - No model is called.
    - Compare the count with the expected count from the screening record, and record the digest.
@@ -239,7 +237,7 @@ As a result:
 | Destination | What is sent | When |
 |---|---|---|
 | Embedding gateway (the configured model service) | Two synthetic probe strings | Step 2 |
-| Embedding gateway | The full text of each manifest record (active, non-secret, approved sensitivity, this account only) | Step 3 |
+| Embedding gateway | The full text of each manifest record (active, this account only) | Step 3 |
 | Embedding gateway | Query text of semantic or hybrid searches | After step 4, while active |
 | The private vector store | Vectors plus payloads holding hashed owner/scope/document identifiers, revision, profile and content hash. No text. | Steps 3 to 5 |
 
@@ -254,7 +252,7 @@ silently break the serving index. The status shows `serving_profile_differs`.
 The retained profile still follows current consent:
 
 - It stops when the embedding model is disabled.
-- Egress, query approvals and sensitivities are intersected with the current settings.
+- Egress and query approvals are intersected with the current settings.
 - On the same origin, the current key is used.
 
 ### Known limits (deliberate in this bounded first run)
@@ -271,8 +269,7 @@ The retained profile still follows current consent:
   for rollback, and nothing deletes points. Further builds need further pre-created names.
 - **ChatGPT search after new writes.** ChatGPT semantic and hybrid reads require every
   ChatGPT-readable active record to be indexed. Without catch-up, they fall back to lexical
-  search once a newer record exists. This also happens when the embedder's approved sensitivities
-  exclude records that ChatGPT may read.
+  search once a newer record exists.
 - **Provider change.** A retained profile serves only on the embedder's current origin, using the
   current key; keys are never copied into retained profiles. Moving the embedder to another
   origin stops the old index (`VECTOR_PROFILE_MISMATCH`) until a new build is approved.

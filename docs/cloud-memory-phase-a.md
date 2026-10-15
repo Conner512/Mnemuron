@@ -13,7 +13,7 @@ This opt-in extension adds memory operations to the existing OAuth MCP gateway. 
 
 The deployment profile, current account, OAuth scope, immutable connection binding, internal credential and target visibility all constrain an operation. The model cannot supply owner, role, confirmation, key, URL, SQL or filesystem authority. OAuth tokens are never forwarded to Core. There is no shared mutable owner credential.
 
-The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned, currently Web-visible record, its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history.
+The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned record with an explicit grant for its current revision (and no owner denial; `read_all` and the active-uniform read policy widen reads only), its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history.
 
 The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and `GET /v1/cloud-memory/operations/:operation_id?connection_id=...`. Keep these behind the existing loopback Core boundary; no new public Core route is required.
 
@@ -21,7 +21,7 @@ The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and 
 
 Save and correction require an explicit `cloud_read` value:
 
-- `keep_private`: an explicit, owner-scoped Web denial, overriding account `read_all`, public classification and grants. Result and receipt contain metadata only, never the submitted body. The denial survives metadata/lifecycle changes and local corrections; only an explicit, reviewed current-version allow can release it.
+- `keep_private`: no Web grant for the submitted version. Result and receipt contain metadata only, never the submitted body. It no longer creates a denial: under the account's `read_all` setting or the active-uniform read policy the record is readable like any other (sensitivity levels were removed).
 - `allow_submitted_revision`: disabled unless explicitly approved in the deployment, connection binding and OAuth consent. It grants **only the final version submitted by this operation**. The existing grant is account-level: other authorized cloud readers of this account may read it too. It is not a current-connection-only grant. It cannot grant arbitrary existing records, copy old sources, or change sensitive content to public. Secret records remain inaccessible.
 
 Until that deployment policy is approved, use `allow_submitted_revision_grant: false`. The permission failure is explicit; private saving still works. Changes to content, privacy or lifecycle invalidate old version grants.
@@ -74,7 +74,7 @@ Phase A supports the existing operator-registered OAuth client only. A trusted c
 
 Core adds `cloud_memory_bindings`, `cloud_memory_operations` and `memory_web_denials`; OAuth adds `identity_cloud_bindings` and reuses the existing encrypted durable operation queue. Existing memory IDs, subjects, users, revisions and sources are not rewritten. All new tables have explicit owner classifications.
 
-The private-denial migration atomically backfills earlier committed `keep_private` choices and their local replacements, except records with a valid current explicit grant. A one-time settings marker prevents a later reviewed allow from being undone on restart. Original commit-snapshot receipts are not rewritten: an old receipt may still say `cloud_readable=true` even though present access is denied. Current reads, not historical receipts, determine current visibility. Portable exports preserve denials with optional `cloud_private: true`; imports validate that boolean and preserve the restriction. Legacy records without the field retain their existing import semantics.
+Earlier releases turned `keep_private` into a denial and backfilled old receipts. Core schema 12 removes those automatic denials once (owner-set denials stay; see [sensitivity-levels-removed.md](sensitivity-levels-removed.md)). Original commit-snapshot receipts are not rewritten, so an old receipt's `cloud_readable` reflects access at commit time.
 
 Do not roll back Core to code that ignores `memory_web_denials` while cloud reads remain enabled. Such a rollback would reopen the original privacy defect; retain the corrected enforcement layer or block cloud traffic until it is restored. The migration neither deletes original data nor changes the account-wide read policy.
 

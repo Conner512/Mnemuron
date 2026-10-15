@@ -34,7 +34,7 @@ async function setup(t,{names=['synthetic_first_v1','synthetic_second_v1'],dims=
   const backend=new PrecreatedStore(names);f.store.consoleService.vectorBackend=()=>backend;
   const issue=user=>{const c=f.store.issueCredential({userId:user,deviceId:'synthetic-vector',agentId:'mnemuron-console',agentInstanceId:randomUUID(),scopes:CONSOLE_WRITE_SCOPES});return {...c,auth:f.store.authenticate(c.api_key)};};
   const a=issue(f.a.auth.user_id),b=issue(f.other.auth.user_id),service=f.store.consoleService;
-  const config={enabled:true,protocol:'openai_compatible',base_url:origin,model:'synthetic-embedding',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true,dimensions:dims};
+  const config={enabled:true,protocol:'openai_compatible',base_url:origin,model:'synthetic-embedding',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,egress_approved:true,query_approved:true,dimensions:dims};
   const act=(action,payload,owner=a,operation_id=randomUUID())=>service.execute(owner.auth,{action,payload,operation_id});
   const save=(overrides={},revision=0,owner=a)=>act('models.save',{kind:'embedder',expected_revision:revision,config:{...config,...overrides}},owner);
   const status=(owner=a)=>service.processing(owner.auth.user_id).vector;
@@ -42,13 +42,12 @@ async function setup(t,{names=['synthetic_first_v1','synthetic_second_v1'],dims=
   const create=(content,extra={},owner=a)=>act('memory.create',{scope:'user',content,...extra},owner).then(r=>r.memory_id);
   return {...f,calls,backend,a,b,service,act,save,status,drain,create,outputDims:n=>{outputDims=n;}};
 }
-// Five eligible records, one secret, one retracted, one superseded (its replacement is active), one foreign.
+// Five eligible records, one retracted, one superseded (its replacement is active), one foreign.
 async function seed(f){
   const ids={};
   ids.network=await f.create('Synthetic network router decision.');
-  ids.publicNote=await f.create('Synthetic public note.',{sensitivity:'public'});
-  ids.internal=await f.create('Synthetic internal note.',{sensitivity:'internal'});
-  ids.secret=await f.create('Synthetic SECRET must never be sent.',{sensitivity:'secret'});
+  ids.publicNote=await f.create('Synthetic public note.');
+  ids.internal=await f.create('Synthetic internal note.');
   ids.retracted=await f.create('Synthetic HISTORY retracted text.');
   await f.act('memory.retract',{memory_id:ids.retracted,revision:1});
   ids.old=await f.create('Synthetic OLDVERSION text.');
@@ -63,7 +62,7 @@ test('FIRST-RUN-01: prepare → probe → confirmed build of exactly the manifes
   const f=await setup(t),ids=await seed(f);await f.save();
   const prepared=await f.act('vector.prepare',{budget_calls:20});
   assert.equal(prepared.status,'prepared');assert.equal(prepared.collection,'synthetic_first_v1','an operator pre-created collection inside the prefix');
-  assert.equal(prepared.manifest.count,5);assert.deepEqual(prepared.manifest.excluded,{inactive:2,secret_or_unavailable:1,sensitivity_not_approved:0});
+  assert.equal(prepared.manifest.count,5);assert.deepEqual(prepared.manifest.excluded,{inactive:2,unavailable:0});
   assert.equal(prepared.probe_required,true);assert.deepEqual([prepared.budget.total,prepared.budget.used],[20,0]);assert.equal(prepared.catch_up,false);
   assert.equal(f.calls.length,0,'prepare sends nothing');
   const confirm={generation:prepared.generation,expected_count:5,expected_digest:prepared.manifest.digest};
@@ -77,7 +76,7 @@ test('FIRST-RUN-01: prepare → probe → confirmed build of exactly the manifes
   const built=await f.drain();
   assert.equal(built.build,'built');assert.deepEqual([built.manifest.indexed,built.manifest.pending,built.manifest.stale],[5,0,0]);
   assert.equal(f.calls.length,7,'2 probe + exactly one call per manifest record');assert.equal(built.budget.used,7);
-  for(const forbidden of ['SECRET','HISTORY','OLDVERSION','FOREIGN'])assert.ok(!sentText(f).includes(forbidden),forbidden);
+  for(const forbidden of ['HISTORY','OLDVERSION','FOREIGN'])assert.ok(!sentText(f).includes(forbidden),forbidden);
   assert.equal(f.backend.created,0,'never creates a collection');
   // Built, but not serving until explicitly activated.
   assert.equal(built.serving,false);assert.ok(f.status().search_blockers.includes('VECTOR_NOT_READY'));

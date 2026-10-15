@@ -68,7 +68,7 @@ export class ConsoleModels {
   snapshot(user,generation){const row=this.raw(user,'embedder');if(!row)fail('NOT_CONFIGURED');
     this.db.prepare('INSERT OR IGNORE INTO console_vector_profiles VALUES(?,?,?,?,?,?)').run(generation,user,this.profile(user,'embedder',JSON.parse(row.config_json)).fingerprint,row.config_json,null,Date.now());} // keys are never copied; the current key is used
   /** Providers for retained generation profiles on the CURRENT origin, bound to the owner's current consent: the
-   * embedder must be enabled, approvals and sensitivities are intersected with the current ones, and only the
+   * embedder must be enabled, approvals are intersected with the current ones, and only the
    * current key is used (a removed key or a different origin stops the old profile). */
   retainedServes(user,generation){const s=this.db.prepare('SELECT config_json FROM console_vector_profiles WHERE generation=? AND user_id=?').get(generation,user),row=this.raw(user,'embedder');
     return !!s&&!!row&&new URL(JSON.parse(s.config_json).base_url).origin===new URL(JSON.parse(row.config_json).base_url).origin;}
@@ -91,7 +91,7 @@ export class ConsoleModels {
         guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});guard();return response;
       }});
       provider.profile=Object.freeze({...profile,egress:Object.freeze({...profile.egress,approved:profile.egress.approved&&now.egress_approved===true,
-        query_approved:profile.egress.query_approved&&now.query_approved===true,sensitivities:profile.egress.sensitivities.filter(x=>now.sensitivities.includes(x))})});
+        query_approved:profile.egress.query_approved&&now.query_approved===true})});
       const embed=provider.embed.bind(provider);provider.embed=(texts,type,options)=>{if(this.store.consoleService?.owner.user&&type!=='query')fail('EXECUTION_GRANT_REQUIRED');return embed(texts,type,options);};
       out.push(provider);
     }
@@ -107,6 +107,7 @@ export class ConsoleModels {
     const row=this.raw(auth.user_id,p.kind),revision=row?.revision||0;
     if(number(p.expected_revision,0,2147483647)!==revision)throw new ConflictError('Model configuration changed.','MODEL_VERSION_CHANGED');
     const config=structuredClone(p.config);
+    delete config.sensitivities; // removed setting; older clients may still send it
     if(config.native_schema===undefined)config.native_schema=true;
     if(typeof config.native_schema!=='boolean')throw new ValidationError('Invalid schema capability.');
     if(typeof config.enabled!=='boolean'||!['openai_compatible','ollama'].includes(config.protocol))throw new ValidationError('Invalid model configuration.');
@@ -114,7 +115,7 @@ export class ConsoleModels {
     for(const key of ['model','profile_revision'])if(typeof config[key]!=='string'||!config[key].trim()||config[key].length>160)throw new ValidationError('Model name and revision are required.');
     number(config.daily_requests,1,10000);number(config.output_tokens,128,32768);number(config.batch_size,1,20);
     if(p.kind==='embedder')number(config.dimensions,1,65536);
-    if(typeof config.egress_approved!=='boolean'||typeof config.query_approved!=='boolean'||!Array.isArray(config.sensitivities)||config.sensitivities.length<1||config.sensitivities.some(s=>!['public','internal','sensitive'].includes(s)))throw new ValidationError('Explicit egress policy required.');
+    if(typeof config.egress_approved!=='boolean'||typeof config.query_approved!=='boolean')throw new ValidationError('Explicit egress policy required.');
     if(p.remove_key!==undefined&&typeof p.remove_key!=='boolean')throw new ValidationError('Invalid key operation.');
     if(p.api_key!==undefined&&(typeof p.api_key!=='string'||!p.api_key||p.api_key.length>16384||/[\r\n\x00]/.test(p.api_key)))throw new ValidationError('Invalid model key.');
     if(p.api_key&&p.remove_key)throw new ValidationError('Conflicting key operation.');
@@ -146,7 +147,7 @@ export class ConsoleModels {
     const profile=validateProfile({enabled:true,provider_id:`console-${kind}`,protocol:c.protocol,base_url:c.base_url,model:c.model,profile_revision:c.profile_revision,auth:{none:true},
       timeouts:{request_ms:30000},limits:{input_bytes:262144,input_tokens:262144,output_bytes:524288,output_tokens:c.output_tokens,batch_size:c.batch_size,concurrency:1,daily_requests:c.daily_requests},
       retry:{max_attempts:3,base_ms:2000,max_ms:60000,repair_once:false},capabilities:{native_schema:c.native_schema!==false},
-      egress:{approved:c.egress_approved,query_approved:c.query_approved,origins:[new URL(c.base_url).origin],addresses:[],allow_private:privateApproved,sensitivities:c.sensitivities},
+      egress:{approved:c.egress_approved,query_approved:c.query_approved,origins:[new URL(c.base_url).origin],addresses:[],allow_private:privateApproved},
       ...(kind==='embedder'?{dimensions:c.dimensions,distance:'Cosine',query_prefix:'',document_prefix:'',normalization:'l2',chunker_version:'unicode-8k-v1'}:{})},{kind});
     return {...profile,fingerprint:'console-'+fingerprint([user,profile.fingerprint])};
   }
@@ -236,7 +237,7 @@ export class ConsoleModels {
       this.db.prepare('INSERT INTO memory_owner_model_usage VALUES(?,?,?,1) ON CONFLICT(user_id,profile,day) DO UPDATE SET reserved_calls=reserved_calls+1').run(auth.user_id,profile,day);
     });
     try{
-      const checks=[],skipped=[],options={sensitivity:provider.profile.egress.sensitivities[0],reserve};
+      const checks=[],skipped=[],options={reserve};
       if(p.kind==='organizer'&&mode==='capabilities'){
         const sources=[{memory_id:'synthetic-model-probe',revision:1,content:'Synthetic technical decision: preserve source versions. This is not a personal memory.',evidence_kind:'synthetic'}];
         const taxonomy={version:'synthetic-probe-v1',categories:['technical','uncategorized']};

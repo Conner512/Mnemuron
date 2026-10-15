@@ -200,20 +200,19 @@ test('LW-07: cloud supersede/retract never act on a deleted-project memory and l
   assert.equal(memoryRow(w,routedSave.body.memory_id).project_id,'proj-lr-tgt','cloud saves route like Core saves');
 });
 
-test('LW-08: Console privacy, grants, manual categories and operation replays respect each record\'s lifecycle',async t=>{
+test('LW-08: Console grants, manual categories and operation replays respect each record\'s lifecycle',async t=>{
   const w=await world(t),{store,m,a}=w;
   const writer=store.authenticate(store.issueCredential({userId:w.user,deviceId:'d-lw-con',agentId:'mnemuron-console',agentInstanceId:'lw-con',scopes:[...CONSOLE_WRITE_SCOPES]}).api_key);
-  assert.throws(()=>store.memorySources.setSensitivity(writer,m.dead,'internal'),{errorCode:'PROJECT_DELETED'});
   const {revision,state_hash}=store.revisions.latest(w.user,m.dead);
   assert.throws(()=>store.webVisibility.set(a.auth,m.dead,{allow:true,revision,state_hash}),{errorCode:'PROJECT_DELETED'});
   assert.throws(()=>store.derivedMemory.setCategory(writer,m.dead,'technical',store.consoleService.taxonomy(w.user)),{code:'INVALID_CATEGORY_TARGET'});
   assert.equal(count(w,'memory_privacy','memory_id=?',m.dead)+count(w,'memory_web_grants','memory_id=?',m.dead)+count(w,'memory_category_overrides','memory_id=?',m.dead),0);
   const live=store.revisions.latest(w.user,m.live);
-  const done=await store.consoleService.execute(writer,{action:'memory.sensitivity',operation_id:'lw-op-sens',payload:{memory_id:m.live,revision:live.revision,sensitivity:'internal'}});
-  // The stored result carries the memory's metadata (its `status` is the memory status, as before this phase).
-  assert.equal(done.memory_id,m.live);assert.equal(done.sensitivity,'internal');assert.equal(done.replayed,false);
+  const done=await store.consoleService.execute(writer,{action:'memory.retract',operation_id:'lw-op-retract',payload:{memory_id:m.live,revision:live.revision}});
+  // The stored result carries the memory's metadata.
+  assert.equal(done.memory_id,m.live);assert.equal(done.replayed,false);
   w.mutate('proj-lr-live','deleted');
-  const replay=await store.consoleService.execute(writer,{action:'memory.sensitivity',operation_id:'lw-op-sens',payload:{memory_id:m.live,revision:live.revision,sensitivity:'internal'}});
+  const replay=await store.consoleService.execute(writer,{action:'memory.retract',operation_id:'lw-op-retract',payload:{memory_id:m.live,revision:live.revision}});
   assert.deepEqual(Object.keys(replay).sort(),['content_withheld','current_status','memory_id','operation_id','replayed','status']);
   assert.equal(replay.current_status,'unavailable');
 });

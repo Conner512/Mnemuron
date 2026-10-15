@@ -87,7 +87,7 @@ test('LW-16: cloud supersede/retract denials (foreign, stale revision, removed g
   assert.equal(store.db.prepare('SELECT project_id FROM memories WHERE memory_id=?').get(ok.body.memory_id).project_id,'proj-lr-tgt');
 });
 
-test('LW-17: an injected failure at the end of organize, classify, undo, web-grant and privacy writes rolls every row and success audit back',async t=>{
+test('LW-17: an injected failure at the end of organize, classify, undo and web-grant writes rolls every row and success audit back',async t=>{
   const w=await world(t),{store,a,m}=w,organizer=store.consoleService.organizer,writer=writerOf(w,'lw17'),audit=store.audit.bind(store);
   const tables=['memory_category_overrides','console_organize_items','console_organize_batches','memory_derived_outbox','memory_summaries','memory_privacy','memory_web_grants','audit_events'];
   const snapshot=()=>tables.map(name=>rows(w,name)).join('\n');
@@ -102,10 +102,8 @@ test('LW-17: an injected failure at the end of organize, classify, undo, web-gra
   const applied=organizer.organize(writer,{...request,preview_token:organizer.preview(writer,request).preview_token});
   attempt('memory.category.undo',()=>organizer.undo(writer,{batch_id:applied.batch_id}));
   attempt('memory.web_visibility',()=>store.webVisibility.set(a.auth,m.live,{allow:true,revision:live.revision,state_hash:live.state_hash}));
-  attempt('memory.sensitivity.set',()=>store.memorySources.setSensitivity(writer,m.live,'internal'));
   // Controls: each write succeeds without the injected failure.
   assert.equal(organizer.undo(writer,{batch_id:applied.batch_id}).status,'undone');
-  assert.equal(store.memorySources.setSensitivity(writer,m.live,'internal').sensitivity,'internal');
 });
 
 test('LW-18: a save first made through a project before its merge replays through the same old ID afterwards without conflict or retargeting',async t=>{

@@ -361,7 +361,6 @@ function detailFacts(t, m, data, meta, labels) {
     ['revisions', html`<span class="figure">${data.revision}</span>`],
     ...(origin ? [['originFacet', html`${i18n(t, ORIGIN_KEYS[origin.kind] || 'originAgent')}${origin.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(origin.original_created_at)}</time>` : ''}`]] : []),
     ...(meta?.tag ? [['originalTag', html`<code class="tag-value">${meta.tag}</code><small class="muted">${i18n(t, 'originalTagNote')}</small>`]] : []),
-    ...(meta?.sensitivity ? [['sensitivity', html`${t(meta.sensitivity)}`]] : []),
   ];
   return html`<dl class="detail-facts">${rows.map(([key, value]) => html`<dt>${i18n(t, key)}</dt><dd>${value}</dd>`)}</dl>`;
 }
@@ -413,7 +412,7 @@ export const featureMap = {
     {id: 'MEM-02', status: 'live', read: ['memory', 'memory-meta']},
     {id: 'MEM-03', status: 'live', write: ['memory.create']},
     {id: 'MEM-04', status: 'live', write: ['memory.correct', 'memory.retract']},
-    {id: 'MEM-05', status: 'live', write: ['memory.classify', 'memory.sensitivity']},
+    {id: 'MEM-05', status: 'live', write: ['memory.classify']},
     {id: 'MEM-06', status: 'live', read: ['memories'], write: ['memory.organize', 'memory.organize_undo', 'memory.batch_classify', 'memory.batch_retract']},
     {id: 'MEM-07', status: 'live', read: ['memory-versions']},
     {id: 'MEM-08', status: 'live', read: ['entities'], write: ['entity.create','entity.alias','entity.alias_correct','entity.alias_remove','entity.link','entity.unlink','entity.resolve']},

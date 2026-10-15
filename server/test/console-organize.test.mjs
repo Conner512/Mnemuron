@@ -190,11 +190,11 @@ test('ORG-07: two owners stay isolated across facets, previews, organize, undo a
   assert.equal((await f.act('memory.organize',{category:'personal',memory_ids:mine,preview_token:fresh.preview_token},basic)).status,200);
 });
 
-test('ORG-08: keep_private, secret records, original fields and writes are preserved; nothing is physically deleted',async t=>{
+test('ORG-08: owner denials, formerly secret records, original fields and writes are preserved; nothing is physically deleted',async t=>{
   const f=await setup(t);
+  // Sensitivity levels were removed: a legacy default or per-record sensitivity is accepted and ignored.
   await f.act('privacy.defaults',{expected_revision:0,sensitivity:'secret',cloud_readable:false});
-  const secret=await f.create('Synthetic secret note',f.A,{sensitivity:'secret'});
-  await f.act('privacy.defaults',{expected_revision:1,sensitivity:'sensitive',cloud_readable:false});
+  const secret=await f.create('Synthetic formerly secret note',f.A,{sensitivity:'secret'});
   const privateId=await f.create('Synthetic keep-private note');
   f.store.webVisibility.keepPrivate(f.A.auth.user_id,privateId,f.store.revisions.latest(f.A.auth.user_id,privateId));
   f.store.webVisibility.setPolicy(f.A.auth,{read_all:true,expected_revision:0}); // retained legacy setting
@@ -210,7 +210,8 @@ test('ORG-08: keep_private, secret records, original fields and writes are prese
   const after=snapshot();
   assert.deepEqual(after,before,'memories, revisions, events, tasks, privacy and web denials are untouched by organizing');
   assert.equal(f.store.webVisibility.visible(web,privateId),false,'keep_private still rejects web reads');
-  assert.equal(f.store.derivedMemory.currentSource(f.A.auth.user_id,secret),null,'secret records stay excluded from model input');
+  assert.notEqual(f.store.derivedMemory.currentSource(f.A.auth.user_id,secret),null,'a formerly secret record is ordinary model input');
+  assert.equal(f.store.webVisibility.visible(web,secret),true,'read-all opens it to ChatGPT');
   // Correction keeps the manual category on the replacement and keeps the private denial.
   const meta=(await f.get('memory-meta',{memory_id:privateId})).body;await f.act('memory.classify',{memory_id:privateId,revision:meta.revision,category:'technical'});
   const corrected=await f.act('memory.correct',{memory_id:privateId,revision:meta.revision,content:'Synthetic keep-private note, corrected',memory_type:'fact'});
@@ -270,7 +271,7 @@ test('ORG-11: the library explains why memories are uncategorized: unconfigured,
   const status=async()=>(await f.get('memories',{part:'facets'})).body.classification;
   let c=await status();assert.equal(c.state,'unconfigured');assert.equal(c.model_configured,false);assert.equal(c.key_storage,true);assert.equal(c.worker_enabled,false);
   assert.deepEqual([c.active,c.manual,c.model],[2,0,0]);
-  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:false,query_approved:false};
+  const config={enabled:true,protocol:'openai_compatible',base_url:'https://model.example.invalid/v1',model:'synthetic-model',profile_revision:'1',daily_requests:10,output_tokens:4096,batch_size:5,egress_approved:false,query_approved:false};
   assert.equal((await f.act('models.save',{kind:'organizer',expected_revision:0,config,api_key:'synthetic-key'})).status,200);
   c=await status();assert.equal(c.state,'blocked');assert.deepEqual(c.blockers,['EGRESS_DENIED']);
   const jobsView=(await f.get('jobs')).body;assert.ok(jobsView.processing.classification.blockers.includes('EGRESS_DENIED'),'the Jobs page learns why scheduling would fail');

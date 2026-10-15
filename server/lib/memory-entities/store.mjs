@@ -21,7 +21,7 @@ export class MemoryEntities {
     const revision=this.store.revisions.latest(user,id),lifecycle=this.lifecycleStamp(user,source.project_id);
     // Category is presentation metadata, not identity evidence. Revision, privacy, exact context and
     // project lifecycle are still bound; changing a category must not accidentally erase aliases.
-    return {...source,state_hash:digest(['entity-source-v1',revision.state_hash,source.sensitivity,lifecycle])};}
+    return {...source,state_hash:digest(['entity-source-v1',revision.state_hash,'sensitive',lifecycle])};} // former default class keeps hashes stable
 
   validProof(proof,auth=null){if(!proof)return null;if(!safeId(proof.user_id)||!safeId(proof.memory_id)||!Number.isSafeInteger(proof.revision)||proof.revision<1||typeof proof.state_hash!=='string'||!/^[a-f0-9]{64}$/.test(proof.state_hash)||typeof proof.scope_key!=='string'||proof.scope_key.length>2000)throw new ConflictError('Object proof is invalid.','ENTITY_PROOF_INVALID');if(auth&&proof.user_id!==auth.user_id)return null;const s=this.source(proof.user_id,proof.memory_id,auth);
     return s&&s.revision===proof.revision&&s.state_hash===proof.state_hash&&s.scope_key===proof.scope_key?s:null;}
@@ -121,7 +121,6 @@ export class MemoryEntities {
       const selected=rows.slice(0,ENTITY_LIMITS.queue),groups=new Map();let excluded=0;
       for(const row of selected){const source=this.store.derivedMemory.currentSource(user,row.memory_id);
         if(!source||source.revision!==row.revision){this.db.prepare("UPDATE memory_processing_outbox SET state='stale' WHERE rowid=?").run(row.cursor_id);excluded++;continue;}
-        if(!organizer.profile.egress.sensitivities.includes(source.sensitivity)){excluded++;continue;}
         const list=groups.get(source.scope_key)||[];list.push(source);groups.set(source.scope_key,list);
       }
       const configurationRevision=organizer.profile.fingerprint.startsWith('console-')?this.db.prepare("SELECT revision FROM console_models WHERE user_id=? AND kind='organizer'").get(user)?.revision||0:null;

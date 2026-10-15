@@ -51,19 +51,6 @@ export class MemorySources {
     });
   }
   unpin(auth,pinId){this.store.requireScope(auth,'memory:retention');const result=this.db.prepare('DELETE FROM memory_source_pins WHERE user_id=? AND pin_id=?').run(auth.user_id,pinId);return {unpinned:result.changes};}
-  setSensitivity(auth,id,value){
-    if(!consoleMemoryWritable(auth))this.store.requireScope(auth,'memory:retention');if(!['public','internal','sensitive','secret'].includes(value) || !this.db.prepare('SELECT 1 FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id))fail('INVALID_PRIVACY_TARGET');
-    return this.store.memoryTransaction(()=>{
-      // Inside the write: no privacy change on a memory of a deleted (or dangling/foreign) project.
-      const state=this.store.lifecycle.projectState(auth.user_id,this.db.prepare('SELECT project_id FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.project_id??null);
-      if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
-      if(state==='unavailable')fail('INVALID_PRIVACY_TARGET');
-      this.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?) ON CONFLICT(user_id,memory_id) DO UPDATE SET sensitivity=excluded.sensitivity').run(auth.user_id,id,value);
-      this.db.prepare("UPDATE memory_processing_outbox SET state=CASE WHEN job_type='entities' THEN 'pending' ELSE 'blocked_config' END WHERE user_id=? AND memory_id=?").run(auth.user_id,id);
-      this.db.prepare("UPDATE memory_index_outbox SET state='pending',action=? WHERE user_id=? AND memory_id=?").run(value==='secret'?'hide':'upsert',auth.user_id,id);
-      this.store.audit({auth,action:'memory.sensitivity.set',targetType:'memory',targetId:id,metadata:{sensitivity:value}});return {sensitivity:value};
-    });
-  }
   privacyImpact(auth,memoryIds){
     this.store.requireScope(auth,'memory:retention');if(!Array.isArray(memoryIds) || !memoryIds.length || memoryIds.length>1000 || memoryIds.some(s=>typeof s!=='string'))fail('INVALID_PURGE_SELECTION');
     const ids=[...new Set(memoryIds)];let atomic=0,revisions=0,summaries=new Set(),points=0,jobs=new Set();

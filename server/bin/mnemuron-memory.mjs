@@ -16,7 +16,7 @@ export async function memoryCommand(args){
   for(let n=0;n<flags.length;n+=2){const key=flags[n];if(!/^--(config|user|type|generation|destination|backup|memory-id|pin-id|event-id|task-id|project-id|workstream-id|session-id|value|max-jobs|allow-network|offset|after|highwater|limit|profile|job-id)$/.test(key) || options[key]!==undefined || flags[n+1]===undefined || flags[n+1].startsWith('--'))fail('INVALID_ARGUMENTS');options[key]=flags[n+1];}
   if(!options['--config'] || !path.isAbsolute(options['--config']))fail('PRIVATE_CONFIG_REQUIRED');
   const config=loadMemoryRuntimeFile(options['--config']);
-  const commands=['status','provider-validate','organize','worker-once','worker-loop','category-set','sensitivity-set','summaries','index-rebuild','index-sync','index-activate','index-reconcile','sources','source-read','pin','unpin','privacy-dry-run','backup','backup-verify','restore-isolated','migration-dry-run','jobs-resume-profile','jobs-cancel'];
+  const commands=['status','provider-validate','organize','worker-once','worker-loop','category-set','summaries','index-rebuild','index-sync','index-activate','index-reconcile','sources','source-read','pin','unpin','privacy-dry-run','backup','backup-verify','restore-isolated','migration-dry-run','jobs-resume-profile','jobs-cancel'];
   if(!commands.includes(command))fail('INVALID_COMMAND');
   if(command==='migration-dry-run')return {dry_run:true,source_paths:storageDoctor({database:config.storage?.sqlite_path},{sourceRoots:[SOURCE_ROOT]}),destination_paths:options['--destination']?storageDoctor({database:options['--destination']},{sourceRoots:[SOURCE_ROOT]}):null,copied:false,service_started:false};
   if(command==='backup-verify')return verifyMemoryBackup(options['--backup']);
@@ -28,12 +28,12 @@ export async function memoryCommand(args){
       const p=config.providers?.[kind];if(!p?.enabled){checks.push({component:kind,status:'not_configured'});continue;}
       try{
         if(kind==='organizer'){
-          const result=await new Organizer(p).generateStructured({synthetic:true,instruction:'Return ok true.'},{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false},{sensitivity:'public'});
+          const result=await new Organizer(p).generateStructured({synthetic:true,instruction:'Return ok true.'},{type:'object',properties:{ok:{type:'boolean'}},required:['ok'],additionalProperties:false});
           if(result.data.ok!==true)fail('PROBE_OUTPUT_MISMATCH');
           checks.push({component:kind,status:'passed',synthetic_input:true,endpoint_called:true,usage:result.usage});
         }else{
-          const model=new Embedder(p),document=await model.embed(['Synthetic protocol validation only.'],'document',{sensitivity:'public'});
-          const query=await model.embed(['Find the synthetic protocol example.'],'query',{sensitivity:'public'});
+          const model=new Embedder(p),document=await model.embed(['Synthetic protocol validation only.'],'document');
+          const query=await model.embed(['Find the synthetic protocol example.'],'query');
           checks.push({component:kind,status:'passed',synthetic_input:true,endpoint_called:true,dimensions:document.dimensions,query_dimensions:query.dimensions,usage:{document:document.usage,query:query.usage}});
         }
       }catch(error){checks.push({component:kind,status:'failed',error_code:error instanceof ModelError?error.code:'PROVIDER_PROBE_FAILED'});}
@@ -68,7 +68,6 @@ export async function memoryCommand(args){
     const pagination=Object.fromEntries(['offset','limit','after','highwater'].filter(k=>options['--'+k]!==undefined).map(k=>[k,Number(options['--'+k])]));
     if(command==='sources')return store.memorySources.manifest(auth,{task_id:options['--task-id'],workstream_id:options['--workstream-id'],session_id:options['--session-id'],...pagination});
     if(command==='source-read')return store.memorySources.content(auth,options['--event-id'],pagination);
-    if(command==='sensitivity-set')return store.memorySources.setSensitivity(auth,options['--memory-id'],options['--value']);
     const taxonomy=config.memory?.taxonomy;
     if(command==='category-set')return store.derivedMemory.setCategory(auth,options['--memory-id'],options['--value'],taxonomy);
     if(command==='summaries')return store.memorySummaries(auth,{scope:options['--type'] || 'user',project_id:options['--project-id'],task_id:options['--task-id'],workstream_id:options['--workstream-id'],session_id:options['--session-id'],...pagination});

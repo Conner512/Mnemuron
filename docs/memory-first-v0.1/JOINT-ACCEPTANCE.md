@@ -19,9 +19,9 @@ command and never changes `production_ready`.
   and a fixed loopback port. The harness never starts Docker or any service.
 - Config, key files and evidence belong outside every Git worktree. Config/key
   files must be private (`0600`); the output directory must exist with `0700`.
-- Production queries remain sensitivity-gated. This synthetic config must
-  explicitly permit `sensitive` query embedding and `public` fixture documents.
-  Do not relax the production policy to run this test.
+- Query embedding still requires explicit `query_approved` egress. This
+  synthetic config must approve it; do not relax the production policy to run
+  this test.
 - No production SQLite file is opened. Every run creates a fresh synthetic
   database and randomly named collections; no existing generation is activated.
 

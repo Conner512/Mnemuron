@@ -14,31 +14,31 @@ export const webReadPolicy = auth => auth?.read_policy === WEB_READ_POLICY_ACTIV
 const currentGrantSql=alias=>`EXISTS (SELECT 1 FROM memory_web_grants wg JOIN memory_revisions wr
   ON wr.user_id=wg.user_id AND wr.memory_id=wg.memory_id AND wr.revision=wg.revision AND wr.state_hash=wg.state_hash
   WHERE wg.user_id=${alias}.user_id AND wg.memory_id=${alias}.memory_id
-  AND wg.sensitivity=COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive')
   AND wr.content=${alias}.content AND wr.status=${alias}.status
   AND wr.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=wg.user_id AND memory_id=wg.memory_id))`;
 
 // Destination comes from the authenticated credential, never from a tool argument or header.
-// Internal/sensitive records need a grant for their current revision, unless the owner switched
-// ChatGPT reads to all records (memory_web_policy.read_all). Explicit denials always win.
-// A denial retains its reviewed version as evidence, but never expires on a version change.
+// There are no sensitivity levels. Under the per-memory policy ChatGPT reads a record the owner granted
+// for its current revision, or every record once the owner switched reads to all records
+// (memory_web_policy.read_all). An owner's explicit denial always wins there; it retains its reviewed
+// version as evidence, but never expires on a version change.
 //
-// Active-uniform policy: an ACTIVE, non-secret record is readable like it is for every other agent of the
-// account. Superseded/retracted history and every secret record keep the per-memory rules below, so legacy
-// denials and secret exclusions still hide them (including include_history-style status filters).
+// Active-uniform policy: every ACTIVE record is readable like it is for every other agent of the account.
+// Superseded/retracted history keeps the per-memory rules below.
 export function webMemorySql(auth, alias='m') {
   if (!isWebReader(auth)) return '1=1';
   const legacy = legacyWebMemorySql(alias);
   if (webReadPolicy(auth) !== WEB_READ_POLICY_ACTIVE_UNIFORM) return legacy;
-  return `((${alias}.status='active' AND COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive')<>'secret') OR ${legacy})`;
+  return `(${alias}.status='active' OR ${legacy})`;
 }
 function legacyWebMemorySql(alias) {
   return `(NOT EXISTS (SELECT 1 FROM memory_web_denials wd WHERE wd.user_id=${alias}.user_id AND wd.memory_id=${alias}.memory_id)
-    AND (EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id AND wp.sensitivity='public')
-    OR (COALESCE((SELECT sensitivity FROM memory_privacy wp WHERE wp.user_id=${alias}.user_id AND wp.memory_id=${alias}.memory_id),'sensitive') IN ('internal','sensitive')
-      AND (EXISTS (SELECT 1 FROM memory_web_policy wpol WHERE wpol.user_id=${alias}.user_id AND wpol.read_all=1)
-      OR ${currentGrantSql(alias)}))))`;
+    AND (EXISTS (SELECT 1 FROM memory_web_policy wpol WHERE wpol.user_id=${alias}.user_id AND wpol.read_all=1)
+      OR ${currentGrantSql(alias)}))`;
 }
+
+// memory_web_grants keeps its legacy NOT NULL sensitivity column; new grants write this marker.
+export const GRANT_LEGACY_COLUMN = 'unclassified';
 
 export class WebMemoryVisibility {
   constructor(store) {
@@ -67,31 +67,6 @@ export class WebMemoryVisibility {
   }
   inheritPrivate(user,from,to){
     if(this.denied(user,from))this.keepPrivate(user,to,this.store.revisions.latest(user,to));
-  }
-  migrateCloudPrivateChoices({markEmpty=false}={}){
-    this.store.memoryTransaction(()=>{
-      if(this.db.prepare("SELECT 1 FROM settings WHERE key='cloud_private_denials_v1'").get())return;
-      // Untouched pre-cloud databases retain their original settings byte-for-byte.
-      if(!markEmpty&&!this.db.prepare('SELECT 1 FROM cloud_memory_operations LIMIT 1').get())return;
-      // Receipts are immutable commit snapshots. Restore their explicit choice, including local
-      // replacements, without revoking a later exact-version grant or rewriting any receipt.
-      this.db.exec(`WITH RECURSIVE private_memories(user_id,memory_id) AS (
-        SELECT m.user_id,m.memory_id FROM cloud_memory_operations op JOIN memories m
-          ON m.user_id=op.user_id AND m.memory_id=json_extract(op.receipt_json,'$.memory_id')
-        WHERE op.action IN ('memory.save','memory.supersede')
-          AND json_extract(op.receipt_json,'$.cloud_read_choice')='keep_private'
-          AND json_extract(op.receipt_json,'$.status')='committed'
-        UNION
-        SELECT m.user_id,m.memory_id FROM memories m JOIN private_memories p
-          ON m.user_id=p.user_id AND m.supersedes_memory_id=p.memory_id
-      ) INSERT OR IGNORE INTO memory_web_denials
-        SELECT p.user_id,p.memory_id,r.revision,r.state_hash FROM private_memories p JOIN memory_revisions r
-          ON r.user_id=p.user_id AND r.memory_id=p.memory_id
-        JOIN memories m ON m.user_id=p.user_id AND m.memory_id=p.memory_id
-        WHERE r.revision=(SELECT MAX(revision) FROM memory_revisions WHERE user_id=p.user_id AND memory_id=p.memory_id)
-          AND NOT ${currentGrantSql('m')}`);
-      this.db.prepare('INSERT INTO settings(key,value_json,updated_at) VALUES(?,?,?)').run('cloud_private_denials_v1','true',new Date().toISOString());
-    });
   }
   /** Account-level ChatGPT read scope. Off: explicit per-revision grants only. */
   policy(auth) {
@@ -122,8 +97,7 @@ export class WebMemoryVisibility {
   writable(auth,id) {
     return !!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=?
       AND NOT EXISTS (SELECT 1 FROM memory_web_denials wd WHERE wd.user_id=m.user_id AND wd.memory_id=m.memory_id)
-      AND (EXISTS (SELECT 1 FROM memory_privacy wp WHERE wp.user_id=m.user_id AND wp.memory_id=m.memory_id AND wp.sensitivity='public')
-        OR ${currentGrantSql('m')})`).get(auth.user_id,id);
+      AND ${currentGrantSql('m')}`).get(auth.user_id,id);
   }
   project(auth,memory) {
     const revision=this.db.prepare('SELECT MAX(revision) revision FROM memory_revisions WHERE user_id=? AND memory_id=?').get(auth.user_id,memory.memory_id)?.revision;
@@ -138,7 +112,7 @@ export class WebMemoryVisibility {
     const rows=this.db.prepare(`SELECT g.memory_id FROM memory_web_grants g JOIN memories m ON m.user_id=g.user_id AND m.memory_id=g.memory_id
       WHERE g.user_id=? AND g.memory_id>? AND ${live.sql} GROUP BY g.memory_id ORDER BY g.memory_id LIMIT ?`).all(auth.user_id,after || '',...live.params,limit+1);
     const grants=rows.slice(0,limit).map(row=>this.inspect(auth,row.memory_id));
-    return {grants,selection:'explicit_grants_only',public_records_not_listed:true,content_returned:false,
+    return {grants,selection:'explicit_grants_only',content_returned:false,
       next_request:rows.length>limit?{limit,after:grants.at(-1).memory_id}:null};
   }
   inspect(auth,id) {
@@ -149,8 +123,7 @@ export class WebMemoryVisibility {
     const state=project?this.store.lifecycle.projectState(auth.user_id,project.project_id):'unavailable';
     if(state==='unavailable')throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
-    const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';
-    return {memory_id:id,revision:current.revision,state_hash:current.state_hash,sensitivity,
+    return {memory_id:id,revision:current.revision,state_hash:current.state_hash,
       allowed:this.visible(this.reader(auth),id),content_returned:false,policy:webReadPolicy(this.reader(auth))};
   }
   set(auth,id,{allow,revision,state_hash}={}) {
@@ -166,12 +139,9 @@ export class WebMemoryVisibility {
       if(state==='deleted')throw new ConflictError('This project was deleted.','PROJECT_DELETED');
       if(!Number.isSafeInteger(revision) || current.revision!==revision || current.state_hash!==state_hash)
         throw new ConflictError('Approval must match the reviewed revision and state hash.','MEMORY_VERSION_CHANGED');
-      const sensitivity=this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,id)?.sensitivity || 'sensitive';
-      if(sensitivity==='public' && !(allow && this.denied(auth.user_id,id)))throw new ValidationError('Public classification is already visible; change its classification locally to restrict it.','WEB_VISIBILITY_DENIED');
-      if(allow && !['internal','sensitive','public'].includes(sensitivity))throw new ValidationError('Only internal/sensitive records need grants; secret is never eligible.','WEB_VISIBILITY_DENIED');
       if(allow){
         this.db.prepare('DELETE FROM memory_web_denials WHERE user_id=? AND memory_id=?').run(auth.user_id,id);
-        if(sensitivity!=='public')this.db.prepare('INSERT OR REPLACE INTO memory_web_grants VALUES (?,?,?,?,?)').run(auth.user_id,id,revision,state_hash,sensitivity);
+        this.db.prepare('INSERT OR REPLACE INTO memory_web_grants VALUES (?,?,?,?,?)').run(auth.user_id,id,revision,state_hash,GRANT_LEGACY_COLUMN);
       }else this.keepPrivate(auth.user_id,id,current);
       this.store.audit({auth,action:'memory.web_visibility',targetType:'memory',targetId:id,metadata:{allow,revision}});
       return {memory_id:id,revision,allowed:allow,policy:WEB_READ_POLICY};

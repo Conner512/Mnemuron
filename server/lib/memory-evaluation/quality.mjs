@@ -47,7 +47,7 @@ export async function evaluateQuality({output,config=null,allowNetwork=false,tra
   if(!['v1','v2','v3'].includes(edition) || vectorConfig && (edition==='v1' || !allowNetwork))fail('INVALID_QUALITY_MODE');
   if(vectorConfig){
     vectorConfig=vectorAcceptanceTarget(vectorConfig);
-    if(!config?.providers?.embedder?.enabled || !config.providers.embedder.egress.query_approved || !config.providers.embedder.egress.sensitivities.includes('sensitive'))fail('QUERY_EGRESS_NOT_APPROVED');
+    if(!config?.providers?.embedder?.enabled || !config.providers.embedder.egress.query_approved)fail('QUERY_EGRESS_NOT_APPROVED');
     storageDoctor({vector_secret_file:vectorConfig.auth.secret_file});
   }
   storageDoctor({evidence_dir:output});
@@ -83,7 +83,7 @@ export async function evaluateQuality({output,config=null,allowNetwork=false,tra
   const s=new MnemuronStore(run+'/synthetic.sqlite3',{memoryConfig:{config_version:'mnemuron-memory-first-v1',modules:{memory:{enabled:true},handoff:{enabled:false,existing_inflight_policy:'drain_before_disable'}},memory:{capture_extraction:{enabled:false}}}});
   const authFor=userId=>s.authenticate(s.issueCredential({userId,label:'Synthetic quality fixture',deviceId:'synthetic-device',agentId:'synthetic',agentInstanceId:'synthetic-quality',scopes:['memory:read','memory:write','memory:retention']}).api_key);
   const auth=authFor('synthetic-quality-owner'),memories=new Map(),byMemoryId=new Map(),summaryDocs=fixture.documents.filter(d=>fixture.summary_ids.includes(d.id));
-  const save=d=>{const m=s.saveMemory(auth,{content:d.content,scope:'user'}).memory;memories.set(d.id,m);byMemoryId.set(m.memory_id,d.id);s.memorySources.setSensitivity(auth,m.memory_id,'public');return m;};
+  const save=d=>{const m=s.saveMemory(auth,{content:d.content,scope:'user'}).memory;memories.set(d.id,m);byMemoryId.set(m.memory_id,d.id);return m;};
   const result={fixture_version:fixture.version,fixture_digest:digest(fixture),synthetic_only:true,production_ready:false,configured_database_opened:false,
     qdrant:'not_run',human_review:'not_run',vector_values_saved:false,qualification:transport===requestJSON && vectorTransport===requestJSON?'live_providers':'protocol_simulated',components:{},hard_gates:{},quality_gates:{}};
   try {
@@ -137,7 +137,7 @@ export async function evaluateQuality({output,config=null,allowNetwork=false,tra
       try {
         if(config.providers.embedder.protocol==='mock')fail('REAL_PROVIDER_REQUIRED');
         const embedder=new Embedder(config.providers.embedder,{transport:remote('embedder')}),batch=embedder.profile.limits.batch_size;
-        const embed=async(texts,type)=>{const vectors=[];for(let start=0;start<texts.length;start+=batch)vectors.push(...(await embedder.embed(texts.slice(start,start+batch),type,{sensitivity:'public'})).vectors);return vectors;};
+        const embed=async(texts,type)=>{const vectors=[];for(let start=0;start<texts.length;start+=batch)vectors.push(...(await embedder.embed(texts.slice(start,start+batch),type)).vectors);return vectors;};
         const documents=await embed(fixture.documents.map(d=>d.content),'document'),queries=await embed(fixture.queries.map(q=>q.query),'query');
         const cosine=(a,b)=>a.reduce((sum,v,i)=>sum+v*b[i],0)/(Math.hypot(...a)*Math.hypot(...b));
         const ranks=Object.fromEntries(fixture.queries.map((q,n)=>[q.id,documents.map((v,i)=>({id:fixture.documents[i].id,score:cosine(queries[n],v)})).sort((a,b)=>b.score-a.score || a.id.localeCompare(b.id)).map(r=>r.id)]));

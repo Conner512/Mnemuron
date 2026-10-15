@@ -11,7 +11,7 @@ import {MockVectorStore} from './helpers/vector-mock.mjs';
 import {consoleRead} from '../lib/console-read.mjs';
 import {MnemuronStore} from '../lib/store.mjs';
 import {applyMigrations} from '../lib/store/migrations.mjs';
-import {CORE_MIGRATIONS} from '../lib/store/schema.mjs';
+import {CORE_MIGRATIONS,CORE_SCHEMA_VERSION} from '../lib/store/schema.mjs';
 const ids=r=>r.results.map(x=>x.memory_id);
 function setup(t){const f=fixture(t),c=f.s.issueCredential({userId:f.auth.user_id,deviceId:'synthetic-console',agentId:'mnemuron-console',agentInstanceId:randomUUID(),scopes:CONSOLE_WRITE_SCOPES});
   const auth=f.s.authenticate(c.api_key),g=f.s.entities,api=f.s.consoleService.entities;
@@ -103,7 +103,7 @@ test('ENT-09: each query rechecks target revision and every alias proof; stale c
 });
 
 test('ENT-10: restricted web readers receive evidence-backed names only and recheck all visibility dependencies',async t=>{
-  const f=setup(t),a=f.save('alpha (aka bravo)'),b=f.save('Backup data');for(const m of [a,b])f.s.memorySources.setSensitivity(f.auth,m.memory_id,'public');
+  const f=setup(t),a=f.save('alpha (aka bravo)'),b=f.save('Backup data');f.s.db.prepare('INSERT INTO memory_web_policy VALUES(?,1,1,?)').run(f.auth.user_id,new Date().toISOString()); // owner lets ChatGPT read all
   await f.derive({[a.memory_id]:[named('alpha','bravo')]});const e=f.entity(a);await f.change('entity.link',e,{memory_id:b.memory_id,revision:1});await f.change('entity.alias',e,{name:'owner-private-hint'});
   const web={...f.auth,agent_id:'chatgpt-web'};assert.ok(ids(f.s.queryMemories(web,{query:'bravo'})).includes(b.memory_id));assert.equal(f.s.queryMemories(web,{query:'owner-private-hint'}).results.length,0);
   f.s.webVisibility.keepPrivate(f.auth.user_id,a.memory_id,f.s.revisions.latest(f.auth.user_id,a.memory_id));const result=f.s.queryMemories(web,{query:'bravo'});assert.equal(result.results.length,0);assert.ok(!JSON.stringify(result).includes('owner-private-hint'));
@@ -165,18 +165,18 @@ test('ENT-16: queue scan is bounded and carries a deterministic cursor beyond 50
   const second=f.g.schedule(f.auth.user_id,model);assert.equal(second.scanned,2);assert.equal(second.truncated,false);assert.equal(second.jobs.length,1);assert.equal(second.cursor,null);
 });
 
-test('ENT-17: existing quota, egress, sensitivity and stale-source fences protect extraction',async t=>{
-  const f=setup(t),a=f.save('alpha (aka bravo)'),secret=f.save('secret-source');f.s.memorySources.setSensitivity(f.auth,secret.memory_id,'secret');
+test('ENT-17: existing quota, egress and stale-source fences protect extraction',async t=>{
+  const f=setup(t),a=f.save('alpha (aka bravo)');
   const denied=organizer(undefined,{egress:{...organizer().profile.egress,approved:false}});assert.equal(f.g.schedule(f.auth.user_id,denied).blocked,true);
-  const run=await f.derive({[a.memory_id]:[named('alpha','bravo')]},{},()=>f.s.retractMemory(f.auth,a.memory_id));assert.equal(run.jobs[0].state,'stale');assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM memory_entities').get().n,0);assert.equal(run.calls.flatMap(c=>c.sources).some(s=>s.memory_id===secret.memory_id),false);
+  const run=await f.derive({[a.memory_id]:[named('alpha','bravo')]},{},()=>f.s.retractMemory(f.auth,a.memory_id));assert.equal(run.jobs[0].state,'stale');assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM memory_entities').get().n,0);
   const q=setup(t),m=q.save('budgeted node'),model=organizer(input=>({results:input.sources.map(s=>({memory_id:s.memory_id,revision:s.revision,objects:[]}))}));q.g.schedule(q.auth.user_id,model);
   const worker=new MemoryWorker(q.s,q.s.memoryJobs,model,{userId:q.auth.user_id,profileFilter:model.profile.fingerprint,quota:()=>{const e=new Error('Synthetic exhausted');e.code='BUDGET_EXHAUSTED';throw e;}});
   assert.equal((await worker.runOne()).state,'blocked_budget');assert.equal(q.s.db.prepare('SELECT COUNT(*) n FROM memory_entities').get().n,0);
 });
 
-test('ENT-18: historical memory is never backfilled on open; schema v11 refuses a v10 reader unchanged',async t=>{
+test('ENT-18: historical memory is never backfilled on open; the current schema refuses a v10 reader unchanged',async t=>{
   const f=setup(t),m=f.save('historical alpha');f.s.db.prepare("DELETE FROM memory_processing_outbox WHERE job_type='entities'").run();f.g.migrate();assert.equal(f.g.schedule(f.auth.user_id,organizer()).scanned,0);
-  assert.equal(f.s.db.prepare('PRAGMA user_version').get().user_version,11);const before=f.s.db.prepare('SELECT COUNT(*) n FROM sqlite_master').get().n;
+  assert.equal(f.s.db.prepare('PRAGMA user_version').get().user_version,CORE_SCHEMA_VERSION);const before=f.s.db.prepare('SELECT COUNT(*) n FROM sqlite_master').get().n;
   assert.throws(()=>applyMigrations(f.s.db,CORE_MIGRATIONS.slice(0,10)),{code:'SCHEMA_VERSION_UNSUPPORTED'});assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM sqlite_master').get().n,before);assert.equal(f.s.memoryDetail(f.auth,m.memory_id).memory.content,'historical alpha');
 });
 
@@ -257,7 +257,7 @@ test('ENT-08b: tombstones distinguish separate object pairs sharing the same two
 
 test('ENT-23: a changed organizer configuration requeues unfinished extraction intents with new fences and no historical backfill',async t=>{
   const f=setup(t),a=f.save('alpha (aka bravo)'),historic=f.save('Historical unrelated source');f.s.db.prepare("DELETE FROM memory_processing_outbox WHERE memory_id=? AND job_type='entities'").run(historic.memory_id);
-  const config={enabled:true,protocol:'openai_compatible',base_url:'https://synthetic.example.invalid/v1',model:'synthetic-configured',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,sensitivities:['public','internal','sensitive'],egress_approved:true,query_approved:true};
+  const config={enabled:true,protocol:'openai_compatible',base_url:'https://synthetic.example.invalid/v1',model:'synthetic-configured',profile_revision:'1',daily_requests:100,output_tokens:4096,batch_size:5,egress_approved:true,query_approved:true};
   await f.act('models.save',{kind:'organizer',expected_revision:0,config});const firstProvider=f.s.consoleService.models.provider(f.auth.user_id,'organizer'),first=f.g.schedule(f.auth.user_id,firstProvider).jobs[0],lease=f.s.memoryJobs.claim('old-synthetic-worker',{userId:f.auth.user_id,profile:firstProvider.profile.fingerprint});assert.equal(lease.job_id,first);
   // Batch-size-only edits retain the profile/budget fingerprint but must still fence the old configuration.
   await f.act('models.save',{kind:'organizer',expected_revision:1,config:{...config,batch_size:2}});assert.equal(f.s.memoryJobs.get(first).state,'blocked_config');assert.throws(()=>f.s.memoryJobs.publish(lease,()=>{}),{code:'LEASE_LOST'});

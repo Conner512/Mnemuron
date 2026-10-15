@@ -109,14 +109,14 @@ export class VectorIndex {
             this.store.memoryTransaction(()=>{if(!this.owns(g))fail('LEASE_LOST');const revision=this.store.revisions.latest(raw.user_id,raw.memory_id);
               this.db.prepare('INSERT OR REPLACE INTO memory_vector_documents VALUES (?,?,?,?,?,?,?,?)').run(id,raw.user_id,raw.memory_id,revision?.revision || 0,revision?.state_hash || '',old?.scope_key || '',revision?.content_hash || '', 'hidden');
               this.db.prepare('DELETE FROM memory_vector_points WHERE generation=? AND user_id=? AND memory_id=?').run(id,raw.user_id,raw.memory_id);});};
-          if(!source || !e.profile.egress.sensitivities.includes(source.sensitivity)){await hide();processed++;continue;}
+          if(!source){await hide();processed++;continue;}
           // A source that became stale during its own embedding (deleted project, retraction, new revision) is hidden like
           // any other non-source, and the build continues; only a lost lease or a provider failure stops it.
           try{
           const chunks=splitDocument(source.content,Math.min(8192,Math.floor(e.profile.limits.input_tokens/4))),points=[];
           for(let start=0;start<chunks.length;start+=e.profile.limits.batch_size){
             this.renew(g);const part=chunks.slice(start,start+e.profile.limits.batch_size);
-            const result=await this.embed(e,part,'document',{sensitivity:source.sensitivity,userId:source.user_id,current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
+            const result=await this.embed(e,part,'document',{userId:source.user_id,current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
             if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
             for(const [i,vector] of result.vectors.entries())points.push({id:pointId(id,source.user_id,source.memory_id,source.revision,g.profile,start+i),vector,
               payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),document:surrogate([source.user_id,source.memory_id]),revision:source.revision,
@@ -162,7 +162,6 @@ export class VectorIndex {
         // Points of an earlier interrupted attempt are removed whenever the item is marked stale.
         const dropPoints=()=>this.backend.deleteByDocumentRevision(g.collection_name,{must:[condition('owner',surrogate(user)),condition('document',surrogate([user,item.memory_id]))]});
         if(!source || source.revision!==item.revision || source.state_hash!==item.state_hash){await dropPoints();mark('stale');processed++;continue;}
-        if(!e.profile.egress.sensitivities.includes(source.sensitivity)){mark('excluded');processed++;continue;}
         this.renew(g);
         // As documented above: a record that went stale during its own embedding is marked stale and skipped, with any
         // points already written for it removed; the build continues.
@@ -170,7 +169,7 @@ export class VectorIndex {
         const chunks=splitDocument(source.content,Math.min(8192,Math.floor(e.profile.limits.input_tokens/4))),points=[];
         for(let start=0;start<chunks.length;start+=e.profile.limits.batch_size){
           this.renew(g);const part=chunks.slice(start,start+e.profile.limits.batch_size);
-          const result=await this.embed(e,part,'document',{sensitivity:source.sensitivity,userId:source.user_id,purpose:'manifest',current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
+          const result=await this.embed(e,part,'document',{userId:source.user_id,purpose:'manifest',current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
           if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
           for(const [i,vector] of result.vectors.entries())points.push({id:pointId(id,source.user_id,source.memory_id,source.revision,g.profile,start+i),vector,
             payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),document:surrogate([source.user_id,source.memory_id]),revision:source.revision,
@@ -208,7 +207,7 @@ export class VectorIndex {
     if(frozen){if(manifest.pending)fail('VECTOR_CATCHUP_REQUIRED');}
     // Full authoritative coverage check includes writes that raced with backfill.
     else for(let after=0;;){const rows=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? AND (? IS NULL OR user_id=?) ORDER BY rowid LIMIT 100').all(after,this.ownerId,this.ownerId);if(!rows.length)break;
-      for(const raw of rows){const s=this.store.derivedMemory.currentSource(raw.user_id,raw.memory_id);if(!s || !this.embedders.get(g.profile).profile.egress.sensitivities.includes(s.sensitivity))continue;
+      for(const raw of rows){const s=this.store.derivedMemory.currentSource(raw.user_id,raw.memory_id);if(!s)continue;
         const indexed=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,s.user_id,s.memory_id);
         if(!indexed || indexed.revision!==s.revision || indexed.state_hash!==s.state_hash || indexed.scope_key!==s.scope_key)fail('VECTOR_CATCHUP_REQUIRED');}
       after=rows.at(-1).cursor_id;
@@ -251,7 +250,7 @@ export class VectorIndex {
       const scopes=this.db.prepare(`SELECT DISTINCT m.user_id,m.scope,m.project_id,m.task_id,m.workstream_id,m.session_id FROM memories m WHERE m.user_id=? AND m.status='active' AND ${scopeSql.sql} AND ${webMemorySql(auth)} LIMIT 129`).all(auth.user_id,...scopeSql.params);
       if(scopes.length>128)fail('VECTOR_SCOPE_TOO_BROAD');
       const filter={must:[condition('owner',surrogate(auth.user_id)),condition('profile',snapshot.profile),condition('lifecycle','active'),{key:'scope',match:{any:scopes.map(row=>surrogate(scopeKey(row)))}}]};
-      const {vectors}=await this.embed(e,[payload.query],'query',{sensitivity:'sensitive',userId:auth.user_id});
+      const {vectors}=await this.embed(e,[payload.query],'query',{userId:auth.user_id});
       const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[],semanticScores=new Map();let rejected=0;
       // The requested scope is resolved again after the network waits, before anything else: a project deleted meanwhile
       // is the deterministic answer (PROJECT_DELETED, re-thrown below), never a stale-index degradation. The fresh
@@ -274,7 +273,7 @@ export class VectorIndex {
         if(!row || !this.store.webVisibility.visible(auth,row.memory_id) || payload.statuses && !payload.statuses.includes(row.status)
           || payload.memory_types && !payload.memory_types.includes(row.memory_type))continue;
         const source=this.store.derivedMemory.currentSource(auth.user_id,point.memory_id);
-        if(!source || source.revision!==point.revision || hit.payload?.content_hash!==digest(source.content) || hit.payload?.profile!==snapshot.profile || !e.profile.egress.sensitivities.includes(source.sensitivity))continue;
+        if(!source || source.revision!==point.revision || hit.payload?.content_hash!==digest(source.content) || hit.payload?.profile!==snapshot.profile)continue;
         // Counts, too, are scoped: hidden/foreign/stale hits never affect returned diagnostics.
         if(!acceptsSemanticScore(hit.score,relevance)||!aliasAnchorsMatch(plan,source.content)||(plan.authority_ids&&!plan.authority_ids.includes(source.memory_id))){rejected++;continue;}
         if(!semantic.some(m=>m.memory_id===row.memory_id)) {

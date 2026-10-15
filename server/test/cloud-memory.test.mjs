@@ -125,3 +125,30 @@ test('A-T30: read_all and the active-uniform read policy widen ChatGPT reads, ne
   f.store.webVisibility.set(ownerAdmin(f),owned.memory_id,{allow:true,revision,state_hash});
   const allowed=await change('memory.retract');assert.equal(allowed.status,200,JSON.stringify(allowed.body));assert.equal(allowed.body.memory_status,'retracted');
 });
+
+test('A-T32: migration 12 carries public records as grants (never into deleted projects) and re-indexes secret ones',async t=>{
+  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'},save=(content,extra={})=>f.store.saveMemory(f.a.auth,{scope:'user',content,...extra}).memory;
+  for(const id of ['mig-dead','mig-merged'])f.store.ensureProject(f.a.auth,id,'Synthetic '+id);
+  const pub=save('Synthetic formerly public record'),sec=save('Synthetic formerly secret record');
+  const dead=save('Synthetic public record of a deleted project',{scope:'project',project_id:'mig-dead'});
+  const merged=save('Synthetic public record merged into a deleted project',{scope:'project',project_id:'mig-merged'});
+  // Database state as written by a release that still had sensitivity levels.
+  for(const [m,level] of [[pub,'public'],[sec,'secret'],[dead,'public'],[merged,'public']])
+    f.store.db.prepare('INSERT INTO memory_privacy VALUES (?,?,?)').run(f.a.auth.user_id,m.memory_id,level);
+  f.store.db.prepare("UPDATE memory_index_outbox SET action='hide',state='done' WHERE memory_id=?").run(sec.memory_id);
+  f.store.db.prepare('INSERT INTO project_lifecycle VALUES (?,?,?,?,1,?)').run(f.a.auth.user_id,'mig-dead','deleted',null,new Date().toISOString());
+  f.store.db.prepare('INSERT INTO project_lifecycle VALUES (?,?,?,?,1,?)').run(f.a.auth.user_id,'mig-merged','merged','mig-dead',new Date().toISOString());
+  f.store.db.exec('PRAGMA user_version = 11');
+  const reopened=new MnemuronStore(f.databasePath);t.after(()=>reopened.close());
+  assert.equal(reopened.db.prepare('PRAGMA user_version').get().user_version,12);
+  assert.equal(reopened.webVisibility.visible(reader,pub.memory_id),true);
+  assert.equal(reopened.webVisibility.visible(reader,sec.memory_id),false);
+  const granted=id=>!!reopened.db.prepare('SELECT 1 FROM memory_web_grants WHERE memory_id=?').get(id);
+  assert.equal(granted(dead.memory_id),false);assert.equal(granted(merged.memory_id),false);
+  assert.deepEqual(reopened.db.prepare('SELECT action,state FROM memory_index_outbox WHERE memory_id=?').all(sec.memory_id).map(r=>[r.action,r.state]),[['upsert','pending']]);
+  // One-off: a grant withdrawn afterwards is not re-created on the next open.
+  const {revision,state_hash}=reopened.revisions.latest(f.a.auth.user_id,pub.memory_id);
+  reopened.webVisibility.set(ownerAdmin({...f,store:reopened}),pub.memory_id,{allow:false,revision,state_hash});
+  const again=new MnemuronStore(f.databasePath);t.after(()=>again.close());
+  assert.equal(again.webVisibility.visible(reader,pub.memory_id),false);
+});

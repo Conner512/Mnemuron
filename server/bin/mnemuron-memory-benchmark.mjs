@@ -28,7 +28,7 @@ export async function benchmark({output,sizes=[10000,100000]}={}){
       for(let n=0;n<30;n++){let time=performance.now();save('Synthetic acceptance probe '+n);saveTimes.push(performance.now()-time);time=performance.now();s.queryMemories(auth,{query:'SN-'+String(n*97%size).padStart(8,'0'),limit:5});searchTimes.push(performance.now()-time);}
       const model=new Organizer({enabled:true,provider_id:'synthetic-benchmark',protocol:'mock',model:'synthetic-classifier',profile_revision:'fixture-v1',auth:{none:true},
         timeouts:{request_ms:1000},limits:{input_bytes:1000000,input_tokens:1000000,output_bytes:1000000,output_tokens:10000,batch_size:128,concurrency:1,daily_requests:100000},
-        retry:{max_attempts:1,base_ms:100,max_ms:1000,repair_once:false},capabilities:{native_schema:true},egress:{approved:true,origins:[],addresses:[],allow_private:false,sensitivities:['sensitive'],query_approved:false}},
+        retry:{max_attempts:1,base_ms:100,max_ms:1000,repair_once:false},capabilities:{native_schema:true},egress:{approved:true,origins:[],addresses:[],allow_private:false,query_approved:false}},
         {synthetic:true,mock:async input=>{await new Promise(setImmediate);peak=Math.max(peak,process.memoryUsage().rss);return {results:input.sources.map(source=>({memory_id:source.memory_id,category:'engineering',tags:[]}))};}});
       const jobs=new MemoryJobs(s,{batchSize:128}),start=performance.now(),schedule=scheduleLibrary(s,jobs,{userId:auth.user_id,organizer:model,taxonomy:{version:'synthetic-v1',categories:['uncategorized','engineering']}}),worker=new MemoryWorker(s,jobs,model);
       const loop=monitorEventLoopDelay({resolution:10});loop.enable();const running=worker.drain();const concurrentSearch=[],concurrentSave=[];

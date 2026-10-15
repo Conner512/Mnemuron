@@ -106,7 +106,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ### 8.1 对象与别名（MEM-08）
 
-- 保存/修订只排入本地队列；后台提取复用账户模型的同意、敏感级别与额度，每次最多 10 条来源。搜索只读已存关系，不调用模型；升级不会给历史记忆补建提取意图。
+- 保存/修订只排入本地队列；后台提取复用账户模型的外发同意与额度，每次最多 10 条来源。搜索只读已存关系，不调用模型；升级不会给历史记忆补建提取意图。
 - 自动接受只支持完整原文中的严格等同声明，且名称限为单个工程标识或连续中文名称。多词名称、引述、条件、否定、附加句子、供应商与主机关系均保守留待确认；模型置信度不代替原文证明。
 - 记忆详情中的对象区与记忆库的待确认卡片使用独立、授权的 `entities` 读取；卡片支持独立分页和刷新，晚到的旧分页/刷新结果不能替换新结果。
 - 同名对象保持独立。优先显示来源、完整范围、项目/任务/会话上下文、日期与修订；内部 ID 只作辅助。没有项目不等于用户范围，只有实际 `user` 范围才标注为用户范围。
@@ -154,7 +154,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ### 隐私和权限
 
-- 隐私默认值只作用于以后在控制台新建的记忆；默认敏感级别可配置。启用该偏好后，新记录明确保持私有，即使账户开启全量云端读取也不能绕过；云端可见性仍须单独逐版本授权。
+- 隐私默认值只记录“云端默认不可读”（不能设为可读）。敏感级别已取消，新建记忆不再自动设为私有：它们和其他记录一样，按账户的 ChatGPT 读取范围（全量读取、统一读取或逐版本授权）决定能否被读取。
 - 保留设置只改变本账户未来捕获事件的默认值，已有事件的到期时间不变；显式事件级保留值仍遵守现有合同。记忆、检查点、权威任务状态不自动删除。
 - 清理需要用户确认、当前密码及未复用的 TOTP；只清理本人已到期且没有固定来源 pin 的原始事件正文，保留元数据和来源链。默认每次 100 条，接口上限 1000；多批须逐次确认。不写全局运维状态，不清他人数据。
 - Agent 密钥登记/轮换要求重新验证；最多授予 `memory:read` 或加上 `memory:write/capture:write`，不授予管理、Resume 或任务切换。复用 Core 的加密操作回执和撤销机制；本轮新操作的密钥响应仅原登录会话可在 5 分钟内重试恢复，不接受前端提供会话绑定。平台管理凭证不能在这里轮换。
@@ -184,7 +184,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - **写入**：`memory.organize` 必须携带预览返回的 `preview_token`；服务端在同一事务内重新解析选择，任何变化都返回 `PREVIEW_CHANGED`，不部分写入。一次最多 2000 条；检索候选窗口（500 条）被截断时返回 `SELECTION_TRUNCATED`。`memory.organize_undo` 只恢复此后未再改动的记忆，其余列为 `CHANGED_SINCE`；全部都已改动时返回 `UNDO_CONFLICT` 且批次保持可撤销。同一操作 ID 重放返回同一结果。
 - **分类**：ID 稳定，名称可改。`category.create`（名称 1–40 字符，可用中文，ID 自动生成）、`category.rename`（只改名称，不改分类体系版本，不暂停任务，不使摘要过期）、`category.delete`（必须指定 `move_to`，手动分类与模型分类一并移动，可撤销并恢复原分类）。均需 `expected_revision`，并发修改返回 `SETTINGS_VERSION_CHANGED`。分类体系版本变化时，模型分类结果按 ID 复制到新版本（旧行保留，不改写）；指向已不存在分类的结果回落为未分类。`taxonomy.save` 保留为高级入口，同样复制模型分类。
 - **上限与重新整理**：预览返回准确的 `total`（全部匹配数）和 `limit`；超过上限时只显示总数、上限和下一步（缩小筛选或逐条勾选），确认按钮明确禁用。分类变更会暂停按旧分类排队的模型任务（`STALE_TAXONOMY`）；对这类任务执行 `jobs.retry` 会在同一事务内按当前分类重新安排同类任务，并把旧任务标记为已接替（`cancelled` + `RESCHEDULED`，不再可重试），已有分类结果和手动分类保留。任务页翻译状态与原因。
-- **边界**：手动分类是本地元数据，任何有效记忆都可以设置（包括 secret 和来源已过期的记录）；模型输入规则不变，secret 仍不会发送给模型。整理不修改记忆内容、修订、来源、敏感级别、ChatGPT 授权或 keep_private 拒绝；修订一条记忆时，手动分类随替代记录保留。不物理删除任何记忆。新增动作与 `memory.classify` 同属 memory 组（需要 `memory:organize`），不扩展凭据、scope 或 OAuth/MCP 权限。
+- **边界**：手动分类是本地元数据，任何有效记忆都可以设置（包括来源已过期的记录）；模型输入规则不变。整理不修改记忆内容、修订、来源、ChatGPT 授权或用户设置的拒绝；修订一条记忆时，手动分类随替代记录保留。不物理删除任何记忆。新增动作与 `memory.classify` 同属 memory 组（需要 `memory:organize`），不扩展凭据、scope 或 OAuth/MCP 权限。
 - **数据库**：仅新增 `console_organize_batches`、`console_organize_items`、`console_import_records`（`CREATE TABLE IF NOT EXISTS`），不新增迁移步骤，`PRAGMA user_version` 保持 7。旧版本打开同一数据库时忽略这些表，自定义分类显示为 ID。
 
 ## 12. 功能表
@@ -200,7 +200,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
 | MEM-04 | 记忆库 | 修订与撤回 | live | — | memory.correct, memory.retract |
-| MEM-05 | 记忆库 | 分类与敏感级别 | live | — | memory.classify, memory.sensitivity |
+| MEM-05 | 记忆库 | 分类 | live | — | memory.classify |
 | MEM-06 | 记忆库 | 批量整理 | live | memories | memory.organize, memory.organize_undo, memory.batch_classify, memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
 | MEM-08 | 记忆库 | 对象关联、别名与候选审阅 | live | entities | entity.create, entity.alias, entity.alias_correct, entity.alias_remove, entity.link, entity.unlink, entity.resolve |

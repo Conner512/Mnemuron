@@ -42,7 +42,7 @@ test('HTTP-COMPLETION: new reads require login; system views require an operator
  for(const view of ['system-health','system-version','backups'])assert.equal((await x.get(view)).status,200,view);
  for(const view of ['login-history','audit'])assert.equal((await x.get(view+'?user_id=other')).status,400);
  assert.equal((await x.act('privacy.defaults',{expected_revision:0,sensitivity:'secret',cloud_readable:false})).status,200);
- assert.equal((await x.get('privacy-defaults',x.b)).body.sensitivity,'sensitive');
+ assert.equal((await x.get('privacy-defaults',x.b)).body.sensitivity,undefined); // levels removed; a sent one is ignored
 });
 test('HTTP-COMPLETION: sensitive Agent and retention actions require fresh proof and revoked sessions fail closed',async t=>{
  const x=await setup(t);const key=path.join(x.core.root,'console-features.key');writePrivate(key,randomSecret());x.core.store.memoryConfig.console={key_file:key};

@@ -24,7 +24,7 @@ render/contract tests alone are not functional acceptance.
 | MEM-02 | 详情、来源与修订历史 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-03 | 新建记忆 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-04 | 修订与撤回 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
-| MEM-05 | 分类与敏感级别 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
+| MEM-05 | 分类 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-06 | 批量整理 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-07 | 版本对比 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-08 | 对象、别名与候选审阅 | live | `server/test/entity-alias.test.mjs`; `services/oauth/test/console-entities-ui.test.mjs` | entities (real synthetic BFF writes, source integrity, homonyms, stale evidence, 4 widths × 2 locales, keyboard focus, delayed navigation) |

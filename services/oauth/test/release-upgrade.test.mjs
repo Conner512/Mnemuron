@@ -55,7 +55,8 @@ test('RELEASE-01 paired Core/OAuth upgrade, old-reader refusal and isolated rest
    assert.ok(f.ids.eligible(r.subject));
    const own=f.principal(r,'console'),web=f.principal(r,'web'),foreign=records.find(x=>x!==r);
    assert.equal(f.core.memoryDetail(own,r.memory_id).memory.memory_id,r.memory_id);
-   assert.equal(f.core.webVisibility.visible(web,r.private_id),false);
+   // Sensitivity levels were removed: a keep_private save carries no denial, so the account's read_all opens it.
+   assert.equal(f.core.webVisibility.visible(web,r.private_id),true);
    assert.throws(()=>f.core.memoryDetail(own,foreign.memory_id));
   }
   f.core.saveMemory(f.principal(records[0],'console'),{scope:'user',content:'Synthetic post-upgrade write that must survive rollback'});
@@ -76,7 +77,7 @@ test('RELEASE-01 paired Core/OAuth upgrade, old-reader refusal and isolated rest
   assert.equal(f.core.db.prepare('SELECT count(*) n FROM memories').get().n,5);
   assert.equal(f.auth.db.prepare('SELECT count(*) n FROM identity_accounts').get().n,2);
   assert.equal(tableHash(f.auth.db,'identity_accounts'),identities);
-  assert.equal(f.core.webVisibility.visible(f.principal(records[0],'web'),records[0].private_id),false);
+  assert.equal(f.core.webVisibility.visible(f.principal(records[0],'web'),records[0].private_id),true);
   // A recovered auth snapshot must not revive captured bearer tokens or console sessions.
   f.auth.revoke({all:true});f.auth.db.exec('DELETE FROM identity_sessions; DELETE FROM identity_recovery_claims');
   assert.equal(f.auth.db.prepare('SELECT count(*) n FROM oauth_records').get().n,0);

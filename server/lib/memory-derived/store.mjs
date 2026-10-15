@@ -7,6 +7,7 @@ export const scopeKey = row => JSON.stringify([row.user_id,row.scope,row.project
 export class DerivedMemory {
   constructor(store) {this.store=store;this.db=store.db;this.migrate();this.pagination=new SummaryPagination(this);}
   migrate(){this.db.exec(`
+    -- Legacy: sensitivity levels were removed. Kept (unused) so older databases still open and roll back.
     CREATE TABLE IF NOT EXISTS memory_privacy (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,sensitivity TEXT NOT NULL DEFAULT 'sensitive',PRIMARY KEY(user_id,memory_id));
     CREATE TABLE IF NOT EXISTS memory_annotations (user_id TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,taxonomy_version TEXT NOT NULL,
       category TEXT NOT NULL,tags_json TEXT NOT NULL,suggestion TEXT,profile TEXT NOT NULL,job_id TEXT NOT NULL,PRIMARY KEY(user_id,memory_id,revision,taxonomy_version));
@@ -36,9 +37,8 @@ export class DerivedMemory {
     END;
   `);protectGroup(this.db,'derived');}
   currentSource(user,id){
-    const row=this.db.prepare(`SELECT m.*,COALESCE(p.sensitivity,'sensitive') AS sensitivity FROM memories m LEFT JOIN memory_privacy p
-      ON p.user_id=m.user_id AND p.memory_id=m.memory_id WHERE m.user_id=? AND m.memory_id=?`).get(user,id);
-    if(!row || row.status!=='active' || row.sensitivity==='secret')return null;
+    const row=this.db.prepare('SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=?').get(user,id);
+    if(!row || row.status!=='active')return null;
     // Every derived consumer (summary pages, vector delivery, job input and publication) revalidates here: a record
     // of an effectively deleted project is no longer a current source.
     if(!this.store.lifecycle.liveProject(user,row.project_id))return null;
@@ -50,7 +50,9 @@ export class DerivedMemory {
     if(captured.some(source=>source.content===null || source.content===undefined || source.expired_at || digestText(source.content)!==source.content_hash ||
       source.expires_at && Date.parse(source.expires_at)<=Date.now() && !this.db.prepare('SELECT 1 FROM memory_source_pins WHERE user_id=? AND event_id=?').get(user,source.event_id)))return null;
     const override=this.db.prepare('SELECT category,locked FROM memory_category_overrides WHERE user_id=? AND memory_id=?').get(user,id);
-    return {...row,revision:revision.revision,state_hash:digest([revision.state_hash,row.sensitivity,override || null]),evidence_kind:revision.evidence_kind,scope_key:scopeKey(row)};
+    // 'sensitive' was the default classification; keeping it in the digest leaves existing derived
+    // state hashes valid now that sensitivity levels are gone.
+    return {...row,revision:revision.revision,state_hash:digest([revision.state_hash,'sensitive',override || null]),evidence_kind:revision.evidence_kind,scope_key:scopeKey(row)};
   }
   validateItem(item){const row=this.currentSource(item.user_id,item.memory_id);return row && row.revision===item.revision && row.state_hash===item.state_hash && row.scope_key===item.scope_key?row:null;}
   taxonomy(input){

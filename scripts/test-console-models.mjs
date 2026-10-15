@@ -33,7 +33,7 @@ try{
  check('Unconfigured processing cannot be launched',await page.locator('.model-pipeline button:enabled').count()===0);await shot('models-unconfigured');
  for(const kind of ['organizer','embedder']){
   await begin('models.save',kind);await op.locator('[name=base_url]').fill(cfg.model_url);await op.locator('[name=model]').fill('synthetic-browser-'+kind);
-  await op.locator('[name=api_key]').fill('synthetic-local-only-key');await op.locator('[name=enabled]').check();await op.locator('[name=egress_approved]').check();await pick('sensitivity','sensitive');
+  await op.locator('[name=api_key]').fill('synthetic-local-only-key');await op.locator('[name=enabled]').check();await op.locator('[name=egress_approved]').check();
   if(kind==='embedder'){await op.locator('[name=dimensions]').fill('3');await op.locator('[name=query_approved]').check();}
   await shot('configure-'+kind);check(kind+' configuration persists through real BFF',(await submit()).status==='saved');await close();
   await begin('models.test',kind);const result=await submit();check(kind+' capability tests succeed with synthetic data only',result.status==='verified'&&result.real_memory_sent===false&&result.checks.length===2);await close();

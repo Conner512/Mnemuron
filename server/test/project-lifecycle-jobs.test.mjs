@@ -74,7 +74,7 @@ test('LJ-04: the organizer repair retry is not sent once a source\'s project was
   const model=organizer(input=>{calls++;if(calls===1){w.del('proj-lj-dead');return 'not json';}return classify(input);},{retry:{max_attempts:3,base_ms:100,max_ms:10000,repair_once:true}});
   const jobs=new MemoryJobs(w.s);
   // Only the deleted-to-be project's record is scheduled, so the first model call is for it.
-  w.del('proj-lj-live');w.lifecycle('proj-lj-src','deleted');w.s.db.prepare("INSERT INTO memory_privacy VALUES (?,?, 'secret')").run(OWNER,w.m.neutral);
+  w.del('proj-lj-live');w.lifecycle('proj-lj-src','deleted');w.s.db.prepare("UPDATE memories SET status='retracted' WHERE user_id=? AND memory_id=?").run(OWNER,w.m.neutral);
   const plan=schedule(w,jobs,model);assert.deepEqual(itemIds(w,plan.jobs),[w.m.dead]);
   const [result]=await new MemoryWorker(w.s,jobs,model).drain();
   assert.equal(result.state,'stale');assert.equal(jobs.get(result.job_id).last_error_code,'STALE_INPUT');
@@ -96,7 +96,7 @@ test('LJ-05: publication revalidates every source inside its transaction, at eac
   for(const type of ['summary','classification']){
     const v=world(t),vjobs=new MemoryJobs(v.s),vmodel=organizer(type==='summary'?quoteAll:classify);
     // Only the deleted-to-be project's record is scheduled, so it is the one job to claim.
-    v.del('proj-lj-live');v.lifecycle('proj-lj-src','deleted');v.s.db.prepare("INSERT INTO memory_privacy VALUES (?,?, 'secret')").run(OWNER,v.m.neutral);
+    v.del('proj-lj-live');v.lifecycle('proj-lj-src','deleted');v.s.db.prepare("UPDATE memories SET status='retracted' WHERE user_id=? AND memory_id=?").run(OWNER,v.m.neutral);
     const plan=schedule(v,vjobs,vmodel,type);assert.deepEqual(itemIds(v,plan.jobs),[v.m.dead]);
     const job=vjobs.claim('lj-05',{userId:OWNER});assert.equal(job.job_id,plan.jobs[0]);
     const items=vjobs.items(job),outputs=(type==='summary'?quoteAll:classify)({sources:items.map(i=>({...v.s.derivedMemory.validateItem(i)}))}).results;

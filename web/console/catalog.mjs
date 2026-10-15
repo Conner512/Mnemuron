@@ -116,14 +116,9 @@ Object.assign(catalog["zh-CN"],{
   "editMemory": "修订记忆",
   "retractMemory": "撤回记忆",
   "classifyMemory": "手动分类",
-  "sensitivity": "敏感级别",
   "reason": "变更原因",
   "category": "分类",
-  "sensitive": "敏感",
   "internal": "内部",
-  "public": "公开可外发",
-  "secret": "机密（不外发）",
-  "sensitivityNote": "敏感级别决定这条记忆能否发送给已批准的模型（整理与向量）；机密记录从不外发，也不会被 ChatGPT 读取。更改后相关摘要和索引会失效。",
   "retractNote": "撤回后不再作为有效记忆检索；原文和历史保留，不物理删除。",
   "jobType": "整理类型",
   "classification": "自动分类",
@@ -159,7 +154,6 @@ Object.assign(catalog["zh-CN"],{
   "dailyRequests": "每日调用上限",
   "outputTokens": "输出 Token 上限",
   "batchSize": "每批记忆数量",
-  "modelSensitivity": "模型允许处理的最高敏感级别",
   "approveEgress": "我允许将所选级别的记忆发送至此模型",
   "approveQuery": "我也允许发送搜索词以进行语义检索",
   "keyWriteOnlyNote": "密钥仅可写入，服务不会返回原密钥。跨站点更换服务地址时，必须重新填写密钥。",
@@ -324,7 +318,6 @@ Object.assign(catalog["zh-CN"],{
   "memory.correct": "修订记忆",
   "memory.retract": "撤回记忆",
   "memory.classify": "手动分类",
-  "memory.sensitivity": "调整敏感级别",
   "memory.visibility": "ChatGPT 读取许可",
   "jobs.schedule": "提交整理任务",
   "jobs.retry": "重试任务",
@@ -378,14 +371,9 @@ Object.assign(catalog["en"],{
   "editMemory": "Correct memory",
   "retractMemory": "Retract memory",
   "classifyMemory": "Set category",
-  "sensitivity": "Sensitivity",
   "reason": "Reason",
   "category": "Category",
-  "sensitive": "Sensitive",
   "internal": "Internal",
-  "public": "Public / egress allowed",
-  "secret": "Secret (no egress)",
-  "sensitivityNote": "Sensitivity decides whether approved models (organizing, embeddings) may receive this memory. Secret records are never sent to a model or read by ChatGPT. Changing it invalidates derived summaries and indexes.",
   "retractNote": "Retraction removes active recall while retaining content and history. No physical deletion.",
   "jobType": "Job type",
   "classification": "Classification",
@@ -421,7 +409,6 @@ Object.assign(catalog["en"],{
   "dailyRequests": "Daily request ceiling",
   "outputTokens": "Output token limit",
   "batchSize": "Batch size",
-  "modelSensitivity": "Highest allowed model sensitivity",
   "approveEgress": "I approve sending selected memory classes to this model",
   "approveQuery": "I also approve sending search queries for semantic retrieval",
   "keyWriteOnlyNote": "Keys are write-only. Changing the service origin clears the old key unless a new key is supplied.",
@@ -586,7 +573,6 @@ Object.assign(catalog["en"],{
   "memory.correct": "Correct memory",
   "memory.retract": "Retract memory",
   "memory.classify": "Classify memory",
-  "memory.sensitivity": "Change sensitivity",
   "memory.visibility": "ChatGPT access",
   "jobs.schedule": "Schedule organization",
   "jobs.retry": "Retry job",
@@ -618,8 +604,8 @@ Object.assign(catalog["en"],{
 Object.assign(catalog['zh-CN'],{modelNotConfigured:'尚未配置',nativeSchema:'服务支持原生 JSON Schema',searchMode:'检索方式',lexical:'关键词检索',hybrid:'混合检索',semantic:'语义检索',workerStatus:'后台执行器',workerDisabledNote:'任务已保存。请在“功能与处理”中预览并明确授权批次。'});
 Object.assign(catalog.en,{modelNotConfigured:'Not configured',nativeSchema:'Service supports native JSON Schema',searchMode:'Search mode',lexical:'Lexical',hybrid:'Hybrid',semantic:'Semantic',workerStatus:'Worker',workerDisabledNote:'Jobs are stored durably. An operator must enable the worker before queued jobs can run.'});
 
-Object.assign(catalog['zh-CN'],{CSRF_REFRESH_REQUIRED:'表单校验已更新，请重新确认本次操作',EXPORT_SIZE_LIMIT:'导出超过 16 MiB，请使用运维备份或分批导出',BUDGET_EXHAUSTED:'今日模型调用额度已用尽',WEB_VISIBILITY_DENIED:'此分类或版本不允许授权；secret 不会发送给 ChatGPT',CONSOLE_REQUEST_FAILED:'操作未完成，请核对输入和服务状态',MODEL_URL_DENIED:'服务地址不符合网络安全策略'});
-Object.assign(catalog.en,{CSRF_REFRESH_REQUIRED:'Form protection refreshed; confirm this operation again',EXPORT_SIZE_LIMIT:'Export exceeds 16 MiB; use operator backup or split exports',BUDGET_EXHAUSTED:'Daily model-call limit reached',WEB_VISIBILITY_DENIED:'This class or revision cannot be granted; secret is never sent to ChatGPT',CONSOLE_REQUEST_FAILED:'Operation did not complete; check input and service state',MODEL_URL_DENIED:'Service URL is denied by network policy'});
+Object.assign(catalog['zh-CN'],{CSRF_REFRESH_REQUIRED:'表单校验已更新，请重新确认本次操作',EXPORT_SIZE_LIMIT:'导出超过 16 MiB，请使用运维备份或分批导出',BUDGET_EXHAUSTED:'今日模型调用额度已用尽',WEB_VISIBILITY_DENIED:'这个版本不能授权。',CONSOLE_REQUEST_FAILED:'操作未完成，请核对输入和服务状态',MODEL_URL_DENIED:'服务地址不符合网络安全策略'});
+Object.assign(catalog.en,{CSRF_REFRESH_REQUIRED:'Form protection refreshed; confirm this operation again',EXPORT_SIZE_LIMIT:'Export exceeds 16 MiB; use operator backup or split exports',BUDGET_EXHAUSTED:'Daily model-call limit reached',WEB_VISIBILITY_DENIED:'This revision cannot be granted.',CONSOLE_REQUEST_FAILED:'Operation did not complete; check input and service state',MODEL_URL_DENIED:'Service URL is denied by network policy'});
 
 Object.assign(catalog['zh-CN'],{
   registrationDisabled:'当前暂未开放注册。请联系平台管理员；已有账户可继续登录。',
@@ -715,9 +701,9 @@ Object.assign(catalog['zh-CN'],{
  featOVW03:'待处理事项',featOVW03Note:'把需要你处理的事集中到一处：失败的整理任务、即将过期的连接凭证、等待确认的接续。',
  featMEM01:'检索与筛选',featMEM01Note:'词法、混合与语义检索，可按分类和状态筛选。',
  featMEM02:'详情、来源与修订历史',featMEM02Note:'分页读取完整正文，追溯每条来源和历史版本。',
- featMEM03:'新建记忆',featMEM03Note:'手动保存一条记忆，指定类型、作用域和敏感级别。',
+ featMEM03:'新建记忆',featMEM03Note:'手动保存一条记忆，指定类型和作用域。',
  featMEM04:'修订与撤回',featMEM04Note:'修订会生成新版本替代旧版本；撤回会保留历史。',
- featMEM05:'分类与敏感级别',featMEM05Note:'逐条调整分类，以及决定能否发送给模型处理的敏感级别。',
+ featMEM05:'分类',featMEM05Note:'逐条调整记忆的分类。',
  featMEM06:'批量整理',featMEM06Note:'选中多条记忆后一次分类或撤回；逐条核对版本，并返回每一条的结果。',
  featMEM07:'版本对比',featMEM07Note:'并排比较同一条记忆的两个版本，标出新增和删除的内容。',
  featSUM01:'分类索引与派生摘要',featSUM01Note:'浏览分类和摘要；每一句摘要都链接到来源记忆的具体版本。',
@@ -755,10 +741,10 @@ Object.assign(catalog['zh-CN'],{
  featSTO02:'导入为新记忆',featSTO02Note:'从导出文件导入，全部作为新记忆，不覆盖现有记录。',
  featSTO03:'存储用量',featSTO03Note:'记忆、来源、事件和版本的数量。',
  featSTO04:'整库备份与恢复',featSTO04Note:'网页端不提供。整库备份和恢复由运维在服务器上执行，并单独校验。',
- readPolicyUniform:'ChatGPT 与其他智能体读取一致',readPolicyUniformOn:'已启用：ChatGPT 与本账户其他已授权的智能体读取同样的有效记忆（机密级别除外）。已修订、已撤回的历史版本仍按原有的逐条规则处理。',readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有的逐条授权规则读取。启用需要运维单独确认。',readPolicyOperator:'控制台不能更改这项设置，也不再提供逐条的 ChatGPT 可见性开关。',
+ readPolicyUniform:'ChatGPT 与其他智能体读取一致',readPolicyUniformOn:'已启用：ChatGPT 与本账户其他已授权的智能体读取同样的有效记忆。已修订、已撤回的历史版本仍按原有的逐条规则处理。',readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有规则读取（逐条授权的记忆）。启用需要运维单独确认。',readPolicyOperator:'控制台不能更改这项设置，也不再提供逐条的 ChatGPT 可见性开关。',
  'memory.web_policy':'ChatGPT 读取范围',
  connChatGPTWeb:'插件连接',connChatGPTWebNote:'通过系统预置的插件连接读取你的记忆，不限于浏览器。目前由 ChatGPT 插件使用：每次在 ChatGPT 中授权都会留下一条授权记录；撤销后需要在 ChatGPT 中重新连接。',
- connAuthorized:'已授权',connNotAuthorized:'未授权',connReadScope:'读取范围',connReadAll:'全部记忆（机密除外）',connReadGranted:'仅逐条授权的记忆',connAdjust:'调整',
+ connAuthorized:'已授权',connNotAuthorized:'未授权',connReadScope:'读取范围',connReadAll:'全部记忆',connReadGranted:'仅逐条授权的记忆',connAdjust:'调整',
  connGrantsLabel:'授权记录',connFirstAuthorized:'最早授权',connLastActivity:'最近活动',connGrantList:'查看授权记录',connAuthorizedAt:'授权时间',
  connDevices:'Agent 与设备',connDevicesNote:'ChatGPT / Codex 插件、OpenClaw、Hermes 等 Agent 各用一把独立的密钥连接。撤销后该设备立即断开，需要重新配置密钥才能继续使用；已保存的记忆不受影响。',
  connNoDevices:'还没有 Agent 连接。',connAgentColumn:'Agent',connRevokeDevice:'撤销密钥',
@@ -822,9 +808,9 @@ Object.assign(catalog.en,{
  featOVW03:'Needs attention',featOVW03Note:'Everything waiting on you in one place: failed jobs, expiring connection credentials and resumes awaiting confirmation.',
  featMEM01:'Search and filters',featMEM01Note:'Lexical, hybrid and semantic search with category and status filters.',
  featMEM02:'Detail, sources and revisions',featMEM02Note:'Page through the full text and trace every source and past revision.',
- featMEM03:'New memory',featMEM03Note:'Save a memory by hand with a type, scope and sensitivity.',
+ featMEM03:'New memory',featMEM03Note:'Save a memory by hand with a type and scope.',
  featMEM04:'Correct and retract',featMEM04Note:'A correction creates a replacement revision; a retraction keeps history.',
- featMEM05:'Category and sensitivity',featMEM05Note:'Adjust the category per memory, and the sensitivity that decides whether models may process it.',
+ featMEM05:'Category',featMEM05Note:'Adjust the category per memory.',
  featMEM06:'Bulk organize',featMEM06Note:'Classify or retract several memories at once. Each item is version-checked and reported.',
  featMEM07:'Compare revisions',featMEM07Note:'Compare two revisions of a memory side by side with additions and removals marked.',
  featSUM01:'Category index and summaries',featSUM01Note:'Browse categories and summaries; every claim links to the source memory revision.',
@@ -862,10 +848,10 @@ Object.assign(catalog.en,{
  featSTO02:'Import as new memories',featSTO02Note:'Import an export file. Everything becomes new memories; nothing is overwritten.',
  featSTO03:'Storage usage',featSTO03Note:'Counts of memories, sources, events and revisions.',
  featSTO04:'Whole-database backup and restore',featSTO04Note:'Not offered on the web. Operators back up and restore the database on the server and verify it separately.',
- readPolicyUniform:'ChatGPT reads like other agents',readPolicyUniformOn:'On: ChatGPT reads the same active memories as the other authorized agents of this account, except secret ones. Corrected and retracted history keeps the earlier per-memory rules.',readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier per-memory grants. Enabling it needs a separate operator confirmation.',readPolicyOperator:'The console cannot change this setting and no longer offers per-memory ChatGPT visibility switches.',
+ readPolicyUniform:'ChatGPT reads like other agents',readPolicyUniformOn:'On: ChatGPT reads the same active memories as the other authorized agents of this account. Corrected and retracted history keeps the earlier per-memory rules.',readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (memories allowed one by one). Enabling it needs a separate operator confirmation.',readPolicyOperator:'The console cannot change this setting and no longer offers per-memory ChatGPT visibility switches.',
  'memory.web_policy':'ChatGPT read scope',
  connChatGPTWeb:'Plugin connection',connChatGPTWebNote:'Reads your memories through the preconfigured plugin connection; it is not limited to a browser. It is currently used by the ChatGPT plugin: every authorization in ChatGPT is recorded here, and after revoking you reconnect from ChatGPT.',
- connAuthorized:'Authorized',connNotAuthorized:'Not authorized',connReadScope:'Read scope',connReadAll:'All memories except secret',connReadGranted:'Only memories allowed one by one',connAdjust:'Change',
+ connAuthorized:'Authorized',connNotAuthorized:'Not authorized',connReadScope:'Read scope',connReadAll:'All memories',connReadGranted:'Only memories allowed one by one',connAdjust:'Change',
  connGrantsLabel:'Authorizations',connFirstAuthorized:'First authorized',connLastActivity:'Last activity',connGrantList:'Show authorizations',connAuthorizedAt:'Authorized',
  connDevices:'Agents and devices',connDevicesNote:'Agents such as the ChatGPT / Codex plugin, OpenClaw and Hermes each connect with their own key. Revoking disconnects that device at once; it needs a new key to reconnect. Saved memories are not affected.',
  connNoDevices:'No agents connected yet.',connAgentColumn:'Agent',connRevokeDevice:'Revoke key',
@@ -1047,14 +1033,14 @@ Object.assign(catalog['zh-CN'],{
  modelEndpoint:'接口与模型',modelLimits:'用量与处理设置',modelPrivacy:'数据外发授权',
  modelUrlHelp:'OpenAI 兼容服务通常填写以 /v1 结尾的基础地址，不填 /chat/completions 或 /embeddings。Ollama 填服务根地址。私有网络需管理员预先允许。',
  dimensionsHelp:'填写模型支持的维度；更换模型、版本或维度后需要重新建立索引。旧索引不会被当作新模型的索引使用。',
- modelSecretExcluded:'机密记忆永不发给模型。这里的外发授权仅用于整理与向量化，不会改变 ChatGPT 等云端连接的记忆读取权限。',
+ modelSecretExcluded:'打开外发后，记忆正文可能发送给这个模型服务（用于整理与向量化）。这里的外发授权不会改变 ChatGPT 等云端连接的记忆读取权限。',
  testCapabilities:'测试实际能力',probeNotRun:'当前配置尚未测试',probeVerified:'当前配置测试通过',probeRunning:'正在测试当前配置',probeFailed:'当前配置测试失败',probeSkipped:'未执行',
  modelProbeBoundary:'测试只发送合成文本，也会消耗模型额度。测试通过不代表后台处理或 Qdrant 已启用；修改配置后需重新测试。',
  organizerProbeNote:'依次验证归类和有来源依据的汇总，最多 2 次模型调用，不写入测试记忆。',
  embedderProbeNote:'验证文档向量及输出维度；若已允许搜索词外发，再验证查询向量。最多 2 次调用，不访问个人记忆或 Qdrant。',
  modelProbePassed:'合成数据测试通过。请关闭此窗口查看已验证的能力；处理真实记忆需要单独启动任务。',
  modelSavedNext:'配置已保存，尚未开始处理记忆。请先测试实际能力，再启动所需任务。',
- modelNoWork:'没有符合本次条件的新任务。请检查敏感级别和汇总周期；默认不包含尚未结束的日期／周。',
+ modelNoWork:'没有符合本次条件的新任务。请检查汇总周期；默认不包含尚未结束的日期／周。',
  modelQueued:'任务已加入队列，尚未完成。请在整理任务页查看进度；后台处理关闭时不会执行。',
  vectorScheduleNote:'将当前账户允许外发的记忆送到已配置的向量模型，可能产生费用。新索引完整建立后才切换，之后由后台增量同步；原文和云端读取权限不变。',
  summaryPeriods:'汇总周期',daily_weekly:'每日与每周',daily:'每日',weekly:'每周',vector:'向量化',
@@ -1068,7 +1054,7 @@ Object.assign(catalog['zh-CN'],{
  AUTH_FAILED:'模型服务拒绝认证，请检查密钥和模型访问权限。',HTTP_REJECTED:'模型服务拒绝请求，请核对接口协议、基础地址和模型名称。',
  INVALID_MODEL_OUTPUT:'模型未返回符合要求的结构化结果。',INVALID_JSON:'模型未返回有效 JSON；请核对模型与结构化输出设置。',INCOMPLETE_OUTPUT:'模型输出不完整，请检查输出上限或模型限制。',
  REQUEST_TIMEOUT:'模型测试超时，请检查服务可用性后重试。',NETWORK_ERROR:'无法连接模型服务，请检查网络和服务地址。',REMOTE_UNAVAILABLE:'模型服务暂时不可用。',DNS_UNAVAILABLE:'模型域名无法解析。',
- RATE_LIMITED:'模型服务限流，请稍后再试。',REDIRECT_DENIED:'为保护密钥，不跟随模型服务重定向；请填写最终接口地址。',ADDRESS_DENIED:'模型地址不在批准范围内；私有地址需管理员明确允许。',SENSITIVITY_DENIED:'所选数据敏感级别未获模型处理授权。',succeeded:'已完成',MODEL_TEST_INTERRUPTED:'测试已中断或未收到完成结果，请重新测试。'
+ RATE_LIMITED:'模型服务限流，请稍后再试。',REDIRECT_DENIED:'为保护密钥，不跟随模型服务重定向；请填写最终接口地址。',ADDRESS_DENIED:'模型地址不在批准范围内；私有地址需管理员明确允许。',SENSITIVITY_DENIED:'旧版本的敏感级别限制阻止了这次处理；敏感级别已取消，请重新安排任务。',succeeded:'已完成',MODEL_TEST_INTERRUPTED:'测试已中断或未收到完成结果，请重新测试。'
 });
 Object.assign(catalog.en,{
  organizerPurpose:'Use an LLM to classify memories and produce daily/weekly source-linked summaries. Originals and manual categories are preserved.',
@@ -1077,14 +1063,14 @@ Object.assign(catalog.en,{
  modelEndpoint:'Endpoint and model',modelLimits:'Usage and processing',modelPrivacy:'Data egress approval',
  modelUrlHelp:'For OpenAI-compatible services, usually use the base URL ending in /v1, not /chat/completions or /embeddings. Use the root URL for Ollama. Private endpoints need prior operator approval.',
  dimensionsHelp:'Use dimensions supported by the model. Rebuild after changing the model, revision or dimensions. Old indexes are not treated as compatible with a new model.',
- modelSecretExcluded:'Secret memories are never sent. Processing approval does not change memory access for ChatGPT or other cloud connections.',
+ modelSecretExcluded:'With egress on, memory text may be sent to this model service for organizing and embeddings. This approval does not change memory access for ChatGPT or other cloud connections.',
  testCapabilities:'Test capabilities',probeNotRun:'Current configuration not tested',probeVerified:'Current configuration verified',probeRunning:'Testing current configuration',probeFailed:'Current configuration test failed',probeSkipped:'Not tested',
  modelProbeBoundary:'Tests send synthetic text only and consume model quota. Passing does not enable background processing or Qdrant. Configuration changes invalidate test results.',
  organizerProbeNote:'Tests classification and source-grounded summaries with at most 2 model calls. No test memories are saved.',
  embedderProbeNote:'Tests document vectors and dimensions, plus query vectors when query egress is approved. At most 2 calls; no personal memories or Qdrant access.',
  modelProbePassed:'Synthetic tests passed. Close to inspect the verified capabilities; processing real memories requires a separate action.',
  modelSavedNext:'Configuration saved. No memory processing started. Test capabilities before starting jobs.',
- modelNoWork:'No new jobs match these conditions. Check sensitivity and periods; open days/weeks are excluded by default.',
+ modelNoWork:'No new jobs match these conditions. Check the periods; open days/weeks are excluded by default.',
  modelQueued:'Queued, not completed. Inspect Jobs for progress; disabled workers will not execute it.',
  vectorScheduleNote:'Send approved memories of this account to its embedding model; charges may apply. Switch only after a complete index is built, then synchronize incrementally in the background. Originals and cloud visibility are unchanged.',
  summaryPeriods:'Summary periods',daily_weekly:'Daily and weekly',daily:'Daily',weekly:'Weekly',vector:'Vector indexing',
@@ -1098,7 +1084,7 @@ Object.assign(catalog.en,{
  AUTH_FAILED:'Model authentication failed. Check the key and model permissions.',HTTP_REJECTED:'Model request rejected. Check protocol, base URL and model name.',
  INVALID_MODEL_OUTPUT:'The model did not return the required structured result.',INVALID_JSON:'Invalid JSON returned. Check model and structured-output settings.',INCOMPLETE_OUTPUT:'Incomplete output. Check output limits or model constraints.',
  REQUEST_TIMEOUT:'Model test timed out. Check availability before retrying.',NETWORK_ERROR:'Cannot connect to the model service.',REMOTE_UNAVAILABLE:'Model service is temporarily unavailable.',DNS_UNAVAILABLE:'Model hostname could not be resolved.',
- RATE_LIMITED:'Model service rate limit reached. Retry later.',REDIRECT_DENIED:'Redirects are blocked to protect keys. Use the final endpoint URL.',ADDRESS_DENIED:'Model address is not approved. Private addresses need explicit operator approval.',SENSITIVITY_DENIED:'This sensitivity level is not approved for model processing.',succeeded:'Completed',MODEL_TEST_INTERRUPTED:'Test was interrupted or did not finish. Run it again.'
+ RATE_LIMITED:'Model service rate limit reached. Retry later.',REDIRECT_DENIED:'Redirects are blocked to protect keys. Use the final endpoint URL.',ADDRESS_DENIED:'Model address is not approved. Private addresses need explicit operator approval.',SENSITIVITY_DENIED:'A sensitivity limit from an earlier version blocked this job; sensitivity levels were removed, so schedule it again.',succeeded:'Completed',MODEL_TEST_INTERRUPTED:'Test was interrupted or did not finish. Run it again.'
 });
 
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;
@@ -1188,7 +1174,7 @@ Object.assign(catalog['zh-CN'],{
  IMPORT_INVALID_JSON:'文件不是有效的 JSON，可能已损坏或不完整。请重新导出后再导入，本次未导入任何记录。',INVALID_IMPORT:'文件格式不是 Mnemuron 个人导出（mnemuron-personal-portable-v1），本次未导入任何记录。',
  IMPORT_EMPTY:'文件中没有可导入的记录，本次未导入任何记录。',IMPORT_FILE_TOO_LARGE:'文件超过 16 MiB，请分批导出后再导入。',
  batchRetractCount:'条记忆将被撤回（保留原文和历史，可在“已撤回”中查看）：',batchClassifyCount:'条记忆将被分类：',
- resultCreated:'已保存新记忆。',resultCorrected:'已保存修订，原记录保留为历史版本。',resultRetracted:'已撤回，原文和历史仍保留。',resultSensitivity:'敏感级别已更新。',
+ resultCreated:'已保存新记忆。',resultCorrected:'已保存修订，原记录保留为历史版本。',resultRetracted:'已撤回，原文和历史仍保留。',
  resultBatchRetract:'已撤回',resultBatchClassify:'已分类',resultFailedCount:'未处理',
  MEMORY_NOT_FOUND:'找不到这条记忆，可能已不在当前账户中。',JOB_NOT_RETRYABLE:'这个任务当前不能重试。',JOB_TERMINAL:'已完成的任务不能取消。',JOB_NOT_FOUND:'找不到这个任务。',
  IMPORT_CONFLICT:'同一条导出记录的内容与之前导入的版本不同，已停止导入。请检查文件来源。',INVALID_CONSOLE_INPUT:'输入格式不正确，请刷新页面后重试。',INVALID_PAYLOAD:'输入内容不符合要求，请检查后重试。',
@@ -1199,7 +1185,7 @@ Object.assign(catalog.en,{
  IMPORT_INVALID_JSON:'The file is not valid JSON; it may be damaged or incomplete. Export again and retry. Nothing was imported.',INVALID_IMPORT:'The file is not a Mnemuron personal export (mnemuron-personal-portable-v1). Nothing was imported.',
  IMPORT_EMPTY:'The file contains no records to import. Nothing was imported.',IMPORT_FILE_TOO_LARGE:'The file is larger than 16 MiB; export in smaller parts.',
  batchRetractCount:'memories will be retracted (text and history are kept and remain visible under Retracted):',batchClassifyCount:'memories will be classified:',
- resultCreated:'New memory saved.',resultCorrected:'Correction saved; the previous text is kept as history.',resultRetracted:'Retracted; the text and history are kept.',resultSensitivity:'Sensitivity updated.',
+ resultCreated:'New memory saved.',resultCorrected:'Correction saved; the previous text is kept as history.',resultRetracted:'Retracted; the text and history are kept.',
  resultBatchRetract:'Retracted',resultBatchClassify:'Classified',resultFailedCount:'not processed',
  MEMORY_NOT_FOUND:'This memory could not be found; it may no longer be in this account.',JOB_NOT_RETRYABLE:'This job cannot be retried now.',JOB_TERMINAL:'A completed job cannot be cancelled.',JOB_NOT_FOUND:'This job could not be found.',
  IMPORT_CONFLICT:'A record in the file differs from the version imported earlier, so the import stopped. Check where the file came from.',INVALID_CONSOLE_INPUT:'The input format is invalid; refresh the page and try again.',INVALID_PAYLOAD:'The input does not meet the requirements; check it and try again.',
@@ -1236,12 +1222,12 @@ Object.assign(catalog.en,{originalTag:'Original tag',originalTagNote:'A label at
 
 // Embedding first run: frozen manifest, finite budget, confirmed build, explicit activation and rollback.
 Object.assign(catalog['zh-CN'],{built:'已建立，等待启用',deactivated:'已停用','vector.prepare':'准备首次建立索引','vector.activate':'启用向量索引','vector.deactivate':'停用向量索引（回滚）',
- firstRun:'首次建立向量索引',firstRunNote:'只为冻结清单中的有效记录生成向量；不含历史版本、机密记录或其他账户。建立完成后需要手动启用，之后不会自动补充新记忆。',
+ firstRun:'首次建立向量索引',firstRunNote:'只为冻结清单中的有效记录生成向量；不含历史版本或其他账户。建立完成后需要手动启用，之后不会自动补充新记忆。',
  vectorCollection:'向量集合',manifestCount:'清单记录数',manifestDigest:'清单摘要',manifestProgress:'进度',indexedShort:'已完成',pendingShort:'待处理',staleShort:'已变更跳过',serving:'正在用于检索',
  firstRunBudget:'首次调用预算（已用 / 总数）',prepareFirstRun:'准备并冻结清单',startFirstRunBuild:'确认并开始建立',activateIndex:'启用索引',deactivateIndex:'停用索引（回滚）',
  firstRunPrepareNote:'冻结当前可发送给向量模型的有效记录清单，并设定一次性的调用总预算。此步骤不会调用模型。之后请先运行“测试模型接口”确认向量维度。',
  firstRunBudgetField:'调用总预算（1–150，包括测试、建立、重试和查询）',
- firstRunSendNote:'建立时，清单中每条记录的正文会发送到已配置的向量模型服务；机密记录从不发送。预算用完后所有向量调用都会停止，不会自动重试或补充。',
+ firstRunSendNote:'建立时，清单中每条记录的正文会发送到已配置的向量模型服务。预算用完后所有向量调用都会停止，不会自动重试或补充。',
  firstRunBuildNote:'请核对记录数和清单摘要，并输入你预期的记录数。数量或摘要不一致时不会开始。',firstRunExpectedCount:'预期记录数',
  activateIndexNote:'启用后，语义和混合检索会使用这个索引。新记忆不会自动加入。',deactivateIndexNote:'停用后检索回到关键词方式。索引和向量都会保留，可以再次启用。',
  firstRunPrepared:'清单已冻结。请先测试模型接口，再确认开始建立。',indexActivated:'索引已启用。',indexDeactivated:'索引已停用，检索已回到关键词方式。',
@@ -1253,12 +1239,12 @@ Object.assign(catalog['zh-CN'],{built:'已建立，等待启用',deactivated:'�
  MANIFEST_CHANGED:'清单与核对的不一致，未开始建立。',MANIFEST_EMPTY:'没有可发送给向量模型的有效记录。',NOT_FIRST_RUN:'这不是首次建立的索引。',FIRST_RUN_ACTIVE:'首次建立模式下不能运行完整重建。',
  FIRST_RUN_IN_PROGRESS:'首次建立已经开始，请先启用或停用它。',BUDGET_ALREADY_SET:'首次调用预算已设定，不能更改。',BUDGET_REQUIRED:'请先准备首次建立。'});
 Object.assign(catalog.en,{built:'Built, awaiting activation',deactivated:'Deactivated','vector.prepare':'Prepare first index build','vector.activate':'Activate vector index','vector.deactivate':'Deactivate vector index (rollback)',
- firstRun:'First vector index build',firstRunNote:'Embeds only the active records in a frozen list: no history, secret records or other accounts. Activation is a separate step, and new memories are not added automatically afterwards.',
+ firstRun:'First vector index build',firstRunNote:'Embeds only the active records in a frozen list: no history or other accounts. Activation is a separate step, and new memories are not added automatically afterwards.',
  vectorCollection:'Vector collection',manifestCount:'Records in the list',manifestDigest:'List digest',manifestProgress:'Progress',indexedShort:'done',pendingShort:'waiting',staleShort:'changed, skipped',serving:'Used for search',
  firstRunBudget:'First-run call budget (used / total)',prepareFirstRun:'Prepare and freeze the list',startFirstRunBuild:'Confirm and build',activateIndex:'Activate index',deactivateIndex:'Deactivate index (rollback)',
  firstRunPrepareNote:'Freezes the list of active records that may be sent to the embedding model and sets a one-time total call budget. No model is called. Then run “Test model API” to confirm the dimensions.',
  firstRunBudgetField:'Total call budget (1–150, covering tests, build, retries and queries)',
- firstRunSendNote:'The build sends the text of each listed record to the configured embedding service; secret records are never sent. When the budget is used up, every embedding call stops: nothing retries or catches up automatically.',
+ firstRunSendNote:'The build sends the text of each listed record to the configured embedding service. When the budget is used up, every embedding call stops: nothing retries or catches up automatically.',
  firstRunBuildNote:'Check the record count and list digest, then enter the count you expect. Nothing starts if the count or digest differs.',firstRunExpectedCount:'Expected record count',
  activateIndexNote:'Semantic and hybrid search will use this index. New memories are not added automatically.',deactivateIndexNote:'Search returns to keywords. The index and its vectors are kept and can be activated again.',
  firstRunPrepared:'The list is frozen. Test the model API, then confirm the build.',indexActivated:'Index activated.',indexDeactivated:'Index deactivated; search uses keywords again.',
@@ -1271,13 +1257,13 @@ Object.assign(catalog.en,{built:'Built, awaiting activation',deactivated:'Deacti
  FIRST_RUN_IN_PROGRESS:'The first build already started; activate or deactivate it first.',BUDGET_ALREADY_SET:'The first-run budget is already set and cannot change.',BUDGET_REQUIRED:'Prepare the first build first.'});
 
 // Read scope as ChatGPT actually experiences it, including an earlier account-wide read-all setting.
-Object.assign(catalog['zh-CN'],{connReadActiveUniform:'与其他智能体一致的有效记忆（机密除外）',
- readPolicyLegacyReadAll:'尚未启用统一读取，但此账户之前开启了“允许 ChatGPT 读取全部记忆”：ChatGPT 可以读取全部记忆（机密及你明确设为私有的除外）。控制台已不能更改这项旧设置；如需关闭，请联系运维。',
- readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有规则读取（公开记忆和逐条授权的记忆）。启用需要运维单独确认。',
+Object.assign(catalog['zh-CN'],{connReadActiveUniform:'与其他智能体一致的有效记忆',
+ readPolicyLegacyReadAll:'尚未启用统一读取，但此账户之前开启了“允许 ChatGPT 读取全部记忆”：ChatGPT 可以读取全部记忆（你明确设为私有的除外）。控制台已不能更改这项旧设置；如需关闭，请联系运维。',
+ readPolicyUniformOff:'尚未启用：ChatGPT 仍按原有规则读取（逐条授权的记忆）。启用需要运维单独确认。',
  MANIFEST_EXCEEDS_BUDGET:'预算不足以覆盖接口测试和清单中每条记录各一次调用。',FIRST_RUN_EXISTS:'首次建立已经生成向量，请重新启用它；新的首次建立需要另行批准。'});
-Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other agents (except secret)',
- readPolicyLegacyReadAll:'Not enabled yet, but this account earlier turned on “ChatGPT may read all memories”: ChatGPT can read all memories except secret ones and those you explicitly kept private. The console can no longer change that setting; ask an operator to turn it off.',
- readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (public memories and memories allowed one by one). Enabling it needs a separate operator confirmation.',
+Object.assign(catalog.en,{connReadActiveUniform:'Active memories, like other agents',
+ readPolicyLegacyReadAll:'Not enabled yet, but this account earlier turned on “ChatGPT may read all memories”: ChatGPT can read all memories except those you explicitly made private. The console can no longer change this earlier setting; ask the operator to turn it off.',
+ readPolicyUniformOff:'Not enabled yet: ChatGPT still follows the earlier rules (memories allowed one by one). Enabling it needs a separate operator confirmation.',
  MANIFEST_EXCEEDS_BUDGET:'The budget cannot cover the probe and one call per listed record.',FIRST_RUN_EXISTS:'This first run already embedded records; activate it again. A new first run needs a separate approval.'});
 
 // Owner call limits per model kind: explicit "no limit" or a whole-number cap for today and in total.
@@ -1292,7 +1278,7 @@ Object.assign(catalog['zh-CN'],{'models.quota':'设置调用次数限制',setCal
  BUDGET_EXHAUSTED:'已达到模型调用上限（每日或累计）。',
  FIRST_RUN_BUDGET_EXHAUSTED:'首次建立的调用总预算已用完，语义检索不可用。这个预算不会重置；可以在“调用次数限制”中改用手动设置的累计上限。',
  firstRunBudgetField:'调用总预算（1–150，包括测试、建立、重试和查询；已设置手动累计上限时以手动上限为准）',
- firstRunSendNote:'建立时，清单中每条记录的正文会发送到已配置的向量模型服务；机密记录从不发送。达到调用上限后所有向量调用都会停止，不会自动重试或补充。'});
+ firstRunSendNote:'建立时，清单中每条记录的正文会发送到已配置的向量模型服务。达到调用上限后所有向量调用都会停止，不会自动重试或补充。'});
 Object.assign(catalog.en,{'models.quota':'Set call limits',setCallLimits:'Call limits',callLimits:'Call limits',
  callLimitsNote:'Set this model’s daily and total call limits. With no limit, every call is still counted; a limit of 0 allows no calls. Changing a limit never resets a count, never activates or rebuilds an index, and never retries or schedules work.',
  callLimitsBoundary:'“No limit” is about counts only and is not a new data egress approval: what is sent and where is still governed by the model’s egress approval.',
@@ -1304,7 +1290,7 @@ Object.assign(catalog.en,{'models.quota':'Set call limits',setCallLimits:'Call l
  BUDGET_EXHAUSTED:'Model call limit reached (daily or total).',
  FIRST_RUN_BUDGET_EXHAUSTED:'The first-run total call budget is used up; semantic search is unavailable. This budget is never reset; a manual total under “Call limits” can replace it.',
  firstRunBudgetField:'Total call budget (1–150, covering tests, build, retries and queries; a manual total limit, when set, applies instead)',
- firstRunSendNote:'The build sends the text of each listed record to the configured embedding service; secret records are never sent. When a call limit is reached, every embedding call stops: nothing retries or catches up automatically.'});
+ firstRunSendNote:'The build sends the text of each listed record to the configured embedding service. When a call limit is reached, every embedding call stops: nothing retries or catches up automatically.'});
 
 // Connection management: named wizard steps, guided choices and explicit destructive actions.
 Object.assign(catalog['zh-CN'],{

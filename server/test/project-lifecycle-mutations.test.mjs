@@ -196,8 +196,8 @@ test('LM-08: the read-only pre-check reports staleness without writing; restore 
   const stale=(await new MemoryWorker(store,jobs,model).drain()).filter(r=>r.state==='stale').map(r=>r.job_id);
   const withDoomed=stale.filter(id=>store.db.prepare('SELECT 1 FROM memory_job_items WHERE job_id=? AND memory_id=?').get(id,doomed));
   assert.ok(withDoomed.length>0);
-  // (Synthetic: the item's privacy changes to secret while the project is deleted, so it can no longer validate.)
-  store.db.prepare("INSERT OR REPLACE INTO memory_privacy VALUES (?,?,'secret')").run(w.user,doomed);
+  // (Synthetic: the item is retracted while the project is deleted, so it can no longer validate.)
+  store.db.prepare("UPDATE memories SET status='retracted' WHERE user_id=? AND memory_id=?").run(w.user,doomed);
   const res=await preview('restore','lm-chk');await act('projects.lifecycle_restore',{preview_id:res.preview_id});
   for(const id of withDoomed)assert.equal(jobs.get(id).state,'stale','a job with a still-invalid item is not rescheduled');
 });

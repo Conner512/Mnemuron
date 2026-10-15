@@ -259,3 +259,15 @@ The owner-control, handoff and lifecycle behavior tests remain required alongsid
 ## PR 14 search integration review
 
 The new declaration probe in `memory-retrieval.mjs` uses the resolved lifecycle scope and Web visibility before collecting aliases. Dynamic project/task metadata queries use the same live-project view and canonical member set; they are disabled for Web readers. `memory-entities/store.mjs` adds an owner-scoped memory lookup to reserve existing names, filtered by resolved lifecycle scope and readable source. Vector results still refresh scope after provider waits. These are read-only query-time additions; no lifecycle write or migration is added.
+
+## Sensitivity levels removed (schema 12)
+
+- `server/lib/memory/sources.mjs`: `setSensitivity()` is removed with the levels (two `memories` reads fewer).
+- `server/lib/memory/web-visibility.mjs`: the one-off `keep_private` → denial backfill is removed, because
+  `keep_private` no longer creates a denial (two `memories` and two `memory_revisions` reads fewer).
+- `server/lib/store/schema.mjs`: migration 12 (`retire-sensitivity-levels`) runs once at open, before any
+  reader. Its `memories`/`memory_revisions` reads select formerly public records for a current-revision grant,
+  and its `project_lifecycle` reads follow `merged_into` to the canonical project exactly as the resolver does,
+  so a memory whose project is effectively deleted never receives a grant (A-T32). The denial clean-up keeps
+  every owner-set denial and its local corrections; it writes no lifecycle-relevant table.
+
