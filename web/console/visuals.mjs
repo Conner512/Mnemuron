@@ -163,6 +163,8 @@ export function libraryView(t, {data, query = '', searchMode = 'hybrid', categor
     <div class="filter-actions"><button class="primary filter-submit" type="submit">${svg('search')}${i18n(t, 'search')}</button><button type="button" class="filter-reset quiet" data-reset-filters>${i18n(t, 'resetFilters')}</button></div></form>
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
+    ${data.retrieval?.degraded ? html`<p class="policy-box library-note" role="status">${i18n(t, 'searchDegradedNote')} <code>${data.retrieval.degradation_code || 'UNAVAILABLE'}</code></p>` : ''}
+    ${data.retrieval?.alias_ambiguous ? html`<p class="library-note" role="status">${i18n(t, 'searchAliasAmbiguous')}</p>` : ''}
     <div id="memory-rows">${table}</div>
     <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section>`);
 }
