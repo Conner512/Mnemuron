@@ -5,10 +5,10 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {generate} from 'otplib';
 import {identityFixture} from './helpers/identity-fixture.mjs';
+import {previousStepCode} from './helpers/totp.mjs';
 import {seconds,secretHash} from '../../../shared/oauth-common.mjs';
 import {fixture} from './fixture.mjs';
 import {createAuthorizationServer} from '../src/server.mjs';
-import {previousStepCode} from './helpers/totp.mjs';
 
 async function prepared(f,name='Synthetic_A') {
  const issued=f.identities.issueInvitations({count:1,ttlMinutes:10,issuer:'synthetic-operator'});

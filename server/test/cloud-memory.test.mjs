@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {memoryFixture,businessSnapshot} from './helpers/core-memory-fixture.mjs';
 import {MnemuronStore} from '../lib/store.mjs';
+import {CloudMemory} from '../lib/memory/cloud.mjs';
 
 async function setup(t){
   const f=await memoryFixture(t);
@@ -102,4 +103,47 @@ test('A-T18/20/23 and BASE-T04: gates, atomic grant failures and additive migrat
   assert.equal((await f.act('memory.save',f.save())).body.error_code,'CLOUD_MEMORY_DISABLED');
   const original=f.store.db.prepare('SELECT * FROM memories ORDER BY memory_id').all();
   const reopened=new MnemuronStore(f.databasePath);try{assert.deepEqual(reopened.db.prepare('SELECT * FROM memories ORDER BY memory_id').all(),original);}finally{reopened.close();}
+});
+
+// The owner's own administrative credential sets the read policy and per-memory grants.
+const ownerAdmin=f=>f.store.authenticate(f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-owner-admin',agentId:'synthetic-owner',
+  agentInstanceId:randomUUID(),scopes:['memory:read','memory:write','admin:tasks']}).api_key);
+
+test('A-T30: the read_all switch widens ChatGPT reads, never cloud corrections or retractions',async t=>{
+  const f=await setup(t),owned=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic owner note never granted to ChatGPT'}).memory;
+  const change=(action,extra={})=>f.act(action,{memory_id:owned.memory_id,expected_revision:1,reason:'synthetic',...extra});
+  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
+  assert.equal(f.store.webVisibility.visible({...f.a.auth,agent_id:'chatgpt-web'},owned.memory_id),true);
+  for(const [action,extra] of [['memory.retract',{}],['memory.supersede',{content:'Synthetic overwrite attempt',cloud_read:'keep_private'}]]){
+    const r=await change(action,extra);assert.equal(r.status,404,JSON.stringify(r.body));assert.equal(r.body.error_code,'MEMORY_NOT_FOUND');
+  }
+  assert.equal(f.store.db.prepare('SELECT status FROM memories WHERE memory_id=?').get(owned.memory_id).status,'active');
+  const {revision,state_hash}=f.store.revisions.latest(f.a.auth.user_id,owned.memory_id);
+  f.store.webVisibility.set(ownerAdmin(f),owned.memory_id,{allow:true,revision,state_hash});
+  const allowed=await change('memory.retract');assert.equal(allowed.status,200,JSON.stringify(allowed.body));assert.equal(allowed.body.memory_status,'retracted');
+});
+
+test('A-T31: a keep_private cloud save stays private under read_all until the owner grants it',async t=>{
+  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
+  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
+  const kept=await f.act('memory.save',f.save('Synthetic keep-private submission','keep_private'));
+  assert.equal(kept.status,200,JSON.stringify(kept.body));assert.equal(kept.body.cloud_readable,false);
+  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),false);
+  const replaced=await f.act('memory.save',f.save('Synthetic readable submission','allow_submitted_revision'));
+  assert.equal(replaced.body.cloud_readable,true);
+  const corrected=await f.act('memory.supersede',{memory_id:replaced.body.memory_id,expected_revision:1,reason:'synthetic',content:'Synthetic private correction',cloud_read:'keep_private'});
+  assert.equal(corrected.status,200,JSON.stringify(corrected.body));assert.equal(corrected.body.cloud_readable,false);
+  const {revision,state_hash}=f.store.revisions.latest(f.a.auth.user_id,kept.body.memory_id);
+  f.store.webVisibility.set(ownerAdmin(f),kept.body.memory_id,{allow:true,revision,state_hash});
+  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),true);
+});
+
+test('A-T32: keep_private saves committed before the read_all switch are backfilled as private',async t=>{
+  const f=await setup(t),reader={...f.a.auth,agent_id:'chatgpt-web'};
+  const kept=await f.act('memory.save',f.save('Synthetic earlier keep-private submission','keep_private'));
+  f.store.db.prepare('DELETE FROM memory_web_private').run(); // as stored before this table existed
+  f.store.webVisibility.setPolicy(ownerAdmin(f),{read_all:true,expected_revision:0});
+  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),true);
+  new CloudMemory(f.store);
+  assert.equal(f.store.webVisibility.visible(reader,kept.body.memory_id),false);
 });

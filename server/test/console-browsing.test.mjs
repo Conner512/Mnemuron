@@ -75,3 +75,21 @@ test('BROWSE-07: stable jobs/summary pagination and job detail never return a fo
  assert.equal((await f.get('jobs',{job_id:ids[0]})).body.job.job_id,ids[0]);
  assert.equal((await f.get('jobs',{job_id:foreignJob})).status,404);
 });
+test('BROWSE-08: overview preserves all supported categories and excludes other accounts and retracted records',async t=>{
+ const f=await setup(t),taxonomy={version:'synthetic-overview-v1',categories:['uncategorized',...Array.from({length:63},(_,i)=>`synthetic-${i}`)]};
+ f.store.memoryConfig.memory={taxonomy};
+ const organizer=f.store.issueCredential({userId:f.a.auth.user_id,deviceId:'synthetic-organizer',agentId:'test',agentInstanceId:'overview-categories',scopes:['memory:organize']});
+ const auth=f.store.authenticate(organizer.api_key);
+ for(const category of taxonomy.categories){
+  const memory=f.store.saveMemory(f.a.auth,{scope:'user',content:`Synthetic overview ${category}`}).memory;
+  f.store.derivedMemory.setCategory(auth,memory.memory_id,category,taxonomy);
+ }
+ const removed=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic retracted overview memory'}).memory;
+ f.store.retractMemory(f.a.auth,removed.memory_id);
+ f.store.saveMemory(f.other.auth,{scope:'user',content:'Synthetic foreign overview memory'});
+ const r=await f.get('overview');assert.equal(r.status,200);
+ assert.equal(r.body.insights.categories.length,64);
+ assert.equal(r.body.insights.categories.reduce((sum,c)=>sum+c.count,0),64);
+ assert.deepEqual(r.body.insights.categories.map(c=>c.value).sort(),[...taxonomy.categories].sort());
+ assert.ok(r.body.insights.categories.every(c=>c.count===1));
+});

@@ -17,7 +17,7 @@ test('BROWSE-UI-02: model, connection and security inspection is independent of 
 });
 test('BROWSE-UI-03: overview metrics and processing stages navigate to their real pages',()=>{
  const html=overviewView({counts:{memories:1,sources:2,summaries:0,jobs:0}},{t:text,memoryRows:()=>''});
- assert.match(html,/<a[^>]*class="card metric"[^>]*href="\/app\/memories"/);
+ assert.match(html,/<a class="metric" href="\/app\/memories"/);
  assert.match(html,/href="\/app\/memories\?focus=sources"/);
- assert.match(html,/<a[^>]*class="processing-stage"[^>]*href="\/app\/summaries"/);
+ assert.match(html,/<a class="processing-stage" href="\/app\/summaries"/);
 });

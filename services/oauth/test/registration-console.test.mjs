@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import {generate} from 'otplib';
 import {fixture,Browser} from './fixture.mjs';
-import {writePrivate,randomSecret,seconds} from '../../../shared/oauth-common.mjs';
+import {writePrivate,randomSecret} from '../../../shared/oauth-common.mjs';
+import {previousStepCode} from './helpers/totp.mjs';
 import {memoryFixture} from '../../../server/test/helpers/core-memory-fixture.mjs';
 import {provisionIdentities} from '../src/provisioning.mjs';
 const csrf=page=>page.text.match(/name="csrf" value="([^"]+)"/)?.[1];
 import {consoleFixture} from './helpers/identity-fixture.mjs';
-import {previousStepCode} from './helpers/totp.mjs';
 test('REG-UI-01: disabled signup explains the boundary without opening enrollment or hiding the sign-in route',async t=>{
  const f=await consoleFixture(t);f.app.config.login.registration_enabled=false;
  const browser=new Browser(f.config.issuer),page=await browser.request('/register');
@@ -66,7 +66,7 @@ test('REG-MGMT-02: real signup finishes through the durable worker without grant
  writePrivate(f.config.identity.encryption_key_file,randomSecret());await f.start();const ids=f.app.accounts,browser=new Browser(f.config.issuer);
  const [code]=ids.issueInvitations({count:1,ttlMinutes:5,issuer:'synthetic-server'}).codes;
  let page=await browser.request('/login');assert.match(page.text,/href="\/register"/);
- page=await browser.request('/register');assert.match(page.text,/registrationSteps/);
+ page=await browser.request('/register');assert.match(page.text,/class="auth-steps"/);assert.match(page.text,/<li aria-current="step"><span data-i18n="stepInvitation">/);
  let result=await browser.post('/register/reserve',{csrf:csrf(page),code});assert.equal(result.status,303);
  page=await browser.request('/register/account');assert.match(page.text,/registrationCredentials/);
  result=await browser.post('/register/account',{csrf:csrf(page),username:'Synthetic_Full_Signup',password:'Synthetic signup password',password_confirm:'Synthetic signup password'});assert.equal(result.status,303);

@@ -1,6 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {ConsoleState,object,id,number,fingerprint} from './state.mjs';
 import {ConsoleModels} from './models.mjs';
+import {credentialView} from './credentials.mjs';
 import {consoleActionWritable,CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
 import {AuthorizationError,ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
 import {MemoryWorker,scheduleLibrary} from '../memory-jobs/worker.mjs';
@@ -14,7 +15,7 @@ export class ConsoleService {
   require(auth,action){if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(){return this.store.memoryConfig.memory?.taxonomy||taxonomyDefault;}
   capabilities(auth){const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(),
-    secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
+    web_policy:this.store.webVisibility.policy(auth),secret_storage:!!this.store.memoryConfig.console?.key_file,worker_enabled:this.store.memoryConfig.console?.worker_enabled===true,vector_enabled:this.store.memoryConfig.vector_store?.enabled===true,production_ready:false};}
   memory(auth,memoryId,revision){id(memoryId);const row=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,memoryId);if(!row)throw new NotFoundError('Memory not found.','MEMORY_NOT_FOUND');
     const current=this.store.revisions.latest(auth.user_id,memoryId);if(revision!==undefined&&number(revision,1,2147483647)!==current.revision)throw new ConflictError('Memory changed; review the current revision.','MEMORY_VERSION_CHANGED');return {row,current};}
   meta(auth,p){object(p,['memory_id']);const {row,current}=this.memory(auth,p.memory_id);
@@ -31,7 +32,7 @@ export class ConsoleService {
     return this.state.sync(auth,action,p,operation,()=>this.apply(auth,action,p),{secret:['connections.create','connections.rotate'].includes(action)});
   }
   apply(auth,action,p){const store=this.store;
-    if(action.startsWith('memory.')&&action!=='memory.create')number(p.revision,1,2147483647);
+    if(action.startsWith('memory.')&&!['memory.create','memory.web_policy'].includes(action))number(p.revision,1,2147483647);
     if(action==='memory.create'){object(p,['content','memory_type','scope','topic','project_id','task_id','workstream_id','session_id','sensitivity']);
       const {sensitivity='sensitive',...input}=p;this.sensitivity(sensitivity);const result=store.saveMemory(auth,{...input,source:'console_explicit'});
       store.memorySources.setSensitivity(auth,result.memory.memory_id,sensitivity);return receipt(result);}
@@ -42,6 +43,15 @@ export class ConsoleService {
     if(action==='memory.sensitivity'){object(p,['memory_id','revision','sensitivity']);this.memory(auth,p.memory_id,p.revision);this.sensitivity(p.sensitivity);store.memorySources.setSensitivity(auth,p.memory_id,p.sensitivity);return {status:'updated',...this.meta(auth,{memory_id:p.memory_id})};}
     if(action==='memory.classify'){object(p,['memory_id','revision','category']);this.memory(auth,p.memory_id,p.revision);return {status:'classified',...store.derivedMemory.setCategory(auth,p.memory_id,p.category,this.taxonomy())};}
     if(action==='memory.visibility'){object(p,['memory_id','revision','state_hash','allow']);this.memory(auth,p.memory_id,p.revision);return {status:'updated',...store.webVisibility.set(auth,p.memory_id,p)};}
+    if(action==='memory.web_policy'){object(p,['read_all','expected_revision']);return {status:'updated',...store.webVisibility.setPolicy(auth,p)};}
+    if(action==='devices.revoke'){object(p,['agent_instance_id']);id(p.agent_instance_id);
+      // Same effect as the admin revoke of an agent instance, limited to the owner's own unmanaged keys.
+      const rows=this.db.prepare('SELECT * FROM credentials WHERE user_id=? AND agent_instance_id=? AND revoked_at IS NULL').all(auth.user_id,p.agent_instance_id).map(row=>credentialView(row));
+      if(!rows.length)throw new NotFoundError('Active agent credential not found.','CREDENTIAL_NOT_FOUND');
+      if(rows.some(row=>row.managed))throw new ConflictError('Platform-managed and admin keys are revoked by an operator, not from the console.','MANAGED_CONNECTION');
+      const revokedAt=new Date().toISOString(),result=this.db.prepare('UPDATE credentials SET revoked_at=? WHERE user_id=? AND agent_instance_id=? AND revoked_at IS NULL').run(revokedAt,auth.user_id,p.agent_instance_id);
+      store.audit({auth,action:'agent_instance.revoke',targetType:'agent_instance',targetId:p.agent_instance_id,metadata:{revoked_credentials:result.changes,source:'console'}});
+      return {status:'revoked',agent_instance_id:p.agent_instance_id,revoked_at:revokedAt,revoked_credentials:result.changes};}
     if(action==='jobs.schedule'){
       object(p,['type','timezone','periods','include_open','schedule_enabled','settings_revision']);
       if(!['classification','summary'].includes(p.type)||typeof p.timezone!=='string'||(p.include_open!==undefined&&typeof p.include_open!=='boolean'))throw new ValidationError('Invalid scheduling request.');

@@ -20,6 +20,9 @@ export class CloudMemory {
       user_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,operation_id TEXT NOT NULL,
       request_hash TEXT NOT NULL,receipt_json TEXT NOT NULL,credential_id TEXT NOT NULL,created_at TEXT NOT NULL,
       PRIMARY KEY(user_id,connection_id,action,operation_id),UNIQUE(user_id,connection_id,operation_id));`);
+    // Saves committed with keep_private before the read_all switch existed stay private under it.
+    this.db.prepare(`INSERT OR IGNORE INTO memory_web_private SELECT user_id,json_extract(receipt_json,'$.memory_id') FROM cloud_memory_operations
+      WHERE json_extract(receipt_json,'$.cloud_read_choice')='keep_private' AND json_extract(receipt_json,'$.memory_id') IS NOT NULL`).run();
   }
   // Local provisioning only: this function is never exposed as an HTTP route.
   bind(auth,input){
@@ -65,7 +68,8 @@ export class CloudMemory {
       let prior;
       if(!saving){
         prior=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,payload.memory_id);
-        if(!prior||!this.store.webVisibility.visible(auth,payload.memory_id))throw missing();
+        // read_all widens what ChatGPT may read, never what it may correct or retract.
+        if(!prior||!this.store.webVisibility.writable(auth,payload.memory_id))throw missing();
         if(this.store.revisions.latest(auth.user_id,payload.memory_id)?.revision!==payload.expected_revision)throw new ConflictError('Memory changed.','MEMORY_VERSION_CHANGED');
         if(prior.status!=='active')throw new ConflictError('Memory is no longer active.','MEMORY_VERSION_CHANGED');
       }
@@ -79,6 +83,7 @@ export class CloudMemory {
         const sensitivity=prior?this.db.prepare('SELECT sensitivity FROM memory_privacy WHERE user_id=? AND memory_id=?').get(auth.user_id,prior.memory_id)?.sensitivity||'sensitive':'sensitive';
         // A remote correction never inherits a public classification implicitly.
         this.db.prepare('INSERT OR REPLACE INTO memory_privacy VALUES(?,?,?)').run(auth.user_id,id,sensitivity==='public'?'sensitive':sensitivity);
+        if(cloud_read==='keep_private')this.store.webVisibility.keepPrivate(auth.user_id,id);
         if(grant){
           if(!['internal','sensitive','public'].includes(sensitivity))throw new ValidationError('This revision cannot be shared.','CLOUD_READ_POLICY_DENIED');
           this.db.prepare('INSERT INTO memory_web_grants VALUES(?,?,?,?,?)').run(auth.user_id,id,revision.revision,revision.state_hash,sensitivity==='public'?'sensitive':sensitivity);
