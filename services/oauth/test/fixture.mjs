@@ -8,7 +8,8 @@ import { generate } from "otplib";
 import { createOwner, Accounts } from "../src/accounts.mjs";
 import { AuthStore } from "../src/sqlite-adapter.mjs";
 import { createAuthorizationServer } from "../src/server.mjs";
-import { randomSecret, readPrivate, writePrivate, seconds } from "../../../shared/oauth-common.mjs";
+import { randomSecret, readPrivate, writePrivate } from "../../../shared/oauth-common.mjs";
+import { previousStepCode } from "./helpers/totp.mjs";
 
 // Linux may hand a just-released ephemeral port straight back. Two fixture roles on one port
 // silently reroute traffic (an auth-port callback is followed as a 404), so never reuse one.
@@ -101,10 +102,7 @@ export async function fixture(t, { start = true, mutate = () => {} } = {}) {
   await createOwner(config.accounts_file, "synthetic-owner", password);
   const seed = readPrivate(config.accounts_file, { json: true }).mfa.secret;
   const enrollmentStore = new AuthStore(config.database_file);
-  // The previous-step code keeps the later login code unreplayed; do not let it age out mid-verify.
-  const untilNextStep = 30_000 - (Date.now() % 30_000);
-  if (untilNextStep < 2_000) await new Promise((resolve) => setTimeout(resolve, untilNextStep + 50));
-  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await generate({ secret: seed, epoch: seconds() - 30 }), path.join(directory, "recovery.json")); }
+  try { await new Accounts(config.accounts_file, enrollmentStore).enroll(await previousStepCode(seed), path.join(directory, "recovery.json")); }
   finally { enrollmentStore.close(); }
   const subject = readPrivate(config.accounts_file, { json: true }).subject;
   const f = { directory, config, ports, password, seed, subject, secret, introspectionSecret, browser: new Browser(config.issuer), logs: [] };
