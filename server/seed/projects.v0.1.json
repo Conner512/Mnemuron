@@ -1,0 +1,15 @@
+[
+  {
+    "project_id": "project-mnemuron",
+    "name": "Mnemuron",
+    "aliases": [
+      "Mnemuron memory",
+      "跨 Agent 记忆共享"
+    ],
+    "git_remotes": [],
+    "repo_fingerprints": [],
+    "path_hints": [
+      "/path/to/mnemuron"
+    ]
+  }
+]

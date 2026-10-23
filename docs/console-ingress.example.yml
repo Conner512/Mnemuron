@@ -1,0 +1,33 @@
+# UNAPPLIED example for the opt-in integrated console. Not a production change.
+# Review policies, private configuration and existing routes before deployment.
+tunnel: __REQUIRED_APPROVED_TUNNEL_ID__
+credentials-file: /etc/cloudflared/__REQUIRED_TUNNEL_ID__.json
+
+ingress:
+  - hostname: memory.example.com
+    path: '^/(mcp(/generic)?|\.well-known/oauth-protected-resource(/mcp)?)$'
+    service: http://127.0.0.1:47832
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/\.well-known/(oauth-authorization-server|openid-configuration)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/(authorize(/[A-Za-z0-9_-]{1,128})?|token|jwks|revoke|introspect)$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/interaction/[A-Za-z0-9_-]{1,128}(/(login|confirm|abort))?$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  - hostname: memory.example.com
+    path: '^/(login|recover(/(start|complete))?|register(/(reserve|account|totp|recovery-codes|ack|status))?|app(/(overview|memories|summaries|entities|tasks|resume|jobs|connections|models|privacy|security|audit|usage|storage|invitations|accounts|system|agents))?/?|console-api/(me|logout|capabilities|action|security|connections|audit|overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|login-history|memories|memory|memory-meta|summaries|summary|jobs|job|projects|metadata-values|task-detail|entities|storage|export|operation|models|invitations|accounts)|assets/(styles\.css|display-font\.woff2|mono-font\.woff2|favicon\.svg|appearance\.mjs|catalog\.mjs|app\.mjs|session-state\.mjs|audit\.mjs|entities\.mjs|visuals\.mjs|actions\.mjs|connections\.mjs))$'
+    service: http://127.0.0.1:47833
+    originRequest:
+      httpHostHeader: memory.example.com
+  # No wildcard assets, health, Core, admin or database routes. /console-api/export is an authenticated personal JSON export, never a database download.
+  - service: http_status:404

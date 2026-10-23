@@ -1,0 +1,24 @@
+[Unit]
+Description=Mnemuron verified SQLite backup
+After=mnemuron.service
+RequiresMountsFor=/var/lib/mnemuron
+
+[Service]
+Type=oneshot
+User=mnemuron
+Group=mnemuron
+WorkingDirectory=/opt/mnemuron/server
+Environment=MNEMURON_DATABASE_PATH=/var/lib/mnemuron/mnemuron.sqlite3
+Environment=MNEMURON_BACKUP_DIR=/var/lib/mnemuron/backups/scheduled
+ExecStart=/opt/mnemuron/node/bin/node /opt/mnemuron/server/bin/mnemuron-scheduled-backup.mjs
+UMask=0077
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/var/lib/mnemuron
+ReadWritePaths=/var/lib/mnemuron/backups/scheduled
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

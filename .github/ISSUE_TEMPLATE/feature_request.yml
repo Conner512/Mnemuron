@@ -1,0 +1,32 @@
+name: Feature request
+description: Describe a use case or a focused improvement.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem before the implementation. English and Chinese are welcome. Use fictional examples and do not share personal memory or credentials.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What work is difficult with the current behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Explain the user-visible change and which component it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and trade-offs
+      description: Include scope, privacy, compatibility, or migration concerns if relevant.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How would we verify it?
+      description: Suggest a small, reproducible acceptance case using synthetic data.

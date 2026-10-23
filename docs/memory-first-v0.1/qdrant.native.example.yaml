@@ -1,0 +1,25 @@
+log_level: WARN
+telemetry_disabled: true
+
+storage:
+  storage_path: /var/lib/qdrant/storage
+  snapshots_path: /var/lib/qdrant/snapshots
+  temp_path: /var/lib/qdrant/tmp
+  performance:
+    max_search_threads: 2
+    optimizer_cpu_budget: 1
+  optimizers:
+    max_optimization_threads: 1
+
+service:
+  host: 127.0.0.1
+  http_port: 6333
+  grpc_port: null
+  enable_cors: false
+  enable_tls: false
+  enable_snapshot_url_recovery: false
+  max_request_size_mb: 8
+  max_workers: 2
+
+cluster:
+  enabled: false

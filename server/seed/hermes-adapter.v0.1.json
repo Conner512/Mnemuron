@@ -1,0 +1,29 @@
+{
+  "task_id": "task-mnemuron-hermes-adapter-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron Hermes Adapter v0.1",
+  "aliases": [
+    "Hermes",
+    "Hermes adapter",
+    "Hermes 接入"
+  ],
+  "goal": "Example task: validate the Hermes adapter with your own isolated service and agent identity.",
+  "status": "active",
+  "progress": [],
+  "decisions": [],
+  "blockers": [],
+  "next_steps": [],
+  "resources": [
+    "adapters/hermes/README.md",
+    "adapters/hermes/plugin.yaml"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-hermes",
+      "name": "Hermes example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

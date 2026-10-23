@@ -1,0 +1,47 @@
+{
+  "task_id": "task-mnemuron-dynamic-task-scope-v01",
+  "project_id": "project-mnemuron",
+  "project_name": "Mnemuron",
+  "title": "Example: Mnemuron Dynamic Task Scope v0.1",
+  "aliases": [
+    "Dynamic Task Scope",
+    "Task Scope",
+    "动态任务绑定"
+  ],
+  "goal": "Example task: validate persistent task binding after an explicitly confirmed Resume while preserving the destination workstream.",
+  "status": "active",
+  "progress": [],
+  "decisions": [],
+  "blockers": [],
+  "next_steps": [],
+  "resources": [
+    "docs/dynamic-task-scope-v0.1.md",
+    "docs/chatgpt-mcp-delivery-receipt-v0.1.4.md",
+    "plugins/mnemuron/scripts/storage.mjs",
+    "adapters/openclaw/dist/client.js",
+    "adapters/hermes/client.py"
+  ],
+  "workstreams": [
+    {
+      "workstream_id": "workstream-clientb",
+      "name": "Client B ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-clienta",
+      "name": "Client A ChatGPT",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-openclaw",
+      "name": "OpenClaw example client",
+      "status": "active"
+    },
+    {
+      "workstream_id": "workstream-hermes",
+      "name": "Hermes example client",
+      "status": "active"
+    }
+  ],
+  "conflicts": []
+}

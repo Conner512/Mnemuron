@@ -1,0 +1,75 @@
+{
+  "core-v0.1": {
+    "files": [
+      {
+        "name": "reconciliation.mjs",
+        "size": 14464,
+        "sha256": "1d41c16024749ce631c9678e6a0fc5eedc8b66f40f5c2c9a90dd367cd329044f"
+      },
+      {
+        "name": "resolver.mjs",
+        "size": 12791,
+        "sha256": "b7fa0f222e9a75f9af82068e45cd24f02da752eefad06d797842d1aafaaa602d"
+      },
+      {
+        "name": "store.mjs",
+        "size": 230991,
+        "sha256": "1d0756c9bd75ec34ac22a3700f35e88d572f9d0da9ecd8f7f983c865bbc44615"
+      }
+    ]
+  },
+  "pre-memory-first": {
+    "files": [
+      {
+        "name": "app.mjs",
+        "size": 16858,
+        "sha256": "19e38c5a4f57b66f1e511663a637a1935a7ec91197ee5b502dde83df7c0bff9b"
+      },
+      {
+        "name": "errors.mjs",
+        "size": 1146,
+        "sha256": "f4d3cfa0fa6068714c977bb9e1d09094a28be607b72d5c61ff4bc7d70bb8733c"
+      },
+      {
+        "name": "harness-sync.mjs",
+        "size": 1130,
+        "sha256": "eecc6a16ad47217504cd7b5f88df39c28abadd2ee9bc523cbd95eda4a300d29d"
+      },
+      {
+        "name": "memory-projection.mjs",
+        "size": 2251,
+        "sha256": "8a19468e6959aeb53af21d9fce9fcc74bbb425fc05028202d5318559bfd03525"
+      },
+      {
+        "name": "memory-retrieval.mjs",
+        "size": 8655,
+        "sha256": "d8d61fbf7000433a80acf128607aaea879666f294fb753748157c98bb60c93f0"
+      },
+      {
+        "name": "memory-scope.mjs",
+        "size": 4297,
+        "sha256": "417589d07210f15505c742e1b3b300e3a5a52628c03780a3b41d555bcd8a7159"
+      },
+      {
+        "name": "memory-validation.mjs",
+        "size": 3428,
+        "sha256": "6777a94f363927fb6a2db180331016c788ec6cd6ec03779bff6670e3b31c1ad1"
+      },
+      {
+        "name": "reconciliation.mjs",
+        "size": 14464,
+        "sha256": "1d41c16024749ce631c9678e6a0fc5eedc8b66f40f5c2c9a90dd367cd329044f"
+      },
+      {
+        "name": "resolver.mjs",
+        "size": 12791,
+        "sha256": "b7fa0f222e9a75f9af82068e45cd24f02da752eefad06d797842d1aafaaa602d"
+      },
+      {
+        "name": "store.mjs",
+        "size": 234716,
+        "sha256": "e31c871486060b284c61a697dcf844d5684e9205c0b01111866542e4132437f7"
+      }
+    ]
+  }
+}

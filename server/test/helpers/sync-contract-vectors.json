@@ -1,0 +1,20 @@
+{
+  "now": 1767225600000,
+  "vectors": [
+    {"status": null, "code": "NETWORK_ERROR", "state": "retry_wait", "next_retry_at": "2026-01-01T00:00:01.000Z"},
+    {"status": 503, "code": "HTTP_503", "state": "retry_wait", "next_retry_at": "2026-01-01T00:00:01.000Z"},
+    {"status": 429, "code": "HTTP_429", "retry_after": "600", "state": "retry_wait", "next_retry_at": "2026-01-01T00:10:00.000Z"},
+    {"status": 429, "code": "HTTP_429", "retry_after": "Thu, 01 Jan 2026 00:10:00 GMT", "state": "retry_wait", "next_retry_at": "2026-01-01T00:10:00.000Z"},
+    {"status": 429, "code": "HTTP_429", "retry_after": "invalid", "state": "retry_wait", "next_retry_at": "2026-01-01T00:00:01.000Z"},
+    {"status": 401, "code": "HTTP_401", "state": "paused_auth", "next_retry_at": null},
+    {"status": 403, "code": "HTTP_403", "state": "paused_auth", "next_retry_at": null},
+    {"status": 413, "code": "REQUEST_BODY_TOO_LARGE", "state": "quarantined", "next_retry_at": null},
+    {"status": 422, "code": "INVALID_PAYLOAD", "state": "quarantined", "next_retry_at": null},
+    {"status": 400, "code": "UNKNOWN", "state": "blocked_protocol", "next_retry_at": null},
+    {"status": 404, "code": "HTTP_404", "state": "blocked_protocol", "next_retry_at": null},
+    {"status": 302, "code": "REDIRECT_BLOCKED", "state": "blocked_protocol", "next_retry_at": null},
+    {"status": 200, "code": "INVALID_RESPONSE_JSON", "state": "blocked_protocol", "next_retry_at": null},
+    {"status": 200, "code": "RECEIPT_MISMATCH", "state": "blocked_reconciliation", "next_retry_at": null},
+    {"status": 409, "code": "IDEMPOTENCY_CONFLICT", "state": "blocked_reconciliation", "next_retry_at": null}
+  ]
+}
