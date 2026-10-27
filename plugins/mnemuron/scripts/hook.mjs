@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import {backgroundSyncEnabled, startBackgroundSync} from './background-sync.mjs';
+import {remoteRequest} from './remote-client.mjs';
 import {
   flushDeliveryReceiptOutbox,
   flushInjectionEventOutbox,
@@ -102,6 +103,26 @@ function compatibilitySessionContext(sessionId) {
     "A confirmed Resume is armed only after the confirmation turn stops. The next ordinary turn may receive authoritative Resume context directly in the MCP tool result after central server accepts a delivery receipt.",
     "Never call mnemuron_take_pending_resume again during the same confirmation turn. If the tool returns no resume_context, continue the ordinary user request normally.",
   ].join("\n");
+}
+
+// Session-start memory context (server memory/session-context.mjs): on by default in remote mode, also after a
+// compaction (SessionStart source "compact"); MNEMURON_SESSION_CONTEXT=off disables it. Best effort with a short timeout:
+// a slow or failing server never delays or breaks the session start.
+const SESSION_CONTEXT_TIMEOUT_MS = 2500;
+export function sessionContextEnabled(runtimeEnv) {
+  return runtimeMode(runtimeEnv) === "remote" && !["off", "false", "0"].includes(String(runtimeEnv.MNEMURON_SESSION_CONTEXT || "").toLowerCase());
+}
+export async function fetchSessionContext(dataDir, payload, runtimeEnv) {
+  const projectId = resolveTaskScope(dataDir, payload.session_id, runtimeEnv)?.project_id;
+  const budget = Number(runtimeEnv.MNEMURON_SESSION_CONTEXT_TOKENS || 1500);
+  try {
+    const result = await remoteRequest({ ...runtimeEnv, MNEMURON_REQUEST_TIMEOUT_MS: String(SESSION_CONTEXT_TIMEOUT_MS) }, "POST", "/v1/context/session",
+      { ...(typeof projectId === "string" && projectId ? { project_id: projectId } : {}), ...(Number.isInteger(budget) ? { budget_tokens: budget } : {}) });
+    return typeof result?.text === "string" && result.text ? result.text : null;
+  } catch (error) {
+    process.stderr.write(`Mnemuron session context skipped: ${error.message}\n`);
+    return null;
+  }
 }
 
 function shouldRecoverInterruptedDelivery(payload) {
@@ -534,6 +555,10 @@ async function main() {
     ].join("\n");
   } else if (payload.hook_event_name === "SessionStart") {
     additionalContext = compatibilitySessionContext(payload.session_id);
+  }
+  if (payload.hook_event_name === "SessionStart" && sessionContextEnabled(runtimeEnv)) {
+    const memoryContext = await fetchSessionContext(dataDir, payload, runtimeEnv);
+    if (memoryContext) additionalContext = [additionalContext, memoryContext].filter(Boolean).join("\n\n");
   }
   const output = additionalContext ? {
     hookSpecificOutput: {

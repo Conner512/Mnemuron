@@ -1,0 +1,8 @@
+# Reports the tunnel token cloudflared runs with (sealed) so the console and the CLI show it, however it was set.
+[Unit]
+Description=Discover the Mnemuron Cloudflare tunnel settings
+
+[Service]
+Type=oneshot
+Environment=MNEMURON_MEMORY_CONFIG=/etc/mnemuron/memory-first.runtime.json
+ExecStart=/opt/node-v24.19.0-linux-x64/bin/node /opt/mnemuron/current/server/bin/mnemuron-tunnel-apply.mjs --discover

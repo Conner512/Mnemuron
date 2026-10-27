@@ -39,8 +39,8 @@ export class IdentityConsole {
   /** Last token issued to a client for this subject: the latest sign of ChatGPT using its authorization. */
   lastTokenAt(subject,clientId){return this.db.prepare("SELECT MAX(json_extract(payload,'$.iat')) at FROM oauth_records WHERE model IN ('AccessToken','RefreshToken') AND json_extract(payload,'$.accountId')=? AND json_extract(payload,'$.clientId')=?").get(subject,clientId)?.at??null;}
   /** Fresh password for a console action that the Core then executes (the authenticator code was checked at sign-in). */
-  async reauthenticate(account,session,p){
-    const verified=await this.proof(account,p);
+  async reauthenticate(account,session,p,{otp=false}={}){
+    const verified=await this.proof(account,p,{otp});
     const current=this.db.prepare("SELECT * FROM identity_sessions WHERE digest=? AND account_id=? AND purpose='console' AND expires>?").get(session.digest,account,seconds());
     if(!current||current.security_version!==verified.security_version)fail('SESSION_REQUIRED',401);
     return verified;

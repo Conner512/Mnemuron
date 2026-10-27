@@ -30,8 +30,7 @@ test('Batch actions sit above the list, start disabled and respect each granted 
  assert.doesNotMatch(html,/data-console-action="memory\.(batch_classify|organize)"/,'types are chosen by the writer: no batch filing');
  assert.doesNotMatch(render([batch[0]]),/data-memory-selection/,'classify alone offers no selection');
  assert.doesNotMatch(completedFeaturePanels(text,'memories',data,{allowed_actions:batch}),/data-console-action="memory.batch_/,'no duplicate far-away actions');
- const blocked=completedFeaturePanels(text,'memories',data,{allowed_actions:['memory.create']});
- assert.match(blocked,/data-i18n="batchUnavailable"/);
+ assert.equal(completedFeaturePanels(text,'memories',data,{allowed_actions:['memory.create']}),'','text-only feature cards are not shown');
 });
 
 test('Memory search hides only its placeholder while focused; selection layout is inline',()=>{

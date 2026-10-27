@@ -1,0 +1,10 @@
+# Runs the tunnel applier whenever the service writes a new apply request (console or mnemuron-config).
+[Unit]
+Description=Mnemuron tunnel apply requests
+
+[Path]
+PathChanged=/var/lib/mnemuron/tunnel/apply.request
+Unit=mnemuron-tunnel-apply.service
+
+[Install]
+WantedBy=multi-user.target

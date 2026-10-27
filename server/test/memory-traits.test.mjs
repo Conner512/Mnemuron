@@ -93,3 +93,18 @@ test('TRAITS-08: out-of-bounds model output fails the job without writing', asyn
   await new MemoryWorker(f.s, jobs, model).drain();
   assert.deepEqual(f.s.traits.get(f.auth.user_id, m.memory_id), { kind: null, concepts: [], strength: null });
 });
+
+test("TRAITS-SEARCH: keywords are searchable, follow corrections and survive an index rebuild", async t => {
+  const { store, a } = await memoryFixture(t);
+  const saved = store.saveMemory(a.auth, { content: "评论系统基于 Discussions，不需要数据库", scope: "user", concepts: ["giscus", "comments"] }).memory;
+  store.saveMemory(a.auth, { content: "Unrelated note about backups", scope: "user" });
+  const found = query => store.queryMemories(a.auth, { query }).results.map(r => r.memory_id);
+  assert.deepEqual(found("giscus"), [saved.memory_id], "a keyword-only match is found");
+  assert.deepEqual(found("comments"), [saved.memory_id], "an English keyword finds a Chinese body");
+  store.traits.set("user-coretest-a", saved.memory_id, { concepts: ["utterances"] }, new Date().toISOString());
+  assert.deepEqual(found("giscus"), [], "a removed keyword no longer matches");
+  assert.deepEqual(found("utterances"), [saved.memory_id]);
+  store.memorySearch.rebuild();
+  assert.equal(store.memorySearch.validate(), true);
+  assert.deepEqual(found("utterances"), [saved.memory_id]);
+});

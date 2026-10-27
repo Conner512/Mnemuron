@@ -15,16 +15,21 @@ export const CONSOLE_SELF_SERVICE_ACTIONS = Object.freeze(['devices.revoke']);
 export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(consoleMemoryWritable(auth)&&(CONSOLE_MEMORY_ACTIONS.includes(action)||CONSOLE_SELF_SERVICE_ACTIONS.includes(action)));
 // ChatGPT per-memory visibility (memory.visibility, memory.web_policy) was removed from the console; the
 // account read policy is an operator runtime setting (memory.agent_read_policy).
-export const OWNER_ACTIONS=Object.freeze(['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel']);
+// Tunnel changes and the fields the BFF forwards to Core for each.
+const CONSOLE_TUNNEL_ACTIONS_LIST=['tunnel.add','tunnel.token','tunnel.reapply','tunnel.remove'];
+export const CONSOLE_TUNNEL_FIELDS=Object.freeze({'tunnel.add':['name','token'],'tunnel.token':['id','token'],'tunnel.reapply':['id'],'tunnel.remove':['id']});
+export const OWNER_ACTIONS=Object.freeze(['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel','processing.delete','processing.clear']);
 export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,'memory.create','memory.correct','memory.retract',...CONSOLE_ORGANIZE_ACTIONS,
-  'jobs.schedule','jobs.cancel','jobs.retry','models.save','models.test','models.discover','models.disable','models.quota','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
+  'jobs.schedule','jobs.cancel','jobs.cancel_batch','jobs.retry','models.save','models.test','models.discover','models.disable','models.quota','hosts.set','hosts.remove','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
   'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
   'memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate',
   // Project/task editing and Console-only archive: full Console write credentials only (no admin:tasks).
   'projects.update','projects.archive','projects.restore','tasks.update',
   // Recoverable project delete/restore and canonical merge (preview, then confirm). Full Console write credentials only;
   // the BFF requires a fresh password + OTP for every confirm. projects.restore above stays Console unarchive.
-  'projects.lifecycle_preview',...['projects.lifecycle_delete','projects.lifecycle_restore','projects.merge']]);
+  'projects.lifecycle_preview',...['projects.lifecycle_delete','projects.lifecycle_restore','projects.merge'],
+  // Cloudflare Tunnel (owner only): the BFF requires a fresh password + OTP for every change.
+  ...CONSOLE_TUNNEL_ACTIONS_LIST]);
 // Confirms that change project lifecycle state: the BFF re-authenticates each one and forwards only these fields.
 export const CONSOLE_LIFECYCLE_CONFIRMS = Object.freeze({'projects.lifecycle_delete':['preview_id','confirm_name'],'projects.lifecycle_restore':['preview_id'],'projects.merge':['preview_id']});
 export const CONSOLE_FEATURE_VIEWS = Object.freeze(['attention','capture-status','model-usage','taxonomy','privacy-defaults','retention','task-branches','project-context','task-checkpoints','task-reconciliation','system-health','system-version','backups','memory-versions']);

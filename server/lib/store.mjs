@@ -26,6 +26,9 @@ import {ProjectLifecycle} from './lifecycle/resolver.mjs';
 import { dispatchCapture } from "./capture/dispatch.mjs";
 import { redactFields, redactValue } from "./redaction.mjs";
 import { MemoryTraits, memoryTraits } from "./memory/traits.mjs";
+import { MemorySalience } from "./memory/salience.mjs";
+import { TunnelSettings } from "./tunnel/settings.mjs";
+import { ConfigCenter } from "./config/center.mjs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, ValidationError, isDeterministicReadError } from "./errors.mjs";
@@ -147,6 +150,7 @@ export class MnemuronStore {
       this.webVisibility = new WebMemoryVisibility(this);
       this.entities = new MemoryEntities(this);
       this.traits = new MemoryTraits(this.db);
+      this.salience = new MemorySalience(this.db);
       this.cloudMemory = new CloudMemory(this);
       this.memorySources = new MemorySources(this);
       this.memoryConfig = options.memoryConfig || {};
@@ -162,6 +166,8 @@ export class MnemuronStore {
         transaction:callback=>this.memoryTransaction(callback),project:row=>this.memoryFromRow(row),audit:event=>this.audit(event)});
       this.memorySearch = new MemorySearch(this.db, {enabled: options.searchEnabled !== false,entities:this.entities});
       this.consoleService = new ConsoleService(this);
+      this.tunnel = new TunnelSettings(this);
+      this.config = new ConfigCenter(this);
       // Every module has installed its own protection right after creating its tables; refuse to serve unless
       // all required material tables exist with exactly their epoch triggers (optional groups when present).
       protectPresentOptional(this.db);
@@ -3285,6 +3291,7 @@ export class MnemuronStore {
       {workstreamIds, includeShared, statuses, memoryTypes, auth});
     const rows = selection.rows,entityMatches=new Map(rows.map(row=>[row.memory_id,row._entity_match]));
     const currentTime = Date.now();
+    const salience = this.salience.of(auth.user_id, rows.map((row) => row.memory_id), currentTime);
     const candidates = rows
       .map((row) => this.memoryFromRow(row))
       .map((memory) => {
@@ -3296,12 +3303,14 @@ export class MnemuronStore {
           : 0.5;
         const scope = memoryScopeScore(memory);
         const recency = memoryRecencyScore(memory, currentTime);
-        const score = Number((
+        // Strength and recent assistant reads scale the score slightly (memory/salience.mjs).
+        const weight = salience.get(memory.memory_id);
+        const score = Number(((
           lexical * 0.72
           + confidence * 0.12
           + scope * 0.1
           + recency * 0.06
-        ).toFixed(6));
+        ) * weight.factor).toFixed(6));
         return {
           ...memory,
           ranking: {
@@ -3311,7 +3320,9 @@ export class MnemuronStore {
             confidence_score: Number(confidence.toFixed(6)),
             scope_score: Number(scope.toFixed(6)),
             recency_score: Number(recency.toFixed(6)),
-            method: "literal-fts-scope-confidence-recency-v0.2",
+            strength_score: weight.strength_term,
+            read_score: weight.read_term,
+            method: "literal-fts-scope-confidence-recency-salience-v0.3",
           },
         };
       })

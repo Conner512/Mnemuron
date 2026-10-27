@@ -1,0 +1,9 @@
+# Writes the owner's host records into /etc/hosts (root: Proxmox's block and unrelated lines are kept).
+[Unit]
+Description=Apply Mnemuron host records to /etc/hosts
+
+[Service]
+Type=oneshot
+Environment=MNEMURON_MEMORY_CONFIG=/etc/mnemuron/memory-first.runtime.json
+ExecStart=/opt/node-v24.19.0-linux-x64/bin/node /opt/mnemuron/current/server/bin/mnemuron-hosts-apply.mjs
+TimeoutStartSec=30

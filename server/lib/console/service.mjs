@@ -27,6 +27,8 @@ export const manifestDigest=items=>fingerprint(items.map(i=>[i.memory_id,i.revis
 // Older accounts without a saved taxonomy continue to use v1 until explicit adoption.
 const taxonomyDefault=LEGACY_TAXONOMY;
 const receipt=result=>({status:result.status,memory_id:result.replacement_memory?.memory_id||result.memory?.memory_id||result.memory_id,physically_deleted:false});
+// Console actions whose effects the config center logs (source 'web').
+const CONFIG_ACTIONS=['features.save','schedule.save','models.save','models.disable','models.quota','hosts.set','hosts.remove','devices.register','devices.rotate','devices.revoke','connections.create','connections.rotate','connections.revoke'];
 export class ConsoleService {
   constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);}
   require(auth,action){if(this.owner.user)this.owner.require(auth.user_id);else if(OWNER_ACTIONS.includes(action))throw new AuthorizationError('owner mode');if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
@@ -108,7 +110,20 @@ export class ConsoleService {
     // Lifecycle confirms carry the operation ID into the lifecycle operation record and history.
     if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){const kind={'projects.lifecycle_delete':'delete','projects.lifecycle_restore':'restore','projects.merge':'merge'}[action];
       return this.state.sync(auth,action,p,operation,()=>this.lifecycleMutations.confirm(auth,kind,p,operation));}
-    return this.state.sync(auth,action,p,operation,()=>this.apply(auth,action,p),{secret:['connections.create','connections.rotate','devices.register','devices.rotate'].includes(action)});
+    if(action.startsWith('tunnel.'))return this.tunnelAction(auth,action,p,operation);
+    // Configuration changes are logged by the config center (source 'web'), like the same changes made from the CLI.
+    const change=()=>CONFIG_ACTIONS.includes(action)?this.store.config.track(auth.user_id,'web','console',()=>this.apply(auth,action,p)):this.apply(auth,action,p);
+    return this.state.sync(auth,action,p,operation,change,{secret:['connections.create','connections.rotate','devices.register','devices.rotate'].includes(action)});
+  }
+  /** Cloudflare Tunnels (tunnel/settings.mjs): single owner only; add, replace a token, apply again or remove. */
+  tunnelAction(auth,action,p,operation){
+    const user=auth.user_id;this.owner.require(user);
+    const t=this.store.tunnel,c=this.store.config,sync=fn=>this.state.sync(auth,action,p,operation,()=>({status:'saved',tunnel:c.track(user,'web','console',fn)}));
+    if(action==='tunnel.add'){object(p,['name','token']);return sync(()=>t.add(user,p,'web'));}
+    if(action==='tunnel.token'){object(p,['id','token']);return sync(()=>t.setToken(user,p.id,p.token,'web'));}
+    if(action==='tunnel.reapply'){object(p,['id']);return sync(()=>t.reapply(p.id,'web'));}
+    if(action==='tunnel.remove'){object(p,['id']);return sync(()=>t.remove(p.id,'web'));}
+    throw new NotFoundError('Action not found.');
   }
   apply(auth,action,p){const store=this.store;
     if(OWNER_ACTIONS.includes(action))return this.owner.apply(auth,action,p);
@@ -149,6 +164,11 @@ export class ConsoleService {
       const result=p.type==='traits'?scheduleTraits(store,store.memoryJobs,{userId:auth.user_id,organizer}):scheduleLibrary(store,store.memoryJobs,{userId:auth.user_id,organizer,taxonomy:this.taxonomy(auth.user_id),type:p.type,timezone:p.timezone,periods:p.periods,includeOpen:p.include_open===true});
       return {status:result.jobs.length?'queued':'no_work',...result,worker_enabled:store.memoryConfig.console?.worker_enabled===true};
     }
+    if(action==='jobs.cancel_batch'){object(p,['batch_id']);if(typeof p.batch_id!=='string'||p.batch_id.length>200)throw new ValidationError('Invalid batch.');
+      const open=store.memoryJobs.batchJobs(auth.user_id,p.batch_id);if(!open.length)throw new NotFoundError('Batch not found.','JOB_NOT_FOUND');
+      // Each unfinished job is cancelled exactly as a single cancel would (fencing, entity outbox); finished ones stay.
+      let cancelled=0;for(const j of open)if(!['succeeded','cancelled'].includes(j.state)){this.apply(auth,'jobs.cancel',{job_id:j.job_id});cancelled++;}
+      return {status:'cancelled',batch_id:p.batch_id,cancelled};}
     if(action==='jobs.cancel'){object(p,['job_id']);const job=this.job(auth,p.job_id);if(job.state==='succeeded')throw new ConflictError('A completed job cannot be cancelled.','JOB_TERMINAL');store.memoryJobs.cancel(job.job_id);
       if(job.job_type==='entities')this.db.prepare(`UPDATE memory_processing_outbox AS o SET state='cancelled' WHERE o.user_id=? AND o.job_type='entities'
         AND EXISTS(SELECT 1 FROM memory_job_items i WHERE i.job_id=? AND i.user_id=o.user_id AND i.memory_id=o.memory_id AND i.revision=o.revision)
@@ -173,6 +193,8 @@ export class ConsoleService {
       const provider=this.models.provider(auth.user_id,'organizer');if(provider.profile.fingerprint!==job.profile||(!['entities','traits'].includes(job.job_type)&&job.metadata.taxonomy?.version!==this.taxonomy(auth.user_id).version)||store.memoryJobs.items(job).some(i=>!store.derivedMemory.validateItem(i)))throw new ConflictError('Inputs/model/taxonomy changed; schedule a new job.','STALE_INPUT');
       this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(job.profile);
       this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL,fence=fence+1,lease_owner=NULL,lease_expires=NULL,updated_at=? WHERE job_id=? AND user_id=?").run(Date.now(),Date.now(),job.job_id,auth.user_id);return {status:'queued',job_id:job.job_id};}
+    if(action==='hosts.set'){object(p,['hostname','address']);return this.models.hosts.set(auth.user_id,p,'web');}
+    if(action==='hosts.remove'){object(p,['hostname']);return this.models.hosts.remove(auth.user_id,p.hostname,'web');}
     if(action==='models.save')return this.models.save(auth,p);
     if(action==='models.quota')return this.models.quotas.save(auth,p);
     if(action==='models.disable'){object(p,['kind','expected_revision']);const row=this.models.raw(auth.user_id,p.kind);if(!row||row.revision!==p.expected_revision)throw new ConflictError('Model changed.','MODEL_VERSION_CHANGED');const config=JSON.parse(row.config_json);return this.models.save(auth,{kind:p.kind,expected_revision:row.revision,config:{...config,enabled:false}});}

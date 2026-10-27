@@ -1,6 +1,7 @@
 import {ValidationError} from '../errors.mjs';
 import {protectTables} from '../lifecycle/protection.mjs';
 import {resolveMemoryScope} from '../memory-scope.mjs';
+import {staleSql,staleReasons} from '../memory/review.mjs';
 import {MEMORY_KINDS} from '../memory/traits.mjs';
 
 // The memory library's reads: the validated filter, the owner-scoped rows and the browsing facets.
@@ -48,6 +49,8 @@ export class ConsoleOrganizer {
     if(p.concept!==undefined&&p.concept!==''){if(typeof p.concept!=='string'||[...p.concept].length>40)throw new ValidationError('Invalid concept.');f.concept=p.concept;}
     if(p.origin!==undefined&&p.origin!==''){if(!ORIGINS.includes(p.origin))throw new ValidationError('Invalid origin.');f.origin=p.origin;}
     if(p.status!==undefined&&p.status!==''){if(!['active','superseded','retracted'].includes(p.status))throw new ValidationError('Invalid status.');f.status=p.status;}
+    // Cleanup review (memory/review.mjs) lists active memories only.
+    if(p.review!==undefined&&p.review!==''){if(p.review!=='stale')throw new ValidationError('Invalid review.');f.review='stale';f.status='active';}
     return f;
   }
   /** Rows matching a filter, newest first (or search rank). Candidate windows are bounded and say so. */
@@ -63,6 +66,7 @@ export class ConsoleOrganizer {
       const extra=this.conceptMatches(user,f.query).filter(x=>!order.includes(x));order=[...order,...extra];
       ids=ids?ids.filter(x=>order.includes(x)):order;
     }
+    const now=Date.now(),stale=f.review==='stale'?staleSql(now):null;
     // Writer-chosen traits (kind, concepts, strength) and the project name ride along for the library row; 'none' filters unmarked records.
     const sql=`SELECT m.memory_id,m.content,m.memory_type,m.status,m.topic,m.created_at,m.project_id,c.category,
         t.kind,t.concepts_json,t.strength,t.updated_at traits_updated_at,p.name project_name,
@@ -76,9 +80,10 @@ export class ConsoleOrganizer {
         AND (? IS NULL OR COALESCE(t.kind,'none')=?)
         AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(COALESCE(t.concepts_json,'[]')) c WHERE lower(c.value)=lower(?)))
         AND (? IS NULL OR (m.source LIKE 'user_import:%')=(?='imported'))
+        ${stale?`AND ${stale.sql}`:''}
         AND (? IS NULL OR m.memory_id IN (SELECT value FROM json_each(?)))`;
     const args=[...categories.params,user,f.status??null,f.status??null,null,null,f.topic??null,f.topic??null,f.kind??null,f.kind??null,f.concept??null,f.concept??null,
-      f.origin??null,f.origin??null,ids?'1':null,ids?JSON.stringify(ids):null];
+      f.origin??null,f.origin??null,...(stale?stale.params:[]),ids?'1':null,ids?JSON.stringify(ids):null];
     let rows;
     if(order){
       // Keep search rank; the candidate window is already bounded by the search.
@@ -86,7 +91,8 @@ export class ConsoleOrganizer {
       rows=all.slice(offset,offset+limit);if(count)total=all.length;
     }else{rows=this.db.prepare(sql+' ORDER BY m.created_at DESC,m.rowid DESC LIMIT ? OFFSET ?').all(...args,limit,offset);
       if(count)total=rows.length<limit&&offset===0?rows.length:this.db.prepare(`SELECT COUNT(*) n FROM (${sql})`).get(...args).n;}
-    return {rows:rows.map(({concepts_json,...r})=>({...r,concepts:conceptList(concepts_json),imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{})})),truncated,plan,aliases,dependencyToken,...(count?{total}:{})};
+    const reasons=stale?staleReasons(this.db,user,rows,now):null;
+    return {rows:rows.map(({concepts_json,...r})=>({...r,concepts:conceptList(concepts_json),imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{}),...(reasons?{review:reasons.get(r.memory_id)}:{})})),truncated,plan,aliases,dependencyToken,...(count?{total}:{})};
   }
   /** Memory IDs whose keywords contain the query (case-insensitive), newest first, at most 200. */
   conceptMatches(user,query){const q=String(query).trim();if(!q||[...q].length>40)return [];

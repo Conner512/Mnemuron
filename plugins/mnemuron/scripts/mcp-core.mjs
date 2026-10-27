@@ -291,7 +291,7 @@ export const TOOLS = [
   },
   {
     name: "mnemuron_remember",
-    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain remote save; separate saves use separate keys.",
+    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain remote save; separate saves use separate keys. The result may list similar_memories (relation duplicate or similar): if the new memory repeats or corrects one of them, use mnemuron_supersede_memory on that memory instead of keeping both.",
     inputSchema: {
       type: "object",
       properties: {
@@ -324,6 +324,17 @@ export const TOOLS = [
         operation_id: { type: "string", minLength: 1, maxLength: 128, pattern: "^[a-zA-Z0-9][a-zA-Z0-9._:-]*$" },
       },
       required: ["content", "scope"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "mnemuron_project_profile",
+    description: "Read-only profile of one project's own memories: counts by type, the most used keywords, the strongest preferences, architecture and workflows, and the latest problems. Defaults to the active project. Use it at the start of work on a project to get oriented before searching.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        project_id: { type: "string", minLength: 1, description: "Defaults to the project of the active task." },
+      },
       additionalProperties: false,
     },
   },
@@ -1204,6 +1215,7 @@ export async function callTool(name, args = {}, env = process.env) {
     "mnemuron_preview_task_bootstrap",
     "mnemuron_confirm_task_bootstrap",
     "mnemuron_search_memories",
+    "mnemuron_project_profile",
     "mnemuron_supersede_memory",
     "mnemuron_retract_memory",
     "mnemuron_reconciliation_status",
@@ -1736,6 +1748,12 @@ async function callRemoteTool(name, args, runtimeEnv) {
       ...(args.operation_id === undefined ? {} : { operation_id: args.operation_id }),
       ...resolvedScope,
     });
+  }
+  if (name === "mnemuron_project_profile") {
+    const activeScope = resolveTaskScope(resolveDataDir(runtimeEnv), runtimeEnv.CODEX_THREAD_ID, runtimeEnv) || {};
+    const projectId = args.project_id ?? activeScope.project_id;
+    if (typeof projectId !== "string" || !projectId.trim()) throw new Error("project_id is required when no task is active.");
+    return remoteRequest(runtimeEnv, "POST", "/v1/projects/profile", { project_id: projectId });
   }
   if (name === "mnemuron_search_memories") {
     if (typeof args.query !== "string" || !args.query.trim()) {

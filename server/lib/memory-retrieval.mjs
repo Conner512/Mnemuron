@@ -2,11 +2,16 @@ import { ValidationError } from './errors.mjs';
 import { memoryScopeSql, SCOPE_LIFECYCLE } from './memory-scope.mjs';
 import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
 
+// Keywords (memory_traits.concepts_json) are indexed with the body and topic. That needs no version change: a memory
+// without keywords keeps its v3 document, and validate() rebuilds on open when any stored document differs.
 export const INDEX_VERSION = 'memory-search-v3';
 export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
-import {normalizeSearch,searchTokens,lexicalScore,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
+import {normalizeSearch,searchTokens,lexicalScore,memorySearchText,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
+// SQL for a memory's indexed text (see memorySearchText): body, topic and space-joined keywords.
+const conceptsSql = a => `coalesce((SELECT group_concat(c.value,' ') FROM memory_traits t, json_each(t.concepts_json) c WHERE t.user_id=${a}.user_id AND t.memory_id=${a}.memory_id),'')`;
+const docSql = a => `${a}.content || char(10) || coalesce(${a}.topic,'') || coalesce(char(10) || nullif(${conceptsSql(a)},''),'')`;
 export function originalMatchKind(query,memory){
   const score=lexicalScore(query,memory);
   return score===1?'raw_query':score>0?'original_terms':null;
@@ -25,9 +30,9 @@ export class MemorySearch {
     db.function('memory_search_contains', {deterministic:true}, (text,term)=>Number(containsTerm(text,term)));
     db.function('memory_search_alias_seed', {deterministic:true}, (text,query)=>Number(declaredAliases(text).some(group=>group.some(term=>containsTerm(query,term)))));
     let cachedJSON,cachedPlan;
-    db.function('memory_search_relevance', {deterministic:true}, (content,topic,json)=>{
+    db.function('memory_search_relevance', {deterministic:true}, (content,topic,concepts,json)=>{
       if(cachedJSON!==json){cachedPlan=JSON.parse(json);cachedJSON=json;}
-      return lexicalScore(cachedPlan.queries[0],{content,topic},cachedPlan);
+      return lexicalScore(cachedPlan.queries[0],{content,topic,concepts_text:concepts},cachedPlan);
     });
     this.state = 'unavailable';
     try { this.initialize(); } catch { this.state = 'unavailable'; }
@@ -46,13 +51,26 @@ export class MemorySearch {
       CREATE TRIGGER IF NOT EXISTS memory_search_doc_update AFTER UPDATE ON memory_search_docs BEGIN
         INSERT INTO memory_search_fts(memory_search_fts,rowid,tokens) VALUES('delete',old.doc_id,old.tokens);
         INSERT INTO memory_search_fts(rowid,tokens) VALUES(new.doc_id,new.tokens); END;
-      CREATE TRIGGER IF NOT EXISTS memory_search_insert AFTER INSERT ON memories BEGIN
-        INSERT INTO memory_search_docs(memory_id,normalized,tokens) VALUES(new.memory_id,memory_search_normalize(new.content || char(10) || coalesce(new.topic,'')),memory_search_tokens(new.content || char(10) || coalesce(new.topic,''))); END;
-      CREATE TRIGGER IF NOT EXISTS memory_search_update AFTER UPDATE OF content,topic ON memories BEGIN
-        INSERT INTO memory_search_docs(memory_id,normalized,tokens) VALUES(new.memory_id,memory_search_normalize(new.content || char(10) || coalesce(new.topic,'')),memory_search_tokens(new.content || char(10) || coalesce(new.topic,'')))
+      DROP TRIGGER IF EXISTS memory_search_insert;
+      DROP TRIGGER IF EXISTS memory_search_update;
+      CREATE TRIGGER memory_search_insert AFTER INSERT ON memories BEGIN
+        INSERT INTO memory_search_docs(memory_id,normalized,tokens) VALUES(new.memory_id,memory_search_normalize(${docSql('new')}),memory_search_tokens(${docSql('new')})); END;
+      CREATE TRIGGER memory_search_update AFTER UPDATE OF content,topic ON memories BEGIN
+        INSERT INTO memory_search_docs(memory_id,normalized,tokens) VALUES(new.memory_id,memory_search_normalize(${docSql('new')}),memory_search_tokens(${docSql('new')}))
         ON CONFLICT(memory_id) DO UPDATE SET normalized=excluded.normalized,tokens=excluded.tokens; END;
       CREATE TRIGGER IF NOT EXISTS memory_search_delete AFTER DELETE ON memories BEGIN
         DELETE FROM memory_search_docs WHERE memory_id=old.memory_id; END;
+    `);
+    // Keywords are written after the memory row (and changed later by the keyword fill or a correction): refresh its doc.
+    if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_traits'").get())db.exec(`
+      DROP TRIGGER IF EXISTS memory_search_traits_insert;
+      DROP TRIGGER IF EXISTS memory_search_traits_update;
+      CREATE TRIGGER memory_search_traits_insert AFTER INSERT ON memory_traits BEGIN
+        UPDATE memory_search_docs SET normalized=(SELECT memory_search_normalize(${docSql('m')}) FROM memories m WHERE m.memory_id=new.memory_id),
+          tokens=(SELECT memory_search_tokens(${docSql('m')}) FROM memories m WHERE m.memory_id=new.memory_id) WHERE memory_id=new.memory_id; END;
+      CREATE TRIGGER memory_search_traits_update AFTER UPDATE OF concepts_json ON memory_traits BEGIN
+        UPDATE memory_search_docs SET normalized=(SELECT memory_search_normalize(${docSql('m')}) FROM memories m WHERE m.memory_id=new.memory_id),
+          tokens=(SELECT memory_search_tokens(${docSql('m')}) FROM memories m WHERE m.memory_id=new.memory_id) WHERE memory_id=new.memory_id; END;
     `);
     const state=db.prepare('SELECT * FROM memory_search_state WHERE id=1').get();
     if (state.state!=='ready' || state.version!==INDEX_VERSION || !this.validate()) this.rebuild();
@@ -61,8 +79,8 @@ export class MemorySearch {
   validate() {
     try {
       const mismatch=this.db.prepare(`SELECT 1 FROM memories m LEFT JOIN memory_search_docs d USING(memory_id)
-        WHERE d.doc_id IS NULL OR d.normalized != memory_search_normalize(m.content || char(10) || coalesce(m.topic,''))
-        OR d.tokens != memory_search_tokens(m.content || char(10) || coalesce(m.topic,'')) LIMIT 1`).get();
+        WHERE d.doc_id IS NULL OR d.normalized != memory_search_normalize(${docSql('m')})
+        OR d.tokens != memory_search_tokens(${docSql('m')}) LIMIT 1`).get();
       this.db.exec("INSERT INTO memory_search_fts(memory_search_fts,rank) VALUES('integrity-check',1)");
       const orphan=this.db.prepare('SELECT 1 FROM memory_search_docs d LEFT JOIN memories m USING(memory_id) WHERE m.memory_id IS NULL LIMIT 1').get();
       return !mismatch && !orphan;
@@ -78,12 +96,12 @@ export class MemorySearch {
       db.exec("INSERT INTO memory_search_fts(memory_search_fts) VALUES('rebuild')");
       db.exec('DELETE FROM memory_search_docs WHERE memory_id NOT IN (SELECT memory_id FROM memories)');
       for (;;) {
-        const rows=db.prepare('SELECT memory_id,content,topic FROM memories WHERE memory_id>? ORDER BY memory_id LIMIT 250').all(after);
+        const rows=db.prepare(`SELECT m.memory_id,m.content,m.topic,${conceptsSql('m')} AS concepts_text FROM memories m WHERE m.memory_id>? ORDER BY m.memory_id LIMIT 250`).all(after);
         if (!rows.length) break;
         db.exec('BEGIN IMMEDIATE');
         try {
           const insert=db.prepare(`INSERT INTO memory_search_docs(memory_id,normalized,tokens) VALUES(?,?,?) ON CONFLICT(memory_id) DO UPDATE SET normalized=excluded.normalized,tokens=excluded.tokens`);
-          for (const row of rows) { const text=`${row.content}\n${row.topic || ''}`; insert.run(row.memory_id,normalizeSearch(text),indexText(text)); }
+          for (const row of rows) { const text=memorySearchText(row); insert.run(row.memory_id,normalizeSearch(text),indexText(text)); }
           db.exec('COMMIT');
         } catch(error) { db.exec('ROLLBACK'); throw error; }
         after=rows.at(-1).memory_id;
@@ -160,7 +178,7 @@ export class MemorySearch {
       if(!tokens.length)return {rows:[],truncated:false,plan};
       const variants=[...new Set(tokens.flatMap(wordVariants))];if(variants.length<=512)tokens=variants;
       const json=JSON.stringify(plan);
-      const rows=this.db.prepare(`SELECT m.*,memory_search_relevance(m.content,m.topic,?) AS search_relevance FROM memory_search_fts
+      const rows=this.db.prepare(`SELECT m.*,${conceptsSql('m')} AS concepts_text,memory_search_relevance(m.content,m.topic,${conceptsSql('m')},?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
         WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)}
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})

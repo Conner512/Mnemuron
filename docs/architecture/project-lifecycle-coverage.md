@@ -314,3 +314,20 @@ The new declaration probe in `memory-retrieval.mjs` uses the resolved lifecycle 
 - `server/lib/console/owner.mjs`: saving the switches reads the owner's highest `memories` rowid (metadata only) so a
   newly enabled processing channel covers new memories only, exactly as saving the automatic rule already did.
 
+- Keyword search (`server/lib/memory-retrieval.mjs`): each search document now also carries the memory's keywords. The two
+  `memory_traits` triggers and the rebuild read the indexed `memories` row by its ID only, exactly like the existing index
+  maintenance; candidate selection and every lifecycle filter are unchanged. No lifecycle write.
+- Near-duplicate hints on save (`server/lib/memory/similar.mjs`): after a committed save the semantic path reuses
+  `searchMemories` (all its scope, visibility and live-project rules). Without a ready vector index, one fallback read of the
+  owner's active `memories` with the same search tokens, filtered by Web visibility and dropping memories of deleted
+  projects. Advisory and read-only; no lifecycle write.
+- Project profile (`server/lib/memory/profile.mjs`, `POST /v1/projects/profile`, console `project-profile`): counts, kinds,
+  keywords, strongest preference/architecture/workflow memories and latest problems of one project. Scope is resolved with
+  `resolveMemoryScope` (deleted projects refused, merged members included) and filtered by `memoryScopeSql` plus Web
+  visibility, leaving out account-wide (`scope='user'`) memories; one `projects` name read. Audited as `memory.profile`.
+  Read-only; no lifecycle write.
+- Session-start context (`server/lib/memory/session-context.mjs`, `POST /v1/context/session`, plugin SessionStart hook):
+  account-wide preference/workflow memories and, with a project, that project's strongest preference/architecture/
+  workflow memories and recent problems, within a token budget. Scope via `resolveMemoryScope` / `memoryScopeSql` plus
+  Web visibility (deleted projects refused); one `projects` name read. Audited as `memory.context`. Read-only; no
+  lifecycle write.

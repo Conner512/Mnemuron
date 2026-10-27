@@ -2,6 +2,9 @@ import http from "node:http";
 import { URL } from "node:url";
 import {isWebReader} from './memory/web-visibility.mjs';
 import {isConsoleReader,consoleRead} from './console-read.mjs';
+import {similarMemories} from './memory/similar.mjs';
+import {projectProfile} from './memory/profile.mjs';
+import {sessionContext} from './memory/session-context.mjs';
 import {
   AuthenticationError,
   MnemuronStore,
@@ -100,7 +103,7 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
-        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        request.method==='GET' && (pathname==='/v1/identity' || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
         || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
       if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){
@@ -115,7 +118,10 @@ export function createMnemuronApp({
         throw new NotFoundError('Endpoint not available to this destination.');
 
       if(request.method==='POST'&&pathname==='/v1/cloud-memory/operations'){
-        const input=await readJson(request,32768);responseStatus=200;return sendJson(response,200,store.cloudMemory.execute(auth,input));
+        const input=await readJson(request,32768);responseStatus=200;const receipt=store.cloudMemory.execute(auth,input);
+        // The stored receipt stays a fixed commit snapshot; the near-duplicate hint is added to this response only.
+        const similar=input.action==='memory.save'?(await similarMemories(store,auth,{memory_id:receipt.memory_id,content:input.payload.content})).map(({memory_id,similarity})=>({memory_id,similarity})):[];
+        return sendJson(response,200,similar.length?{...receipt,similar_memories:similar}:receipt);
       }
       const cloudOperation=routeMatch(pathname,/^\/v1\/cloud-memory\/operations\/([A-Za-z0-9_.:-]+)$/);
       if(request.method==='GET'&&cloudOperation){responseStatus=200;return sendJson(response,200,store.cloudMemory.get(auth,url.searchParams.get('connection_id'),cloudOperation[0]));}
@@ -223,14 +229,24 @@ export function createMnemuronApp({
       if (request.method === "POST" && pathname === "/v1/memories") {
         const body = await readJson(request, maxBodyBytes);
         responseStatus = 201;
-        return sendJson(response, 201, store.saveMemory(auth, body, {
+        const saved = store.saveMemory(auth, body, {
           idempotencyKey: request.headers["idempotency-key"],
-        }));
+        });
+        // Advisory near-duplicate hint, computed after commit (memory/similar.mjs).
+        const similar = saved.idempotent ? [] : await similarMemories(store, auth, saved.memory);
+        return sendJson(response, 201, similar.length ? { ...saved, similar_memories: similar } : saved);
       }
       if (request.method === "POST" && pathname === "/v1/memories/query") {
         const body = await readJson(request, maxBodyBytes);
         responseStatus = 200;
         return sendJson(response, 200, await store.searchMemories(auth, body));
+      }
+      if(request.method==='POST' && pathname==='/v1/context/session'){
+        const body=await readJson(request,maxBodyBytes);responseStatus=200;
+        return sendJson(response,200,sessionContext(store,auth,{...(body?.project_id!==undefined?{project_id:body.project_id}:{}),...(body?.budget_tokens!==undefined?{budget_tokens:body.budget_tokens}:{})}));
+      }
+      if(request.method==='POST' && pathname==='/v1/projects/profile'){
+        const body=await readJson(request,maxBodyBytes);responseStatus=200;return sendJson(response,200,projectProfile(store,auth,body?.project_id));
       }
       if(request.method==='POST' && pathname==='/v1/memory-summaries/query'){
         const body=await readJson(request,maxBodyBytes);responseStatus=200;return sendJson(response,200,store.memorySummaries(auth,body));

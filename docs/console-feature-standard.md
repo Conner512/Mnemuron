@@ -27,17 +27,15 @@
 | （无） | 概览 | `/app/overview` | `OVW` |
 | 记忆 | 记忆库 | `/app/memories` | `MEM` |
 | 记忆 | 摘要 | `/app/summaries` | `SUM` |
-| 自动整理 | 整理能力 | `/app/jobs` | `JOB` |
-| 连接 | ChatGPT | `/app/connections` | `CON` |
-| 连接 | 编程助手 | `/app/agents` | `AGT` |
-| 工作 | 项目与任务 | `/app/tasks` | `TSK` |
+| 自动整理 | 整理能力 | `/app/processing` | `JOB` |
+| 连接 | 连接 | `/app/connections` | `CON` |
+| 工作 | 项目与任务 | `/app/projects` | `TSK` |
 | 系统 | 模型与额度 | `/app/models` | `MOD` |
-| 系统 | 健康 | `/app/storage` | `STO` |
-| 系统 | 用量 | `/app/usage` | `USE` |
+| 系统 | 健康 | `/app/health` | `STO` |
 | 系统 | 审计 | `/app/audit` | `AUD` |
 | 系统 | 账户安全 | `/app/security` | `SEC` |
 
-导航按“记忆从哪来、怎么整理、被谁使用”分组。页面换了位置时沿用原路由，公网入口（Cloudflare Tunnel）只放行这些路径，新增路径要先在入口规则里加（`/app/agents` 需要加入）。原 `/app/system`（功能开关）跳转到 `/app/jobs`，原 `/app/resume`（接续交接）跳转到 `/app/tasks`。单一所有者部署中：每项整理能力（语义检索、自动分类、摘要、实体提取）在「整理能力」页有自己的开关、依赖清单、状态和补处理入口，默认检索模式在语义检索卡片里；ChatGPT 的连接、读取范围和写入开关在「ChatGPT」页；设备、通用 MCP 连接和采集开关在「编程助手」页。功能编号随内容移动：原 `CON-03`～`CON-05` 现为 `AGT-01`～`AGT-03`，原 `RES-01`～`RES-04` 现为 `TSK-07`～`TSK-10`，原 `SYS-01`～`SYS-04` 现为 `STO-05`～`STO-08`。
+导航按“记忆从哪来、怎么整理、被谁使用”分组。每个页面的地址与它的中英文标题一致（整理能力 Processing → `/app/processing`，项目与任务 Projects & tasks → `/app/projects`，健康 Health → `/app/health`）；代码里的页面键（`jobs`、`tasks`、`storage`）只在内部使用。公网入口（Cloudflare Tunnel）只放行这些路径，新增或改名的路径要先在入口规则里加。旧地址都会跳转：`/app/jobs`、`/app/system` → `/app/processing`，`/app/tasks`、`/app/resume` → `/app/projects`，`/app/storage` → `/app/health`，`/app/agents` → `/app/connections`，`/app/usage` → `/app/models`，`/app/entities` → `/app/memories`。单一所有者部署中：每项整理能力在「整理能力」页有自己的开关、依赖清单、状态和补处理入口，默认检索模式在语义检索卡片里；所有连接（ChatGPT、编程助手和其他应用）都在「连接」页；用量（调用次数与 14 天调用图）在「模型与额度」页。功能编号随内容移动：原 `CON-03`～`CON-05` 现为 `AGT-01`～`AGT-03`，原 `RES-01`～`RES-04` 现为 `TSK-07`～`TSK-10`，原 `SYS-01`～`SYS-04` 现为 `STO-05`～`STO-08`，`USE-01`～`USE-02` 在「模型与额度」页。
 
 「项目与任务」是原型页面：整页由清单生成，每个功能一张卡片，已上线的排在前面。已上线的卡片显示真实数据，也可以带真实操作；规划中的卡片显示线框和开发说明，不带任何操作。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
 
@@ -239,8 +237,8 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | SEC-05 | 账户安全 | 登录记录 | live | login-history | — |
 | AUD-01 | 审计记录 | 账户事件时间线 | live | audit | — |
 | AUD-02 | 审计记录 | 筛选与导出 | live | audit | — |
-| USE-01 | 用量统计 | 调用历史 | live | model-usage | — |
-| USE-02 | 用量统计 | 额度消耗 | live | model-usage | — |
+| USE-01 | 模型与额度 | 调用历史 | live | model-usage | — |
+| USE-02 | 模型与额度 | 额度消耗 | live | model-usage | — |
 | STO-01 | 存储与备份 | 个人数据导出 | live | export | storage.export |
 | STO-02 | 存储与备份 | 导入为新记忆 | live | — | storage.import |
 | STO-03 | 存储与备份 | 存储用量 | live | storage | — |

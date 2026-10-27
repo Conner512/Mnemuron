@@ -1,0 +1,10 @@
+# Installs a new Cloudflare tunnel token (root: writes the cloudflared credential and restarts it), with rollback.
+[Unit]
+Description=Apply Mnemuron Cloudflare tunnel settings
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=MNEMURON_MEMORY_CONFIG=/etc/mnemuron/memory-first.runtime.json
+ExecStart=/opt/node-v24.19.0-linux-x64/bin/node /opt/mnemuron/current/server/bin/mnemuron-tunnel-apply.mjs
+TimeoutStartSec=180

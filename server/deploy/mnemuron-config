@@ -1,0 +1,21 @@
+#!/bin/sh
+# Owner configuration CLI (see server/bin/mnemuron-config.mjs; connections: services/oauth/bin/connections-config.mjs). Always runs as the service user so the database and its
+# WAL files keep their owner; the same environment as the service.
+set -eu
+RELEASE="${MNEMURON_RELEASE:-/opt/mnemuron/current}"
+NODE="${MNEMURON_NODE:-/opt/node-v24.19.0-linux-x64/bin/node}"
+export MNEMURON_MEMORY_CONFIG="${MNEMURON_MEMORY_CONFIG:-/etc/mnemuron/memory-first.runtime.json}"
+# Connections live in the OAuth service: same CLI name, run as that service user with its runtime file.
+if [ "${1:-}" = "connections" ]; then
+  shift
+  OAUTH_CONFIG="${MNEMURON_OAUTH_CONFIG:-$(systemctl show -p Environment --value mnemuron-oauth 2>/dev/null | tr ' ' '\n' | sed -n 's/^MNEMURON_OAUTH_CONFIG=//p' | tail -1)}"
+  if [ "$(id -u)" = "0" ]; then
+    exec runuser -u mnemuron-oauth -- env MNEMURON_OAUTH_CONFIG="$OAUTH_CONFIG" "$NODE" "$RELEASE/services/oauth/bin/connections-config.mjs" "$@" --actor "${MNEMURON_CONFIG_ACTOR:-${SUDO_USER:-root}}"
+  fi
+  exec env MNEMURON_OAUTH_CONFIG="$OAUTH_CONFIG" "$NODE" "$RELEASE/services/oauth/bin/connections-config.mjs" "$@"
+fi
+if [ "$(id -u)" = "0" ]; then
+  exec runuser -u mnemuron -- env MNEMURON_MEMORY_CONFIG="$MNEMURON_MEMORY_CONFIG" MNEMURON_DATABASE_PATH="${MNEMURON_DATABASE_PATH:-}" \
+    "$NODE" "$RELEASE/server/bin/mnemuron-config.mjs" "$@" --actor "${MNEMURON_CONFIG_ACTOR:-${SUDO_USER:-root}}"
+fi
+exec "$NODE" "$RELEASE/server/bin/mnemuron-config.mjs" "$@"

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
-import {renderPage,sendPage,serveAsset,pages,routeTitle} from '../../../web/console/render.mjs';
+import {renderPage,sendPage,serveAsset,pages,routeTitle,slugOf} from '../../../web/console/render.mjs';
 import {overviewView,icon,libraryView,memoryDetailView,memoryRows,summaryDetailView} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
 import {declarations,rules} from './helpers/css.mjs';
@@ -128,18 +128,18 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar has the overview plus five journey groups and all twelve destinations as icon links',()=>{
+test('Shell: the sidebar has the overview plus five journey groups and all ten destinations as icon links (usage lives on the models page)',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
   assert.equal((nav.match(/class="nav-group"/g)||[]).length,6);
   assert.equal((nav.match(/<h2 data-i18n="nav(Memory|Processing|Connections|Work|System)">/g)||[]).length,5);
-  assert.equal((nav.match(/data-nav-badge="[a-z]+"/g)||[]).length,12);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,12);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon nav-glyph"/g)||[]).length,12,"every destination has its own bold navigation glyph");
+  assert.equal((nav.match(/data-nav-badge="[a-z]+"/g)||[]).length,10);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,10);assert.doesNotMatch(nav,/href="\/app\/usage"/);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon nav-glyph"/g)||[]).length,10,"every destination has its own bold navigation glyph");
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
-  assert.match(nav,new RegExp(`href="/app/${page}" aria-current="page"`));
+  assert.match(nav,new RegExp(`href="/app/${slugOf(page)}" aria-current="page"`));
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
   assert.doesNotMatch(html,/data-skin|data-mode|status-readout|<filter id=|page-code/);
  }

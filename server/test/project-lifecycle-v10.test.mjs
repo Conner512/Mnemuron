@@ -92,7 +92,7 @@ test('LV-03: the exact final v9 build upgrades through v10 to v11 preserving bus
   new MnemuronStore(file).close();
   assert.equal(version(file),CORE_SCHEMA_VERSION);const after=rows(file);
   for(const [table,value] of Object.entries(before)){if(table==='lifecycle_protection'){const prior=JSON.parse(value),current=JSON.parse(after[table]);assert.deepEqual(current.filter(r=>prior.some(p=>p.table_name===r.table_name)),prior,'preexisting protection rows preserved');continue;}assert.equal(after[table],value,`${table} unchanged by the upgrade`);}
-  assert.deepEqual(Object.keys(after).filter(t=>!(t in before)).sort(),['project_lifecycle_enforcement','memory_entities','memory_entity_names','memory_entity_members','memory_entity_proposals','memory_entity_tombstones','memory_entity_queue_cursor','memory_traits'].sort());
+  assert.deepEqual(Object.keys(after).filter(t=>!(t in before)).sort(),['project_lifecycle_enforcement','memory_entities','memory_entity_names','memory_entity_members','memory_entity_proposals','memory_entity_tombstones','memory_entity_queue_cursor','memory_traits','config_changes','tunnels','console_hosts','console_hosts_apply'].sort());
   // A conflicting pre-existing object makes the v10 step fail: nothing of v10 remains and the version stays 9.
   // (The v10 step is one table plus one marker row; rollback of objects a failing step had already created is proven for
   // the shared migration runner by LF-02.)

@@ -1,6 +1,7 @@
 import {collectAuditExport} from './audit.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
+import {agentsView} from './agents.mjs';
 import {icon,revisionDifference,kindGroup,KIND_OF_GROUP} from './visuals.mjs';
 
 // Settings and operations pages. Views are markup only; every write goes through
@@ -16,7 +17,8 @@ const section=(title,body,{aside='',className=''}={})=>`<section class="card ${c
 const buttons=items=>items.length?`<div class="actions action-toolbar">${items.join('')}</div>`:'';
 const kv=pairs=>`<dl class="metadata-grid">${pairs.map(([k,v])=>`<dt>${l(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 const note=key=>`<p class="policy-box">${l(key)}</p>`;
-const refresh=()=>`<button type="button" class="quiet" data-retry>${l('refresh')}</button>`;
+// Refresh: the standard button, as everywhere else on the console.
+const refresh=()=>`<button type="button" class="refresh-button" data-retry>${l('refresh')}</button>`;
 export const canAct=(caps,action)=>Array.isArray(caps.allowed_actions)?caps.allowed_actions.includes(action):caps.enabled===true&&(/^(security|oauth)\./.test(action)||caps.writable===true);
 // Coarse sign-in snapshot as stored for that session; never the browser viewing this page.
 const clientKey=(s,k)=>`${k}_${/^[a-z]{1,16}$/.test(s[k])?s[k]:'unknown'}`;
@@ -26,7 +28,7 @@ const pager=data=>`<div class="pagination">${data.offset?`<button type="button" 
 const progress=(done,total)=>{const n=Number(done)||0,m=Number(total)||0,w=m>0?Math.min(100,Math.round(n/m*100)):0;return `<span class="progress"><svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${w}" height="4" rx="2"/></svg><span>${n} / ${m}</span></span>`;};
 
 const ownerLabels={processing:'后台整理',summary:'摘要',traits:'补全关键词',vector_build:'手动构建向量索引',vector_search:'语义检索',vector_catch_up:'新记忆自动进语义索引',memory:'记忆功能',handoff:'任务接续',capture:'从事件提取记忆',conversation:'从对话提取',cloud_write:'ChatGPT 保存和修正记忆',cloud_submitted_grants:'ChatGPT 写入后自己可读',connections:'在控制台管理连接'};
-const ownerActions=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel'];
+const ownerActions=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel','processing.delete','processing.clear'];
 const ownerButton=(action,label,data={})=>`<button type="button" data-console-action="${esc(action)}" ${Object.entries(data).map(([k,v])=>`data-${k}="${esc(v)}"`).join(' ')}>${esc(label)}</button>`;
 // Owner pages (single-owner deployments). The switches, background processing, the default retrieval mode and the
 // ChatGPT read policy each have their own page; every change still goes through features.save with re-authentication.
@@ -58,7 +60,7 @@ const CAPABILITIES=[
   {key:'summary',flags:['summary'],title:'摘要',purpose:'按项目、任务或会话，每天和每周各生成一份摘要，只摘录原记忆里的原话。',model:'organizer',run:'summary'},
   {key:'traits',flags:['traits'],title:'补全关键词',purpose:'给没有类型、关键词或重要度的记忆自动补上，直接写入，不用逐条确认；写入方已经填的不会被覆盖，可以在修订记忆时改。',model:'organizer',run:'traits'}];
 const NEED_TEXT={NOT_CONFIGURED:['模型未配置','/app/models'],EGRESS_DENIED:['尚未同意发送记忆给模型','/app/models'],QUERY_EGRESS_DENIED:['尚未同意发送查询给模型','/app/models'],
-  PROBE_REQUIRED:['模型测试未通过','/app/models'],VECTOR_DISABLED:['向量库未配置','/app/storage'],VECTOR_NOT_READY:['还没有可用的语义索引','/app/storage'],
+  PROBE_REQUIRED:['模型测试未通过','/app/models'],VECTOR_DISABLED:['向量库未配置','/app/health'],VECTOR_NOT_READY:['还没有可用的语义索引','/app/health'],
   PROCESSING_PAUSED:['后台整理已暂停','#processing-master'],MEMORY_DISABLED:['记忆功能已关闭','#processing-other']};
 function needsList(o,cap,models){const m=models?.find(x=>x.kind===cap.model),blockers=[...new Set(cap.flags.flatMap(k=>o.effective?.[k]?.blockers||[]))].filter(c=>c!=='FEATURE_DISABLED');
   const items=[];const has=code=>blockers.includes(code);
@@ -83,14 +85,65 @@ function capabilityCard(o,cap,models){const f=flagState(o,cap.key),runs=(o.runs|
   return `<section class="card capability" id="cap-${esc(cap.key)}" data-capability="${esc(cap.key)}"><header class="section-head"><div><h2>${esc(cap.title)}</h2><p class="muted">${esc(cap.purpose)}</p></div>${tone(f.label,f.kind)}</header>
     <div class="capability-body"><div><h3 class="capability-label">需要</h3>${needsList(o,cap,models)}</div><div><h3 class="capability-label">状态</h3><dl class="metadata-grid">${status.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl></div></div>
     <div class="actions">${actions.join('')}</div></section>`;}
-function processingPage(o,models){if(!o)return ownerUnavailable;
+// Host records for model requests (server console/hosts.mjs): a model hostname pointed at a fixed address, e.g. a relay
+// on the local network. Model requests use the record instead of DNS.
+function hostsCard(hosts,can,system=[],apply=null){if(!hosts)return '';
+  const row=(h,source,time)=>`<tr data-host="${esc(h.hostname)}"><td><code>${esc(h.hostname)}</code></td><td><code>${esc(h.address)}</code></td><td><span class="tag">${source}</span></td><td>${time}</td>
+    <td>${buttons([...(can('hosts.set')?[actionButton('hosts.set','hostEdit',{id:h.hostname})]:[]),...(can('hosts.remove')?[actionButton('hosts.remove','hostRemove',{id:h.hostname})]:[])])}</td></tr>`;
+  // Records (Mnemuron's block in /etc/hosts) first, then the server's other lines; editing one of those takes it over.
+  const all=[...hosts.map(h=>row(h,'Mnemuron',esc(clock(Date.parse(h.updated_at))))),...system.map(h=>row(h,l('hostSourceSystem'),'—'))];
+  const rows=all.length?`<div class="table-scroll"><table class="hosts-table"><thead><tr><th>域名</th><th>解析到</th><th>来源</th><th>修改时间</th><th>操作</th></tr></thead><tbody>${all.join('')}</tbody></table></div>`:`<p class="muted">还没有解析记录，按正常 DNS 解析。</p>`;
+  const status=!apply?.writes_file||!apply.revision?'':apply.pending?tone('正在写入 /etc/hosts',''):apply.state==='failed'?tone(`写入 /etc/hosts 失败 ${apply.error||''}`,'bad'):tone('已写入 /etc/hosts','good');
+  return `<section class="card" id="model-hosts"><header class="section-head"><h2>${l('hostsTitle')}</h2>${status}${can('hosts.set')?actionButton('hosts.set','hostAdd'):''}</header><p class="muted">${l('hostsNote')}</p>${rows}</section>`;
+}
+// Job queue by batch (server memory-jobs batches): one row per planned round with its overall progress in percent;
+// cancelling a batch cancels its unfinished jobs.
+const BATCH_STATE=b=>b.running?'leased':b.waiting?'pending':b.failed?'dead_letter':b.succeeded===b.jobs?'succeeded':b.cancelled===b.jobs?'cancelled':'succeeded';
+function batchTable(batches,can){
+  return table(batches,['scope','state','progress','batchIssues','actions'],b=>{const done=b.succeeded+b.cancelled+b.failed,pct=b.jobs?Math.round(b.succeeded/b.jobs*100):0,s=BATCH_STATE(b);
+    const parts=[b.running&&`${b.running} 个进行中`,b.waiting&&`${b.waiting} 个等待`,b.succeeded&&`${b.succeeded} 个完成`,b.failed&&`${b.failed} 个失败`,b.cancelled&&`${b.cancelled} 个已取消`].filter(Boolean).join(' · ');
+    return `<tr data-batch="${esc(b.batch_id)}"><td><button type="button" class="link-button batch-toggle" data-batch-toggle="${esc(b.batch_id)}" aria-expanded="false"><span class="batch-caret" aria-hidden="true">▸</span>${esc(t(b.job_type))}</button><small>${esc(new Date(b.created_at).toLocaleString('zh-CN'))} · 共 ${esc(b.jobs)} 个</small></td>
+      <td><span class="state-dot" data-state="${esc(s)}">${l('jobState_'+s)}</span><small>${esc(parts)}</small></td>
+      <td><span class="progress batch-progress"><svg viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect class="track" width="100" height="4" rx="2"/><rect class="fill" width="${pct}" height="4" rx="2"/></svg><span>${pct}%</span></span></td>
+      <td>${b.error_codes.length?b.error_codes.map(c=>`<span class="job-error">${esc(t(c))}</span>`).join(' '):'—'}</td>
+      <td>${done<b.jobs&&can('jobs.cancel_batch')?buttons([actionButton('jobs.cancel_batch','cancelBatch',{id:b.batch_id})]):'—'}</td></tr>`;});
+}
+// A batch's jobs, one page (BATCH_PAGE) at a time, shown under its row: what each covers (project/task and day), state,
+// progress and error; a job opens its detail. The footer says which page of how many.
+export const BATCH_PAGE=10;
+const PERIOD={daily:'每日',weekly:'每周'};
+const jobScope=j=>{const s=j.scope||{},w=j.window;const where=s.kind==='project'?`项目 ${s.project_name||s.project_id||''}`:s.kind==='task'?`任务 ${s.task_title||s.task_id||''}`:s.kind==='workstream'?`工作流 ${s.workstream_name||s.workstream_id||''}`:s.kind==='session'?'会话':s.kind==='user'?'全部记忆':'—';
+  return `${where}${w?.local_start?` · ${w.local_start}${PERIOD[w.period]?`（${PERIOD[w.period]}）`:''}`:''}`;};
+export function batchJobsView(d){
+  const pages=Math.max(1,Math.ceil(d.total/(d.limit||BATCH_PAGE))),current=Math.floor(d.offset/(d.limit||BATCH_PAGE))+1;
+  const rows=d.jobs.map(j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(jobScope(j))}</button></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td>
+    <td>${progress(j.processed,j.total)}</td><td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span>`:'—'}</td><td>${esc(clock(j.updated_at))}</td></tr>`).join('');
+  return `<table class="batch-jobs"><thead><tr><th>内容</th><th>状态</th><th>进度</th><th>问题</th><th>更新</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="pagination batch-pager"><span class="muted">第 ${current} / ${pages} 页 · 共 ${esc(d.total)} 个</span>${d.offset>0?`<button type="button" data-batch-page="${Math.max(0,d.offset-(d.limit||BATCH_PAGE))}">${l('previous')}</button>`:''}${d.next_offset!=null?`<button type="button" data-batch-page="${d.next_offset}">${l('next')}</button>`:''}</div>`;
+}
+const RUN_PURPOSE={summary:'把选中的历史记忆按项目和日期分组，生成摘要',traits:'为记忆补全类型、关键词和重要度',vector:'把全部活动记忆重新嵌入一个新的语义索引'};
+const span=(a,b)=>{const m=Math.max(0,Math.round((b-a)/60000));return m<1?'不到 1 分钟':m<60?`${m} 分钟`:`${Math.floor(m/60)} 小时 ${m%60} 分钟`;};
+// What a run did and when: purpose, start and end (or how long it has been going), memories, jobs, model calls and model.
+function runFacts(r){
+  const end=r.finished_at?esc(clock(r.finished_at)):['running','queued'].includes(r.state)?'进行中':r.state==='paused'?'已暂停':'—';
+  const facts=[['开始',r.started_at?esc(clock(r.started_at)):'—'],['结束',end],['用时',r.started_at?esc(span(r.started_at,r.finished_at||Date.now())):'—'],
+    ['记忆',`${esc(r.count)} 条${r.excluded?`（排除 ${esc(r.excluded)} 条）`:''}`],...(r.jobs?[['任务',`${esc(r.jobs)} 个，完成 ${esc(r.jobs_done)} 个${r.jobs_failed?`，失败 ${esc(r.jobs_failed)} 个`:''}`]]:[]),
+    ['模型调用',`${esc(r.used)} / ${esc(r.budget)} 次`],['模型',esc(r.model||'—')],...(r.generation?[['索引',`第 ${esc(r.generation)} 代`]]:[])];
+  return `<p class="muted">${esc(RUN_PURPOSE[r.kind]||'')}</p><dl class="run-facts">${facts.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+}
+// Run history, last on the processing page. Finished runs (completed, cancelled, expired previews) can be deleted one by
+// one or all at once; what they wrote stays.
+const runFinished=r=>r.expired||['completed','cancelled'].includes(r.state);
+function runsCard(o){if(!o)return '';
   // Previews are an internal step of the one-step confirmation, and entity/classification runs belong to retired features.
   const shown=(o.runs||[]).filter(r=>r.state!=='preview'&&['summary','traits','vector'].includes(r.kind));
-  const runs=shown.length?shown.map(r=>`<article class="policy-box run-row" data-run-state="${r.expired?'expired':esc(r.state)}"><strong>${esc(runKind(r.kind))}</strong> · ${esc(RUN_STATES[r.expired?'expired':r.state]||r.state)} · 调用 ${esc(r.used)}/${esc(r.budget)} · ${esc(r.count)} 条 · ${esc(r.model||'')}${r.error_code?`<p role="status">${esc(t(r.error_code))}</p>`:''}${runItems(r)}<details class="tech-details"><summary>技术信息</summary><code class="owner-digest">${esc(r.manifest_digest)}</code></details>${r.expired?'<p class="muted">预览只在 15 分钟内有效，过期后需要重新预览。</p>':''}<div class="actions">${r.state==='preview'&&!r.expired?ownerButton('processing.start','确认并开始',{id:r.run_id}):''}${r.expired&&['summary','traits','vector'].includes(r.kind)?ownerButton('processing.preview','重新预览',{kind:r.kind}):''}${['running','queued'].includes(r.state)?ownerButton('processing.pause','暂停',{id:r.run_id}):''}${['paused','blocked'].includes(r.state)?ownerButton('processing.resume','确认恢复',{id:r.run_id}):''}${!['completed','cancelled'].includes(r.state)?ownerButton('processing.cancel','取消',{id:r.run_id}):''}</div></article>`).join(''):'<p class="muted">还没有运行记录。</p>';
+  const runs=shown.length?shown.map(r=>`<article class="policy-box run-row" data-run-state="${r.expired?'expired':esc(r.state)}"><strong>${esc(runKind(r.kind))}</strong> · ${esc(RUN_STATES[r.expired?'expired':r.state]||r.state)}${runFacts(r)}${r.error_code?`<p role="status">${esc(t(r.error_code))}</p>`:''}${runItems(r)}<details class="tech-details"><summary>技术信息</summary><code class="owner-digest">${esc(r.manifest_digest)}</code></details>${r.expired?'<p class="muted">预览只在 15 分钟内有效，过期后需要重新预览。</p>':''}<div class="actions">${r.state==='preview'&&!r.expired?ownerButton('processing.start','确认并开始',{id:r.run_id}):''}${r.expired&&['summary','traits','vector'].includes(r.kind)?ownerButton('processing.preview','重新预览',{kind:r.kind}):''}${['running','queued'].includes(r.state)?ownerButton('processing.pause','暂停',{id:r.run_id}):''}${['paused','blocked'].includes(r.state)?ownerButton('processing.resume','确认恢复',{id:r.run_id}):''}${!['completed','cancelled'].includes(r.state)&&!r.expired?ownerButton('processing.cancel','取消',{id:r.run_id}):''}${runFinished(r)?ownerButton('processing.delete','删除',{id:r.run_id}):''}</div></article>`).join(''):'<p class="muted">还没有运行记录。</p>';
+  return `<section class="card" id="processing-runs"><header class="section-head"><h2>运行记录</h2>${shown.some(runFinished)?ownerButton('processing.clear','清空已结束的记录'):''}</header>${runs}</section>`;
+}
+function processingPage(o,models){if(!o)return ownerUnavailable;
   return `<section class="card" id="processing-master"><header class="section-head"><div><h2>后台整理</h2><p class="muted">总开关。关闭后下面三项都暂停；修改需要输入密码确认，任何修改都会暂停正在运行的批次。</p></div>${tone(o.flags.processing?'已开启':'已暂停',o.flags.processing?'good':'warn')}</header><div class="actions">${flagButton(o.flags.processing?'暂停':'开启','processing'.split(','),o.flags.processing?'off':'on')}</div></section>
     ${CAPABILITIES.map(cap=>capabilityCard(o,cap,models)).join('')}
-    <section class="card" data-pacing><header class="section-head"><h2>自动处理节奏</h2>${tone(o.schedule.enabled?'已开启':o.schedule.error_code?'已暂停':'未开启',o.schedule.enabled?'good':o.schedule.error_code?'warn':'')}</header><p class="muted">打开上面的摘要或补全关键词后，新记忆按这个节奏自动处理：每 ${esc(o.schedule.interval_minutes)} 分钟一轮，每轮最多 ${esc(o.schedule.max_items)} 条、${esc(o.schedule.budget)} 次调用。${o.schedule.error_code?`暂停原因：${esc(t(o.schedule.error_code))}；重新保存对应开关即可恢复。`:''}</p><div class="actions">${ownerButton('schedule.save','修改节奏')}</div></section>
-    <section class="card"><header class="section-head"><h2>运行记录</h2></header>${runs}</section>
+    <section class="card" id="processing-pacing" data-pacing><header class="section-head"><h2>自动处理节奏</h2>${tone(o.schedule.enabled?'已开启':o.schedule.error_code?'已暂停':'未开启',o.schedule.enabled?'good':o.schedule.error_code?'warn':'')}</header><p class="muted">打开上面的摘要或补全关键词后，新记忆按这个节奏自动处理：每 ${esc(o.schedule.interval_minutes)} 分钟一轮，每轮最多 ${esc(o.schedule.max_items)} 条、${esc(o.schedule.budget)} 次调用。${o.schedule.error_code?`暂停原因：${esc(t(o.schedule.error_code))}；重新保存对应开关即可恢复。`:''}</p><div class="actions">${ownerButton('schedule.save','修改节奏')}</div></section>
     <section class="card" id="processing-other"><header class="section-head"><h2>其他开关</h2></header>${switchRows(o,['memory','vector_build'],{memory:'关闭后不能保存、修正和撤回任何记忆',vector_build:'通过手动批次构建一个新的语义索引（日常用不到，新记忆由“语义检索”自动加入）'})}<div class="actions">${flagButton('修改',['memory','vector_build'])}</div></section>`;
 }
 const RETRIEVAL_MODES={lexical:'关键词',hybrid:'混合（关键词 + 语义）',semantic:'仅语义'};
@@ -98,46 +151,119 @@ function retrievalCard(o){if(!o)return '';const mode=o.preferences?.retrieval_mo
   return `<section class="card" data-retrieval-mode="${esc(mode)}"><header class="section-head"><h2>默认检索模式</h2>${tone(RETRIEVAL_MODES[mode]||mode||'—',mode==='lexical'?'':'good')}</header><p class="muted">控制台、ChatGPT 和其他助手在没有指定检索方式时都用这个模式。混合检索同时用关键词和语义，嵌入模型不可用时自动退回关键词。</p><div class="actions">${ownerButton('features.save','修改检索模式',{section:'retrieval'})}</div></section>`;}
 function readPolicyCard(o){if(!o)return '';const current=o.preferences?.read_policy,names={chatgpt_per_memory_v1:'逐条授权',active_uniform_v1:'全部活动记忆'};
   return `<section class="card" data-read-policy="${esc(current)}"><header class="section-head"><h2>ChatGPT 读取策略</h2>${tone(names[current]||current||'—')}</header><p class="muted">${(o.read_policy_options||[]).map(x=>`${esc(names[x.value]||x.value)}：当前可读 ${esc(x.active_readable)} 条活动记忆`).join('；')}。不会扩大连接本身的权限，生命周期边界始终保留。</p><div class="actions">${ownerButton('features.save','修改读取策略',{section:'read_policy'})}</div></section>`;}
-// ChatGPT: connection, what it can read, what it can write, in one place (owner mode). Other deployments keep the
-// full connections page here.
-function chatgptPage(data,caps,q,o){
-  return connectionsView(data,caps,q,{only:'chatgpt'})+(o?`<div class="card-grid">${readPolicyCard(o)}<section class="card" data-chatgpt-write><header class="section-head"><h2>能写什么</h2></header>${switchRows(o,['cloud_write','cloud_submitted_grants','connections'],
+// Connections: every connection (ChatGPT, coding assistants, other apps) in one list, then what ChatGPT may read and
+// write and what is taken from coding assistants (owner mode). Other deployments show the list only.
+// Connections: the agent page (agents.mjs): every connection, then per-agent setup. Each agent's own rules sit in its
+// panel's settings: ChatGPT's read and write rules, the capture switches for agents that upload activity.
+function connectionsPage(data,caps,q,o){
+  const capture=o?agentCards(data,o):'';
+  return agentsView(data,caps,o?{chatgpt:chatgptCards(data,o),'codex:plugin':capture,openclaw:capture,hermes:capture}:{})+(o?tunnelCards(data.features?.tunnel,caps):'');}
+// Public access through Cloudflare Tunnels (server tunnel/settings.mjs): one card per tunnel with its connection, token
+// fingerprint and apply state. The main tunnel cannot be removed; every change asks for the password and an authenticator code.
+const TUNNEL_STATES={pending:'等待应用',applied:'已生效',rolled_back:'未连上，已恢复原令牌',failed:'应用失败'};
+const TUNNEL_SOURCE={web:'网页',server:'服务器（命令行或安装时配置）'};
+const tunnelSource=by=>!by?'—':TUNNEL_SOURCE[by]||(by.startsWith('cli:')?`命令行（${by.slice(4)}）`:by);
+// One tunnel as a panel inside the public entry card: name, connection state and its service in the head; the
+// details in two columns; its actions at the foot.
+function tunnelCard(d,can){
+  const c=d.connection||{},time=v=>v?esc(new Date(v).toLocaleString('zh-CN')):'';
+  const conn=d.state==='removing'?tone('正在删除','warn'):!c.reachable?tone('读不到 cloudflared','bad'):c.ready?tone(`已连接 · ${c.connections??'—'} 条线路`,'good'):tone('未连接','bad');
+  const facts=[['连接器令牌',d.configured?`<code>${esc(d.token_fingerprint)}</code> <small class="muted">${esc(tunnelSource(d.updated_by))}</small>`:'<span class="muted">还没有读到服务器上的令牌</span>'],
+    ['Tunnel ID',d.tunnel_id?`<code>${esc(d.tunnel_id)}</code>`:'—'],['账户 ID',d.account_id?`<code>${esc(d.account_id)}</code>`:'—'],
+    ['路由配置',c.config_version!=null?`v${esc(c.config_version)}`:'—'],
+    ['应用状态',d.apply_state?`${esc(TUNNEL_STATES[d.apply_state]||d.apply_state)}${d.apply_error?` <code>${esc(d.apply_error)}</code>`:''}${d.applied_at?` · ${time(d.applied_at)}`:''}`:'—'],
+    ['最近修改',d.updated_by?`${esc(tunnelSource(d.updated_by))} · ${time(d.updated_at)}`:'—']];
+  const buttons=d.state==='removing'?[]:[can('tunnel.token')?actionButton('tunnel.token','tunnelSetToken',{id:d.id}):'',d.configured&&can('tunnel.reapply')?actionButton('tunnel.reapply','tunnelReapply',{id:d.id}):'',
+    !d.main&&can('tunnel.remove')?actionButton('tunnel.remove','tunnelRemove',{id:d.id}):''].filter(Boolean);
+  return `<article class="tunnel-item" data-tunnel="${esc(d.id)}"><header><div><h3>${esc(d.name)}</h3><small class="muted"><code>${esc(d.unit)}</code> · 指标端口 ${esc(d.metrics_port)}</small></div>${conn}</header>
+    <dl class="tunnel-facts">${facts.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>${buttons.length?`<div class="actions">${buttons.join('')}</div>`:''}</article>`;
+}
+// Public entry: one card like the other sections, its add button in the card head and one panel per tunnel.
+function tunnelCards(d,caps){
+  const can=a=>caps.allowed_actions?.includes(a);
+  const body=!d?.tunnels?'<p class="muted">暂时读不到 Tunnel 状态。</p>':`<div class="tunnel-list">${d.tunnels.map(x=>tunnelCard(x,can)).join('')}</div>`;
+  return `<section class="card" id="tunnels"><header class="section-head"><h2>公网入口</h2>${d?.tunnels&&can('tunnel.add')?actionButton('tunnel.add','tunnelAdd'):''}</header>${body}</section>`;
+}
+// Configuration changes from the console and the CLI (server config/center.mjs), newest first.
+const CONFIG_SOURCE={web:'网页',cli:'命令行'};
+const configValue=v=>v===null||v===undefined?'—':typeof v==='boolean'?(v?'开':'关'):typeof v==='object'?esc(JSON.stringify(v)):esc(String(v));
+// Configuration changes (server config/center.mjs) on the audit page: web and CLI edits to the same settings, newest first.
+export function configHistoryCard(d){
+  if(!d)return '';
+  return `<section class="card" data-config-history><header class="section-head"><h2>配置变更</h2><button type="button" class="refresh-button" data-retry>${l('refresh')}</button></header>
+    <p class="muted">网页和命令行（mnemuron-config）对配置的修改，按时间倒序。</p>
+    ${(d.history||[]).length?`<div class="table-scroll"><table><thead><tr><th>时间</th><th>来源</th><th>配置项</th><th>修改</th></tr></thead><tbody>${d.history.map(h=>`<tr><td>${esc(new Date(h.at).toLocaleString('zh-CN'))}</td>
+      <td><span class="tag" data-source="${esc(h.source)}">${esc(CONFIG_SOURCE[h.source]||h.source)}</span>${h.actor&&h.actor!=='console'?` <small><code>${esc(h.actor)}</code></small>`:''}</td><td><code>${esc(h.key)}</code></td><td>${configValue(h.old)} → ${configValue(h.new)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">还没有配置变更。</p>'}</section>`;
+}
+function chatgptCards(data,o){
+  return (o?`<div class="card-grid">${readPolicyCard(o)}<section class="card" data-chatgpt-write><header class="section-head"><h2>能写什么</h2></header>${switchRows(o,['cloud_write','cloud_submitted_grants','connections'],
     {cloud_write:'ChatGPT 可以新建和修正记忆',cloud_submitted_grants:'它保存的记忆，之后它自己能读到',connections:'允许在控制台新建、停用和轮换连接'})}<div class="actions">${flagButton('修改',['cloud_write','cloud_submitted_grants','connections'])}</div></section></div>`:'')+
     `${activityLine(data.features?.attention?.activity_7d,'chatgpt','写入')}<p class="section-foot"><a href="/app/audit?group=memory">查看 ChatGPT 的读写记录 →</a></p>`;}
-// Coding assistants: devices and generic MCP connections, what they upload, and the capture switches (owner mode).
-function agentsPage(data,caps,q,o){
-  return activityLine(data.features?.attention?.activity_7d,'agents','提取')+connectionsView(data,caps,q,{only:'agents'})+(o?`<section class="card" data-agent-switches><header class="section-head"><h2>从助手那里收什么</h2></header>${switchRows(o,['capture','conversation','handoff'],
+// Coding assistants: what they upload and the capture switches (owner mode).
+function agentCards(data,o){
+  return activityLine(data.features?.attention?.activity_7d,'agents','提取')+(o?`<section class="card" data-agent-switches><header class="section-head"><h2>从助手那里收什么</h2></header>${switchRows(o,['capture','conversation','handoff'],
     {capture:'助手上传的事件里，用户明确说明的事实会变成记忆',conversation:'对话里“请记住……”这类话会保存',handoff:'自动生成检查点和交接包，换设备或换助手继续'})}<p class="muted">原始事件保留 30 天；上传时会去掉密钥。</p><div class="actions">${flagButton('修改',['capture','conversation','handoff'])}</div></section>`:'');}
 // Health: every check states its result and, when something is wrong, what to do. Unknown parts say so.
 const HEALTH_FIX={VECTOR_AUTH_FAILED:'向量库拒绝了密钥：在 PVE 上重新签发 Qdrant 密钥（无需重启）。',VECTOR_COLLECTION_MISSING:'向量库里缺少预建的集合：检查 Qdrant 集合名称。',
   BUDGET_EXHAUSTED:'调用额度已用完：在“模型与额度”里调高额度。',NOT_CONFIGURED:'嵌入模型未配置或已停用：在“模型与额度”里配置。',NETWORK_ERROR:'连不上模型服务：检查服务地址和网络。'};
-export function healthChecks(f={}){const h=f['system-health'],v=f['system-version'],b=f.backups,m=f.models,o=h?.owner,checks=[];
-  const add=(level,title,detail,fix='')=>checks.push({level,title,detail,fix});
+// Each check says where it is fixed (href): the page and section holding that setting.
+const GO={models:'/app/models',hosts:'/app/models#model-hosts',processing:'/app/processing#processing-master',pacing:'/app/processing#processing-pacing',
+  summary:'/app/processing#cap-summary',traits:'/app/processing#cap-traits',vector:'/app/processing#cap-vector_catch_up',runs:'/app/processing#processing-runs',
+  library:'/app/memories',tunnel:'/app/connections#tunnels',audit:'/app/audit?group=system'};
+export function healthChecks(f={}){const h=f['system-health'],v=f['system-version'],m=f.models,o=h?.owner,checks=[];
+  const add=(level,title,detail,fix='',href='',hint='')=>checks.push({level,title,detail,fix,href,hint});
   if(!h)add('unknown','服务状态','暂时读不到服务状态','稍后点“重新检查”');
-  else{add(h.services?.core==='ready'?'ok':'bad','核心服务',h.services?.core==='ready'?'正在运行，数据库可读':'数据库不可读','检查 mnemuron 服务和数据库文件');
-    add(h.services?.search==='ready'?'ok':'warn','关键词索引',h.services?.search==='ready'?'已就绪':`状态：${h.services?.search||'未知'}`,'索引会在后台自动重建');}
-  const embedder=m?.models?.find(x=>x.kind==='embedder'),probe=embedder?.verification;
-  if(!m)add('unknown','嵌入模型','暂时读不到模型状态');
-  else if(!embedder?.config?.enabled)add('warn','嵌入模型','未启用，语义检索不可用','在“模型与额度”里配置嵌入模型');
-  else add(probe?.state==='verified'?'ok':'warn','嵌入模型',`${embedder.config.model||''} · ${probe?.state==='verified'?'最近一次测试通过':'尚未通过测试'}`,probe?.state==='verified'?'':'在“模型与额度”里点“测试”');
-  if(o){const c=o.vector_catch_up||{},on=o.flags?.vector_catch_up===true,serving=!(o.effective?.vector_search?.blockers||[]).includes('VECTOR_NOT_READY');
-    if(!serving)add('warn','语义索引','还没有可用的语义索引','在“整理能力”的语义检索卡片里重建索引并启用');
-    else if(c.error_code)add('bad','语义索引',`增量索引失败：${t(c.error_code)}`,HEALTH_FIX[c.error_code]||'查看“整理能力”页的语义检索卡片');
-    else if(!on)add('warn','语义索引','增量索引未开启：新记忆不会进入语义索引','在“整理能力”页打开“后台整理”和“语义检索”');
-    else add(c.pending?'warn':'ok','语义索引',c.pending?`待索引 ${c.pending} 条，正在补齐`:'所有活动记忆都已索引');
-    const exhausted=[...(o.effective?.vector_search?.blockers||[])].filter(x=>/BUDGET_EXHAUSTED/.test(x));
-    add(exhausted.length?'bad':'ok','调用额度',exhausted.length?exhausted.map(blockerText).join(' / '):'嵌入模型额度充足',exhausted.length?HEALTH_FIX.BUDGET_EXHAUSTED:'');
-    const spare=o.vector_index?.spare_collections;
-    if(spare!==null&&spare!==undefined)add('ok','重建语义索引',spare?`有 ${spare} 个备用集合，可以重建`:'没有备用集合：日常用不到；换嵌入模型或需要重建时，先在 Qdrant 预建一个空集合，加入运行配置的 precreated_collections，并让向量库密钥能访问它');
-    add(o.flags?.processing?'ok':'warn','后台整理',o.flags?.processing?'已开启':'已暂停：语义索引、摘要和补全关键词都不会运行',o.flags?.processing?'':'在“整理能力”页打开“后台整理”');}
+  else{add(h.services?.core==='ready'?'ok':'bad','核心服务',h.services?.core==='ready'?'正在运行，数据库可读':'数据库不可读','检查 mnemuron 服务和数据库文件',GO.audit);
+    add(h.services?.search==='ready'?'ok':'warn','关键词索引',h.services?.search==='ready'?'已就绪':`状态：${h.services?.search||'未知'}`,'索引会在后台自动重建',GO.library);}
   if(v)add('ok','数据库',`结构版本 ${v.schema_version} · Node ${v.node}`);
-  if(b)add(b.status==='not_configured'?'warn':'ok','备份',b.status==='not_configured'?'没有配置定期备份':'已配置',b.status==='not_configured'?'在 PVE 备份任务里加入 CT 131，或启用内置每日备份':'');
+  // Models: configured, tested and within their call limits.
+  // The organizer is only needed while summaries or keyword filling are on; the embedder always (semantic search).
+  const model=(kind,name,need,needed=true)=>{const x=m?.models?.find(y=>y.kind===kind),probe=x?.verification;
+    if(!m)return needed?add('unknown',name,'暂时读不到模型状态','',GO.models):undefined;
+    if(!x?.config?.enabled)return add(needed?'warn':'ok',name,needed?`未启用：${need}不可用`:`未配置（${need}会用到）`,needed?'在“模型与额度”里配置':'',GO.models);
+    add(probe?.state==='verified'?'ok':'warn',name,`${x.config.model||''} · ${probe?.state==='verified'?'最近一次测试通过':'尚未通过测试'}`,probe?.state==='verified'?'':'在“模型与额度”里点“测试实际能力”',GO.models);};
+  model('organizer','整理模型','摘要和补全关键词',o?.flags?.summary===true||o?.flags?.traits===true);model('embedder','嵌入模型','语义检索');
+  if(o){const c=o.vector_catch_up||{},on=o.flags?.vector_catch_up===true,serving=!(o.effective?.vector_search?.blockers||[]).includes('VECTOR_NOT_READY');
+    const blockers=Object.values(o.effective||{}).flatMap(e=>e?.blockers||[]),exhausted=[...new Set(blockers.filter(x=>/BUDGET_EXHAUSTED/.test(x)))];
+    add(exhausted.length?'bad':'ok','调用额度',exhausted.length?exhausted.map(blockerText).join(' / '):'整理和嵌入模型的额度都还有余量',exhausted.length?HEALTH_FIX.BUDGET_EXHAUSTED:'',GO.models);
+    add(o.flags?.processing?'ok':'warn','后台整理',o.flags?.processing?'已开启':'已暂停：语义索引、摘要和补全关键词都不会运行',o.flags?.processing?'':'在“整理能力”页打开“后台整理”',GO.processing);
+    // Capabilities: on and able to run, or why not.
+    const cap=(flag,name,href)=>{const e=o.effective?.[flag];if(!o.flags?.[flag])return add('ok',name,'未开启（按需打开）','',href);
+      add(e?.effective?'ok':'warn',name,e?.effective?'已开启，正常运行':`已开启但不能运行：${(e?.blockers||[]).map(blockerText).join(' / ')||'原因未知'}`,e?.effective?'':'打开对应卡片查看缺少什么',href);};
+    cap('summary','摘要',GO.summary);cap('traits','补全关键词',GO.traits);
+    if(!serving)add('warn','语义索引','还没有可用的语义索引','在“整理能力”的语义检索卡片里重建索引并启用',GO.vector);
+    else if(c.error_code)add('bad','语义索引',`增量索引失败：${t(c.error_code)}`,HEALTH_FIX[c.error_code]||'查看“整理能力”页的语义检索卡片',GO.vector);
+    else if(!on)add('warn','语义索引','增量索引未开启：新记忆不会进入语义索引','在“整理能力”页打开“后台整理”和“语义检索”',GO.vector);
+    else add(c.pending?'warn':'ok','语义索引',c.pending?`待索引 ${c.pending} 条，正在补齐`:'所有活动记忆都已索引','',GO.vector);
+    const spare=o.vector_index?.spare_collections;
+    if(spare!==null&&spare!==undefined)add('ok','重建语义索引',spare?`有 ${spare} 个备用集合，可以重建`:'没有备用集合（日常用不到）','',GO.vector,'需要重建时先在 Qdrant 预建一个空集合，加入运行配置的 precreated_collections，并让向量库密钥能访问它');
+    const s=o.schedule||{};
+    add(s.error_code?'warn':'ok','自动处理节奏',s.error_code?`已暂停：${t(s.error_code)}`:s.enabled?`每 ${s.interval_minutes} 分钟一轮，每轮最多 ${s.max_items} 条`:'未开启：新记忆不会自动摘要或补全关键词',s.error_code?'重新保存对应开关即可恢复':'',GO.pacing);}
+  const failed=f.attention?.counts?.failed_jobs;
+  if(Number.isFinite(failed))add(failed?'warn':'ok','整理任务',failed?`${failed} 个任务失败`:'没有失败的任务',failed?'在“整理能力”页的任务队列里查看原因并重试':'',GO.runs);
+  const tunnels=f.tunnel?.tunnels;
+  if(tunnels?.length){const down=tunnels.filter(x=>x.state!=='removing'&&!x.connection?.ready),failedApply=tunnels.filter(x=>['failed','rolled_back'].includes(x.apply_state));
+    add(down.length?'bad':failedApply.length?'warn':'ok','公网入口',down.length?`${down.map(x=>x.name).join('、')} 未连接`:failedApply.length?`${failedApply.map(x=>x.name).join('、')} 上次更换令牌没有生效`:`${tunnels.length} 个 Tunnel 已连接`,down.length||failedApply.length?'在“连接”页的公网入口里查看':'',GO.tunnel);}
+  const ha=f.models?.hosts_apply;
+  if(ha?.writes_file&&ha.revision)add(ha.state==='failed'?'bad':ha.pending?'warn':'ok','自定义解析',ha.state==='failed'?`写入 /etc/hosts 失败：${ha.error||''}`:ha.pending?'正在写入 /etc/hosts':'已写入 /etc/hosts',ha.state==='failed'?'在“模型与额度”的自定义解析里重新保存':'',GO.hosts);
   return checks;
 }
 const HEALTH_LEVELS={ok:['正常','good'],warn:['提醒','warn'],bad:['需要处理','bad'],unknown:['未知','']};
-function healthView(data){const checks=healthChecks(data.features||{}),levels=HEALTH_LEVELS;
-  return `<section class="card"><header class="section-head"><h2>检查项</h2>${refresh()}</header><ul class="health-list">${checks.map(c=>`<li data-health="${esc(c.level)}"><span class="health-dot" data-level="${esc(c.level)}" aria-hidden="true"></span><div><strong>${esc(c.title)}</strong><p>${esc(c.detail)}</p>${c.fix&&c.level!=='ok'?`<p class="muted">${esc(c.fix)}</p>`:''}</div>${tone(...levels[c.level])}</li>`).join('')}</ul></section>
-`;
+const HEALTH_ORDER={bad:0,warn:1,unknown:2,ok:3};
+// Health groups, in page order; a check not listed falls into the first.
+const HEALTH_GROUPS=[['服务',['服务状态','核心服务','关键词索引','数据库']],['模型',['整理模型','嵌入模型','调用额度','自定义解析']],
+  ['自动整理',['后台整理','摘要','补全关键词','自动处理节奏','整理任务']],['语义检索',['语义索引','重建语义索引']],['连接',['公网入口']]];
+// Health: problems first in their own group, then the rest by area. One compact card per check: a status dot, the
+// title and a one-line state (full text on hover); problems also say how to fix. A card with a setting opens it.
+function healthView(data){const checks=healthChecks(data.features||{});
+  const problems=checks.filter(c=>c.level==='bad'||c.level==='warn').sort((a,b)=>HEALTH_ORDER[a.level]-HEALTH_ORDER[b.level]);
+  const tile=c=>{const problem=c.level==='bad'||c.level==='warn',hint=[c.detail,c.hint].filter(Boolean).join('；');
+    const body=`<span class="health-dot" data-level="${esc(c.level)}" aria-hidden="true"></span><span class="health-tile-body"><strong>${esc(c.title)}</strong><span class="health-detail" title="${esc(hint)}">${esc(c.detail)}</span>${problem&&c.fix?`<span class="health-fix">${esc(c.fix)}</span>`:''}</span>${problem?tone(...HEALTH_LEVELS[c.level]):c.level==='unknown'?tone(...HEALTH_LEVELS.unknown):''}`;
+    return c.href?`<a class="health-tile" data-health="${esc(c.level)}" href="${esc(c.href)}">${body}<span class="health-go" aria-hidden="true">›</span></a>`:`<div class="health-tile" data-health="${esc(c.level)}">${body}</div>`;};
+  const group=(name,list,extra='')=>list.length?`<section class="health-group${extra}"><h3>${esc(name)}${extra?` <span>${list.length}</span>`:''}</h3><div class="health-tiles">${list.map(tile).join('')}</div></section>`:'';
+  const rest=checks.filter(c=>!problems.includes(c)),home=c=>HEALTH_GROUPS.findIndex(([,titles])=>titles.includes(c.title));
+  const groups=HEALTH_GROUPS.map(([name],i)=>group(name,rest.filter(c=>Math.max(0,home(c))===i))).join('');
+  return `<div class="health-head"><h2>检查项</h2>${tone(problems.length?`${problems.length} 项需要注意`:'全部正常',problems.length?'warn':'good')}${refresh()}</div>${group('需要注意',problems,' is-problems')}${groups}`;
 }
 // Overview status: four tiles (active memories, semantic index, today's calls, health) and one list of what needs
 // attention, built from the same health checks as the health page plus the attention counts.
@@ -150,10 +276,11 @@ export function overviewStatus(data){const f=data.features||{},o=f['system-healt
     :c?.pending?[`${num(Math.max(0,(active||0)-c.pending))}/${num(active)}`,`待索引 ${c.pending} 条`,'warn']:[`${num(active)}/${num(active)}`,'全部已索引','good'];
   const calls=embedder?.configured?[`${num(embedder.used)}/${embedder.limit===null?'不限':num(embedder.limit)}`,`总量 ${num(embedder.total?.used)} / ${embedder.total?.limit===null||embedder.total?.limit===undefined?'不限':num(embedder.total.limit)}`]:['—','嵌入模型未配置'];
   const worst=problems.some(x=>x.level==='bad')?'bad':problems.length?'warn':'good';
-  const extra=[[attention.failed_jobs,'个整理任务失败','/app/jobs'],[attention.stale_summaries,'份摘要已过期','/app/summaries'],[attention.pending_reconciliation,'项任务对账待确认','/app/tasks']].filter(([n])=>n>0);
-  const items=[...problems.map(x=>`<li data-health="${esc(x.level)}"><span class="health-dot" data-level="${esc(x.level)}" aria-hidden="true"></span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p>${x.fix?`<p class="muted">${esc(x.fix)}</p>`:''}</div><a href="/app/storage">查看</a></li>`),
+  // Failed jobs are a health check (整理任务), so they are not listed twice here.
+  const extra=[[attention.stale_summaries,'份摘要已过期','/app/summaries'],[attention.pending_reconciliation,'项任务对账待确认','/app/projects']].filter(([n])=>n>0);
+  const items=[...problems.map(x=>`<li data-health="${esc(x.level)}"><span class="health-dot" data-level="${esc(x.level)}" aria-hidden="true"></span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p>${x.fix?`<p class="muted">${esc(x.fix)}</p>`:''}</div><a href="${esc(x.href||'/app/health')}">${x.href?'去处理':'查看'}</a></li>`),
     ...extra.map(([n,text,href])=>`<li data-health="warn"><span class="health-dot" data-level="warn" aria-hidden="true"></span><div><strong>${esc(n)} ${esc(text)}</strong></div><a href="${href}">处理</a></li>`)];
-  return `${mapCard(f,active)?`<div class="overview-hero">${mapCard(f,active)}${streamCard()}</div>`:''}<div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/jobs',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/usage')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/storage',worst)}</div>
+  return `${mapCard(f,active)?`<div class="overview-hero">${mapCard(f,active)}${streamCard()}</div>`:''}<div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/processing',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/models')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/health',worst)}</div>
     ${pipelineCard(data,f,active)}
     <section class="card attention-card"><header class="section-head"><h2>需要注意</h2></header>${items.length?`<ul class="health-list">${items.join('')}</ul>`:'<p class="muted">目前没有需要处理的事。</p>'}</section>`;
 }
@@ -191,12 +318,12 @@ function pipelineCard(data,f,active){const a=f.attention?.activity_7d,o=f['syste
   const spark=days.length?`<svg class="stage-spark" viewBox="0 0 ${days.length*6} 24" preserveAspectRatio="none" aria-hidden="true">${days.map((d,i)=>`<rect x="${i*6}" y="${24-Math.max(1,Math.round(22*d.count/max))}" width="4" height="${Math.max(1,Math.round(22*d.count/max))}" rx="1"/>`).join('')}</svg>`:'';
   const withConcepts=(g?.memories||[]).filter(m=>m.concepts?.length).length,reads=u.chatgpt.search+u.chatgpt.read+u.agents.search+u.agents.read+u.console.search+u.console.read;
   const stage=(group,label,value,note,href,extra='')=>`<a class="pipe-stage" data-group="${group}" href="${href}"><span class="pipe-label">${esc(label)}</span><strong>${esc(value)}</strong>${extra}<span class="pipe-note">${esc(note)}</span></a>`;
-  return `<section class="card pipeline-card"><header class="section-head"><h2>记忆流水线 <small>最近 7 天，从写入到被读取</small></h2><a href="/app/jobs">整理能力</a></header><div class="pipe">
+  return `<section class="card pipeline-card"><header class="section-head"><h2>记忆流水线 <small>最近 7 天，从写入到被读取</small></h2><a href="/app/processing">整理能力</a></header><div class="pipe">
     ${stage('proj','写入',num(written),`ChatGPT ${num(s.chatgpt)} · 编程助手 ${num(s.agents)} · 控制台和导入 ${num(s.console+s.import)}`,'/app/memories',spark)}
     ${stage('fact','脱敏',num(a.redacted??0),a.redacted?'写入前替换了密钥或令牌':'没有发现密钥','/app/audit?group=system')}
     ${stage('flow','类型',`${num(Math.max(0,(active||0)-unmarked))}/${num(active)}`,'写入的 Agent 标注类型','/app/memories?kind=none')}
-    ${stage('entity','关键词',`${num(withConcepts)}/${num(g?.memories.length||0)}`,on('traits')?'新记忆自动补全关键词':'补全关键词已关闭','/app/jobs#cap-traits')}
-    ${stage('proj','语义索引',c?.error_code?'失败':on('vector_catch_up')?`${num(Math.max(0,(active||0)-(c?.pending||0)))}/${num(active)}`:'未开启',c?.pending?`待索引 ${num(c.pending)} 条`:on('vector_catch_up')?'新记忆自动加入':'新记忆不会进入语义索引','/app/jobs')}
+    ${stage('entity','关键词',`${num(withConcepts)}/${num(g?.memories.length||0)}`,on('traits')?'新记忆自动补全关键词':'补全关键词已关闭','/app/processing#cap-traits')}
+    ${stage('proj','语义索引',c?.error_code?'失败':on('vector_catch_up')?`${num(Math.max(0,(active||0)-(c?.pending||0)))}/${num(active)}`:'未开启',c?.pending?`待索引 ${num(c.pending)} 条`:on('vector_catch_up')?'新记忆自动加入':'新记忆不会进入语义索引','/app/processing')}
     ${stage('pref','被读取',num(reads),`搜索 ${num(u.chatgpt.search+u.agents.search+u.console.search)} · 读取 ${num(u.chatgpt.read+u.agents.read+u.console.read)}`,'/app/audit?group=memory')}
   </div></section>`;}
 // Live stream: the latest memory reads and writes from the audit log. Every console read is itself audited, so the
@@ -383,18 +510,16 @@ function wireControls(card,map){card.addEventListener('click',event=>{const z=ev
 const activityLine=(a,key,writeLabel)=>a?`<p class="activity-line" data-activity="${esc(key)}">最近 7 天：搜索 <strong>${num(a.uses[key].search)}</strong> 次 · 读取 <strong>${num(a.uses[key].read)}</strong> 次 · ${esc(writeLabel)} <strong>${num(a.sources[key])}</strong> 条</p>`:'';
 // Entities: names that recur across memories (people, devices, projects, vendors) with their aliases.
 // Usage: calls per model kind for the last 14 days, today's and total limits, and recent search volume.
-function usageView(d){const models=d.models||[],history=d.history||[],names={organizer:'整理模型',embedder:'嵌入模型'};
-  const limit=v=>v===null||v===undefined?'不限':num(v);
-  const cards=models.map(m=>`<section class="card"><header class="section-head"><h2>${esc(names[m.kind]||m.kind)}</h2>${tone(m.configured?'已配置':'未配置',m.configured?'good':'')}</header>${m.configured?
-    `<dl class="metadata-grid"><dt>今日调用</dt><dd>${num(m.used)} / ${limit(m.limit)}</dd><dt>累计调用</dt><dd>${num(m.total?.used)} / ${limit(m.total?.limit)}</dd><dt>额度来源</dt><dd>${m.limit_mode==='manual'?'你设置的调用上限':'模型默认每日上限'}</dd></dl>`:'<p class="muted">在“模型与额度”里配置后才会产生调用。</p>'}</section>`).join('');
+// Usage on the models page (moved from its own page): totals, searches and the 14-day call chart. Per-model calls are on
+// the model cards above, so they are not repeated here.
+function usageOverview(d){if(!d)return '';const history=d.history||[];
   const W=640,H=200,left=34,bottom=26,top=10,max=Math.max(4,...history.flatMap(r=>[r.organizer||0,r.embedder||0])),step=Math.pow(10,Math.floor(Math.log10(max))),ceil=Math.ceil(max/step)*step;
   const y=v=>H-bottom-(v/ceil)*(H-bottom-top),slot=(W-left-8)/Math.max(1,history.length),bar=Math.max(3,slot*0.32);
   const grid=[0,ceil/2,ceil].map(v=>`<line x1="${left}" x2="${W-8}" y1="${y(v)}" y2="${y(v)}" class="chart-grid"/><text x="${left-6}" y="${y(v)+4}" text-anchor="end">${num(v)}</text>`).join('');
   const bars=history.map((r,i)=>{const x=left+i*slot+slot/2;return `<rect x="${x-bar-1}" y="${y(r.organizer||0)}" width="${bar}" height="${H-bottom-y(r.organizer||0)}" class="bar-organizer"><title>${r.day} 整理 ${r.organizer||0}</title></rect><rect x="${x+1}" y="${y(r.embedder||0)}" width="${bar}" height="${H-bottom-y(r.embedder||0)}" class="bar-embedder"><title>${r.day} 嵌入 ${r.embedder||0}</title></rect>${(history.length-1-i)%2===0?`<text x="${x}" y="${H-8}" text-anchor="middle">${r.day.slice(5)}</text>`:''}`;}).join('');
   const total=history.reduce((n,r)=>n+(r.organizer||0)+(r.embedder||0),0);
-  return `<div class="status-strip" data-count="3">${[['近 14 天模型调用',num(total),'整理 + 嵌入'],['近 7 天记忆搜索',num(d.searches_7d),'来自所有连接'],['费用','未计量','只统计调用次数']].map(([a,b,c])=>`<div class="status-tile"><span class="status-label">${a}</span><strong class="status-value">${b}</strong><span class="status-sub">${c}</span></div>`).join('')}</div>
-    <section class="card"><header class="section-head"><h2>近 14 天调用</h2><span class="chart-legend"><span class="legend-organizer">整理</span><span class="legend-embedder">嵌入</span></span></header><div class="chart-scroll"><svg class="usage-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 14 天每天的整理和嵌入调用次数">${grid}${bars}</svg></div><p class="muted">按 UTC 日期统计；计入你的调用额度的请求都算在内。</p></section>
-    <div class="card-grid">${cards}</div>`;
+  return `<div class="usage-overview"><div class="status-strip" data-count="2">${[['近 14 天模型调用',num(total),'整理 + 嵌入'],['近 7 天记忆搜索',num(d.searches_7d),'来自所有连接']].map(([a,b,c])=>`<div class="status-tile"><span class="status-label">${a}</span><strong class="status-value">${b}</strong><span class="status-sub">${c}</span></div>`).join('')}</div>
+    <section class="card"><header class="section-head"><h2>近 14 天调用</h2><span class="chart-legend"><span class="legend-organizer">整理</span><span class="legend-embedder">嵌入</span></span></header><div class="chart-scroll"><svg class="usage-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 14 天每天的整理和嵌入调用次数">${grid}${bars}</svg></div><p class="muted">按 UTC 日期统计；计入你的调用额度的请求都算在内。</p></section></div>`;
 }
 export function actionPage(page,data,caps,connectionQuery={}) {
   const owner=caps.owner_mode?data.features?.['system-health']?.owner:null;
@@ -423,28 +548,28 @@ export function actionPage(page,data,caps,connectionQuery={}) {
     const limits=q=>q?`<div class="call-limits" data-call-limits="${esc(q.kind)}"><h4>${l('callLimits')}</h4>`+kv([['limitSource',l('limitMode_'+q.mode)],['dailyCallLimit',limit(q.daily)],['totalCallLimit',limit(q.total)]])+blocked(q.exhausted)+`</div>`:'';
     return `<div class="card-grid">${(data.models||[]).map(m=>section(m.kind,
       `<p>${l(m.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p>`+
-      kv([['modelUsedBy',l('modelUsedBy_'+m.kind)],['modelName',`<span class="model-name">${esc(m.config.model||t('modelNotConfigured'))}</span>`+(m.kind==='embedder'&&m.config.dimensions?` <span class="model-dimensions" data-model-dimensions>${esc(m.config.dimensions)} ${l('dimensionsShort')}</span>`:'')],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',esc(m.config.daily_requests??'—')+(p.quotas?.[m.kind]?.mode==='manual'?` <small class="muted">${l('supersededByCallLimits')}</small>`:'')],['hasKey',l(m.has_key?'yes':'no')]])+verification(m.verification)+limits(p.quotas?.[m.kind])+
+      kv([['modelUsedBy',l('modelUsedBy_'+m.kind)],['modelName',`<span class="model-name">${esc(m.config.model||t('modelNotConfigured'))}</span>`+(m.kind==='embedder'&&m.config.dimensions?` <span class="model-dimensions" data-model-dimensions>${esc(m.config.dimensions)} ${l('dimensionsShort')}</span>`:'')],['baseUrl',`<code>${esc(m.config.base_url||'—')}</code>`],['dailyRequests',p.quotas?.[m.kind]?.mode==='manual'?(p.quotas[m.kind].daily?.limit==null?l('noLimit'):esc(p.quotas[m.kind].daily.limit)):esc(m.config.daily_requests??'—')],['hasKey',l(m.has_key?'yes':'no')]])+verification(m.verification)+limits(p.quotas?.[m.kind])+
       buttons([...(can('models.save')?[actionButton('models.save','configure',{kind:m.kind})]:[]),...(can('models.quota')?[actionButton('models.quota','setCallLimits',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.test')?[actionButton('models.test','testCapabilities',{kind:m.kind})]:[]),...(m.config.enabled&&can('models.disable')?[actionButton('models.disable','disable',{kind:m.kind})]:[]),inspect('models',m.kind)])+(!can('models.save')?onlyRead():''),
-      {aside:state(m.config.enabled?'enabled':'disabled'),className:'model-card'})).join('')}</div>`+
-      section('modelPipeline',`<p>${l('modelPipelineNote')}</p><div class="card-grid model-pipeline">${['summary','vector'].map(kind=>{
+      {aside:state(m.config.enabled?'enabled':'disabled'),className:'model-card'})).join('')}</div>`+hostsCard(data.hosts,can,data.system_hosts,data.hosts_apply)+usageOverview(data.features?.['model-usage'])+
+      // Owner mode runs processing from the capability cards (processing page), so this page keeps only the models; other
+      // deployments still start summaries and the index here.
+      (caps.owner_mode?'':section('modelPipeline',`<p>${l('modelPipelineNote')}</p><div class="card-grid model-pipeline">${['summary','vector'].map(kind=>{
         const step=p[kind]||{},vector=kind==='vector';return `<div data-model-stage="${kind}"><h3>${l(kind)}</h3>${state(step.ready?'ready':'notReady')}${blocked(step.blockers)}${vector?kv([['indexedDocuments',esc(step.indexed_documents??0)],['state',esc(t(step.state||'not_started'))],['semanticReadiness',l(step.search_ready?'ready':'notReady')]])+blocked(step.search_blockers)+blocked(step.error_code?[step.error_code]:[]):''}${vector&&!caps.owner_mode?firstRun(step):''}${buttons([...(vector&&step.first_run?.budget?[]:[launch(vector?'vector.schedule':'jobs.schedule',vector?'rebuildIndex':'summarize',step.ready===true,vector?{}:{type:kind})])])}</div>`;
-      }).join('')}</div><div class="section-foot"><a href="/app/jobs">${l('viewJobs')} →</a><a href="/app/summaries">${l('viewSummaries')} →</a></div>`)+
-      section('modelBoundary',`<p>${l('modelBoundaryNote')}</p><p>${l('modelProbeBoundary')}</p>`);
+      }).join('')}</div><div class="section-foot"><a href="/app/processing">${l('viewJobs')} →</a><a href="/app/summaries">${l('viewSummaries')} →</a></div>`));
   }
 
   if(page==='jobs')return (caps.owner_mode?processingPage(owner,data.features?.models?.models):'')+section('jobQueue',`<div class="status-line">${l('scheduleStatus')} ${state(data.settings?.schedule_enabled?'enabled':'disabled')}<span aria-hidden="true">·</span>${l('workerStatus')} ${state(data.worker_enabled?'enabled':'disabled')}${data.vector?`<span aria-hidden="true">·</span>${l('vectorIndex')} ${state(data.vector.state)} ${esc(data.vector.error_code||'')}`:''}</div>
     ${can('jobs.schedule')?(data.processing?.summary?.blockers?.some(code=>['NOT_CONFIGURED','EGRESS_DENIED'].includes(code))
       // Without a usable model the button can only fail: say why and where to fix it instead.
       ?`<div class="actions action-toolbar"><button type="button" data-console-action="jobs.schedule" data-type="summary" disabled>${l('summarize')}</button></div><p class="policy-box">${l('jobsNotReady')} ${data.processing.summary.blockers.filter(code=>code!=='WORKER_DISABLED').map(code=>esc(t(code))).join(' · ')} · <a href="/app/models">${l('classifyOpenModels')}</a></p>`
-      :buttons([actionButton('jobs.schedule','summarize',{type:'summary'})])):onlyRead()}
+      :buttons([actionButton('jobs.schedule','summarize',{type:'summary'})])):caps.owner_mode?'':onlyRead()}
     ${!data.worker_enabled?note('workerDisabledNote'):''}
-    ${table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td><td>${progress(j.processed,j.total)}</td>
+    ${data.batches?batchTable(data.batches,can):table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td><td>${progress(j.processed,j.total)}</td>
       <td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span><small><code>${esc(j.last_error_code)}</code></small>${j.stale_taxonomy&&j.last_error_code!=='RESCHEDULED'?`<small class="job-hint">${l('jobStaleTaxonomyHint')}</small>`:''}`:'—'}</td>
       <td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&j.last_error_code!=='RESCHEDULED'&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[j.stale_taxonomy?actionButton('jobs.retry','rescheduleWithCategories',{id:j.job_id,stale:'true'}):actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
-    <div class="section-foot">${pager(data)}</div>`,{aside:refresh()});
+    <div class="section-foot">${pager(data)}</div>`,{aside:refresh()})+(caps.owner_mode?runsCard(owner):'');
 
-  if(page==='connections')return caps.owner_mode?chatgptPage(data,caps,connectionQuery,owner):connectionsView(data,caps,connectionQuery);
-  if(page==='agents')return agentsPage(data,caps,connectionQuery,owner);
+  if(page==='connections')return caps.owner_mode?connectionsPage(data,caps,connectionQuery,owner):agentsView(data,caps,{});
 
   if(page==='security')return `<div class="columns">${section('accountSecurity',`<div class="identity-row"><span class="avatar" aria-hidden="true">${esc([...(data.username||'·')][0])}</span><div><strong>${esc(data.username)}</strong>${tag(t(data.mfa_verified?'passwordTotp':'pending'))}</div></div>
       ${buttons([['security.password','changePassword'],['security.totp.begin','changeTotp'],['security.recovery_codes','rotateRecovery']].filter(([a])=>can(a)).map(([a,k])=>actionButton(a,k)))}${!can('security.password')?onlyRead():''}<p class="muted">${l('securityOperationsNote')}</p><a href="/recover">${l('recover')} →</a>`)}
@@ -452,9 +577,10 @@ export function actionPage(page,data,caps,connectionQuery={}) {
 
 
 
-  if(page==='usage')return usageView(data);
-  if(page==='storage')return healthView(data)+`<div class="columns">${section('personalExport',`<p>${l('portableNote')}</p>${writable?buttons([actionButton('storage.export','export'),actionButton('storage.import','importMemories')]):onlyRead()}${note('databaseRestoreNote')}`)}
-    ${section('dataCounts',kv(Object.entries(data.counts||{}).map(([k,n])=>[k,`<strong class="figure">${esc(n)}</strong>`])))}</div>`;
+  // Health: the checks, then the data counts beside personal export and import.
+  if(page==='storage'){const COUNTS={memories:'记忆',sources:'来源',events:'原始事件',revisions:'修订版本'};
+    return healthView(data)+`<div class="card-grid health-extras">${section('dataCounts',`<dl class="metadata-grid">${Object.entries(data.counts||{}).map(([k,n])=>`<dt>${esc(COUNTS[k]||k)}</dt><dd><strong class="figure">${esc(n)}</strong></dd>`).join('')}</dl>`)}
+    ${section('personalExport',`<p>${l('portableNote')}</p>${writable?buttons([actionButton('storage.export','export'),actionButton('storage.import','importMemories')]):onlyRead()}${note('databaseRestoreNote')}`)}</div>`;}
 
   return null;
 }
@@ -735,7 +861,7 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     try{
       let fields='',data=getData();
       if(ownerActions.includes(action)){
-        modal.querySelector('h2').textContent={'features.save':{retrieval:'默认检索模式',read_policy:'ChatGPT 读取策略'}[intent.section]||'功能开关','schedule.save':'新记录自动规则','processing.preview':'预览有限批次','processing.start':'确认并开始处理','processing.resume':'确认恢复处理','processing.pause':'暂停处理','processing.cancel':'取消批次'}[action];
+        modal.querySelector('h2').textContent={'features.save':{retrieval:'默认检索模式',read_policy:'ChatGPT 读取策略'}[intent.section]||'功能开关','schedule.save':'新记录自动规则','processing.preview':'预览有限批次','processing.start':'确认并开始处理','processing.resume':'确认恢复处理','processing.pause':'暂停处理','processing.cancel':'取消批次','processing.delete':'删除运行记录','processing.clear':'清空运行记录'}[action];
         const o=(await api('system-health')).owner;if(!o)throw new Error('OWNER_REQUIRED');intent.owner=o;intent.revision=o.revision;
         // One form per section; the other settings are sent back unchanged (see payload).
         if(action==='features.save'&&intent.section==='retrieval')fields=`<p>控制台、ChatGPT 和其他助手在没有指定检索方式时使用的模式。</p><label>默认检索模式<select name="retrieval_mode">${Object.entries(RETRIEVAL_MODES).map(([k,v])=>`<option value="${k}" ${k===o.preferences.retrieval_mode?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`+reauth();
@@ -765,6 +891,8 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
               +(run.truncated?`<p class="muted">还有更多记忆，这一批先处理前 ${esc(run.count)} 条，跑完可以再点一次。</p>`:'')+runItems(run)
               +`<p>${rebuild?'会把全部活动记忆重新嵌入到一个新的语义索引，完成后点“启用新索引”才会切换；旧索引保留，可随时切回。':kind==='traits'?'确认后在后台跑完，结果直接写入，不用逐条确认；写入方已经填的不会被覆盖。':'确认后在后台跑完，会把这些记忆发送给上面的模型。'}</p>`+reauth();}
         }
+        else if(action==='processing.clear'){const n=o.runs.filter(r=>r.state!=='preview'?['completed','cancelled'].includes(r.state):r.expires_at<Date.now()).length;
+          fields=`<p>删除 ${esc(n)} 条已结束的运行记录（已完成、已取消、已过期）。运行中、已暂停和受阻的批次保留。</p><p class="muted">只删除记录，已经写入的摘要、关键词和索引不受影响。</p>`;}
         else {const run=o.runs.find(r=>r.run_id===intent.id);if(!run)throw new Error('RUN_NOT_FOUND');intent.run=run;
           const starting=['processing.start','processing.resume'].includes(action),expired=action==='processing.start'&&(run.expired||run.expires_at<Date.now());
           const facts=`<dl class="run-facts"><div><dt>处理类型</dt><dd>${esc(runKind(run.kind))}</dd></div><div><dt>记忆</dt><dd>${esc(run.count)} 条${run.excluded?`（排除 ${esc(run.excluded)} 条）`:''}</dd></div><div><dt>模型</dt><dd>${esc(run.model||'—')}</dd></div><div><dt>调用上限</dt><dd>已用 ${esc(run.used)} / ${esc(run.budget)}</dd></div></dl>`
@@ -772,7 +900,7 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
             +`<details class="tech-details"><summary>技术信息</summary><p class="muted">清单校验码（确认时用来核对清单没有变化）</p><code class="owner-digest">${esc(run.manifest_digest)}</code></details>`;
           // An expired preview cannot start: say so and offer a fresh preview of the same kind instead of a password form that fails.
           fields=expired?facts+`<p class="policy-box" role="alert">这份预览已过期（预览只在 15 分钟内有效）。请重新预览，生成新的清单后再确认。</p><div class="actions">${['summary','traits','vector'].includes(run.kind)?ownerButton('processing.preview','重新预览',{kind:run.kind}):''}</div>`
-            :facts+`<p>${starting?'确认后只处理这份冻结清单，会把清单里的记忆发送给上面的模型。':'停止后不会自动恢复；已发送的请求无法撤回。'}</p>`+(starting?reauth():'');
+            :facts+`<p>${starting?'确认后只处理这份冻结清单，会把清单里的记忆发送给上面的模型。':action==='processing.delete'?'只删除这条记录，已经写入的结果不受影响。':'停止后不会自动恢复；已发送的请求无法撤回。'}</p>`+(starting?reauth():'');
           if(expired)intent.expired=true;}
       }
       else if(action==='memory.create'){
@@ -816,6 +944,10 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
       }
       else if(action==='devices.register')fields=field('label','label',{max:120})+field('agent_id','agentId',{max:128})+field('device_id','deviceId',{max:128})+select('access','access',['read','read_write'],'read')+`<p>${l('agentKeyBoundary')}</p>`+reauth();
       else if(action==='devices.rotate')fields=`<p>${l('rotateAgentNote')}</p><code>${esc(intent.id)}</code>`+reauth();
+      else if(action==='tunnel.add')fields=field('name','tunnelName',{max:40})+`<label>${l('tunnelToken')}<textarea name="token" rows="4" maxlength="4096" required autocomplete="off" spellcheck="false"></textarea></label><p class="policy-box">${l('tunnelAddNote')}</p>`+reauth(true);
+      else if(action==='tunnel.remove'){const row=(getData().features?.tunnel?.tunnels||[]).find(x=>x.id===intent.id);fields=`<p><strong>${esc(row?.name||'')}</strong> <code>${esc(intent.id)}</code></p><p class="policy-box">${l('tunnelRemoveNote')}</p>`+reauth(true);}
+      else if(action==='tunnel.token')fields=`<label>${l('tunnelToken')}<textarea name="token" rows="4" maxlength="4096" required autocomplete="off" spellcheck="false"></textarea></label><p class="policy-box">${l('tunnelTokenNote')}</p>`+reauth(true);
+      else if(action==='tunnel.reapply')fields=`<p>${l('tunnelReapplyNote')}</p>`+reauth(true);
       else if(action.startsWith('memory.')){
         const meta=await api('memory',{memory_id:intent.id,metadata:'true'});if(seq!==sequence||!isActive())return;intent.meta=meta;
         if(action==='memory.correct'){
@@ -829,7 +961,8 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
         const model=data.models.find(m=>m.kind===intent.kind),c=model?.config||{};intent.revision=model?.revision||0;
         fields=`<p>${l(intent.kind==='organizer'?'organizerPurpose':'embedderPurpose')}</p><fieldset><legend>${l('modelEndpoint')}</legend>`+check('enabled','enableModel',c.enabled)+select('protocol','protocol',['openai_compatible','ollama'],c.protocol||'openai_compatible')+field('base_url','baseUrl',{value:c.base_url||'',max:2048})+`<p class="muted">${l('modelUrlHelp')}</p>`+field('model','modelName',{value:c.model||''})+
           field('api_key','apiKey',{type:'password',required:false,max:16384})+check('remove_key','removeKey')+`<p class="muted">${l('keyWriteOnlyNote')}</p>`+discoveryBlock()+(intent.kind==='embedder'?field('dimensions','dimensions',{type:'number',value:c.dimensions||'',min:1,upper:65536,step:1})+`<p>${l('dimensionsHelp')}</p>`:'')+`</fieldset><fieldset><legend>${l('modelLimits')}</legend>`+
-          field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100,min:1,upper:10000,step:1})+field('batch_size','batchSize',{type:'number',value:c.batch_size||5,min:1,upper:20,step:1})+
+          ((data.processing??getData().processing)?.quotas?.[intent.kind]?.mode==='manual'?`<input type="hidden" name="daily_requests" value="${esc(c.daily_requests||100)}"><p class="muted">${l('dailyLimitInCallLimits')}</p>`
+            :field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100,min:1,upper:10000,step:1}))+field('batch_size','batchSize',{type:'number',value:c.batch_size||5,min:1,upper:20,step:1})+
           (intent.kind==='organizer'?field('output_tokens','outputTokens',{type:'number',value:c.output_tokens||4096,min:128,upper:32768,step:1}):`<input type="hidden" name="output_tokens" value="${esc(c.output_tokens||4096)}">`)+field('profile_revision','modelRevision',{value:c.profile_revision||'1',max:160})+
           (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
       } else if(action==='models.quota'){
@@ -855,6 +988,11 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
       else if(action==='devices.revoke'){const device=(data.core_connections||[]).find(c=>c.agent_instance_id===intent.id);
         fields=`<p>${l('connRevokeDeviceNote')}</p><p><strong>${esc(device?.agent_id||'')}</strong> ${esc(device?.label||'')} <code>${esc(intent.id)}</code></p>`+reauth();}
       else if(action==='storage.import')fields=`<p>${l('portableNote')}</p><label>${l('file')}<input type="file" name="file" accept="application/json,.json" required></label><label class="check-field"><input type="checkbox" name="confirm_import" required>${l('confirmImport')}</label>`;
+      else if(action==='hosts.set'){const d=getData(),h=[...(d.hosts||[]),...(d.system_hosts||[])].find(x=>x.hostname===intent.id);
+        fields=(h?`<p><code>${esc(h.hostname)}</code></p><input type="hidden" name="hostname" value="${esc(h.hostname)}">`:field('hostname','hostName',{max:253}))+field('address','hostAddress',{value:h?.address||'',max:64})+`<p class="muted">${l('hostSetNote')}</p>`+reauth();}
+      else if(action==='hosts.remove')fields=`<p><code>${esc(intent.id)}</code></p><p>${l('hostRemoveNote')}</p>`+reauth();
+      else if(action==='jobs.cancel_batch'){const b=(getData().batches||[]).find(x=>x.batch_id===intent.id);
+        fields=`<p>取消这一批里还没完成的 ${esc(b?b.jobs-b.succeeded-b.cancelled-b.failed:'')} 个任务；已经完成的结果保留，已发出的请求无法撤回。</p>`;}
       else if(action==='jobs.retry'&&button.dataset.stale==='true'){modal.querySelector('h2').textContent=t('rescheduleWithCategories');fields=`<p>${l('rescheduleNote')}</p><code>${esc(intent.id)}</code>`;}
       else fields=`<p>${l(action==='storage.export'?'exportPrivacyNote':action==='models.test'?'probeCostNote':'confirmAction')}</p><code>${esc(intent.id||intent.kind||'')}</code>`;
       if(seq!==sequence||!isActive())return;content.innerHTML=`<form id="operation-form">${fields}${modalActions(action==='storage.export'?'export':'confirm')}</form>`;if(intent.expired||intent.empty)content.querySelector('#operation-form>.actions:last-of-type button.primary')?.remove();syncAppearance();discoveryReset();
@@ -872,6 +1010,7 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
         p.read_policy=section==='read_policy'?fd.get('read_policy'):o.preferences.read_policy;p.retrieval_mode=section==='retrieval'?fd.get('retrieval_mode'):o.preferences.retrieval_mode;}
       else if(a==='schedule.save')Object.assign(p,{expected_revision:intent.revision,enabled:intent.owner.schedule.enabled===true&&(intent.owner.schedule.kinds||[]).some(k=>k!=='vector'),kinds:(intent.owner.schedule.kinds||[]).filter(k=>k!=='vector'),interval_minutes:Number(fd.get('interval_minutes')),max_items:Number(fd.get('max_items')),budget:Number(fd.get('budget'))});
       else if(a==='processing.preview'){Object.assign(p,{kind:fd.get('kind'),limit:Number(fd.get('limit')),budget:Number(fd.get('budget'))});for(const k of ['from','to'])if(fd.get(k))p[k]=fd.get(k);}
+      else if(a==='processing.clear'){}
       else {p.run_id=intent.id;if(['processing.start','processing.resume'].includes(a))p.digest=intent.run.manifest_digest;}
       if(['features.save','schedule.save','processing.start','processing.resume'].includes(a)){p.current_password=fd.get('current_password');}return p;
     }
@@ -889,9 +1028,15 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     else if(a==='projects.archive'||a==='projects.restore')p.project_id=intent.id;
     else if(a==='devices.register')Object.assign(p,{label:fd.get('label'),agent_id:fd.get('agent_id'),device_id:fd.get('device_id'),access:fd.get('access')});
     else if(a==='devices.rotate')p.credential_id=intent.id;
+    else if(a==='tunnel.add')Object.assign(p,{name:String(fd.get('name')||'').trim(),token:String(fd.get('token')||'').trim()});
+    else if(a==='tunnel.token')Object.assign(p,{id:intent.id,token:String(fd.get('token')||'').trim()});
+    else if(a==='tunnel.reapply'||a==='tunnel.remove')p.id=intent.id;
     else if(a.startsWith('memory.')){Object.assign(p,{memory_id:intent.id,revision:intent.meta.revision});if(a==='memory.correct'){p.content=fd.get('content');p.topic=fd.get('topic')||null;p.memory_type=intent.meta.memory_type;Object.assign(p,traitValues(fd));}if(fd.get('reason'))p.reason=fd.get('reason');}
     else if(a==='jobs.schedule')Object.assign(p,{type:fd.get('type'),timezone:fd.get('timezone'),periods:fd.get('periods')==='daily_weekly'?['daily','weekly']:[fd.get('periods')],include_open:fd.has('include_open'),schedule_enabled:fd.has('schedule_enabled'),settings_revision:intent.settings_revision});
     else if(a==='jobs.cancel'||a==='jobs.retry')p.job_id=intent.id;
+    else if(a==='jobs.cancel_batch')p.batch_id=intent.id;
+    else if(a==='hosts.set')Object.assign(p,{hostname:String(fd.get('hostname')||'').trim(),address:String(fd.get('address')||'').trim()});
+    else if(a==='hosts.remove')p.hostname=intent.id;
     else if(a==='models.save'){
       p.kind=intent.kind;p.expected_revision=intent.revision;p.config={enabled:fd.has('enabled'),protocol:fd.get('protocol'),base_url:fd.get('base_url'),model:fd.get('model'),profile_revision:fd.get('profile_revision'),daily_requests:Number(fd.get('daily_requests')),output_tokens:Number(fd.get('output_tokens')),batch_size:Number(fd.get('batch_size')),egress_approved:fd.has('egress_approved'),query_approved:fd.has('query_approved'),native_schema:intent.kind==='organizer'?fd.has('native_schema'):true};if(intent.kind==='embedder')p.config.dimensions=Number(fd.get('dimensions'));if(fd.get('api_key'))p.api_key=fd.get('api_key');if(fd.has('remove_key'))p.remove_key=true;
     } else if(a==='models.quota'){p.kind=intent.kind;p.expected_revision=intent.revision;
@@ -987,8 +1132,16 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     }catch(e){if(seq!==sequence||!isActive())return;const error=content.querySelector('[data-operation-error]');if(error)error.textContent=`${t(e.message)} · ${t('operationId')}: ${opId}`;}
     finally{working=false;controls.forEach(c=>c.disabled=false);}
   });
+  async function loadBatch(box,offset){if(!box)return;
+    try{const d=await api('jobs',{batch_id:box.dataset.batchJobs,offset,limit:BATCH_PAGE});if(box.isConnected&&isActive()){box.innerHTML=batchJobsView(d);syncAppearance();}}
+    catch(e){if(box.isConnected&&e.name!=='AbortError')box.innerHTML=`<p class="muted" role="status">${esc(t(e.message))}</p>`;}}
   document.addEventListener('click',event=>{const b=event.target.closest('[data-console-action]');if(b){void begin(b.dataset.consoleAction,b);return;}if(event.target.closest('[data-operation-close]')&&!working){modal.close();restoreFocus();returnFocus=null;}
     const inspection=event.target.closest('[data-inspect]');if(inspection){const keys={models:'kind',connections:'grant_id',core_connections:'credential_id',sessions:'session_id'};const key=keys[inspection.dataset.inspect];if(!key)return;const item=getData()[inspection.dataset.inspect]?.find(row=>String(row[key])===inspection.dataset.id);if(item){open('inspectDetails');inspectResult(item);}return;}
+    const toggle=event.target.closest('[data-batch-toggle]');if(toggle){const row=toggle.closest('tr'),open=row.nextElementSibling?.classList.contains('batch-detail');
+      if(open){row.nextElementSibling.remove();toggle.setAttribute('aria-expanded','false');return;}
+      const detail=document.createElement('tr');detail.className='batch-detail';detail.innerHTML=`<td colspan="5"><div data-batch-jobs="${esc(toggle.dataset.batchToggle)}"><p class="muted">加载中…</p></div></td>`;
+      row.after(detail);toggle.setAttribute('aria-expanded','true');void loadBatch(detail.querySelector('[data-batch-jobs]'),0);return;}
+    const batchPage=event.target.closest('[data-batch-page]');if(batchPage){void loadBatch(batchPage.closest('[data-batch-jobs]'),Number(batchPage.dataset.batchPage));return;}
     const job=event.target.closest('[data-job-detail]');if(job){open('jobs');const seq=sequence;void api('jobs',{job_id:job.dataset.jobDetail}).then(data=>{if(seq===sequence&&modal.open&&isActive())inspectResult(data);}).catch(e=>{if(seq===sequence&&modal.open&&isActive())content.textContent=t(e.message);});}});
   modal.addEventListener('cancel',event=>{event.preventDefault();if(!working){modal.close();restoreFocus();returnFocus=null;}});
   // A save reloads the page content behind the dialog, so the trigger may be gone by now. Prefer the trigger,

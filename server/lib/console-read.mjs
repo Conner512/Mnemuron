@@ -5,6 +5,8 @@ import {FEATURE_VIEWS,featureParams} from './console/features.mjs';
 import {auditQuery} from '../../shared/console-queries.mjs';
 import {auditPage} from './console/audit.mjs';
 import {splitLeadingPath,memoryPresentation} from '../../shared/memory-display.mjs';
+import {projectProfile} from './memory/profile.mjs';
+import {CONFIG_KEYS} from './config/center.mjs';
 export const isConsoleReader=auth=>auth.agent_id==='mnemuron-console';
 function pagination(params,maximum=50){
   const offset=Number(params.offset??0),limit=Number(params.limit??25);
@@ -18,7 +20,7 @@ const displayParts=m=>{const parts=splitLeadingPath(m.content);return parts?{pat
 const snippet=m=>({memory_id:m.memory_id,content:[...String(m.content??'')].slice(0,160).join(''),...displayParts(m),...memoryPresentation(m),...(m.ranking?{ranking:m.ranking}:{}),memory_type:m.memory_type,status:m.status,created_at:m.created_at,...(m.category?{category:m.category}:{}),
   ...('kind' in m?{kind:m.kind||null,concepts:m.concepts||[],strength:m.strength??null,updated_at:[m.created_at,m.traits_updated_at].filter(Boolean).sort().pop()||null}:{}),
   ...(m.project_id?{project_id:m.project_id,project_name:typeof m.project_name==='string'?m.project_name:null}:{}),
-  ...(m.topic?{topic:m.topic}:{}),...(m.imported?{imported:true,original_created_at:m.original_created_at||null}:{})});
+  ...(m.topic?{topic:m.topic}:{}),...(m.imported?{imported:true,original_created_at:m.original_created_at||null}:{}),...(m.review?{review:m.review}:{})});
 const jobView=job=>({job_id:job.job_id,job_type:job.job_type,state:job.state,total:job.total,processed:job.processed,attempt_count:job.attempt_count,last_error_code:job.last_error_code,created_at:job.created_at,updated_at:job.updated_at,result_ref:job.result_ref});
 // What tells same-category summaries apart, read from the stored scope key and window (never rewritten).
 // Names come from the owner's own projects/tasks; a name that is missing stays null rather than guessed.
@@ -88,8 +90,8 @@ function summaryPreview(store,auth,user,row){
 export async function consoleRead(store,auth,view,params={}) {
   store.requireScope(auth,'console:read');if(store.consoleService.owner.user)store.consoleService.owner.require(auth.user_id);
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
-  const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','kind','concept','topic','origin','part'],summaries:['offset','limit'],jobs:['offset','limit','job_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit'],
-    projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id']}[view]||[];
+  const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','kind','concept','topic','origin','review','part'],summaries:['offset','limit'],jobs:['offset','limit','job_id','group','batch_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit'],
+    projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'project-profile':['project_id'],tunnel:[],config:['after','limit'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id']}[view]||[];
   if(Object.keys(params).some(key=>!(view==='audit'?['offset','limit','action','outcome','from','to','group']:featureParams[view]||allowed).includes(key)))throw new ValidationError('Unknown console query parameter.');
   if(FEATURE_VIEWS.includes(view))return store.consoleService.features.read(auth,view,params);
   const db=store.db,user=auth.user_id;
@@ -97,7 +99,7 @@ export async function consoleRead(store,auth,view,params={}) {
   switch(view) {
     case 'entities':return store.consoleService.entities.read(auth,params);
     case 'capabilities':return store.consoleService.capabilities(auth);
-    case 'models':return {models:store.consoleService.models.list(user),processing:store.consoleService.processing(user),...store.consoleService.capabilities(auth)};
+    case 'models':return {models:store.consoleService.models.list(user),...(({records,system,apply})=>({hosts:records,system_hosts:system,hosts_apply:apply}))(store.consoleService.models.hosts.view(user)),processing:store.consoleService.processing(user),...store.consoleService.capabilities(auth)};
     case 'memory-meta':return store.consoleService.meta(auth,params);
     case 'export':return store.consoleService.export(auth,params);
     case 'operation':return store.consoleService.state.inspect(user,params.operation_id);
@@ -109,6 +111,12 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'projects':return store.consoleService.projects.list(user,params,{lifecycle:consoleActionWritable(auth,'projects.lifecycle_restore')});
     case 'metadata-values':return store.consoleService.projects.values(user,params);
     case 'task-detail':return store.consoleService.projects.taskDetail(user,params);
+    // Owner settings: the tunnel (token, state, live routes) and the config center (fingerprint, change log).
+    case 'tunnel':{store.consoleService.owner.require(user);return {read_only:true,...await store.tunnel.view()};}
+    case 'config':{store.consoleService.owner.require(user);const after=Number(params.after||0),limit=Number(params.limit||30);
+      if(!Number.isSafeInteger(after)||after<0||!Number.isInteger(limit)||limit<1||limit>200)throw new ValidationError('Invalid config query.');
+      return {read_only:true,...store.config.state(user),history:store.config.history(user,{limit,after}),snapshot:store.config.snapshot(user),editable:CONFIG_KEYS.map(k=>k.key)};}
+    case 'project-profile':return projectProfile(store,{...auth,scopes:[...auth.scopes,'memory:read']},params.project_id);
 
     case 'overview':{const live=store.lifecycle.live(user),own=live.sql('project_id');
       return {read_only:true,production_ready:false,counts:{memories:db.prepare(`SELECT COUNT(*) n FROM memories WHERE user_id=? AND ${own.sql}`).get(user,...own.params).n,
@@ -177,11 +185,19 @@ export async function consoleRead(store,auth,view,params={}) {
         next_request:next,next_cursor:next?.cursor||null,next_offset:null,complete:!next};
     }
     case 'jobs':{const {offset,limit}=pagination(params);if(params.job_id)return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};
+      // One page of a batch's jobs, with the project/task and day each one covers.
+      if(params.batch_id){if(typeof params.batch_id!=='string'||params.batch_id.length>200)throw new ValidationError('Invalid batch.');
+        const page=store.memoryJobs.batchPage(user,params.batch_id,{offset,limit});
+        return {read_only:true,batch_id:params.batch_id,total:page.total,offset,limit,next_offset:offset+limit<page.total?offset+limit:null,
+          jobs:page.rows.map(({scope_key,window_json,...j})=>({...j,...summaryContext(db,user,{scope_key,window_json})}))};}
       // stale_taxonomy: the job was planned with a category list the account has since changed.
       const version=store.consoleService.taxonomy(user).version;
       const rows=db.prepare('SELECT job_id,job_type,state,total,processed,attempt_count,last_error_code,created_at,updated_at,metadata_json,json_extract(metadata_json,\'$.taxonomy.version\') taxonomy_version FROM memory_jobs WHERE user_id=? ORDER BY created_at DESC,job_id LIMIT ? OFFSET ?').all(user,limit+1,offset)
         .map(({taxonomy_version,metadata_json,...job})=>({...job,stale_taxonomy:job.job_type!=='classification'&&!!taxonomy_version&&taxonomy_version!==version,...(job.job_type==='classification'?{retired:true}:{})}));
-      return {read_only:true,worker_enabled:store.consoleService.owner.user?store.consoleService.owner.allowed('processing'):store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:rows.length>limit?offset+limit:null,processing:{summary:store.consoleService.processing(user).summary},operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
+      // group=batch (the console page): one row per planned round with its progress; offset and next_offset page through
+      // the batches instead of the jobs.
+      const batches=params.group==='batch'?store.memoryJobs.batches(user,{offset,limit:limit+1}):null,more=batches?batches.length>limit:rows.length>limit;
+      return {read_only:true,...(batches?{batches:batches.slice(0,limit)}:{}),worker_enabled:store.consoleService.owner.user?store.consoleService.owner.allowed('processing'):store.memoryConfig.console?.worker_enabled===true,settings:store.consoleService.settings(user),vector:db.prepare('SELECT generation,state,error_code,updated_at FROM console_vector_requests WHERE user_id=?').get(user)||null,jobs:rows.slice(0,limit),offset,limit,next_offset:more?offset+limit:null,processing:{summary:store.consoleService.processing(user).summary},operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};}
     case 'connections':return {read_only:true,connections:db.prepare('SELECT credential_id,label,device_id,agent_id,agent_instance_id,created_at,last_used_at,revoked_at,expires_at,scopes_json FROM credentials WHERE user_id=? ORDER BY created_at DESC LIMIT 100').all(user).map(row=>credentialView(row)),operations:store.consoleService.capabilities(auth).writable?'available':'blocked_policy'};
     case 'audit':{let q;try{q=auditQuery(params);}catch{throw new ValidationError('Invalid audit query.');}
       return auditPage(store,user,q);}

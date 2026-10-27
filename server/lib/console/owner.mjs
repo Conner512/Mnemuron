@@ -11,7 +11,7 @@ import {calendarWindow} from '../memory-jobs/windows.mjs';
 import {MemoryWorker} from '../memory-jobs/worker.mjs';
 import {VectorIndex} from '../vector-stores/index.mjs';
 
-export const OWNER_ACTIONS=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel'];
+export const OWNER_ACTIONS=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel','processing.delete','processing.clear'];
 // 'classification' was retired (memories are filed by their writer-chosen type); a stored flag is kept but ignored.
 // 'entities' was replaced by 'traits' (补全关键词: kind, concepts and strength written straight onto each memory); its stored flag is ignored.
 export const OWNER_FLAGS=['processing','summary','traits','vector_build','vector_search','vector_catch_up','memory','handoff','capture','conversation','cloud_write','cloud_submitted_grants','connections'];
@@ -69,7 +69,7 @@ export class OwnerControls{
    effective[key]={requested:p.flags[key],effective:!blockers.length,blockers};
   }
   return {...p,preferences:this.preferences(),read_policy_options:(this.store.memoryConfig.memory?.agent_read_policy==='active_uniform_v1'?['chatgpt_per_memory_v1','active_uniform_v1']:['chatgpt_per_memory_v1']).map(value=>({value,active_readable:this.readImpact(value)})),effective,vector_catch_up:this.catchUpStatus(user),vector_index:this.indexStatus(user),mode:'single_owner',configured:true,model_calls_on_save:0,historical_replay:false,
-   runs:this.db.prepare('SELECT run_id,kind,state,budget,used,created_at,expires_at,generation,error_code,manifest_digest,metadata_json FROM owner_processing_runs WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 30').all(user).map(({metadata_json,...r})=>{const m=JSON.parse(metadata_json);return {...r,count:m.limits.items,model:m.model,excluded:m.excluded,truncated:m.truncated,
+   runs:this.db.prepare('SELECT run_id,kind,state,budget,used,created_at,expires_at,generation,error_code,manifest_digest,metadata_json FROM owner_processing_runs WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 30').all(user).map(({metadata_json,...r})=>{const m=JSON.parse(metadata_json);return {...r,count:m.limits.items,model:m.model,excluded:m.excluded,truncated:m.truncated,...this.runTimes(r),
      // A preview can only be started before it expires; the page shows it as expired instead of offering a start that fails.
      expired:r.state==='preview'&&r.expires_at<now(),
      // A preview that can still start shows what it holds: the first 100 memories of its frozen manifest, by title only.
@@ -161,6 +161,20 @@ export class OwnerControls{
   this.db.prepare("UPDATE memory_profile_state SET state='ready' WHERE profile=?").run(r.profile);
   this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL WHERE job_id IN (SELECT job_id FROM owner_processing_jobs WHERE run_id=?) AND state NOT IN ('succeeded','cancelled')").run(now(),r.run_id);return {status:'queued',run_id:r.run_id};
  }
+ /** Run history: only finished runs (completed, cancelled, expired previews) can be deleted; what they wrote stays.
+  * A paused or blocked run is cancelled first. */
+ /** When a run started and ended, read from its jobs: confirmed (first job queued) to the last job update once the run
+  * is over. A vector run has no jobs: it starts when confirmed (its creation) and ends at its last state change, unknown here. */
+ runTimes(r){if(r.state==='preview')return {};
+  const j=this.db.prepare("SELECT COUNT(*) jobs,SUM(j.state='succeeded') done,SUM(j.state NOT IN ('succeeded','cancelled','pending','leased','retry_wait')) failed,MIN(j.created_at) started,MAX(j.updated_at) last FROM owner_processing_jobs o JOIN memory_jobs j ON j.job_id=o.job_id WHERE o.run_id=?").get(r.run_id);
+  const over=['completed','cancelled','blocked'].includes(r.state);
+  return {jobs:j.jobs,jobs_done:j.done||0,jobs_failed:j.failed||0,started_at:j.started??r.created_at,finished_at:over?j.last??null:null};}
+ finished(r){return ['completed','cancelled'].includes(r.state)||r.state==='preview'&&r.expires_at<now();}
+ drop(id){this.db.prepare('DELETE FROM owner_processing_items WHERE run_id=?').run(id);this.db.prepare('DELETE FROM owner_processing_jobs WHERE run_id=?').run(id);this.db.prepare('DELETE FROM owner_processing_runs WHERE run_id=?').run(id);}
+ remove(user,id){return this.store.memoryTransaction(()=>{const r=this.run(user,id);if(!this.finished(r))error('RUN_NOT_FINISHED');this.drop(id);return {status:'deleted',run_id:id};});}
+ clear(user){this.require(user);return this.store.memoryTransaction(()=>{let deleted=0;
+  for(const r of this.db.prepare('SELECT run_id,state,expires_at FROM owner_processing_runs WHERE user_id=?').all(user))if(this.finished(r)){this.drop(r.run_id);deleted++;}
+  return {status:'deleted',deleted};});}
  guard(id,{reserve=false}={}){const r=this.run(this.user,id);if(!['queued','running'].includes(r.state))error('PROCESSING_PAUSED');this.ready(r);for(const item of this.items(id))if(!this.validate(item,r.user_id))error('STALE_INPUT');if(reserve){if(r.used>=r.budget)error('RUN_BUDGET_EXHAUSTED');this.db.prepare('UPDATE owner_processing_runs SET used=used+1 WHERE run_id=?').run(id);}return r;}
  guardJob(job,{reserve=false}={}){if(!this.user)return;const g=this.db.prepare('SELECT run_id FROM owner_processing_jobs WHERE job_id=?').get(job.job_id);if(!g||job.user_id!==this.user)error('EXECUTION_GRANT_REQUIRED');this.guard(g.run_id,{reserve});}
  vector(r){const provider=this.service.models.provider(r.user_id,'embedder',{runId:r.run_id});return new VectorIndex(this.store,this.service.vectorBackend(this.store.memoryConfig.vector_store),new Map([[provider.profile.fingerprint,provider]]),{ownerId:r.user_id,prefix:this.store.memoryConfig.vector_store.collection_prefix,guard:()=>this.guard(r.run_id),budget:(purpose,day)=>{this.guard(r.run_id,{reserve:true});return this.service.models.budgetReserve(r.user_id,purpose,day);}});}
@@ -218,5 +232,5 @@ export class OwnerControls{
    Object.assign(state,{failures:0,error_code:null,last:result,next_at:result.complete?now()+60000:0});}
   catch(e){state.failures++;Object.assign(state,{error_code:/^[A-Z_]+$/.test(e.errorCode||e.code||'')?e.errorCode||e.code:'VECTOR_UNAVAILABLE',next_at:now()+Math.min(3600000,60000*2**Math.min(state.failures-1,6))});}
  }
- apply(auth,action,p){const user=auth.user_id;this.require(user);if(action==='features.save')return this.save(user,p,auth.credential_id);if(action==='schedule.save')return this.schedule(user,p,auth.credential_id);if(action==='processing.preview')return this.preview(user,p,{credentialId:auth.credential_id});if(action==='processing.start')return this.start(user,p);if(action==='processing.resume')return this.resume(user,p);object(p,['run_id']);return this.change(user,p.run_id,action==='processing.cancel'?'cancelled':'paused');}
+ apply(auth,action,p){const user=auth.user_id;this.require(user);if(action==='features.save')return this.save(user,p,auth.credential_id);if(action==='schedule.save')return this.schedule(user,p,auth.credential_id);if(action==='processing.preview')return this.preview(user,p,{credentialId:auth.credential_id});if(action==='processing.start')return this.start(user,p);if(action==='processing.resume')return this.resume(user,p);if(action==='processing.clear'){object(p,[]);return this.clear(user);}if(action==='processing.delete'){object(p,['run_id']);return this.remove(user,p.run_id);}object(p,['run_id']);return this.change(user,p.run_id,action==='processing.cancel'?'cancelled':'paused');}
 }

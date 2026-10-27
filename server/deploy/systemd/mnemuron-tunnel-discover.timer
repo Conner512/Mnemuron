@@ -1,0 +1,11 @@
+# Fallback: rediscover every five minutes.
+[Unit]
+Description=Rediscover the Mnemuron Cloudflare tunnel settings
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=mnemuron-tunnel-discover.service
+
+[Install]
+WantedBy=timers.target

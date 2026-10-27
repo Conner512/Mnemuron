@@ -6,7 +6,7 @@ import {readFileSync,statSync} from 'node:fs';
 import {ModelError,fail} from './contracts.mjs';
 import {redactText} from '../redaction.mjs';
 
-function addressClass(address) {
+export function addressClass(address) {
   const ip=address.toLowerCase();
   if(isIP(ip)===6) {
     // Mapped/transition encodings cannot circumvent IPv4 policy.

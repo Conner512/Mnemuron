@@ -1,0 +1,40 @@
+# An added Mnemuron Cloudflare tunnel (console or mnemuron-config "add tunnel"). Same hardening as the main tunnel
+# (cloudflared-mnemuron.service); its token and metrics address come from /etc/cloudflared-mnemuron/tunnels/%i.*,
+# written by the tunnel applier.
+[Unit]
+Description=Cloudflare Tunnel %i for Mnemuron
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=notify
+User=cloudflared-mnemuron
+Group=cloudflared-mnemuron
+StateDirectory=cloudflared-mnemuron/%i
+StateDirectoryMode=0700
+WorkingDirectory=/var/lib/cloudflared-mnemuron/%i
+EnvironmentFile=/etc/cloudflared-mnemuron/tunnels/%i.env
+LoadCredential=tunnel-token:/etc/cloudflared-mnemuron/tunnels/%i.token
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --loglevel warn --metrics ${MNEMURON_TUNNEL_METRICS} run --token-file %d/tunnel-token
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+TimeoutStopSec=45
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+InaccessiblePaths=-/var/lib/mnemuron -/etc/mnemuron -/etc/mnemuron-oauth -/etc/mnemuron-web
+
+[Install]
+WantedBy=multi-user.target

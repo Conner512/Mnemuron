@@ -7,7 +7,7 @@ import {icon} from '../../../web/console/visuals.mjs';
 import {text} from '../../../web/console/catalog.mjs';
 import {clientSnapshot} from './session-client.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
-import {CONSOLE_LIFECYCLE_CONFIRMS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_LIFECYCLE_CONFIRMS,CONSOLE_TUNNEL_FIELDS} from '../../../shared/console-contract.mjs';
 
 // A one-time-code field stays one submitted input; data-otp lets the shared asset draw six boxes over it.
 const otpHint=name=>`<small id="${name}-hint" class="field-hint" data-i18n="otpHint">${text('otpHint')}</small>`;
@@ -174,13 +174,22 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     const action=body.get('action'),operation_id=body.get('operation_id');
     store.limit(`console:write:${account.account_id}`,60,60);
     let result;
-    if(action.startsWith('connections.')){if(config.identity.owner_account_id){const state=await coreFor(account.subject).view('system-health',{});ids.session(token,'console');if(state.owner?.flags?.connections!==true)throw new BoundaryError(403,'FEATURE_DISABLED');}result=await ids.connections.execute(account.account_id,session,action,payload,operation_id);}
+    if(action.startsWith('connections.')){if(config.identity.owner_account_id){const state=await coreFor(account.subject).view('system-health',{});ids.session(token,'console');if(state.owner?.flags?.connections!==true)throw new BoundaryError(403,'FEATURE_DISABLED');}
+      // Logged as a configuration change (source web) like Core settings, so the CLI and other windows see it.
+      result=await ids.connections.track(account.account_id,'web','console',()=>ids.connections.execute(account.account_id,session,action,payload,operation_id));}
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
-    else if(['features.save','schedule.save','processing.start','processing.resume'].includes(action)){
+    else if(['features.save','schedule.save','processing.start','processing.resume','hosts.set','hosts.remove'].includes(action)){
       await ids.console.reauthenticate(account.account_id,session,payload);
       const {current_password,otp,...safe}=payload;
       result=await coreFor(account.subject).action({action,operation_id,payload:safe});
+    }
+    else if(Object.hasOwn(CONSOLE_TUNNEL_FIELDS,action)){
+      // The tunnel is the public entry point: fresh password + authenticator code, then only the listed fields go to Core.
+      const fields=CONSOLE_TUNNEL_FIELDS[action];
+      if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      await ids.console.reauthenticate(account.account_id,session,payload,{otp:true});
+      result=await coreFor(account.subject).action({action,operation_id,payload:Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]))});
     }
     else if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){
       // Deleting, restoring or merging a project changes what every agent can read and write: fresh password + OTP here,
@@ -286,9 +295,11 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
   }
   if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
-  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|entities|operation)$/.test(pathname)) {
+  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname)) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
-    const result=await core.view(view,Object.fromEntries(url.searchParams));
+    let result=await core.view(view,Object.fromEntries(url.searchParams));
+    // Configuration lives in Core (settings, models, agent keys, tunnels) and here (connections): one combined view.
+    if(view==='config'){const limit=Number(url.searchParams.get('limit')||30);result=mergeConfig(result,ids.connections.configState(account.account_id,limit),limit);}
     ids.session(token,'console'); // Do not send a response after revocation raced an awaited Core read.
     if(['system-health','system-version','backups'].includes(view)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
     ids.audit(account.account_id,`console.read.${view}`);sendJson(response,200,result);return true;
@@ -297,6 +308,12 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   throw new BoundaryError(404,'NOT_FOUND');
 }
 
+function mergeConfig(core,own,limit){
+  const byTime=(a,b)=>String(b.at).localeCompare(String(a.at)),history=[...(core.history||[]),...own.history].sort(byTime);
+  return {...core,fingerprint:createHash('sha256').update(`${core.fingerprint}:${own.fingerprint}`).digest('hex').slice(0,16),
+    latest:[...(core.latest||[]),...own.history.slice(0,5)].sort(byTime).slice(0,5),history:history.slice(0,limit),
+    snapshot:{...core.snapshot,...own.snapshot}};
+}
 // Current connection facts for credentials recorded in this owner's Core audit page: an exact owner-scoped mapping from
 // the credential to a personal connection (any version, revoked or not) or to the account's system Console/Web binding.
 // Unmapped credentials stay unmapped; nothing is inferred from agent names or times. Labels are current, not historical.

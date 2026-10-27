@@ -99,6 +99,7 @@ test("MCP server enforces preview before confirmation", async () => {
         "mnemuron_confirm_resume",
         "mnemuron_take_pending_resume",
         "mnemuron_remember",
+        "mnemuron_project_profile",
         "mnemuron_search_memories",
         "mnemuron_supersede_memory",
         "mnemuron_retract_memory",

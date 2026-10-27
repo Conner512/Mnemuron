@@ -325,11 +325,14 @@ export class VectorIndex {
         // Evaluate the full original query, never the expansion or the truncated preview. Preserve
         // proven alias explanations even when the same record also appears among semantic hits.
         const source=this.store.derivedMemory.currentSource(auth.user_id,r.item.memory_id),text=source&&normalizeSearch(`${source.content}\n${source.topic||''}`);
-        r.kind=source&&originalMatchKind(payload.query,source)|| (r.item.ranking?.match_kind==='alias'?'alias':'semantic');
+        r.kind=source&&originalMatchKind(payload.query,{...source,concepts:this.store.traits.get(auth.user_id,r.item.memory_id).concepts})|| (r.item.ranking?.match_kind==='alias'?'alias':'semantic');
       }
+      // Within a match tier the fused score is scaled by strength and recent assistant reads (memory/salience.mjs).
+      const salience=this.store.salience.of(auth.user_id,[...ranked.keys()]);
+      for(const r of ranked.values()){r.salience=salience.get(r.item.memory_id);r.score=r.rrf*r.salience.factor;}
       const priority={raw_query:0,original_terms:1,alias:2,semantic:3};
-      const result=[...ranked.values()].sort((a,b)=>(mode==='semantic'?Number(b.kind==='raw_query')-Number(a.kind==='raw_query'):priority[a.kind]-priority[b.kind])||b.rrf-a.rrf||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
-        .map(r=>({...r.item,ranking:{...r.item.ranking,method:'rrf-v1',score:r.rrf,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
+      const result=[...ranked.values()].sort((a,b)=>(mode==='semantic'?Number(b.kind==='raw_query')-Number(a.kind==='raw_query'):priority[a.kind]-priority[b.kind])||b.score-a.score||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
+        .map(r=>({...r.item,ranking:{...r.item.ranking,method:'rrf-salience-v2',score:r.score,rrf_score:r.rrf,strength_score:r.salience.strength_term,read_score:r.salience.read_term,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
       lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length,semantic_rejected:rejected,semantic_threshold:relevance.threshold,semantic_threshold_direction:relevance.direction,semantic_distance:relevance.distance,relevance_policy:'query-relevance-v1',alias_expanded:plan.expanded,alias_ambiguous:plan.ambiguous,alias_source_truncated:plan.source_truncated};
       lexical.retrieval.result_truncated ||= ranked.size>limit;
       boundMemoryResponse(lexical);return lexical;

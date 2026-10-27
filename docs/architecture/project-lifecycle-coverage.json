@@ -462,7 +462,7 @@
   },
   "server/lib/memory-retrieval.mjs": {
    "memories": {
-    "read": 6,
+    "read": 10,
     "write": 0
    }
   },
@@ -494,6 +494,16 @@
     "write": 0
    }
   },
+  "server/lib/memory/profile.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "memories": {
+    "read": 2,
+    "write": 0
+   }
+  },
   "server/lib/memory/revisions.mjs": {
    "memories": {
     "read": 1,
@@ -512,6 +522,22 @@
    "memories": {
     "read": 4,
     "write": 1
+   }
+  },
+  "server/lib/memory/session-context.mjs": {
+   "projects": {
+    "read": 1,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/memory/similar.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
    }
   },
   "server/lib/memory/sources.mjs": {

@@ -2,6 +2,22 @@ import fs from 'node:fs';
 import {randomBytes,createCipheriv,createDecipheriv,createHash} from 'node:crypto';
 import {storageDoctor} from '../storage-policy.mjs';
 import {ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
+// Console secret envelope (AES-256-GCM, AAD bound to user and purpose). Pure functions so a privileged helper (the
+// tunnel applier) can open an envelope with the key file alone, without starting the service.
+export function readConsoleKey(file){
+  const stat=fs.lstatSync(file);
+  if(!stat.isFile()||stat.isSymbolicLink()||(stat.mode&0o077)!==0||stat.size>1024)throw new ConflictError('Console secret storage is unavailable.','CONSOLE_KEY_REQUIRED');
+  const key=Buffer.from(fs.readFileSync(file,'utf8').trim(),'base64url');
+  if(key.length!==32)throw new ConflictError('Console secret storage is unavailable.','CONSOLE_KEY_REQUIRED');return key;
+}
+export function sealWith(key,user,purpose,value){
+  const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',key,iv);c.setAAD(Buffer.from(`console-v1|${user}|${purpose}`));
+  const ciphertext=Buffer.concat([c.update(JSON.stringify(value)),c.final()]);return JSON.stringify({v:1,iv:iv.toString('base64url'),tag:c.getAuthTag().toString('base64url'),ciphertext:ciphertext.toString('base64url')});
+}
+export function unsealWith(key,user,purpose,value){
+  const data=JSON.parse(value);if(data.v!==1)throw new Error('Invalid secret envelope');const c=createDecipheriv('aes-256-gcm',key,Buffer.from(data.iv,'base64url'));
+  c.setAAD(Buffer.from(`console-v1|${user}|${purpose}`));c.setAuthTag(Buffer.from(data.tag,'base64url'));return JSON.parse(Buffer.concat([c.update(Buffer.from(data.ciphertext,'base64url')),c.final()]).toString());
+}
 import {protectTables} from '../lifecycle/protection.mjs';
 export const fingerprint = value => createHash('sha256').update(JSON.stringify(canonical(value))).digest('hex');
 function canonical(v,depth=0) {if(depth>16)throw new ValidationError('Console input is too deeply nested.','INVALID_CONSOLE_INPUT');return Array.isArray(v)?v.map(x=>canonical(x,depth+1)):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k],depth+1)])):v;}
@@ -26,19 +42,10 @@ export class ConsoleState {
     const file=this.store.memoryConfig.console?.key_file;
     if(!file)throw new ConflictError('Console secret storage is not configured.','CONSOLE_KEY_REQUIRED');
     storageDoctor({console_key:file});
-    const stat=fs.lstatSync(file);
-    if(!stat.isFile()||stat.isSymbolicLink()||(stat.mode&0o077)!==0||stat.size>1024)throw new ConflictError('Console secret storage is unavailable.','CONSOLE_KEY_REQUIRED');
-    const key=Buffer.from(fs.readFileSync(file,'utf8').trim(),'base64url');
-    if(key.length!==32)throw new ConflictError('Console secret storage is unavailable.','CONSOLE_KEY_REQUIRED');return key;
+    return readConsoleKey(file);
   }
-  seal(user,purpose,value) {
-    const iv=randomBytes(12),c=createCipheriv('aes-256-gcm',this.key(),iv);c.setAAD(Buffer.from(`console-v1|${user}|${purpose}`));
-    const ciphertext=Buffer.concat([c.update(JSON.stringify(value)),c.final()]);return JSON.stringify({v:1,iv:iv.toString('base64url'),tag:c.getAuthTag().toString('base64url'),ciphertext:ciphertext.toString('base64url')});
-  }
-  unseal(user,purpose,value) {
-    const data=JSON.parse(value);if(data.v!==1)throw new Error('Invalid secret envelope');const c=createDecipheriv('aes-256-gcm',this.key(),Buffer.from(data.iv,'base64url'));
-    c.setAAD(Buffer.from(`console-v1|${user}|${purpose}`));c.setAuthTag(Buffer.from(data.tag,'base64url'));return JSON.parse(Buffer.concat([c.update(Buffer.from(data.ciphertext,'base64url')),c.final()]).toString());
-  }
+  seal(user,purpose,value){return sealWith(this.key(),user,purpose,value);}
+  unseal(user,purpose,value){return unsealWith(this.key(),user,purpose,value);}
   existing(user,operation,action,payload) {
     id(operation);const row=this.db.prepare('SELECT * FROM console_operations WHERE user_id=? AND operation_id=?').get(user,operation);
     if(!row)return null;

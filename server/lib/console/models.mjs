@@ -9,6 +9,7 @@ import {object,number,fingerprint} from './state.mjs';
 import {protectTables} from '../lifecycle/protection.mjs';
 import {outputSchema,validateSummary} from '../memory-jobs/worker.mjs';
 import {ConsoleQuotas} from './quotas.mjs';
+import {ConsoleHosts} from './hosts.mjs';
 
 // Model-list discovery bounds: one deadline for DNS and HTTP, response bytes, listed IDs, ID length (the save limit).
 export const DISCOVERY=Object.freeze({deadline_ms:10000,max_bytes:262144,max_models:200,max_id:160});
@@ -38,7 +39,7 @@ export class ConsoleModels {
       CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);
     protectTables(this.db,['memory_vector_manifest']);
-    this.quotas=new ConsoleQuotas(store,this);
+    this.quotas=new ConsoleQuotas(store,this);this.hosts=new ConsoleHosts(store);
     // Replaceable in synthetic tests only (fake DNS, controlled clock); discovery never uses another resolver path.
     this.lookup=lookup;this.clock=()=>Date.now();this.discoveryDeadlineMs=DISCOVERY.deadline_ms;this.discovering=new Set();}
   /** Counts one embedder call: the owner's limits (if set) and an open first-run budget. Returns true for a manifest
@@ -85,10 +86,10 @@ export class ConsoleModels {
       const provider=new Embedder(input,{transport:async(p,route,body)=>{guard();
         const live=this.raw(user,'embedder');if(!live||!JSON.parse(live.config_json).enabled)fail('NOT_CONFIGURED');
         const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
-        const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
+        const addresses=await this.hosts.resolve(user,host,lookup).catch(()=>fail('DNS_UNAVAILABLE'));
         const cipher=live.secret_cipher;
         const headers=cipher?{authorization:'Bearer '+this.state.unseal(user,'model:embedder',cipher)}:{};
-        guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}},route,body,{resolve:async()=>addresses,headers});guard();return response;
+        guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address),allow_private:p.egress.allow_private||this.hosts.privateRecord(user,host)}},route,body,{resolve:async()=>addresses,headers});guard();return response;
       }});
       provider.profile=Object.freeze({...profile,egress:Object.freeze({...profile.egress,approved:profile.egress.approved&&now.egress_approved===true,
         query_approved:profile.egress.query_approved&&now.query_approved===true})});
@@ -111,7 +112,7 @@ export class ConsoleModels {
     if(config.native_schema===undefined)config.native_schema=true;
     if(typeof config.native_schema!=='boolean')throw new ValidationError('Invalid schema capability.');
     if(typeof config.enabled!=='boolean'||!['openai_compatible','ollama'].includes(config.protocol))throw new ValidationError('Invalid model configuration.');
-    const {url,base}=this.endpoint(config.base_url);config.base_url=base;
+    const {url,base}=this.endpoint(config.base_url,auth.user_id);config.base_url=base;
     for(const key of ['model','profile_revision'])if(typeof config[key]!=='string'||!config[key].trim()||config[key].length>160)throw new ValidationError('Model name and revision are required.');
     number(config.daily_requests,1,10000);number(config.output_tokens,128,32768);number(config.batch_size,1,20);
     if(p.kind==='embedder')number(config.dimensions,1,65536);
@@ -136,14 +137,16 @@ export class ConsoleModels {
   }
   /** One URL rule for saving and for model-list discovery: HTTPS, or HTTP only for an operator-approved private origin;
    * no credentials, query or fragment. Returns the normalized base (no trailing slash). */
-  endpoint(value){
+  endpoint(value,user=null){
     let url;try{url=new URL(value);}catch{throw new ValidationError('Invalid model URL.');}
-    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(url.origin);
+    // Private origins: approved by the operator, or by the owner's own host record pointing the hostname at a private address.
+    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(url.origin)||!!user&&this.hosts.privateRecord(user,url.hostname);
     if(url.username||url.password||url.hash||url.search||!['https:',...(privateApproved?['http:']:[])].includes(url.protocol))throw new ValidationError('Use HTTPS; private HTTP requires operator approval.','MODEL_URL_DENIED');
     return {url,base:url.href.replace(/\/$/,''),privateApproved};
   }
   profile(user,kind,c) {
-    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(new URL(c.base_url).origin);
+    // Egress is not part of the profile fingerprint, so a host record can approve a private address without changing it.
+    const privateApproved=(this.store.memoryConfig.console?.allowed_private_origins||[]).includes(new URL(c.base_url).origin)||this.hosts.privateRecord(user,new URL(c.base_url).hostname);
     const profile=validateProfile({enabled:true,provider_id:`console-${kind}`,protocol:c.protocol,base_url:c.base_url,model:c.model,profile_revision:c.profile_revision,auth:{none:true},
       timeouts:{request_ms:30000},limits:{input_bytes:262144,input_tokens:262144,output_bytes:524288,output_tokens:c.output_tokens,batch_size:c.batch_size,concurrency:1,daily_requests:c.daily_requests},
       retry:{max_attempts:3,base_ms:2000,max_ms:60000,repair_once:false},capabilities:{native_schema:c.native_schema!==false},
@@ -164,11 +167,12 @@ export class ConsoleModels {
       const current=this.raw(user,kind);
       if(!current||current.revision!==row.revision)fail('STALE_INPUT');
       const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
-      const addresses=await lookup(host,{all:true,verbatim:true}).catch(()=>fail('DNS_UNAVAILABLE'));
+      // A host record (hosts.mjs) replaces DNS for this hostname; private addresses are allowed only through one.
+      const addresses=await this.hosts.resolve(user,host,lookup).catch(()=>fail('DNS_UNAVAILABLE'));
       if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');guard();
       // requestJSON rejects metadata, link-local, private/transition addresses and
       // redirects, and pins the validated lookup result to the actual socket.
-      const target={...p,egress:{...p.egress,addresses:addresses.map(a=>a.address)}};
+      const target={...p,egress:{...p.egress,addresses:addresses.map(a=>a.address),allow_private:p.egress.allow_private||this.hosts.privateRecord(user,host)}};
       const headers=row.secret_cipher?{authorization:'Bearer '+this.state.unseal(user,`model:${kind}`,row.secret_cipher)}:{};
       const response=await requestJSON(target,route,body,{resolve:async()=>addresses,headers});guard();if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');return response;
     }});
@@ -188,7 +192,7 @@ export class ConsoleModels {
     const user=auth.user_id,row=this.raw(user,p.kind),revision=row?.revision||0;
     if(number(p.expected_revision,0,2147483647)!==revision)throw new ConflictError('Model configuration changed.','MODEL_VERSION_CHANGED');
     if(!['openai_compatible','ollama'].includes(p.protocol)||!['saved','typed','none'].includes(p.key_source))throw new ValidationError('Invalid model list request.','INVALID_CONSOLE_INPUT');
-    const {url,base,privateApproved}=this.endpoint(p.base_url);
+    const {url,base,privateApproved}=this.endpoint(p.base_url,user);
     if(p.key_source==='typed'?typeof p.api_key!=='string'||!p.api_key||p.api_key.length>16384||/[\r\n\x00]/.test(p.api_key):p.api_key!==undefined)throw new ValidationError('Invalid model key.','INVALID_CONSOLE_INPUT');
     const cipher=row?.secret_cipher||null,savedOrigin=row&&new URL(JSON.parse(row.config_json).base_url).origin;
     // A saved key never travels to another origin (an unsaved origin change drops it, exactly as saving would).
@@ -208,7 +212,7 @@ export class ConsoleModels {
         promise.then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});});
       current();
       const host=url.hostname.replace(/^\[|\]$/g,'');
-      const addresses=isIP(host)?[{address:host,family:isIP(host)}]:await within(Promise.resolve().then(()=>this.lookup(host,{all:true,verbatim:true})).catch(()=>fail('DNS_UNAVAILABLE')),left());
+      const addresses=isIP(host)?[{address:host,family:isIP(host)}]:await within(Promise.resolve().then(()=>this.hosts.resolve(user,host,this.lookup)).catch(()=>fail('DNS_UNAVAILABLE')),left());
       if(left()<=0)fail('REQUEST_TIMEOUT');
       current();
       const headers=p.key_source==='saved'?{authorization:'Bearer '+this.state.unseal(user,`model:${p.kind}`,cipher)}:p.key_source==='typed'?{authorization:'Bearer '+p.api_key}:{};

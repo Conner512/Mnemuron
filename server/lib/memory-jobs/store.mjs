@@ -107,6 +107,33 @@ export class MemoryJobs {
     this.db.prepare('INSERT OR REPLACE INTO memory_profile_state VALUES (?,?)').run(profile,'ready');
     this.db.prepare("UPDATE memory_jobs SET state='pending',run_after=?,last_error_code=NULL WHERE profile=? AND state IN ('blocked_config','blocked_auth','blocked_budget')").run(this.clock(),profile);
   });}
+  /** Jobs grouped into the batches they were planned in: an owner processing run, otherwise the jobs of one type
+   * created in the same minute (one scheduled or requested round). batch_id is stable for cancelling a batch. */
+  batchSql() {
+    const runs = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='owner_processing_jobs'").get();
+    return {from: `memory_jobs j${runs ? ' LEFT JOIN owner_processing_jobs o ON o.job_id=j.job_id' : ''}`,
+      key: runs ? "COALESCE('run:'||o.run_id,'t:'||j.job_type||':'||(j.created_at/60000))" : "'t:'||j.job_type||':'||(j.created_at/60000)"};
+  }
+  batches(userId, {offset = 0, limit = 25} = {}) {
+    const {from, key} = this.batchSql();
+    return this.db.prepare(`SELECT ${key} batch_id,j.job_type,COUNT(*) jobs,SUM(j.state='succeeded') succeeded,SUM(j.state='cancelled') cancelled,SUM(j.state='leased') running,
+      SUM(j.state IN ('pending','retry_wait')) waiting,SUM(j.state NOT IN ('succeeded','cancelled','leased','pending','retry_wait')) failed,SUM(j.total) total,SUM(j.processed) processed,
+      MIN(j.created_at) created_at,MAX(j.updated_at) updated_at,GROUP_CONCAT(DISTINCT j.last_error_code) error_codes
+      FROM ${from} WHERE j.user_id=? GROUP BY batch_id ORDER BY MIN(j.created_at) DESC,batch_id LIMIT ? OFFSET ?`).all(userId, limit, offset)
+      .map(({error_codes, ...b}) => ({...b, error_codes: error_codes ? error_codes.split(',') : []}));
+  }
+  /** One page of a batch's jobs, oldest first, with what each covers (scope and window) for the console. */
+  batchPage(userId, batchId, {offset = 0, limit = 10} = {}) {
+    const {from, key} = this.batchSql(), where = `j.user_id=? AND ${key}=?`;
+    const total = this.db.prepare(`SELECT COUNT(*) n FROM ${from} WHERE ${where}`).get(userId, batchId).n;
+    const rows = this.db.prepare(`SELECT j.job_id,j.job_type,j.state,j.total,j.processed,j.attempt_count,j.last_error_code,j.created_at,j.updated_at,j.scope_key,json_extract(j.metadata_json,'$.window') window_json
+      FROM ${from} WHERE ${where} ORDER BY j.created_at,j.job_id LIMIT ? OFFSET ?`).all(userId, batchId, limit, offset);
+    return {total, rows};
+  }
+  batchJobs(userId, batchId) {
+    const {from, key} = this.batchSql();
+    return this.db.prepare(`SELECT j.job_id,j.state FROM ${from} WHERE j.user_id=? AND ${key}=?`).all(userId, batchId);
+  }
   cancel(id){this.db.prepare("UPDATE memory_jobs SET state='cancelled',fence=fence+1,lease_owner=NULL,lease_expires=NULL WHERE job_id=? AND state NOT IN ('succeeded','cancelled')").run(id);}
   status(){return {states:this.db.prepare('SELECT state,COUNT(*) AS count,SUM(total-processed) AS remaining FROM memory_jobs GROUP BY state').all(),
     oldest_pending_age_ms:Math.max(0,this.clock()-(this.db.prepare("SELECT MIN(created_at) AS n FROM memory_jobs WHERE state IN ('pending','retry_wait','leased')").get().n ?? this.clock()))};}

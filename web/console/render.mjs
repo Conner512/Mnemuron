@@ -9,18 +9,18 @@ const saved=JSON.parse(localStorage.getItem('mnemuron.appearance.v1.'+account)||
 if(['zh-CN','en'].includes(saved?.locale))root.lang=saved.locale;}catch{}})();`;
 const appearanceBootstrapHash=createHash('sha256').update(appearanceBootstrap).digest('base64');
 export const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-import {pages,pageCode,removedPages,movedPages} from './routes.mjs';
-export {pages,pageCode,removedPages,movedPages};
-export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pages.find(p=>route===`/app/${p}`)??null;
+import {pages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug} from './routes.mjs';
+export {pages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug};
+export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pageOfSlug(route.replace(/^\/app\//,''))??null;
 export const label=(key,tag='span')=>`<${tag} data-i18n="${key}">${escapeHtml(text(key))}</${tag}>`;
 
 // Navigation follows the memory's journey: the overview; memory; automatic processing; connections (where memories come
-// from and who reads them); work; system. Thirteen destinations, each an icon + label, no route codes. Slugs are kept
+// from and who reads them); work; system. Each destination is an icon + label, no route codes. Slugs are kept
 // where a page moved (the public ingress allows exactly these): jobs = processing, connections = ChatGPT, storage = health.
 // What each destination offers or will offer is listed in the feature map (visuals.mjs).
 const navGroups=[['',[['overview','home']]],['navMemory',[['memories','library'],['summaries','summaries']]],
-  ['navProcessing',[['jobs','jobs']]],['navConnections',[['connections','connections'],['agents','agents']]],['navWork',[['tasks','tasks']]],
-  ['navSystem',[['models','models'],['storage','storage'],['usage','usage'],['audit','audit'],['security','security']]]];
+  ['navProcessing',[['jobs','jobs']]],['navConnections',[['connections','connections']]],['navWork',[['tasks','tasks']]],
+  ['navSystem',[['models','models'],['storage','storage'],['audit','audit'],['security','security']]]];
 const groupOf=page=>navGroups.find(([,items])=>items.some(([p])=>p===page))?.[0]||'';
 // Logo: a memory neuron. A violet entity node with a hard ink shadow links three memories in the category colours
 // (preference pink, project blue, workflow yellow), as on the overview memory map. Geometry: docs/console-design.md.
@@ -36,7 +36,7 @@ const languageControl=()=>`<div class="language-control"><label class="sr-only" 
 function consoleShell({title,body,account,csrf,page}) {
   const username=escapeHtml(account?.username||'');
   // Each link has an empty badge slot the browser fills with a live count or health state (app.mjs).
-  const nav=navGroups.map(([group,items])=>`<div class="nav-group">${group?label(group,'h2'):''}${items.map(([p,glyph])=>`<a href="/app/${p}"${p===page?' aria-current="page"':''}><span class="nav-icon">${navIcon(glyph)}</span>${label(p)}<span class="nav-badge" data-nav-badge="${p}"></span></a>`).join('')}</div>`).join('');
+  const nav=navGroups.map(([group,items])=>`<div class="nav-group">${group?label(group,'h2'):''}${items.map(([p,glyph])=>`<a href="${pagePath(p)}"${p===page?' aria-current="page"':''}><span class="nav-icon">${navIcon(glyph)}</span>${label(p)}<span class="nav-badge" data-nav-badge="${p}"></span></a>`).join('')}</div>`).join('');
   const loading=`<div class="page-heading"><div>${label(title,'h1')}${label('loading','p')}</div></div><div class="loading-card" role="status">${label('loading')}</div>`;
   return `<div class="shell">
   <aside class="sidebar"><a class="brand" href="/app">${brandMark}</a><p class="eyebrow" data-i18n="systemLabel">${text('systemLabel')}</p>
@@ -74,7 +74,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
 }
 // Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
 // add a module only together with its ingress route, or fold it into an existing one.
-const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','visuals.mjs','actions.mjs','connections.mjs'];
+const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','routes.mjs','visuals.mjs','actions.mjs','connections.mjs','agents.mjs'];
 const STYLESHEETS=['styles.css','controls.css'];
 const stylesheetContent=()=>Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')]));
 // New markup must not reuse a prior release's cached palette; keep the allowlisted path unchanged.

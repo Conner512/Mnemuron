@@ -53,13 +53,14 @@ test('DISPLAY-02: a short title from a meaningful topic or the content; namespac
 
 test('DISPLAY-03: list and detail markup show a title, a labelled original tag and provenance; never a path for a tag',()=>{
   const t=key=>`[${key}]`;
-  const row={memory_id:'m-1',content:'用户喜欢在周末徒步。',memory_type:'goal',status:'active',created_at:'2026-01-01T00:00:00.000Z',category:'personal',
+  const row={memory_id:'m-1',content:'用户喜欢在周末徒步。',memory_type:'goal',status:'active',created_at:'2026-01-01T00:00:00.000Z',kind:'preference',
     topic:'AgentMemory/observation/Mnemuron',imported:true,original_created_at:'2025-01-01T00:00:00.000Z',...memoryPresentation({content:'用户喜欢在周末徒步。',topic:'AgentMemory/observation/Mnemuron'})};
   const topicRow={memory_id:'m-2',content:'正文',memory_type:'fact',status:'active',created_at:'2026-01-01T00:00:00.000Z',topic:'周末安排',...memoryPresentation({content:'正文',topic:'周末安排'})};
   const html=libraryView(t,{data:{results:[row,topicRow]},status:'active'});
   assert.match(html,/<span class="memory-title" data-title-source="content">用户喜欢在周末徒步<\/span>/);
-  assert.match(html,/class="type-chip" data-type="goal">\[goal\]/,'memory_type stays its own chip');
-  assert.match(html,/class="category-pill" data-category="personal"/,'classification stays its own column');
+  assert.match(html,/class="type-chip" data-type="goal"><span class="chip-label">\[taskTypeTag\]<\/span>\[goal\]/,'memory_type stays its own labelled chip');
+  assert.match(html,/<tr data-group="pref">[\s\S]*class="kind-pill" data-group="pref"><span data-i18n="kind_preference">/,'the memory type is its own column');
+  assert.doesNotMatch(html,/category-pill/,'categories were retired');
   assert.match(html,/class="topic-chip tag-chip" data-facet="topic" data-value="AgentMemory\/observation\/Mnemuron"[^>]*><span class="chip-label">\[originalTag\]<\/span>AgentMemory\/observation\/Mnemuron<\/button>/);
   assert.doesNotMatch(html,/class="memory-path"/,'a namespace tag is never shown as a file path');
   assert.equal((html.match(/周末安排/g)||[]).length,1,'a topic used as the title is not repeated as a chip');
@@ -72,12 +73,14 @@ test('DISPLAY-03: list and detail markup show a title, a labelled original tag a
   assert.doesNotMatch(libraryView(t,{data:{results:[single]}}),/class="memory-text"/);
   const longer={memory_id:'m-7',content:'第一句是标题。第二句补充细节。',status:'active',...memoryPresentation({content:'第一句是标题。第二句补充细节。'})};
   assert.match(libraryView(t,{data:{results:[longer]}}),/<span class="memory-title" data-title-source="content">第一句是标题<\/span><span class="memory-text">第一句是标题。第二句补充细节。<\/span>/);
-  const detail=memoryDetailView(t,{revision:3,content_offset:0,content_length:10,content_complete:true,memory:{memory_id:'m-1',content:'用户喜欢在周末徒步。',memory_type:'goal',status:'active'}},
+  const detail=memoryDetailView(t,{revision:3,content_offset:0,content_length:10,content_complete:true,memory:{memory_id:'m-1',content:'用户喜欢在周末徒步。',memory_type:'goal',status:'active',kind:'preference',concepts:['徒步'],strength:7}},
     {meta:{memory_id:'m-1',category:'personal',tag:'AgentMemory/observation/Mnemuron',origin:{kind:'imported',original_created_at:'2025-01-01T00:00:00.000Z'}},labels:{personal:'个人'}});
-  for(const key of ['memoryType','category','status','revisions','originFacet','originalTag'])assert.match(detail,new RegExp(`<dt><span data-i18n="${key}">`),key);
+  for(const key of ['taskTypeTag','kind','strength','concepts','status','revisions','originFacet','originalTag'])assert.match(detail,new RegExp(`<dt><span data-i18n="${key}">`),key);
+  assert.doesNotMatch(detail,/data-i18n="category"/,'categories were retired');
+  assert.match(detail,/class="kind-pill" data-group="pref"/);assert.match(detail,/class="concept-chip" href="\/app\/memories\?concept=/);
   assert.doesNotMatch(detail,/data-i18n="sensitivity"/,'sensitivity levels were removed');
   assert.match(detail,/<code class="tag-value">AgentMemory\/observation\/Mnemuron<\/code>/);
-  assert.match(detail,/>个人</);assert.match(detail,/\[importedOrigin\]/);
+  assert.doesNotMatch(detail,/>个人</,'a stale category label is not shown');assert.match(detail,/\[importedOrigin\]/);
   assert.doesNotMatch(detail,/webVisibility|ChatGPT/);
   // Without metadata the detail still renders the body and the lifecycle facts.
   const bare=memoryDetailView(t,{revision:1,content_offset:0,content_length:4,content_complete:true,memory:{memory_id:'m-4',content:'Body',status:'retracted'}},{});

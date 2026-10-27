@@ -1607,3 +1607,49 @@ Object.assign(catalog["zh-CN"],{authPoint_shared:'ChatGPT 和编程助手读写�
 Object.assign(catalog.en,{authPoint_shared:'ChatGPT and your coding assistants share one memory, so any of them can pick up where another left off',authPoint_selfhosted:'Your data stays on your own server; sign-in needs a password and a one-time code'});
 Object.assign(catalog["zh-CN"],{authPoint_source:'每条记忆都有来源和版本',authPoint_shared:'多个助手共用同一份记忆',authPoint_selfhosted:'数据自托管，登录双重验证'});
 Object.assign(catalog.en,{authPoint_source:'Every memory keeps its source and history',authPoint_shared:'One memory, shared by all your assistants',authPoint_selfhosted:'Self-hosted data behind two-factor sign-in'});
+Object.assign(catalog["zh-CN"],{projectProfile:'项目画像',profileMemories:'项目记忆',profileConcepts:'常用关键词',profileKey:'关键偏好、架构与流程',profileProblems:'最近的问题',profileEmpty:'这个项目还没有专属记忆（账户级记忆不计入）。'});
+Object.assign(catalog.en,{projectProfile:'Project profile',profileMemories:'Project memories',profileConcepts:'Common keywords',profileKey:'Key preferences, architecture and workflows',profileProblems:'Recent problems',profileEmpty:'This project has no memories of its own yet (account-wide memories are not counted).'});
+Object.assign(catalog["zh-CN"],{reviewToggle:'待清理',reviewChip:'待清理',reviewNote:'列出看起来已过时的有效记忆：重要度 ≤ 3、创建超过 60 天且 90 天内没有助手读取；或重要度 ≤ 6、创建超过 180 天且 180 天内没有助手读取。你在控制台里的浏览不算读取。勾选后用批量撤回处理，不会自动删除。',reviewCreated:'创建于',reviewDaysAgo:'天前',reviewLastRead:'助手上次读取',reviewNeverRead:'从未被助手读取'});
+Object.assign(catalog.en,{reviewToggle:'Review stale',reviewChip:'Stale review',reviewNote:'Active memories that look stale: strength ≤ 3, created over 60 days ago and not read by an assistant in 90 days; or strength ≤ 6, created over 180 days ago and not read by an assistant in 180 days. Your own console browsing does not count. Select them and use batch retract; nothing is removed automatically.',reviewCreated:'created',reviewDaysAgo:'days ago',reviewLastRead:'last assistant read',reviewNeverRead:'never read by an assistant'});
+Object.assign(catalog["zh-CN"],{connections:'连接',pageNote_connections:'ChatGPT、编程助手和其他应用的连接都在这里，以及它们能读写什么。'});
+Object.assign(catalog.en,{connections:'Connections',pageNote_connections:'Every connection (ChatGPT, coding assistants and other apps) and what each may read and write.'});
+Object.assign(catalog["zh-CN"],{tunnelSetToken:'更换连接器令牌',tunnelReapply:'重新应用',tunnelSetApiToken:'设置 Cloudflare API 令牌',tunnelReplaceApiToken:'更换 API 令牌',tunnelClearApiToken:'清除 API 令牌',
+ tunnelAddRoute:'添加域名',tunnelRemoveRoute:'删除',tunnelToken:'Tunnel 连接器令牌',tunnelApiToken:'Cloudflare API 令牌',tunnelHostname:'域名（如 app.example.com）',tunnelService:'转发到（本机地址）',
+ tunnelTokenNote:'在 Cloudflare Zero Trust → Networks → Tunnels → 你的 Tunnel → Configure 里复制令牌（运行命令中 --token 后面那一长串）。保存后服务器会重启 cloudflared 并确认连上；40 秒内连不上会自动换回原令牌。',
+ tunnelApiTokenNote:'在 Cloudflare → My Profile → API Tokens 创建，需要权限：Account → Cloudflare Tunnel → Edit，以及域名所在 Zone → DNS → Edit 和 Zone → Read。只保存加密后的令牌，页面上只显示指纹。',
+ tunnelClearApiTokenNote:'清除后不能再在这里管理域名；已有的域名和 Tunnel 不受影响。',tunnelReapplyNote:'把已保存的连接器令牌再应用一次（例如上次没连上被恢复之后）。',
+ tunnelRouteNote:'转发地址只能是本机或内网地址，例如 http://127.0.0.1:8080。会同时在 Cloudflare 创建指向 Tunnel 的 DNS 记录；已有指向别处的记录不会被覆盖。',
+ tunnelRemoveRouteNote:'删除后这个域名不再经过 Tunnel；指向 Tunnel 的 DNS 记录也会一起删除。'});
+Object.assign(catalog.en,{tunnelSetToken:'Replace connector token',tunnelReapply:'Apply again',tunnelSetApiToken:'Set Cloudflare API token',tunnelReplaceApiToken:'Replace API token',tunnelClearApiToken:'Clear API token',
+ tunnelAddRoute:'Add hostname',tunnelRemoveRoute:'Remove',tunnelToken:'Tunnel connector token',tunnelApiToken:'Cloudflare API token',tunnelHostname:'Hostname (e.g. app.example.com)',tunnelService:'Forward to (local address)',
+ tunnelTokenNote:'Copy the token from Cloudflare Zero Trust → Networks → Tunnels → your tunnel → Configure (the long value after --token). The server restarts cloudflared and checks it connects; if it does not within 40 seconds, the previous token is restored.',
+ tunnelApiTokenNote:'Create it under Cloudflare → My Profile → API Tokens with Account → Cloudflare Tunnel → Edit plus Zone → DNS → Edit and Zone → Read for your domains. It is stored encrypted; only a fingerprint is shown.',
+ tunnelClearApiTokenNote:'Hostnames can no longer be managed here; existing hostnames and the tunnel are unaffected.',tunnelReapplyNote:'Apply the stored connector token again (for example after it was rolled back).',
+ tunnelRouteNote:'Forward only to a local or private address such as http://127.0.0.1:8080. A DNS record pointing to the tunnel is created too; an existing record pointing elsewhere is never overwritten.',
+ tunnelRemoveRouteNote:'The hostname stops going through the tunnel and its DNS record pointing to the tunnel is removed.'});
+Object.assign(catalog["zh-CN"],{"tunnel.add":"新增 Tunnel","tunnel.token":"更换 Tunnel 连接器令牌","tunnel.reapply":"重新应用 Tunnel 令牌","tunnel.remove":"删除 Tunnel",tunnelAdd:'新增 Tunnel',tunnelRemove:'删除',tunnelName:'名称',
+ tunnelAddNote:'粘贴新 Tunnel 的连接器令牌（Cloudflare Zero Trust → Networks → Tunnels → Configure 里 --token 后面那一长串）。服务器会单独启动一个 cloudflared 并在 40 秒内确认连上；连不上会停止并清理。公网域名在 Cloudflare 上配置。',
+ tunnelRemoveNote:'会停止这个 Tunnel 的 cloudflared 并删除服务器上保存的令牌；经过它的公网域名将无法访问。Cloudflare 上的 Tunnel 本身不会被删除。'});
+Object.assign(catalog.en,{"tunnel.add":"Add tunnel","tunnel.token":"Replace tunnel connector token","tunnel.reapply":"Apply tunnel token again","tunnel.remove":"Remove tunnel",tunnelAdd:'Add tunnel',tunnelRemove:'Remove',tunnelName:'Name',
+ tunnelAddNote:'Paste the new tunnel\'s connector token (Cloudflare Zero Trust → Networks → Tunnels → Configure, the long value after --token). The server starts a separate cloudflared and checks it connects within 40 seconds; if not, it is stopped and cleaned up. Public hostnames are configured at Cloudflare.',
+ tunnelRemoveNote:'Stops this tunnel\'s cloudflared and deletes its stored token; hostnames routed through it stop working. The tunnel itself at Cloudflare is not deleted.'});
+Object.assign(catalog["zh-CN"],{cancelBatch:'取消整批',"jobs.cancel_batch":'取消整批任务'});
+Object.assign(catalog.en,{cancelBatch:'Cancel batch',"jobs.cancel_batch":'Cancel batch'});
+Object.assign(catalog["zh-CN"],{batchIssues:'问题'});
+Object.assign(catalog.en,{batchIssues:'Issues'});
+Object.assign(catalog["zh-CN"],{setInCallLimits:'（在“调用次数限制”中设置）',dailyLimitInCallLimits:'每日调用上限已改由下方“调用次数限制”统一管理，这里不再单独设置。'});
+Object.assign(catalog.en,{setInCallLimits:'(set in Call limits)',dailyLimitInCallLimits:'The daily call limit is managed under Call limits; it is not set here.'});
+Object.assign(catalog["zh-CN"],{hostsTitle:'自定义解析（Hosts）',hostsNote:'模型请求按这里的记录直接连到指定地址，不再查 DNS，适合走本地中转服务；HTTPS 证书仍按域名校验。',hostAdd:'添加解析',hostEdit:'修改',hostRemove:'删除',
+ hostName:'域名（如 api.example.com）',hostAddress:'解析到（IPv4 或 IPv6）',hostSetNote:'指向内网或本机地址时，这个域名也可以用 HTTP。链路本地、云元数据等保留地址不允许。','hosts.set':'保存解析记录','hosts.remove':'删除解析记录',
+ hostRemoveNote:'删除后，这个域名的模型请求恢复按 DNS 解析。'});
+Object.assign(catalog.en,{hostsTitle:'Custom host records',hostsNote:'Model requests connect straight to the address recorded here instead of using DNS, e.g. through a local relay; HTTPS still verifies the certificate for the hostname.',hostAdd:'Add record',hostEdit:'Edit',hostRemove:'Remove',
+ hostName:'Hostname (e.g. api.example.com)',hostAddress:'Address (IPv4 or IPv6)',hostSetNote:'A hostname pointed at a private or local address may also use HTTP. Link-local, cloud metadata and other reserved addresses are refused.','hosts.set':'Save host record','hosts.remove':'Remove host record',
+ hostRemoveNote:'Model requests for this hostname go back to DNS.'});
+Object.assign(catalog["zh-CN"],{hostSourceSystem:'系统 /etc/hosts',hostOverridden:'已被上面的记录覆盖'});
+Object.assign(catalog.en,{hostSourceSystem:'System /etc/hosts',hostOverridden:'overridden by a record above'});
+Object.assign(catalog["zh-CN"],{hostsNote:'记录写入服务器的 /etc/hosts，服务器上的程序（包括模型请求）都按它解析，适合走本地中转服务；HTTPS 证书仍按域名校验。Proxmox 自动生成的条目不在这里显示。',hostRemoveNote:'删除后这个域名恢复按 DNS 解析（/etc/hosts 里对应的行也会删除）。'});
+Object.assign(catalog.en,{hostsNote:'Records are written to the server\'s /etc/hosts, so every program there, model requests included, resolves them, e.g. through a local relay; HTTPS still verifies the hostname. Entries Proxmox generates are not shown.',hostRemoveNote:'The hostname goes back to DNS (its line in /etc/hosts is removed too).'});
+Object.assign(catalog["zh-CN"],{auditGroup_config:'配置变更'});
+Object.assign(catalog.en,{auditGroup_config:'Configuration changes'});
+Object.assign(catalog["zh-CN"],{auditGroupNote:'只显示当前账户记录到的事件；无法归类的旧事件放在系统活动里。',auditCurrentNote:'记忆标题和连接名称显示的是现在的值。'});
+Object.assign(catalog.en,{auditGroupNote:'Events recorded for this account; older events that cannot be grouped are under System activity.',auditCurrentNote:'Memory titles and connection names show their current values.'});

@@ -160,3 +160,35 @@ test('B-25: pending count uses the same unbound definition as the draft filter',
  x.store.db.prepare("UPDATE identity_connections SET binding_version=version,binding_account_version=1,binding_json=NULL WHERE connection_id=?").run(c.connection.connection_id);
  const listed=x.registry.list(x.a.id,{});assert.equal(x.registry.list(x.a.id,{state:'draft'}).total,1);assert.equal(listed.counts.pending,1);
 });
+
+test('AGENT-01: a connection names the agent it was made for; the list carries the endpoints the console fills into setup commands',async t=>{
+ const x=await accountFixture(t);
+ const cursor=await x.execute(x.a,'connections.create',{kind:'generic_mcp',agent:'cursor',label:'Synthetic Cursor',profile:'readonly'},'agent-cursor');
+ assert.equal(cursor.connection.agent,'cursor');
+ const plain=await x.execute(x.a,'connections.create',{kind:'generic_mcp',label:'Synthetic client',profile:'readonly'},'agent-default');
+ assert.equal(plain.connection.agent,'other','an MCP connection without an agent is a generic client');
+ const gpt=await x.execute(x.a,'connections.create',{kind:'chatgpt_oauth',label:'Synthetic GPT',profile:'readonly',redirect_uri:'https://chatgpt.com/connector_platform_oauth_redirect'},'agent-gpt');
+ assert.equal(gpt.connection.agent,'chatgpt');
+ await assert.rejects(x.execute(x.a,'connections.create',{kind:'chatgpt_oauth',agent:'cursor',label:'Mismatched',profile:'readonly'},'agent-bad'),e=>e.code==='INVALID_AGENT'||/INVALID_AGENT/.test(e.message));
+ const list=x.registry.list(x.a.id,{});
+ assert.deepEqual(list.capabilities.endpoints,{server:x.config.issuer,mcp:'http://127.0.0.1:49002/mcp',mcp_generic:'http://127.0.0.1:49002/mcp/generic'});
+ assert.deepEqual(list.connections.map(c=>c.agent).sort(),['chatgpt','cursor','other']);
+});
+test('B-40: the CLI and the console change connections through the same rules and both are logged as configuration',async t=>{
+ const x=await accountFixture(t),c=x.registry,snap=()=>c.snapshot(x.a.id);
+ const made=c.operatorChange(x.a.id,'connections.create',{kind:'generic_mcp',agent:'codex',label:'Synthetic CLI Codex',profile:'readonly'},'cli:test');
+ assert.match(made.secret,/^mcp_pat_/,'a new token is returned once to the operator');
+ const id=made.connection.connection_id,key=`connections.${id.slice(0,12)}`;
+ assert.deepEqual(snap()[key],{label:'Synthetic CLI Codex',agent:'codex',profile:'readonly',state:'ready',version:1});
+ assert.equal(c.resolve(x.a.id,id.slice(0,8)),id);assert.throws(()=>c.resolve(x.a.id,'abc'),e=>e.code==='CONNECTION_NOT_FOUND');
+ assert.throws(()=>c.operatorChange(x.a.id,'connections.update',{connection_id:id,label:'x',current_password:'p'},'cli:test'),e=>e.code==='INVALID_CONNECTION_INPUT');
+ await c.track(x.a.id,'web','console',()=>x.execute(x.a,'connections.update',{connection_id:id,label:'Synthetic renamed'},'rename-web'));
+ c.operatorChange(x.a.id,'connections.disable',{connection_id:id},'cli:test');
+ assert.deepEqual([snap()[key].label,snap()[key].state,snap()[key].version],['Synthetic renamed','disabled',2]);
+ c.operatorChange(x.a.id,'connections.revoke',{connection_id:id},'cli:test');
+ assert.equal(snap()[key],undefined,'revoked connections leave the configuration');
+ assert.deepEqual(c.history(x.a.id).map(h=>[h.source,h.actor,h.new?.state??null]).reverse(),[['cli','cli:test','ready'],['web','console','ready'],['cli','cli:test','disabled'],['cli','cli:test',null]]);
+ assert.deepEqual(c.snapshot(x.b.id),{},'another account sees none of it');
+ const before=c.configState(x.a.id).fingerprint;c.operatorChange(x.a.id,'connections.create',{kind:'generic_mcp',agent:'muse',label:'Synthetic Muse',profile:'readonly'},'cli:test');
+ assert.notEqual(c.configState(x.a.id).fingerprint,before,'the console notices the change');
+});

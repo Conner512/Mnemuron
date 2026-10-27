@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {pages,removedPages,movedPages,renderPage} from '../../../web/console/render.mjs';
+import {pages,removedPages,movedPages,renderPage,slugOf,routeTitle} from '../../../web/console/render.mjs';
 import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
@@ -31,16 +31,20 @@ test('Feature map: one entry per menu page, in navigation order',()=>{
  assert.deepEqual(Object.keys(featureMap),pages);
  for(const page of prototypePages)assert.ok(pages.includes(page),page);
  const nav=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}});
- assert.deepEqual([...nav.matchAll(/<a href="\/app\/([a-z]+)"/g)].map(m=>m[1]),pages);
+ assert.deepEqual([...nav.matchAll(/<a href="\/app\/([a-z]+)"/g)].map(m=>m[1]),pages.map(slugOf),'each link is the page\'s slug');
 });
 
-test('Feature map: IDs are well formed, sequential per page and one prefix per page',()=>{
+// A page may hold more than one prefix after pages merge (connections keeps CON and AGT); a prefix stays on one page
+// and its IDs stay sequential, so no ID is reused or renumbered.
+test('Feature map: IDs are well formed, sequential per prefix and each prefix on one page',()=>{
  const prefixes=new Map();
  for(const [page,list] of Object.entries(featureMap)){
   assert.ok(list.length>0,page);
-  const prefix=list[0].id.slice(0,3);
-  assert.ok(!prefixes.has(prefix),`prefix ${prefix} reused by ${page}`);prefixes.set(prefix,page);
-  list.forEach((f,i)=>assert.equal(f.id,`${prefix}-${String(i+1).padStart(2,'0')}`,`${page}: IDs are never reused or reordered`));
+  const runs=new Map();for(const f of list){const p=f.id.slice(0,3);(runs.get(p)||runs.set(p,[]).get(p)).push(f.id);}
+  for(const [prefix,ids] of runs){
+   assert.ok(!prefixes.has(prefix),`prefix ${prefix} reused by ${page}`);prefixes.set(prefix,page);
+   ids.forEach((id,i)=>assert.equal(id,`${prefix}-${String(i+1).padStart(2,'0')}`,`${page}: IDs are never reused or reordered`));
+  }
  }
 });
 
@@ -111,11 +115,13 @@ test('The development standard lists every feature with its current status and e
  const doc=read('docs/console-feature-standard.md');
  const rows=new Map([...doc.matchAll(/^\| ([A-Z]{3}-\d{2}) \| [^|]+ \| [^|]+ \| (live|planned|policy) \|/gm)].map(m=>[m[1],m[2]]));
  assert.deepEqual(rows,new Map(features.map(f=>[f.id,f.status])));
- for(const page of pages)assert.match(doc,new RegExp(`\\| \`/app/${page}\` \\| \`${featureMap[page][0].id.slice(0,3)}\` \\|`),page);
+ for(const page of pages)assert.match(doc,new RegExp(`\\| \`/app/${slugOf(page)}\` \\| \`${featureMap[page][0].id.slice(0,3)}\` \\|`),page);
 });
 
 test('The ingress example routes every menu page and the removed pages it redirects',()=>{
- assert.deepEqual([...ingressGroup('app')].sort(),[...pages,...removedPages,...Object.keys(movedPages)].sort());
+ assert.deepEqual([...ingressGroup('app')].sort(),[...pages.map(slugOf),...removedPages,...Object.keys(movedPages)].sort());
+ for(const target of Object.values(movedPages))assert.ok(routeTitle(`/app/${target}`),`${target}: a moved page lands on a page`);
+ for(const page of pages)assert.equal(routeTitle(`/app/${slugOf(page)}`),page,`${page} is served at its slug`);
  for(const page of removedPages)assert.ok(!pages.includes(page)&&!featureMap[page],`${page} is no longer a Console page`);
 });
 

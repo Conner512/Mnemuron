@@ -495,12 +495,26 @@ dialog::backdrop,.audit-date-dialog::backdrop{background:#14171D59;backdrop-filt
 .library-tools .recent-changes h3{margin:4px 0 6px}
 /* In-page tabs and filters (secondary menus) as one outlined segmented control with a coloured current tab. */
 .view-switch{display:inline-flex;flex-wrap:wrap;gap:0;padding:3px;border:var(--bw) solid var(--ink);border-radius:10px;background:var(--surface);box-shadow:var(--hard-sm)}
-.view-switch button,.view-switch button:not(.quiet){min-height:32px;border:0;border-radius:7px;background:transparent;box-shadow:none;font-weight:600;color:var(--muted)}
-.view-switch button:not(:disabled):hover{background:var(--surface-2);color:var(--text)}
-.view-switch button[aria-pressed="true"]{background:var(--c-ent);color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
-.view-switch button:not(.quiet):not(:disabled):active{transform:none}
-.audit-sources{display:inline-grid;grid-template-columns:repeat(4,auto)}
-@media(max-width:560px){.audit-sources{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* The tabs are plain segments: the general button rule (a long :not() chain, so more specific) must not give each one
+   its own border, shadow or press movement. */
+.view-switch button,.view-switch button:not(.quiet){min-height:32px;border:0!important;border-radius:7px;background:transparent!important;box-shadow:none!important;transform:none!important;font-weight:600;color:var(--muted)}
+.view-switch button:not(:disabled):hover{background:var(--surface-2)!important;color:var(--text)}
+.view-switch button[aria-pressed="true"]{background:var(--c-ent)!important;color:var(--ink)}
+/* Audit: one toolbar row (tabs left, filter toggle right). The toggle never moves; its form is the next element and,
+   while the toggle is open, fills a full row below as an outlined panel whose fields wrap to the width. */
+.audit-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin:8px 0 20px}
+.audit-sources{display:inline-flex;flex-wrap:nowrap;gap:2px;margin:0;max-width:100%}
+.audit-sources button{flex:none;white-space:nowrap;padding:0 16px;min-height:34px}
+.audit-toolbar>.audit-filter-panel{margin:0 0 0 auto;padding:0;border:0}
+.audit-toolbar>.audit-filter-panel>summary{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border:1.5px solid var(--ink);border-radius:999px;background:var(--surface);font-weight:600}
+.audit-toolbar>.audit-filter-panel[open]>summary{background:var(--c-ent)}
+.audit-toolbar>.audit-filters{display:none}
+.audit-toolbar>.audit-filter-panel[open]+.audit-filters{display:grid;flex-basis:100%;grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr));align-items:end;gap:12px 14px;
+  margin:0;padding:14px 16px;border:1.5px solid var(--ink);border-radius:var(--radius-sm);background:var(--surface)}
+.audit-toolbar>.audit-filters>button[type=submit]{justify-self:start}
+.audit-toolbar>.audit-filters>.audit-filter-zone{grid-column:1/-1;margin:0}
+.audit-scope{margin:-4px 0 14px;font-size:12.5px}
+@media(max-width:560px){.audit-sources{display:flex;flex-wrap:wrap;width:100%}.audit-sources button{flex:1 1 30%;font-size:12.5px;padding:0 8px}.audit-toolbar>.audit-filter-panel{margin:0}}
 button.select-trigger{border:1.5px solid var(--ink);font-weight:500}
 button.select-trigger[aria-expanded="true"]{box-shadow:var(--hard-sm);background:var(--surface)}
 .select-popup{padding:6px;border-radius:var(--radius-sm)}
@@ -705,3 +719,144 @@ button.concept-chip[aria-pressed="true"]{background:var(--c-ent)!important}
 .auth-form .language-control .select-trigger[aria-expanded=true] .select-badge{background:var(--surface)}
 /* Before the script enables it the server-rendered trigger is disabled; keep it looking final, not dimmed. */
 .language-control .select-trigger:disabled{opacity:1;cursor:default}
+
+/* Project profile above the project context: type counts, keywords, key memories and recent problems. */
+.project-profile{margin:0 0 14px;padding:12px 14px;border:1.5px solid var(--ink);border-radius:var(--radius-sm);background:var(--surface)}
+.project-profile h3{margin:0 0 6px;font:700 15px var(--font-display)}
+.project-profile h4{margin:10px 0 6px;font:600 12px var(--font-mono);color:var(--muted);letter-spacing:.04em}
+.profile-summary{margin:0 0 8px}
+.profile-kinds{display:flex;flex-wrap:wrap;gap:6px;margin:0}
+.profile-kind{display:inline-flex;align-items:center;gap:4px}.profile-kind b{font:700 12px var(--font-mono)}
+.profile-list{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.profile-list li{display:flex;align-items:center;gap:8px;min-width:0}
+.profile-list .memory-link{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;background:none;border:0;padding:0;color:var(--text);cursor:pointer}
+.profile-list .memory-link:hover{text-decoration:underline}
+.concept-chip small{opacity:.6;font-size:10px}
+
+/* Cleanup review: the toolbar toggle and the reason line on each listed memory. */
+button.review-toggle[aria-pressed="true"]{background:var(--c-bug)!important}
+.review-note{display:inline-block;margin-right:8px;padding:0 6px;border:1.5px dashed var(--ink);border-radius:5px;font:500 11px/20px var(--font-mono);color:var(--ink)}
+
+/* Connections page: ChatGPT and coding-assistant sections below the shared connection list. */
+.group-title{margin:22px 0 10px;font:700 17px var(--font-display)}
+
+/* Config sync note: a change made in the CLI or another window refreshed this page. */
+.config-banner{margin:0 0 14px;padding:8px 12px;border:var(--bw) solid var(--ink);border-radius:var(--radius-sm);background:var(--c-flow);box-shadow:var(--hard-sm);font-weight:600}
+.tag[data-source="cli"]{background:var(--c-pat)}
+
+/* Connection counts: one framed strip; the tiles inside are plain cells split by thin rules, not cards of their own. */
+.connection-stats{overflow:hidden}
+.connection-stats>.card.connection-stat{border:0;border-radius:0;box-shadow:none;background:transparent}
+.connection-stats>.card.connection-stat+.connection-stat{border-left:1.5px solid var(--ink)}
+@media(max-width:960px){.connection-stats>.card.connection-stat:nth-child(3){border-left:0}.connection-stats>.card.connection-stat:nth-child(n+3){border-top:1.5px solid var(--ink)}}
+
+/* Connections by agent (agents.mjs): the connected table, the agent picker, the per-agent method choice and the
+   numbered setup steps with copyable code, in the same card language as the rest of the console. */
+.agents-table td small{display:block;color:var(--muted);font-size:11.5px}
+.agents-table .row-actions{white-space:nowrap;text-align:right}
+.agents-table .row-actions button{min-height:28px;padding:0 8px;font-size:12px}
+.agents-table .tag[data-access="rw"]{background:var(--c-pref)}
+.agents-table .tag[data-state="已授权"],.agents-table .tag[data-state="已验证"]{background:var(--c-fact)}
+.agents-table .tag[data-state="已停用"],.agents-table .tag[data-state="已过期"]{background:var(--c-bug)}
+.agents-empty{padding:28px 12px;text-align:center}
+.agents-setup{margin-top:var(--gap)}
+.agent-picker{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 14px}
+.agent-picker button{min-height:34px;padding:0 14px;border:1.5px solid var(--ink);border-radius:999px;background:var(--surface);font-weight:600}
+.agent-picker button[aria-selected="true"]{background:var(--c-ent);box-shadow:var(--hard-sm)}
+.agent-panel>p:first-child{margin:0 0 12px}
+.agent-methods{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:0 0 14px}
+.agent-methods button{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:10px 12px;border:1.5px solid var(--ink);border-radius:var(--radius-sm);background:var(--surface);text-align:left;white-space:normal}
+.agent-methods button small{color:var(--muted);font-weight:400}
+.agent-methods button[aria-checked="true"]{background:var(--c-flow);box-shadow:var(--hard-sm)}
+.agent-method-one{margin:0 0 14px}
+.agent-steps{list-style:none;margin:0;padding:0;border:1.5px solid var(--ink);border-radius:var(--radius-sm);overflow:hidden}
+.agent-step{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:16px;align-items:center;padding:12px 14px}
+.agent-step+.agent-step{border-top:1px solid var(--border)}
+.agent-step p{margin:4px 0 0;font-size:12.5px}
+.agent-code{position:relative}
+.agent-code pre{margin:0;padding:10px 64px 10px 12px;border-radius:var(--radius-sm);background:var(--surface-2);overflow-x:auto;font:500 12px/1.5 var(--font-mono);white-space:pre}
+.agent-code button{position:absolute;top:6px;right:6px;min-height:26px;padding:0 8px;font-size:11.5px}
+.agent-issued{margin:0;font-size:12.5px}
+.agent-settings{margin-top:14px}
+.agent-dialog form{display:grid;gap:12px;min-width:min(440px,90vw)}
+.agent-error{color:var(--bad);margin:0}
+@media(max-width:760px){.agent-step{grid-template-columns:minmax(0,1fr)}}
+/* Run history facts sit inside the run's own box: plain label/value pairs, no box in a box. */
+.run-row .run-facts{grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px 16px;margin:8px 0}
+.run-row .run-facts>div{padding:0;border:0;background:none}
+.run-row>p.muted{margin:4px 0 0}
+/* Job queue batches: a toggle on the type opens the batch's jobs, one page at a time, under its row. */
+.batch-toggle{display:inline-flex;align-items:center;gap:6px;font-weight:700}
+.batch-caret{display:inline-block;transition:transform .15s}
+.batch-toggle[aria-expanded="true"] .batch-caret{transform:rotate(90deg)}
+.batch-detail>td{background:var(--surface-2);padding:8px 12px 12px}
+.batch-jobs{width:100%;font-size:13px}
+.batch-jobs th{font:500 11.5px var(--font-mono);color:var(--muted);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line, var(--muted))}
+.batch-jobs td{padding:6px 8px;border-bottom:1px solid color-mix(in srgb,var(--muted) 25%,transparent);vertical-align:middle}
+.batch-pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:8px}
+.batch-pager .muted{margin-right:auto}
+@media (prefers-reduced-motion:reduce){.batch-caret{transition:none}}
+/* Checkboxes in check rows: a rounded box of their own, never the text-field look (padding, hard focus shadow). Focus
+   shows as a rounded ring that follows the box; the row itself gets a soft highlight. */
+.check-field input[type=checkbox]{appearance:none;-webkit-appearance:none;display:grid;place-items:center;width:18px;height:18px;min-height:0;margin:1px 0 0;padding:0;
+  border:1.5px solid var(--ink);border-radius:5px;background:var(--surface);box-shadow:none;cursor:pointer;transition:background-color .12s var(--ease),border-color .12s var(--ease)}
+.check-field input[type=checkbox]::after{content:"";width:9px;height:5px;margin-top:-2px;border:solid var(--surface);border-width:0 0 2px 2px;transform:rotate(-45deg);opacity:0}
+.check-field input[type=checkbox]:checked{background:var(--accent);border-color:var(--accent)}
+.check-field input[type=checkbox]:checked::after{opacity:1}
+.check-field input[type=checkbox]:focus{box-shadow:none;border-color:var(--ink)}
+.check-field input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.check-field:has(input[type=checkbox]:focus-visible){border-color:var(--ink)!important}
+.check-field input[type=checkbox]:disabled{opacity:.5;cursor:not-allowed}
+@media(forced-colors:active){.check-field input[type=checkbox]{appearance:auto;-webkit-appearance:auto}}
+/* Usage on the models page follows other cards: space above it, and the strip and chart keep the usual gap. */
+.usage-overview{margin-top:var(--gap)}
+.usage-overview+.card,.usage-overview+section{margin-top:var(--gap)}
+.status-strip[data-count="2"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:480px){.status-strip[data-count="2"]{grid-template-columns:minmax(0,1fr)}}
+/* Health page: checks in two columns on wide screens (one item per cell, rows aligned); counts beside export/import. */
+@media(min-width:900px){.health-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:32px}.health-grid>li:nth-child(2){border-top:0}}
+.health-extras{margin-top:var(--gap);grid-template-columns:minmax(220px,1fr) minmax(0,2fr)}
+@media(max-width:900px){.health-extras{grid-template-columns:minmax(0,1fr)}}
+/* Health checks: problems first, then groups by area. Compact cards of one height: dot, title, one-line state
+   (problems also show the fix), a tag only when something is wrong, and a quiet chevron on cards that open a setting. */
+.health-head{display:flex;align-items:center;gap:10px;margin:0 0 14px}
+.health-head h2{margin:0;font-size:18px}.health-head>button,.health-head>a{margin-left:auto}
+.health-group+.health-group{margin-top:18px}
+.health-group h3{margin:0 0 8px;font:600 12px var(--font-mono);letter-spacing:.04em;color:var(--muted)}
+.health-group.is-problems h3{color:var(--text)}.health-group h3 span{display:inline-grid;place-items:center;min-width:18px;height:18px;margin-left:4px;padding:0 5px;border-radius:999px;background:#f2c94c;color:#14171D;font-size:11px}
+.health-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(250px,100%),1fr));gap:10px}
+.health-tile{display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;align-items:center;gap:10px;min-height:62px;padding:10px 14px;
+  border:1.5px solid var(--ink);border-radius:var(--radius-sm);background:var(--surface);color:var(--text);text-decoration:none}
+.health-tile,.health-tile *{text-decoration:none!important}
+.health-tile .health-dot{align-self:center;margin:0}
+.health-tile-body{display:grid;gap:2px;min-width:0}
+.health-tile-body strong{font-size:14px;line-height:1.3}
+.health-detail{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.health-fix{font-size:12.5px;color:var(--text)}
+.health-tile[data-health="warn"],.health-tile[data-health="bad"]{align-items:start;box-shadow:var(--hard-sm)}
+.health-tile[data-health="warn"] .health-detail,.health-tile[data-health="bad"] .health-detail{white-space:normal;color:var(--text)}
+.health-tile[data-health="warn"]{background:linear-gradient(#f2c94c,#f2c94c) left/5px 100% no-repeat,var(--surface)}
+.health-tile[data-health="bad"]{background:linear-gradient(#e5484d,#e5484d) left/5px 100% no-repeat,var(--surface)}
+.health-tile[data-health="warn"] .health-dot,.health-tile[data-health="bad"] .health-dot{margin-top:5px}
+.health-go{color:var(--muted);font-size:20px;line-height:1;transition:transform .12s var(--ease),color .12s var(--ease)}
+a.health-tile{cursor:pointer;transition:box-shadow .12s var(--ease),transform .12s var(--ease)}
+a.health-tile:hover{box-shadow:var(--hard-sm);transform:translate(-1px,-1px)}
+a.health-tile:hover .health-go{color:var(--accent);transform:translateX(2px)}
+a.health-tile:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){a.health-tile,.health-go{transition:none}a.health-tile:hover{transform:none}}
+.health-group.is-problems .health-tiles{grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr))}
+/* Refresh buttons: the standard outlined button, a little smaller where they sit in a card or section header. */
+.refresh-button{min-height:32px;padding:4px 14px;font-size:13px}
+/* Public entry: tunnels as panels inside one card (outlined like the setup steps, no shadow of their own). */
+/* It follows the agent setup block (not a card), so the card-after-card gap does not apply: give it the same gap. */
+#tunnels{margin-top:var(--gap)}
+#tunnels .section-head>button{min-height:32px;padding:4px 14px;font-size:13px}
+.tunnel-list{display:grid;gap:12px}
+.tunnel-item{padding:14px 16px;border:1.5px solid var(--ink);border-radius:var(--radius-sm);background:var(--surface)}
+.tunnel-item>header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+.tunnel-item h3{margin:0 0 2px;font:700 15.5px/1.3 var(--font-sans);letter-spacing:0;text-transform:none;color:var(--text)}.tunnel-item header small code{font-size:12px}
+.tunnel-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 24px;margin:0}
+.tunnel-facts>div{display:grid;grid-template-columns:88px minmax(0,1fr);gap:8px;align-items:baseline}
+.tunnel-facts dt{font-size:12.5px;color:var(--muted)}.tunnel-facts dd{margin:0;font-size:13px;overflow-wrap:anywhere}
+.tunnel-item>.actions{margin-top:12px}
+@media(max-width:760px){.tunnel-facts{grid-template-columns:minmax(0,1fr)}}

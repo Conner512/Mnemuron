@@ -105,8 +105,12 @@ function literalScore(query,text,entities=[]) {
   return coverage.reduce((a,b)=>a+b,0)/coverage.length*0.8;
 }
 export function aliasAnchorsMatch(plan,text) {return (plan?.anchors||[]).every(group=>group.some(term=>containsTerm(text,term)));}
+// The searchable text of a memory: body, topic and, when it has any, its keywords (concepts). A memory without keywords
+// keeps exactly the text earlier index versions stored.
+export const conceptsText=memory=>memory.concepts_text ?? (Array.isArray(memory.concepts)?memory.concepts.join(' '):'');
+export const memorySearchText=memory=>{const concepts=conceptsText(memory);return `${memory.content||''}\n${memory.topic||''}${concepts?`\n${concepts}`:''}`;};
 export function lexicalScore(query,memory,plan) {
-  const text=normalizeSearch(`${memory.content||''}\n${memory.topic||''}`);
+  const text=normalizeSearch(memorySearchText(memory));
   if(!aliasAnchorsMatch(plan,text))return 0;
   return Math.max(0,...(plan?.queries||[query]).map((q,i)=>literalScore(normalizeSearch(q).trim(),text,plan?.required||[])*(i?0.96:1)));
 }

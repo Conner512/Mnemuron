@@ -92,3 +92,28 @@ test('BROWSE-08: overview preserves all supported categories and excludes other 
  assert.deepEqual(r.body.insights.categories.map(c=>c.value).sort(),[...taxonomy.categories].sort());
  assert.ok(r.body.insights.categories.every(c=>c.count===1));
 });
+test('BROWSE-JOBS-BATCH: jobs planned together show as one batch with progress; cancelling it stops only its unfinished jobs',async t=>{
+ const f=await setup(t),db=f.store.db,user=f.a.auth.user_id;
+ const own=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic batch source'}).memory,source=f.store.derivedMemory.currentSource(user,own.memory_id);
+ const enqueue=(n,at)=>{const id=f.store.memoryJobs.enqueue({type:'summary',userId:user,scope:source.scope_key,profile:'synthetic',metadata:{n},items:[source]});db.prepare('UPDATE memory_jobs SET created_at=? WHERE job_id=?').run(at,id);return id;};
+ const round=Date.UTC(2026,9,27,1,0,10),older=Date.UTC(2026,9,26,1,0,0);
+ const batch=[0,1,2,3].map(n=>enqueue(n,round+n)),old=enqueue(9,older);
+ db.prepare("UPDATE memory_jobs SET state='succeeded',processed=total WHERE job_id=?").run(batch[0]);
+ const foreign=f.store.saveMemory(f.other.auth,{scope:'user',content:'Foreign batch source'}).memory,fs=f.store.derivedMemory.currentSource(f.other.auth.user_id,foreign.memory_id);
+ const fj=f.store.memoryJobs.enqueue({type:'summary',userId:fs.user_id,scope:fs.scope_key,profile:'synthetic',metadata:{},items:[fs]});db.prepare('UPDATE memory_jobs SET created_at=? WHERE job_id=?').run(round,fj);
+ const body=(await f.get('jobs',{group:'batch',limit:25})).body;
+ assert.deepEqual(body.batches.map(b=>[b.job_type,b.jobs,b.succeeded,b.waiting]),[['summary',4,1,3],['summary',1,0,1]],'one row per round, newest first, the other account\'s job is not counted');
+ assert.equal((await f.get('jobs',{limit:25})).body.batches,undefined,'without group=batch the job list is unchanged');
+ assert.equal((await f.get('jobs',{group:'batch',limit:1})).body.next_offset,1,'pages go by batch');
+ const page=(await f.get('jobs',{batch_id:body.batches[0].batch_id,offset:2,limit:2})).body;
+ assert.deepEqual([page.total,page.offset,page.next_offset,page.jobs.length,page.jobs[0].job_id],[4,2,null,2,batch[2]],'a batch\'s jobs page oldest first');
+ assert.equal(page.jobs[0].scope.kind,'user');
+ assert.equal((await f.get('jobs',{batch_id:body.batches[0].batch_id,limit:25},)).body.jobs.every(j=>j.job_id!==fj),true);
+ assert.equal((await f.get('jobs',{batch_id:body.batches[0].batch_id})).body.total,4);
+ const r=f.store.consoleService.apply(f.a.auth,'jobs.cancel_batch',{batch_id:body.batches[0].batch_id});
+ assert.equal(r.cancelled,3);
+ assert.deepEqual(batch.map(id=>db.prepare('SELECT state FROM memory_jobs WHERE job_id=?').get(id).state),['succeeded','cancelled','cancelled','cancelled']);
+ assert.equal(db.prepare('SELECT state FROM memory_jobs WHERE job_id=?').get(old).state,'pending');
+ assert.equal(db.prepare('SELECT state FROM memory_jobs WHERE job_id=?').get(fj).state,'pending','another account\'s job in the same minute is untouched');
+ assert.throws(()=>f.store.consoleService.apply(f.other.auth,'jobs.cancel_batch',{batch_id:'t:summary:1'}),e=>e.errorCode==='JOB_NOT_FOUND');
+});

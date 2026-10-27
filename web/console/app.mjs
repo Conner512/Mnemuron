@@ -1,11 +1,12 @@
 import {mountAuditDates,auditDateRange} from './audit.mjs';
 // Console controller: account-bound requests, routing and the detail pane.
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
-import {actionButton,actionPage,mountActions,mountFeatureReads,canAct,overviewStatus,mountOverview} from './actions.mjs';
+import {actionButton,actionPage,mountActions,mountFeatureReads,canAct,overviewStatus,mountOverview,configHistoryCard} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {SELECTION_LIMIT,overviewView,libraryView,summariesView,auditView,memoryDetailView,versionChainView,revisionDifference,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels,projectContextView} from './visuals.mjs';
+import {projectProfileView,SELECTION_LIMIT,overviewView,libraryView,summariesView,auditView,memoryDetailView,versionChainView,revisionDifference,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels,projectContextView} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
+import {mountAgents} from './agents.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
@@ -13,7 +14,7 @@ const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
 let capabilities={enabled:false,writable:false},actions,connections,featureReads,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
-let detailMeta=null,query='',searchMode='hybrid',kind='',concept='',status='active',topic='',origin='',offset=0;
+let detailMeta=null,query='',searchMode='hybrid',kind='',concept='',status='active',topic='',origin='',review='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
 // selected maps memory_id → the text its list row already showed (kept for confirmations across pages).
 let selected=new Map(),selectAll=false,facets=null;
@@ -23,13 +24,15 @@ let projectOffset=0,projectArchived='false',taskOffset=0,contextGeneration=0;con
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
 
-function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=['system','memory','connections','security'].includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||capabilities.default_retrieval_mode||'hybrid';kind=p.get('kind')||'';concept=p.get('concept')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
-function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!==(capabilities.default_retrieval_mode||'hybrid'))p.set('mode',searchMode);if(kind)p.set('kind',kind);if(concept)p.set('concept',concept);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
+// Audit tabs: the four event groups, and configuration changes (web and CLI edits, read from the config view).
+const AUDIT_TABS=['system','memory','connections','security','config'];
+function readLocation(){const p=new URLSearchParams(location.search);if(page==='audit'){auditGroup=AUDIT_TABS.includes(p.get('group'))?p.get('group'):p.get('source')==='identity'?'security':'memory';auditCursor=p.get('cursor')||'';auditFilters=Object.fromEntries(['action','outcome','from','to'].filter(k=>p.has(k)).map(k=>[k,p.get(k)]));}query=p.get('query')||'';searchMode=p.get('mode')||capabilities.default_retrieval_mode||'hybrid';kind=p.get('kind')||'';concept=p.get('concept')||'';status=p.get('status')||'active';topic=p.get('topic')||'';origin=p.get('origin')||'';review=p.get('review')==='stale'?'stale':'';const n=Number(p.get('offset')||0);offset=Number.isSafeInteger(n)&&n>=0?n:0;}
+function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!==(capabilities.default_retrieval_mode||'hybrid'))p.set('mode',searchMode);if(kind)p.set('kind',kind);if(concept)p.set('concept',concept);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(review)p.set('review',review);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
 readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
  actions?.clear();connections?.clear();featureReads?.clear();state.clear();requestSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
- currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';kind='';concept='';status='active';topic='';origin='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
+ currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';kind='';concept='';status='active';topic='';origin='';review='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
 }
@@ -68,10 +71,9 @@ const policy=(note,items)=>`<section class="card"><div class="policy-box"><span 
 
 function heading() {
  if(page==='overview')return pageHeading(t,{title:'overview',note:'heroNote'});
- const pageActions={memories:['memory.create','memory.correct'],summaries:['jobs.schedule'],jobs:['jobs.schedule','jobs.cancel'],models:['models.save'],connections:['oauth.revoke','connections.create'],security:['security.password','security.sessions.revoke_others'],storage:['storage.export','storage.import']};
- const interactive=(pageActions[page]||[]).some(a=>canAct(capabilities,a));
- // New destinations are built from the feature map; their badge says how much of the page is live.
- const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):`<span class="tag">${l(interactive?'interactive':'readOnly')}</span>`;
+ // Prototype destinations (built from the feature map) say how much of the page is live; other pages carry no badge:
+ // whether a button can be used shows on the button itself.
+ const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):'';
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
  return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
 }
@@ -81,14 +83,14 @@ function render(data) {
  contextGeneration++;contextRequests.clear();
  let html='';
  if(page==='overview')html=overviewStatus(data)+overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{},taxonomy:capabilities.taxonomy?.categories||[],descriptions:capabilities.category_descriptions||{}});
- else if(page==='memories')html=libraryView(t,{data,query,searchMode,kind,concept,status,topic,origin,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
+ else if(page==='memories')html=libraryView(t,{data,query,searchMode,kind,concept,status,topic,origin,review,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data),labels:capabilities.category_labels||{}});
+ else if(page==='audit'&&auditGroup==='config')html=auditView(t,{group:'config'})+configHistoryCard(data);
  else if(page==='audit')html=auditView(t,{data,source:'grouped',group:auditGroup,pagination:pagination(data),filters:auditFilters});
  else if(prototypePages.includes(page))html=prototypeView(t,page,{data,caps:capabilities});
  else if(page==='models')html=policy('modelsNote',['configure']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
  if(!prototypePages.includes(page))html+=completedFeaturePanels(t,page,data,capabilities);
- if(!prototypePages.includes(page))html+=roadmapCard(t,page);
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
  // The overview map and live stream draw after the markup exists; both stop once the page is replaced.
@@ -110,7 +112,7 @@ const resetSelection=()=>{selected=new Map();selectAll=false;};
 /** What the organize dialog acts on: the explicit selection, or the current filter (lexical, active only). */
 function librarySelection(){
  if(!selectAll)return {memory_ids:[...selected.keys()],snippets:Object.fromEntries(selected)};
- const filter={...(query?{query}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})};
+ const filter={...(query?{query}:{}),...(topic?{topic}:{}),...(origin?{origin}:{}),...(review?{review}:{})};
  return Object.keys(filter).length?filter:{all:true};
 }
 async function load() {
@@ -141,10 +143,10 @@ async function load() {
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {
-   const params=page==='connections'||page==='agents'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(kind?{kind}:{}),...(concept?{concept}:{}),...(status!=='all'?{status}:{}),...(topic?{topic}:{}),...(origin?{origin}:{})}:['jobs','summaries','audit'].includes(page)?{...(page==='audit'?{...auditParams(),...(auditCursor?{cursor:auditCursor}:{})}:{offset}),limit:25}:{};
+   const params=page==='connections'?connections.query():page==='memories'?{offset,limit:25,...(query?{query,mode:searchMode}:{}),...(kind?{kind}:{}),...(concept?{concept}:{}),...(status!=='all'?{status}:{}),...(topic?{topic}:{}),...(origin?{origin}:{}),...(review?{review}:{})}:['jobs','summaries','audit'].includes(page)?{...(page==='audit'?{...auditParams(),...(auditCursor?{cursor:auditCursor}:{})}:{offset}),...(page==='jobs'?{group:'batch'}:{}),limit:25}:{};
    // Library facets are a separate read: if it fails only the sidebar degrades, never the list.
    const facetRead=page==='memories'?api('memories',{part:'facets'}).catch(e=>{if(e.message==='STALE_ACCOUNT'||e.name==='AbortError')throw e;return null;}):null;
-   const [data,features,facetData]=await Promise.all([api({usage:'model-usage',agents:'connections'}[page]||page,params),extras(),facetRead]);data.features=features;
+   const [data,features,facetData]=await Promise.all([page==='audit'&&auditGroup==='config'?api('config',{limit:100}):api(page,params),extras(),facetRead]);data.features=features;
    if(page==='memories')facets=facetData;
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
@@ -190,6 +192,24 @@ async function openMemory(params,first=false,back=false) {
 }
 // Version chain: the correction lineage of the open memory (each correction is a replacement record). A version's
 // change is read on demand (the two records' text) and shown inline; Compare versions keeps the side-by-side view.
+// Config sync (server config/center.mjs): on settings pages, a change made elsewhere (the CLI or another window) is
+// noticed within CONFIG_POLL_MS and the page refreshes with a note saying where it came from. Never while a dialog is
+// open, so an edit in progress is not replaced. Deployments without owner settings stop polling after the first refusal.
+const CONFIG_POLL_MS=15000,CONFIG_PAGES=['connections','jobs','models','storage'];
+let configSeen=null,configLatest=null,configWatch=true;
+async function watchConfig(){
+ if(!configWatch||!state.account||!CONFIG_PAGES.includes(page)||document.hidden||document.querySelector('dialog[open]'))return;
+ let c;try{c=await api('config',{limit:1});}catch(e){if(e.name!=='AbortError'&&e.message!=='STALE_ACCOUNT')configWatch=false;return;}
+ const changed=configSeen&&c.fingerprint!==configSeen,h=c.latest?.[0],fresh=h&&h.at!==configLatest;configSeen=c.fingerprint;configLatest=h?.at??null;
+ if(!changed)return;
+ // Name the change only when a new one was logged; otherwise (for example an agent key issued by a script) say so plainly.
+ const who=h?.source==='cli'?`命令行${h.actor?`（${h.actor.replace(/^cli:/,'')}）`:''}`:'另一个窗口';
+ const note=fresh?`配置已在${who}修改：${h.key}，页面已刷新。`:'配置已在其他地方更新，页面已刷新。';
+ await load();
+ const banner=document.createElement('p');banner.className='config-banner';banner.setAttribute('role','status');banner.textContent=note;
+ document.getElementById('console-root')?.prepend(banner);setTimeout(()=>banner.remove(),10000);
+}
+setInterval(()=>void watchConfig(),CONFIG_POLL_MS);
 async function loadVersionChain(memory_id,sequence){
  const slot=()=>sequence===detailSequence?detail.querySelector(`[data-version-chain="${CSS.escape(memory_id)}"]`):null;
  try{const d=await api('memory-versions',{memory_id,chain:'1'});const el=slot();if(!el)return;el.innerHTML=versionChainView(t,d.chain||[],{truncated:d.truncated,current:memory_id});syncAppearance();}
@@ -227,7 +247,8 @@ async function loadContext(button){
  const token={generation:contextGeneration};contextRequests.set(project,token);
  const current=()=>contextRequests.get(project)===token&&token.generation===contextGeneration&&!!state.account&&region.isConnected&&!region.hidden;
  region.hidden=false;region.setAttribute('aria-busy','true');region.innerHTML=l('loading','p');
- try{const data=await api('project-context',{project_id:project});if(!current())return;region.innerHTML=projectContextView(t,data);}
+ // The profile is optional: a failure there still shows the context.
+ try{const [data,profile]=await Promise.all([api('project-context',{project_id:project}),api('project-profile',{project_id:project}).catch(e=>{if(e.name==='AbortError')throw e;return null;})]);if(!current())return;region.innerHTML=projectProfileView(t,profile)+projectContextView(t,data);}
  catch(e){if(!current()||e.name==='AbortError')return;region.innerHTML=`<div role="alert">${l('contextFailed','p')}<button type="button" data-project-context-retry="${esc(project)}">${l('retry')}</button></div>`;}
  finally{if(current()){region.removeAttribute('aria-busy');syncAppearance();}}
 }
@@ -255,15 +276,16 @@ document.addEventListener('click',event=>{
  if(event.target.closest('[data-detail-back]')&&detailStack.length>1){detailStack.pop();const prior=detailStack.at(-1);void (prior.kind==='summary'?openSummary:openMemory)(prior.params,false,true);return;}
  if(event.target.closest('[data-detail-next]')&&detailData?.next_request)void (detailKind==='summary'?openSummary:openMemory)(detailData.next_request);
  if(event.target.closest('[data-source-next]')&&detailData?.next_source_request)void openMemory(detailData.next_source_request);
- const stream=event.target.closest('[data-audit-group]');if(stream&&page==='audit'&&['system','memory','connections','security'].includes(stream.dataset.auditGroup)){auditPages[auditGroup]={cursor:auditCursor,filters:{...auditFilters},history:auditPages[auditGroup]?.history||[]};auditGroup=stream.dataset.auditGroup;auditCursor=auditPages[auditGroup]?.cursor||'';auditFilters={...auditPages[auditGroup]?.filters};featureReads.invalidateAudit();auditDates?.close();closePane();saveLocation();void load();return;}
+ const stream=event.target.closest('[data-audit-group]');if(stream&&page==='audit'&&AUDIT_TABS.includes(stream.dataset.auditGroup)){auditPages[auditGroup]={cursor:auditCursor,filters:{...auditFilters},history:auditPages[auditGroup]?.history||[]};auditGroup=stream.dataset.auditGroup;auditCursor=auditPages[auditGroup]?.cursor||'';auditFilters={...auditPages[auditGroup]?.filters};featureReads.invalidateAudit();auditDates?.close();closePane();saveLocation();void load();return;}
  if(page==='audit'&&event.target.closest('[data-audit-next]')&&currentData?.next_cursor){const h=auditPages[auditGroup]?.history||[];h.push(auditCursor);auditPages[auditGroup]={...auditPages[auditGroup],history:h};auditCursor=currentData.next_cursor;saveLocation();void load();return;}
  if(page==='audit'&&event.target.closest('[data-audit-prev]')){auditCursor=auditPages[auditGroup]?.history?.pop()||'';saveLocation();void load();return;}
  const pager=event.target.closest('[data-offset]');if(pager){offset=Number(pager.dataset.offset);if(selectAll)resetSelection();saveLocation();void load();}
- if(event.target.closest('[data-reset-filters]')){query='';kind='';concept='';status='active';topic='';origin='';searchMode=capabilities.default_retrieval_mode||'hybrid';offset=0;resetSelection();saveLocation();void load();}
+ if(event.target.closest('[data-review-toggle]')){review=review?'':'stale';if(review)status='active';offset=0;resetSelection();saveLocation();void load();return;}
+ if(event.target.closest('[data-reset-filters]')){query='';kind='';concept='';status='active';topic='';origin='';review='';searchMode=capabilities.default_retrieval_mode||'hybrid';offset=0;resetSelection();saveLocation();void load();}
  const facet=event.target.closest('[data-facet]');if(facet&&page==='memories'){const value=facet.dataset.value||'';
    if(facet.dataset.facet==='kind')kind=kind===value&&value?'':value;else if(facet.dataset.facet==='concept')concept=concept===value?'':value;else if(facet.dataset.facet==='topic')topic=topic===value?'':value;else if(facet.dataset.facet==='origin')origin=origin===value?'':value;
    offset=0;resetSelection();saveLocation();void load();return;}
- const clearFacet=event.target.closest('[data-clear-facet]');if(clearFacet){if(clearFacet.dataset.clearFacet==='topic')topic='';else if(clearFacet.dataset.clearFacet==='concept')concept='';else origin='';offset=0;resetSelection();saveLocation();void load();return;}
+ const clearFacet=event.target.closest('[data-clear-facet]');if(clearFacet){if(clearFacet.dataset.clearFacet==='topic')topic='';else if(clearFacet.dataset.clearFacet==='concept')concept='';else if(clearFacet.dataset.clearFacet==='review')review='';else origin='';offset=0;resetSelection();saveLocation();void load();return;}
  if(event.target.closest('[data-select-all]')){selectAll=true;selected=new Map();render(currentData);return;}
  if(event.target.closest('[data-retry]'))void load();
 });
@@ -313,6 +335,7 @@ featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
   reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
+mountAgents({mutate,reload:load});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}

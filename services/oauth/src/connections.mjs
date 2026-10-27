@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import {BoundaryError,randomSecret,secretHash,seconds,requireConfig} from '../../../shared/oauth-common.mjs';
 
 const fail=(code='INVALID_CONNECTION_INPUT',status=400)=>{throw new BoundaryError(status,code);};
@@ -37,23 +37,33 @@ export function initializeConnections(db){db.exec(`
  CREATE TABLE IF NOT EXISTS identity_connection_activity (
  event_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,connection_id TEXT NOT NULL,action TEXT NOT NULL,outcome TEXT NOT NULL,created INTEGER NOT NULL);
  CREATE INDEX IF NOT EXISTS identity_connection_activity_parent ON identity_connection_activity(account_id,connection_id,created);
+ CREATE TABLE IF NOT EXISTS identity_config_changes (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,account_id TEXT NOT NULL,key TEXT NOT NULL,old_json TEXT,new_json TEXT,source TEXT NOT NULL,actor TEXT,at TEXT NOT NULL);
+ CREATE INDEX IF NOT EXISTS identity_config_changes_owner ON identity_config_changes(account_id,id);
  CREATE TABLE IF NOT EXISTS identity_connection_credentials (
  credential_id TEXT PRIMARY KEY,account_id TEXT NOT NULL,connection_id TEXT NOT NULL,version INTEGER NOT NULL,security_version INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0);
-`);}
+`);
+ // Which agent a connection was made for (console setup per agent). Added in place; older rows read from their kind.
+ if(!db.prepare('PRAGMA table_info(identity_connections)').all().some(c=>c.name==='agent'))db.exec('ALTER TABLE identity_connections ADD COLUMN agent TEXT');}
+// Agents the console sets up; a connection names one of them. ChatGPT uses its OAuth connector, the others an MCP token.
+export const CONNECTION_AGENTS=Object.freeze({chatgpt_oauth:['chatgpt'],generic_mcp:['claude-code','codex','cursor','muse','other']});
+const agentOf=r=>r.agent||(r.kind==='chatgpt_oauth'?'chatgpt':'other');
 
 export class ConnectionRegistry {
  constructor(ids,config={}){this.ids=ids;this.db=ids.db;this.config=config;initializeConnections(this.db);ids.store.connections=this;}
  enabled(){return this.config.identity?.connection_management?.enabled===true;}
  policy(){const p=this.config.identity?.connection_management;validateConnectionPolicy(p);if(!p?.enabled)fail('CONNECTION_POLICY_REQUIRED',403);return p;}
  capabilities(){return {enabled:this.enabled(),actions:this.enabled()?connectionActions:[],policy:this.enabled()?this.policy():null,
-   allow_submitted_revision_grant:this.config.cloud_memory?.allow_submitted_revision_grant===true,write_enabled:this.config.cloud_memory?.enabled===true,other_agent:'not_implemented',physical_device_verified:false};}
+   allow_submitted_revision_grant:this.config.cloud_memory?.allow_submitted_revision_grant===true,write_enabled:this.config.cloud_memory?.enabled===true,other_agent:'not_implemented',physical_device_verified:false,
+   // Addresses the console fills into each agent's setup commands.
+   endpoints:{server:this.config.issuer,mcp:this.config.resource,mcp_generic:this.config.resource+'/generic'},agents:CONNECTION_AGENTS};}
  owner(account){const a=this.ids.byId(account);if(!a||!this.ids.eligible(a.subject))fail('SESSION_REQUIRED',401);return a;}
  row(account,id){const r=this.db.prepare('SELECT * FROM identity_connections WHERE account_id=? AND connection_id=?').get(account,id);if(!r)fail('CONNECTION_NOT_FOUND',404);return r;}
  current(r){const a=r&&this.ids.byId(r.account_id);return !!a&&this.ids.eligible(a.subject)&&r.state==='ready'&&r.binding_version===r.version&&r.binding_account_version===a.security_version&&!!r.binding_json;}
  activeGrants(r){if(r.kind!=='chatgpt_oauth'||!this.current(r))return [];
    return this.db.prepare("SELECT g.id grant_id,g.expires FROM oauth_records g WHERE g.model='Grant' AND g.expires>? AND json_extract(g.payload,'$.accountId')=? AND json_extract(g.payload,'$.clientId')=? AND EXISTS(SELECT 1 FROM json_each(g.payload,'$.resources') s WHERE s.key=? AND instr(' '||s.value||' ',' memory:read ')>0) ORDER BY g.expires DESC LIMIT 50").all(seconds(),this.ids.byId(r.account_id).subject,r.client_id,this.config.resource);}
  public(r){const expired=r.kind==='generic_mcp'&&!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=?').get(r.connection_id,r.version)&&!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL AND expires>?').get(r.connection_id,r.version,seconds());
-   return {connection_id:r.connection_id,kind:r.kind,label:r.label,description:r.description,profile:r.profile,
+   return {connection_id:r.connection_id,kind:r.kind,agent:agentOf(r),label:r.label,description:r.description,profile:r.profile,
      configuration_state:r.state==='ready'&&!this.current(r)?'draft':r.state,provisioning:r.state==='ready'&&!this.current(r),health:expired?'unknown':r.health,expired,
      client_id:r.kind==='chatgpt_oauth'?r.client_id:null,...(r.kind==='chatgpt_oauth'?{active_grant_count:this.activeGrants(r).length}:{}),redirect_uri:r.callback,version:r.version,created_at:r.created,updated_at:r.updated,
      has_secret:r.state!=='revoked'&&(r.kind==='chatgpt_oauth'?!!r.secret_cipher:!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL').get(r.connection_id,r.version)),
@@ -134,18 +144,29 @@ export class ConnectionRegistry {
    return {...out,connection:this.public(current),replayed:true,...(row.secret_cipher&&row.secret_expires>seconds()&&out.connection.version===current.version&&!['revoked','disabled'].includes(current.state)?{secret:this.ids.unseal(row.secret_cipher,account,`connection-result:${operation}:${session.digest}`),secret_expires_at:row.secret_expires}:{secret_expired:true})};}
  async execute(account,session,action,input,operation){
    const policy=this.policy();this.currentSession(account,session);if(!connectionActions.includes(action)||typeof operation!=='string'||!/^[A-Za-z0-9_.:-]{1,128}$/.test(operation))fail();
-   const allowed=action==='connections.create'?['kind','label','description','profile','allow_submitted_revision_grant','ttl_seconds','redirect_uri']:action==='connections.update'?['connection_id','label','description','profile','redirect_uri','allow_submitted_revision_grant','ttl_seconds']:['connection_id','ttl_seconds'];
+   const allowed=action==='connections.create'?['kind','agent','label','description','profile','allow_submitted_revision_grant','ttl_seconds','redirect_uri']:action==='connections.update'?['connection_id','label','description','profile','redirect_uri','allow_submitted_revision_grant','ttl_seconds']:['connection_id','ttl_seconds'];
    fields(input,[...allowed,'current_password','otp']);const {current_password,otp,...p}=input;
    const prior=this.previous(account,session,action,p,operation);if(prior)return prior;
    if(p.connection_id)this.row(account,p.connection_id);
    await this.ids.console.proof(account,{current_password,otp});this.currentSession(account,session);
    return this.ids.store.transaction(()=>{
      const a=this.currentSession(account,session),prior=this.previous(account,session,action,p,operation);if(prior)return prior;
+     const {r,secret}=this.change(account,a,action,p,policy);
+     const out={status:r.state,connection:this.public(this.row(account,r.connection_id)),operation_id:operation,secret_kind:secret?(r.kind==='generic_mcp'?'personal_token':'oauth_client_secret'):null,
+       expires_at:r.kind==='generic_mcp'?this.db.prepare('SELECT MAX(expires) exp FROM identity_connection_tokens WHERE account_id=? AND connection_id=? AND version=?').get(account,r.connection_id,r.version).exp:null};
+     this.db.prepare('INSERT INTO identity_connection_operations VALUES(?,?,?,?,?,?,?,?,?)').run(account,operation,action,this.ids.console.requestHash(account,operation,action,p),session.digest,JSON.stringify(out),secret?this.ids.seal(secret,account,`connection-result:${operation}:${session.digest}`):null,seconds()+policy.secret_receipt_ttl_seconds,seconds());
+     this.activity(r,action);return {...out,...(secret?{secret,secret_expires_at:seconds()+policy.secret_receipt_ttl_seconds}:{})};
+   });
+ }
+ /** The change itself, shared by the console (execute: session, factors, operation receipt) and the local CLI
+  * (operatorChange). Runs inside the caller's transaction; a is the current account. */
+ change(account,a,action,p,policy){
      let r,secret,metadataOnly=false;
      if(action==='connections.create'){
        if(!['chatgpt_oauth','generic_mcp'].includes(p.kind)||!text(p.label,80)||p.description!==undefined&&(!text(p.description,400)&&p.description!==''))fail();
+       if(p.agent!==undefined&&!CONNECTION_AGENTS[p.kind].includes(p.agent))fail('INVALID_AGENT');
        if(this.db.prepare("SELECT COUNT(*) n FROM identity_connections WHERE account_id=? AND state<>'revoked'").get(account).n>=policy.max_connections)fail('CONNECTION_QUOTA',409);
-       const id=secretHash(randomSecret());r={connection_id:id,account_id:account,kind:p.kind,label:p.label.trim(),description:p.description||'',profile:p.profile,state:p.kind==='generic_mcp'||p.redirect_uri!==undefined?'ready':'draft',health:'never_used',client_id:`mnmc_${randomSecret()}`,secret_cipher:null,
+       const id=secretHash(randomSecret());r={connection_id:id,account_id:account,kind:p.kind,agent:p.agent??(p.kind==='chatgpt_oauth'?'chatgpt':'other'),label:p.label.trim(),description:p.description||'',profile:p.profile,state:p.kind==='generic_mcp'||p.redirect_uri!==undefined?'ready':'draft',health:'never_used',client_id:`mnmc_${randomSecret()}`,secret_cipher:null,
          callback:p.redirect_uri===undefined?null:p.kind==='chatgpt_oauth'?exactChatgptCallback(p.redirect_uri,{isolated:this.config.isolated}):fail(),allow_submitted_revision_grant:p.allow_submitted_revision_grant===true?1:0,version:1,created:seconds(),updated:seconds()};
        if(r.kind==='chatgpt_oauth'){secret=randomSecret();r.secret_cipher=this.ids.seal(secret,account,`connection-client:${id}`);}
        this.validateProfile(r,p);
@@ -176,12 +197,36 @@ export class ConnectionRegistry {
        }
        this.queue(r);
      }
-     const out={status:r.state,connection:this.public(this.row(account,r.connection_id)),operation_id:operation,secret_kind:secret?(r.kind==='generic_mcp'?'personal_token':'oauth_client_secret'):null,
-       expires_at:r.kind==='generic_mcp'?this.db.prepare('SELECT MAX(expires) exp FROM identity_connection_tokens WHERE account_id=? AND connection_id=? AND version=?').get(account,r.connection_id,r.version).exp:null};
-     this.db.prepare('INSERT INTO identity_connection_operations VALUES(?,?,?,?,?,?,?,?,?)').run(account,operation,action,this.ids.console.requestHash(account,operation,action,p),session.digest,JSON.stringify(out),secret?this.ids.seal(secret,account,`connection-result:${operation}:${session.digest}`):null,seconds()+policy.secret_receipt_ttl_seconds,seconds());
-     this.activity(r,action);return {...out,...(secret?{secret,secret_expires_at:seconds()+policy.secret_receipt_ttl_seconds}:{})};
-   });
+     return {r,secret};
  }
+ /** Local CLI change (bin/connections-config.mjs, run on the server as the OAuth service user): the same change as
+  * the console without a browser session or factors; a new secret is returned once to the operator. */
+ operatorChange(account,action,input,actor){
+   const policy=this.policy();if(!connectionActions.includes(action))fail();
+   const allowed=action==='connections.create'?['kind','agent','label','description','profile','allow_submitted_revision_grant','ttl_seconds','redirect_uri']:action==='connections.update'?['connection_id','label','description','profile','redirect_uri','allow_submitted_revision_grant','ttl_seconds']:['connection_id','ttl_seconds'];
+   fields(input,allowed);if(input.connection_id)this.row(account,input.connection_id);
+   return this.track(account,'cli',actor,()=>this.ids.store.transaction(()=>{
+     const {r,secret}=this.change(account,this.owner(account),action,input,policy);this.activity(r,action);
+     return {status:r.state,connection:this.public(this.row(account,r.connection_id)),...(secret?{secret_kind:r.kind==='generic_mcp'?'personal_token':'oauth_client_secret',secret}:{})};
+   }));
+ }
+ /** Configuration view of the connections (shared with Core's config center through the console BFF): one key per
+  * connection, by the first 12 characters of its ID. */
+ snapshot(account){const out={};
+   for(const r of this.db.prepare("SELECT connection_id,kind,agent,label,profile,state,version FROM identity_connections WHERE account_id=? AND state<>'revoked' ORDER BY created,connection_id").all(account))
+     out[`connections.${r.connection_id.slice(0,12)}`]={label:r.label,agent:agentOf(r),profile:r.profile,state:r.state,version:r.version};
+   return out;}
+ track(account,source,actor,change){const before=this.snapshot(account),finish=result=>{this.diff(account,before,this.snapshot(account),source,actor);return result;};
+   const result=change();return result&&typeof result.then==='function'?result.then(finish):finish(result);}
+ diff(account,before,after,source,actor){const at=new Date().toISOString(),insert=this.db.prepare('INSERT INTO identity_config_changes(account_id,key,old_json,new_json,source,actor,at) VALUES(?,?,?,?,?,?,?)');
+   for(const key of new Set([...Object.keys(before),...Object.keys(after)]))if(JSON.stringify(before[key])!==JSON.stringify(after[key]))insert.run(account,key,JSON.stringify(before[key]??null),JSON.stringify(after[key]??null),source,actor||null,at);}
+ history(account,limit=30){return this.db.prepare('SELECT id,key,old_json,new_json,source,actor,at FROM identity_config_changes WHERE account_id=? ORDER BY id DESC LIMIT ?').all(account,Math.min(Math.max(limit,1),200))
+   .map(({id,old_json,new_json,...r})=>({id:`c${id}`,...r,old:JSON.parse(old_json),new:JSON.parse(new_json)}));}
+ configState(account,limit){return {fingerprint:createHash('sha256').update(JSON.stringify(this.snapshot(account))).digest('hex').slice(0,16),snapshot:this.snapshot(account),history:this.history(account,limit)};}
+ /** A connection by its full ID or a unique prefix of at least 6 characters (as the snapshot shows it). */
+ resolve(account,prefix){if(typeof prefix!=='string'||prefix.length<6||!/^[A-Za-z0-9_-]+$/.test(prefix))fail('CONNECTION_NOT_FOUND',404);
+   const rows=this.db.prepare("SELECT connection_id FROM identity_connections WHERE account_id=? AND substr(connection_id,1,?)=?").all(account,prefix.length,prefix);
+   if(rows.length!==1)fail(rows.length?'CONNECTION_AMBIGUOUS':'CONNECTION_NOT_FOUND',rows.length?409:404);return rows[0].connection_id;}
  validateProfile(r,p){if(!['readonly','memory_readwrite'].includes(r.profile)||p.allow_submitted_revision_grant!==undefined&&typeof p.allow_submitted_revision_grant!=='boolean')fail();
    if(r.profile==='memory_readwrite'&&this.config.cloud_memory?.enabled!==true)fail('CLOUD_WRITE_NOT_ENABLED',403);
    if(r.allow_submitted_revision_grant&&(r.profile!=='memory_readwrite'||!this.config.cloud_memory?.allow_submitted_revision_grant))fail('CLOUD_READ_POLICY_DENIED',403);}

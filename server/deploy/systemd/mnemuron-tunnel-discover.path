@@ -1,0 +1,11 @@
+# A tunnel token changed from a shell is picked up right away (main tunnel and added tunnels).
+[Unit]
+Description=Watch the cloudflared tunnel credential
+
+[Path]
+PathChanged=/etc/cloudflared-mnemuron/tunnel-token
+PathChanged=/etc/cloudflared-mnemuron/tunnels
+Unit=mnemuron-tunnel-discover.service
+
+[Install]
+WantedBy=multi-user.target

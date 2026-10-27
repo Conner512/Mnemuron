@@ -88,3 +88,16 @@ test('a semantic index rebuild may cover every memory; other batches stay small;
 test('a startable preview lists its manifest by title in the owner view; an expired one does not',async t=>{const f=setup(t);f.save('Synthetic manifest alpha');f.save('Synthetic manifest beta');await enable(f);const p=await preview(f);
   const run=f.owner.view(f.user).runs.find(r=>r.run_id===p.run_id);assert.deepEqual(run.items.map(i=>i.title),['Synthetic manifest alpha','Synthetic manifest beta']);assert.equal(run.expired,false);
   f.s.db.prepare('UPDATE owner_processing_runs SET expires_at=0 WHERE run_id=?').run(p.run_id);const old=f.owner.view(f.user).runs.find(r=>r.run_id===p.run_id);assert.equal(old.expired,true);assert.equal(old.items,undefined);});
+test('RUN-HISTORY: only finished runs can be deleted, one by one or all at once; other owners and running batches are untouched',async t=>{
+ const f=setup(t);f.save('Synthetic run history one');f.save('Synthetic run history two');await enable(f);
+ const live=await preview(f),old=await preview(f),done=await preview(f),other=await preview(f);
+ const runs=()=>f.s.db.prepare('SELECT run_id,state FROM owner_processing_runs ORDER BY run_id').all().map(r=>r.run_id).sort();
+ await assert.rejects(f.act('processing.delete',{run_id:live.run_id}),e=>e.errorCode==='RUN_NOT_FINISHED','a preview still valid is not history');
+ f.s.memoryTransaction(()=>{f.s.db.prepare('UPDATE owner_processing_runs SET expires_at=0 WHERE run_id=?').run(old.run_id);f.s.db.prepare("UPDATE owner_processing_runs SET state='completed' WHERE run_id=?").run(done.run_id);
+  f.s.db.prepare("UPDATE owner_processing_runs SET state='completed',user_id='synthetic-other-owner' WHERE run_id=?").run(other.run_id);});
+ await assert.rejects(f.act('processing.delete',{run_id:other.run_id}),e=>e.errorCode==='RUN_NOT_FOUND');
+ assert.deepEqual((({status,run_id})=>({status,run_id}))(await f.act('processing.delete',{run_id:done.run_id})),{status:'deleted',run_id:done.run_id});
+ assert.equal(f.s.db.prepare('SELECT COUNT(*) n FROM owner_processing_items WHERE run_id=?').get(done.run_id).n,0,'its items go with it');
+ assert.equal((await f.act('processing.clear',{})).deleted,1);
+ assert.deepEqual(runs(),[live.run_id,other.run_id].sort());
+});

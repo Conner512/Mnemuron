@@ -1,0 +1,10 @@
+# Runs the host file applier whenever the service writes a new request (console or mnemuron-config).
+[Unit]
+Description=Mnemuron host record apply requests
+
+[Path]
+PathChanged=/var/lib/mnemuron/hosts/apply.request
+Unit=mnemuron-hosts-apply.service
+
+[Install]
+WantedBy=multi-user.target

@@ -10,7 +10,7 @@ import {Browser} from './fixture.mjs';
 import {consoleFixture,pendingAccount} from './helpers/identity-fixture.mjs';
 import {provisionIdentities} from '../src/provisioning.mjs';
 import {memoryFixture} from '../../../server/test/helpers/core-memory-fixture.mjs';
-import {pages,removedPages,movedPages,renderPage,routeTitle} from '../../../web/console/render.mjs';
+import {pages,removedPages,movedPages,renderPage,routeTitle,slugOf} from '../../../web/console/render.mjs';
 import {featureMap} from '../../../web/console/visuals.mjs';
 
 globalThis.document??={body:{dataset:{}},documentElement:{dataset:{}},querySelectorAll:()=>[],addEventListener:()=>{}};
@@ -39,7 +39,7 @@ test('RMV-01: removed pages are absent from navigation, routes, feature map and 
   const inventory=connectionsView({system_chatgpt:{configured:true}},{read_policy:policy});
   assert.match(inventory,new RegExp(`data-i18n="${scope}"[\\s\\S]*data-i18n="${note}"[\\s\\S]*data-i18n="readPolicyOperator"`),scope);
  }
- for(const [from,to] of Object.entries(movedPages)){assert.ok(!pages.includes(from),`${from} moved`);assert.ok(pages.includes(to),`${from} → ${to}`);}
+ for(const [from,to] of Object.entries(movedPages)){assert.ok(!pages.map(slugOf).includes(from),`${from} moved`);assert.ok(pages.map(slugOf).includes(to),`${from} → ${to}`);}
 });
 
 test('RMV-02: old URLs redirect to the overview before and after sign-in, and serve no page content',async t=>{
