@@ -22,26 +22,38 @@ createInterface({input:fixture.stdout}).on('line',line=>{if(!line.startsWith('{'
 const read=async()=>{let timer;try{return await Promise.race([queue.length?Promise.resolve(queue.shift()):new Promise(r=>waiters.push(r)),new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Synthetic fixture timeout')),30000);})]);}finally{clearTimeout(timer);}};
 const command=async(command,extra={})=>{fixture.stdin.write(JSON.stringify({command,...extra})+'\n');const r=await read();assert.ok(!r.fixture_error,r.fixture_error);return r;};
 const checks=[];const check=(name,condition=true)=>{assert.ok(condition,name);checks.push(name);console.log('PASS '+name);};
+const requestTimes=[],httpStatuses={},rateLimited=[];let originRequests=0;
+const traffic=()=>({requests:originRequests,recent_requests:requestTimes.filter(t=>t>Date.now()-62000).length,statuses:httpStatuses,rate_limited:rateLimited});
 let browser;
 try{
  const cfg=await read();assert.equal(cfg.fixture,true);
  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});
+ const origin=new URL(cfg.url).origin;
+ const newContext=async options=>{const c=await browser.newContext(options);
+  c.on('request',r=>{if(new URL(r.url()).origin===origin){originRequests++;requestTimes.push(Date.now());}});
+  c.on('response',r=>{const url=new URL(r.url());if(url.origin!==origin)return;httpStatuses[r.status()]=(httpStatuses[r.status()]||0)+1;
+   if(r.status()===429)rateLimited.push({route:url.pathname.startsWith('/console-api/')?url.pathname:'/other',status:429});});return c;};
+ // CI can execute this many-page suite inside one server rate window. Keep every context below the
+ // unchanged 1500/minute peer limit, leaving headroom for each flow's assets and background reads.
+ const pace=async()=>{for(;;){const cutoff=Date.now()-62000;while(requestTimes.length&&requestTimes[0]<=cutoff)requestTimes.shift();if(requestTimes.length<=1000)return;
+  const delay=Math.max(1,requestTimes[requestTimes.length-1000]+62000-Date.now());console.log(`PACE synthetic browser requests for ${delay}ms`);await new Promise(r=>setTimeout(r,delay));}};
+ const navigate=async(p,url)=>{await pace();return p.goto(url);};
  // Model an old browser/edge cache whose palette still requires the removed theme attribute.
- const cachedContext=await browser.newContext();let staleStyles=0;
+ const cachedContext=await newContext();let staleStyles=0;
  await cachedContext.route(url=>url.pathname==='/assets/styles.css'&&!url.search,route=>{
   staleStyles++;
   return route.fulfill({contentType:'text/css',body:'[data-theme="a"]{--bg:#F5F1E8;--text:#1C1B18;--line:#CFC6B3}body{background:var(--bg)}input{border:1px solid var(--line)}button{background:var(--text);color:var(--bg)}'});
  });
- const cachedPage=await cachedContext.newPage();await cachedPage.goto(cfg.url+'/login');await cachedPage.locator('[name=username]').waitFor();
+ const cachedPage=await cachedContext.newPage();await navigate(cachedPage,cfg.url+'/login');await cachedPage.locator('[name=username]').waitFor();
  const paint=await cachedPage.evaluate(()=>({bg:getComputedStyle(document.body).backgroundColor,border:getComputedStyle(document.querySelector('[name=username]')).borderTopStyle,button:getComputedStyle(document.querySelector('button[type=submit]')).backgroundColor}));
  check('Login bypasses an obsolete unversioned stylesheet cache',staleStyles===0&&paint.bg!=='rgba(0, 0, 0, 0)'&&paint.border==='solid'&&paint.button!=='rgba(0, 0, 0, 0)');
  await cachedPage.screenshot({path:path.join(evidence,'login-versioned-styles.png'),fullPage:true});await cachedContext.close();
- const context=await browser.newContext({viewport:{width:1440,height:1080},permissions:['clipboard-read','clipboard-write']});
+ const context=await newContext({viewport:{width:1440,height:1080},permissions:['clipboard-read','clipboard-write']});
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  const page=await context.newPage(),errors=[];let mutations=0;
  page.on('request',request=>{if(request.url().includes('/console-api/action'))mutations++;});
  page.on('pageerror',error=>errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error'&&/Content Security Policy|Refused/.test(msg.text()))errors.push(msg.text());});
- const goto=async name=>{await page.goto(cfg.url+'/app/'+name);await page.locator('#console-root h1').waitFor();await page.locator('.loading-card').waitFor({state:'detached'});};
+ const goto=async name=>{await navigate(page,cfg.url+'/app/'+name);await page.locator('#console-root h1').waitFor();await page.locator('.loading-card').waitFor({state:'detached'});};
  const pick=async(selector,value)=>{const native=page.locator(selector),index=await native.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const button=native.locator('..').locator('> .select-trigger');if(await button.count()){await button.click();await page.locator('#'+await button.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();}else await native.selectOption(value);assert.equal(await native.inputValue(),value);};
  const dialog=page.locator('#connection-dialog'),agentDialog=page.locator('.agent-dialog');
  const inventory=async()=>page.evaluate(async()=>{const r=await fetch('/console-api/connections');if(!r.ok)throw new Error('Synthetic inventory unavailable');return r.json();});
@@ -143,7 +155,7 @@ try{
   const authPage=await page.context().newPage(),verifier=randomBytes(32).toString('base64url');
   const scopes=writable.scopes_supported.filter(s=>writing||s!=='memory:write');
   const authUrl=setupData.guide.authorization_url+'?'+new URLSearchParams({client_id:setupData.connection.client_id,redirect_uri:setupData.connection.redirect_uri,response_type:'code',scope:scopes.join(' '),resource:setupData.guide.resource,state:randomBytes(24).toString('base64url'),code_challenge_method:'S256',code_challenge:createHash('sha256').update(verifier).digest('base64url')});
-  await authPage.goto(authUrl);
+  await navigate(authPage,authUrl);
   if(await authPage.locator('[name=username]').count()){
    await authPage.locator('[name=username]').fill(cfg.accounts[0].username);await authPage.locator('[name=password]').fill(cfg.password);await authPage.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);await authPage.locator('form[action$="/login"] button[type=submit]').click();
   }
@@ -167,7 +179,7 @@ try{
  }
  await pick('#connection-filters [name=section]','history');await page.locator('#connection-filters button[type=submit]').click();await row('Synthetic portable reader').waitFor();check('Revoked record moves to history, preserving the logical record');
  await page.locator('[data-connection-reset]').click();await row('Synthetic browser ChatGPT').waitFor();
- const bContext=await browser.newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await bp.goto(cfg.url+'/app/connections');await bp.locator('[data-agents-root]').waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
+ const bContext=await newContext();await bContext.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const bp=await bContext.newPage();await navigate(bp,cfg.url+'/app/connections');await bp.locator('[data-agents-root]').waitFor();check('Second account does not see first account connection names',!(await bp.innerText('body')).includes('Synthetic browser ChatGPT'));await bContext.close();
  // Current Agent issuance has one form. Cancel and repeated submits still must not mutate twice.
  held=mutations;await openNew('generic_mcp');await basic('Synthetic cancelled draft');
  check('The selected Agent opens one credential form',await page.locator('.agent-dialog[open]').count()===1&&await agentDialog.locator('[name=label]').count()===1);await cancelNew();check('Cancelled Agent draft sends nothing',mutations===held);
@@ -226,10 +238,10 @@ try{
  await begin('storage.import');await operationDialog.locator('[name=file]').setInputFiles(destination);await operationDialog.locator('[name=confirm_import]').check();const imported=await runOperation();check('Existing import preserves original records',imported.originals_overwritten===false&&imported.created>0);await closeOperation();
  // Invitation codes are issued by the operator CLI now (the web page was removed); the fixture issues one the same way.
  const invite=(await command('invitation')).codes[0];check('Synthetic invitation is issued outside the web Console',typeof invite==='string'&&invite.length===43);
- const registration=await browser.newContext(),rp=await registration.newPage();await rp.goto(cfg.url+'/register');await rp.locator('[name=code]').fill(invite);await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/account');await rp.locator('[name=username]').fill('Synthetic_Cloud_Browser_New');await rp.locator('[name=password]').fill('Synthetic new browser password');await rp.locator('[name=password_confirm]').fill('Synthetic new browser password');await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/totp');
+ const registration=await newContext(),rp=await registration.newPage();await navigate(rp,cfg.url+'/register');await rp.locator('[name=code]').fill(invite);await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/account');await rp.locator('[name=username]').fill('Synthetic_Cloud_Browser_New');await rp.locator('[name=password]').fill('Synthetic new browser password');await rp.locator('[name=password_confirm]').fill('Synthetic new browser password');await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/totp');
  const {generate}=await import(pathToFileURL(path.join(root,'services/oauth/node_modules/otplib/dist/index.js')));const enrollmentSecret=await rp.locator('#totp-secret').innerText();await rp.locator('[name=otp]').fill(await generate({secret:enrollmentSecret}));await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/recovery-codes');check('Existing registration binds real synthetic TOTP',await rp.locator('.recovery-codes li').count()===8);await rp.locator('button[type=submit]').click();await rp.waitForURL('**/register/status');
  for(let i=0;i<15;i++){if(await rp.locator('code').innerText()==='active')break;await new Promise(r=>setTimeout(r,1000));await rp.reload();}check('New synthetic account activates only after provisioning',await rp.locator('code').innerText()==='active');await registration.close();
- const realLogin=await browser.newContext(),lp=await realLogin.newPage();await lp.goto(cfg.url+'/login');await lp.locator('[name=username]').fill(cfg.accounts[1].username);await lp.locator('[name=password]').fill(cfg.password);await lp.locator('[name=otp]').fill((await command('otp',{owner:1,fresh:true})).otp);await lp.locator('button[type=submit]').click();await lp.waitForURL('**/app');await lp.goto(cfg.url+'/app/memories');await lp.locator('[data-memory]').first().waitFor();check('Existing real password/TOTP login isolates the second account',(await lp.innerText('body')).includes('Synthetic private B sentinel')&&!(await lp.innerText('body')).includes('蓝色纸船'));await realLogin.close();
+ const realLogin=await newContext(),lp=await realLogin.newPage();await navigate(lp,cfg.url+'/login');await lp.locator('[name=username]').fill(cfg.accounts[1].username);await lp.locator('[name=password]').fill(cfg.password);await lp.locator('[name=otp]').fill((await command('otp',{owner:1,fresh:true})).otp);await lp.locator('button[type=submit]').click();await lp.waitForURL('**/app');await navigate(lp,cfg.url+'/app/memories');await lp.locator('[data-memory]').first().waitFor();check('Existing real password/TOTP login isolates the second account',(await lp.innerText('body')).includes('Synthetic private B sentinel')&&!(await lp.innerText('body')).includes('蓝色纸船'));await realLogin.close();
  await goto('connections');await page.screenshot({path:path.join(evidence,'connections-final.png'),fullPage:true});
  // Rotate an existing synthetic client and close before its real guide response arrives.
  await openDetail('Synthetic browser ChatGPT');await dialog.locator('[data-connection-action=rotate]').click();await proof();
@@ -247,7 +259,7 @@ try{
  // refresh (connections + capture-status); whichever request first meets the revoked session wipes the
  // secret and goes to sign-in. Wait for those exact reads (a load-state wait returns at once on an idle
  // page), then test each order deterministically.
- const refreshAfterCreate=()=>Promise.all(['/console-api/connections?','/console-api/capture-status?'].map(part=>page.waitForResponse(r=>r.url().includes(part))));
+ const refreshAfterCreate=()=>Promise.all(['/console-api/connections?','/console-api/capture-status?'].map(part=>page.waitForResponse(r=>r.url().includes(part)).then(r=>r.finished())));
  const issueManagedSecret=async label=>{await openNew('generic_mcp');await basic(label);await submitNew();await goto('connections');await openDetail(label);await dialog.locator('[data-connection-action=rotate]').click();await proof();const refreshed=refreshAfterCreate();await submit();await refreshed;};
  // A sentinel proves the clipboard is readable and untouched; a failed read cannot pass the check.
  const sentinel='synthetic-clipboard-sentinel',setSentinel=()=>page.evaluate(v=>navigator.clipboard.writeText(v),sentinel);
@@ -255,22 +267,25 @@ try{
  const signInAgain=async()=>{const {token}=await command('cookies');await context.addCookies([{name:cfg.cookie,value:token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);await goto('connections');};
  // Order 1: Copy is the first request after revocation; a double-click must not copy or error.
  await issueManagedSecret('Synthetic logout cleanup');
- const firstSecret=await page.locator('#connection-secret').inputValue();await setSentinel();await command('revoke-console-sessions');
- await dialog.locator('[data-connection-copy-secret]').dblclick();await page.waitForURL('**/login');
+ const firstSecret=await page.locator('#connection-secret').inputValue();await pace();await setSentinel();await command('revoke-console-sessions');
+ const copySession=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/me');
+ await dialog.locator('[data-connection-copy-secret]').dblclick();check('Copy checks the revoked session and receives HTTP 401',(await copySession).status()===401);await page.waitForURL('**/login');
  check('A revoked login clears secrets before any copy',await page.locator('#connection-secret').count()===0);
  check('Double-clicking Copy after revocation copies nothing',await clipboardUntouched());
  await page.goBack().catch(()=>{});await page.waitForURL('**/login');
  check('Browser back after the redirect never shows the credential again',await page.locator('#connection-secret').count()===0&&!(await page.content()).includes(firstSecret));
  // Order 2: a background session check (returning to the tab) meets the revocation before any click.
  await signInAgain();await issueManagedSecret('Synthetic background revoke');
- const secondSecret=await page.locator('#connection-secret').inputValue();await setSentinel();await command('revoke-console-sessions');
- await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await page.waitForURL('**/login');
+ const secondSecret=await page.locator('#connection-secret').inputValue();await pace();await setSentinel();await command('revoke-console-sessions');
+ const backgroundSession=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/me');
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));check('Background checking the revoked session receives HTTP 401',(await backgroundSession).status()===401);await page.waitForURL('**/login');
  check('A background check after revocation wipes the credential and goes to sign-in',await page.locator('#connection-secret').count()===0&&await clipboardUntouched()&&!(await page.content()).includes(secondSecret));
  // Signing in again: the connection exists, its one-time secret is never shown again; rotation is the way forward.
  await signInAgain();await openDetail('Synthetic background revoke');await dialog.locator('[data-connection-action=rotate]').waitFor();
  check('After signing in again the connection remains and its secret is not re-displayed',await dialog.locator('#connection-secret').count()===0&&!(await page.content()).includes(secondSecret));
  await goto('connections');check('The pre-existing ChatGPT authorization is unchanged after every flow',JSON.stringify(await gptState())===JSON.stringify(gptBefore));
+ check('Every browser context stays within the unchanged server request limit',rateLimited.length===0);
  check('No JavaScript or CSP errors',errors.length===0);
- fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,count:checks.length,production_data_used:false,external_client_acceptance:false},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
-}catch(error){fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'failed',checks,error:error.stack},null,2),{mode:0o600});console.error(JSON.stringify({status:'failed',checks:checks.length,evidence,error:error.message}));process.exitCode=1;}
+ fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,count:checks.length,network:traffic(),production_data_used:false,external_client_acceptance:false},null,2),{mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
+}catch(error){fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'failed',checks,error:error.stack,network:traffic()},null,2),{mode:0o600});console.error(JSON.stringify({status:'failed',checks:checks.length,evidence,error:error.message,network:traffic()}));process.exitCode=1;}
 finally{await browser?.close();fixture.stdin.end('{"command":"stop"}\n');const timer=setTimeout(()=>fixture.kill('SIGTERM'),5000);await new Promise(r=>fixture.once('exit',r));clearTimeout(timer);fs.closeSync(log);assert.ok(fs.readFileSync(path.join(evidence,'fixture.stderr'),'utf8').includes('"synthetic_cleanup_complete":true'),'Synthetic fixture cleanup must be verified');}
