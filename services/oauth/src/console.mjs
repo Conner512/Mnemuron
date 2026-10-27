@@ -206,7 +206,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     }
     else if(['devices.revoke','devices.register','devices.rotate','retention.prune'].includes(action)){
       // Revoking an agent key is a security change: fresh factors here, then only the target goes to Core.
-      const fields={'devices.revoke':['agent_instance_id'],'devices.register':['label','agent_id','device_id','access'],'devices.rotate':['credential_id'],'retention.prune':['confirmed','batch_size']}[action];
+      const fields={'devices.revoke':['agent_instance_id'],'devices.register':['label','agent_id','device_id','access','task_continuity'],'devices.rotate':['credential_id'],'retention.prune':['confirmed','batch_size']}[action];
       if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
       await ids.console.reauthenticate(account.account_id,session,payload);
       const corePayload=Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]));

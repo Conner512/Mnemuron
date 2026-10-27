@@ -51,6 +51,14 @@ Different unscoped statements are never classified as conflicts. Potential confl
 
 Neither operation changes Canonical Task state. Superseded and retracted rows are excluded from default retrieval and previews but remain queryable when their statuses are explicitly requested.
 
+## Similarity hints after saving
+
+A successful save has already committed its new Memory. `similar_memories` is an advisory list of existing records, not a preflight decision, an authorization to merge, or an automatic deduplication result. Search before saving; an explicit correction should call supersede on the existing record without first creating a separate save.
+
+If a later hint reveals a redundant save, preserve both records until the current user explicitly requests cleanup. Retract the **newly saved Memory ID returned by the save**, not the existing ID in the hint. This leaves the original active and retains the redundant save as a tombstone. Do not supersede the existing record merely because of a duplicate hint: supersede creates a third record and leaves the separate save active. Similar wording alone does not prove redundancy; preserve new information and report cleanup failures.
+
+Cloud cleanup also requires reading the current revision and an explicit current write grant. A private save receipt or account-wide read access is not such a grant. If the adapter cannot read or retract the saved record, leave it intact and explain that cleanup needs an authorized owner action. See [cloud memory writes](cloud-memory-phase-a.md).
+
 ## Schema migration
 
 The existing `memories` table gains seven additive nullable/defaulted columns:

@@ -15,6 +15,8 @@ The deployment profile, current account, OAuth scope, immutable connection bindi
 
 The four tools are `mnemuron_save_memory`, `mnemuron_supersede_memory`, `mnemuron_retract_memory`, and the metadata-only `mnemuron_get_operation`. Save supports `scope=user` without a Task, Workstream, Hook or Resume. Other scopes use existing owned IDs. Correction/retraction require an owned record with an explicit grant for its current revision (and no owner denial; `read_all` and the active-uniform read policy widen reads only), its exact `expected_revision` and a reason. Correction creates a new record and supersedes the old one; retraction changes lifecycle, not physical history.
 
+Similarity hints in a save response arrive **after commit**. Search first and use supersede for a user-requested correction instead of first saving a separate record. A hint alone authorizes no lifecycle change. If the user explicitly requests removal of a confirmed redundant save, read and retract the new `memory_id` from that save's receipt, using its current revision and a new stable operation ID. Do not supersede the hinted existing record: that creates another replacement while leaving the new save active. A `keep_private` save has no write grant, even when account policy makes `cloud_readable=true`; leave it intact and explain the limitation if cleanup is unavailable. The full [similarity-hint contract](structured-memory-retrieval-lifecycle-v0.1.md#similarity-hints-after-saving) applies to both adapters.
+
 The internal gateway allowlist adds only `POST /v1/cloud-memory/operations` and `GET /v1/cloud-memory/operations/:operation_id?connection_id=...`. Keep these behind the existing loopback Core boundary; no new public Core route is required.
 
 ## Save is not permission to disclose
@@ -35,6 +37,8 @@ All writes require a stable `operation_id`. A new intent gets a new ID; a retry 
 Memory, revision, source, outboxes, audit, optional grant and receipt commit atomically in Core. Database uniqueness and transactions protect concurrent retries; neither an in-process lock nor an MCP session is the authority. `status=committed` and `saved=true` are returned only after commit.
 
 Receipts have `receipt_semantics=commit_snapshot`: a replay reports the original commit, not current visibility/lifecycle, and cannot revive a later retracted record. Revoked credentials cannot query old receipts. Another account or connection cannot query them.
+
+The optional near-duplicate hint on a newly committed save queries only the write-time scrubbed text. It is response-only metadata: saved text is never added to the durable receipt, and replaying an operation does not repeat the similarity query or model egress. Hint failure does not undo a committed save.
 
 Before a write, the gateway reserves an 8 KiB response envelope for the at-most-2 KiB metadata receipt. Network loss or invalid post-commit output returns `OPERATION_STATUS_UNKNOWN` with `next_action=query_same_operation`. Query the same ID; do not interpret uncertainty as failure, or retry with a new ID. A not-found query alone does not prove an in-flight write cannot commit. Read pagination still preserves revision and source-version pins.
 

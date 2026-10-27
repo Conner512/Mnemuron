@@ -118,9 +118,9 @@ export function createMnemuronApp({
         throw new NotFoundError('Endpoint not available to this destination.');
 
       if(request.method==='POST'&&pathname==='/v1/cloud-memory/operations'){
-        const input=await readJson(request,32768);responseStatus=200;const receipt=store.cloudMemory.execute(auth,input);
+        const input=await readJson(request,32768);responseStatus=200;const {receipt,savedMemory}=store.cloudMemory.executeWithResult(auth,input);
         // The stored receipt stays a fixed commit snapshot; the near-duplicate hint is added to this response only.
-        const similar=input.action==='memory.save'?(await similarMemories(store,auth,{memory_id:receipt.memory_id,content:input.payload.content})).map(({memory_id,similarity})=>({memory_id,similarity})):[];
+        const similar=savedMemory?(await similarMemories(store,auth,savedMemory)).map(({memory_id,similarity})=>({memory_id,similarity})):[];
         return sendJson(response,200,similar.length?{...receipt,similar_memories:similar}:receipt);
       }
       const cloudOperation=routeMatch(pathname,/^\/v1\/cloud-memory\/operations\/([A-Za-z0-9_.:-]+)$/);

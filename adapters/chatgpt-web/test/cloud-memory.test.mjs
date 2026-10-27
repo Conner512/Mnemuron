@@ -15,7 +15,7 @@ import {provisionIdentities,identityMapSnapshot} from '../../../services/oauth/s
 import {queueCloudBinding,prepareCloudBinding,applyCloudBinding,finishCloudBinding} from '../../../services/oauth/src/cloud-provisioning.mjs';
 import {generate} from '../../../services/oauth/node_modules/otplib/dist/index.js';
 import {ReadonlyCoreClient} from '../src/core-client.mjs';
-import {prepareTool} from '../src/tools.mjs';
+import {prepareTool,CLOUD_INSTRUCTIONS,toolDefinitions} from '../src/tools.mjs';
 import {validateGatewayConfig} from '../src/config.mjs';
 
 test('disabled connection registry preserves legacy example configurations and enabled registry requires multi-account mode',()=>{
@@ -55,6 +55,50 @@ async function setup(t,{allowGrant=true}={}){
   return {...f,core,readonly,tokenRequest:f.token,token,call};
 }
 const save=(operation_id=randomUUID())=>({scope:'user',memory_type:'fact',content:'Synthetic cloud memory 1.2.3 😀',operation_id,cloud_read:'allow_submitted_revision'});
+
+test('cloud post-save duplicate cleanup follows the returned new ID and current revision without creating a replacement',async t=>{
+  const f=await setup(t);
+  assert.match(CLOUD_INSTRUCTIONS,/successful save is already committed/);
+  assert.match(CLOUD_INSTRUCTIONS,/Do not supersede a hinted memory/);
+  assert.match(CLOUD_INSTRUCTIONS,/retract the newly saved memory_id/);
+  assert.match(CLOUD_INSTRUCTIONS,/current user explicitly requests cleanup/);
+  assert.match(toolDefinitions.mnemuron_save_memory.description,/hints arrive after commit/);
+  const first=(await f.call('mnemuron_save_memory',save())).data.result.structuredContent;
+  const original=(await f.call('mnemuron_get_memory',{memory_id:first.memory_id})).data.result.structuredContent;
+  const args=save(),second=(await f.call('mnemuron_save_memory',args)).data.result.structuredContent;
+  assert.equal(second.similar_memories[0].memory_id,first.memory_id);
+  const active=()=>f.core.store.db.prepare("SELECT count(*) n FROM memories WHERE memory_id IN (?,?) AND status='active'").get(first.memory_id,second.memory_id).n;
+  assert.equal(active(),2,'hints do not silently authorize lifecycle writes');
+  const cleanup={memory_id:second.memory_id,expected_revision:second.revision+1,operation_id:randomUUID(),reason:'Synthetic explicit redundant-save cleanup'};
+  assert.equal((await f.call('mnemuron_retract_memory',cleanup)).data.result.structuredContent.error.code,'MEMORY_VERSION_CHANGED');
+  assert.equal(active(),2,'failed cleanup preserves both saves');
+  const current=(await f.call('mnemuron_get_memory',{memory_id:second.memory_id})).data.result.structuredContent;
+  const cleaned=(await f.call('mnemuron_retract_memory',{...cleanup,expected_revision:current.revision})).data.result.structuredContent;
+  assert.equal(cleaned.memory_id,second.memory_id);assert.equal(cleaned.memory_status,'retracted');assert.equal(cleaned.physically_deleted,false);
+  assert.equal(active(),1);
+  assert.deepEqual((await f.call('mnemuron_get_memory',{memory_id:first.memory_id})).data.result.structuredContent,original);
+  const receipts=f.core.store.db.prepare('SELECT action FROM cloud_memory_operations ORDER BY rowid').all();
+  assert.deepEqual(receipts.map(r=>r.action),['memory.save','memory.save','memory.retract']);
+  assert.equal((await f.call('mnemuron_save_memory',args)).data.result.structuredContent.memory_id,second.memory_id);
+  assert.equal(active(),1,'replaying the historical save receipt cannot revive the duplicate');
+});
+
+test('private duplicate cleanup remains unavailable even when read-all makes the new record readable',async t=>{
+  const f=await setup(t),first=(await f.call('mnemuron_save_memory',save())).data.result.structuredContent;
+  const second=(await f.call('mnemuron_save_memory',{...save(),cloud_read:'keep_private'})).data.result.structuredContent;
+  assert.equal(second.cloud_readable,false);
+  assert.equal((await f.call('mnemuron_get_memory',{memory_id:second.memory_id})).data.result.structuredContent.error.code,'MEMORY_NOT_FOUND');
+  const user=f.core.store.authenticate(f.coreCredential.api_key).user_id;
+  const local=f.core.store.issueCredential({userId:user,deviceId:'synthetic-duplicate-operator',agentId:'test',agentInstanceId:randomUUID(),scopes:['admin:tasks']});
+  f.core.store.webVisibility.setPolicy(f.core.store.authenticate(local.api_key),{read_all:true,expected_revision:0});
+  const current=(await f.call('mnemuron_get_memory',{memory_id:second.memory_id})).data.result.structuredContent;
+  assert.equal(current.memory.memory_id,second.memory_id);
+  const denied=(await f.call('mnemuron_retract_memory',{memory_id:second.memory_id,expected_revision:current.revision,operation_id:randomUUID(),reason:'Synthetic explicit cleanup'})).data.result.structuredContent;
+  assert.equal(denied.error.code,'MEMORY_NOT_FOUND');
+  for(const memoryId of [first.memory_id,second.memory_id])assert.equal(f.core.store.db.prepare('SELECT status FROM memories WHERE memory_id=?').get(memoryId).status,'active');
+  assert.match(CLOUD_INSTRUCTIONS,/keep_private and cloud_readable do not grant correction\/retraction authority/);
+  assert.match(CLOUD_INSTRUCTIONS,/leave it intact and explain the limitation/);
+});
 
 test('A-T01..06/09/19/24: OAuth scope intersection, real SDK lifecycle and no implicit readonly upgrade',async t=>{
   const f=await setup(t),before=businessSnapshot(f.core.store);

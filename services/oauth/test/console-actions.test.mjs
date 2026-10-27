@@ -55,6 +55,17 @@ test('HTTP-COMPLETION: sensitive Agent and retention actions require fresh proof
  assert.equal((await x.act('devices.rotate',{credential_id:created.body.credential.credential_id,...await x.proof(x.a,30)})).status,401);
  assert.ok(x.core.store.authenticate(created.body.api_key));
 });
+test('HTTP-COMPLETION: explicit Codex continuity survives the BFF allowlist and still requires fresh proof',async t=>{
+ const x=await setup(t),key=path.join(x.core.root,'console-continuity.key');writePrivate(key,randomSecret());x.core.store.memoryConfig.console={key_file:key};
+ const p={label:'Synthetic Codex continuity',agent_id:'codex',device_id:'synthetic-codex',access:'read_write',task_continuity:true};
+ assert.equal((await x.act('devices.register',p)).status,403);
+ const created=await x.act('devices.register',{...p,...await x.proof()});assert.equal(created.status,200,JSON.stringify(created.body));
+ const auth=x.core.store.authenticate(created.body.api_key);
+ assert.deepEqual(auth.scopes,['memory:read','memory:write','capture:write','resume:read','resume:confirm','task:bootstrap:preview','task:bootstrap:confirm','project:bootstrap:preview','project:bootstrap:confirm']);
+ assert.equal(auth.user_id,x.a.record.user_id);
+ assert.equal((await x.act('devices.register',{...p,scopes:['admin:devices'],...await x.proof(x.a,30)})).status,400);
+ assert.equal(x.core.store.db.prepare("SELECT count(*) n FROM credentials WHERE agent_id='codex'").get().n,1);
+});
 test('HTTP-COMPLETION: authentication history and audit filters/export pages are owner scoped and secret free',async t=>{
  const x=await setup(t);
  await x.ids.authenticate(x.a.name,'wrong','000000');await x.ids.authenticate(x.b.name,'wrong','000000');

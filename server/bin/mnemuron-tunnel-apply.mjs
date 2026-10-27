@@ -24,7 +24,7 @@ const requestFile = path.join(dir, 'apply.request'), statusFile = path.join(dir,
 const mainCredential = env.MNEMURON_TUNNEL_CREDENTIAL || '/etc/cloudflared-mnemuron/tunnel-token';
 const extraDir = env.MNEMURON_TUNNEL_ETC || path.join(path.dirname(mainCredential), 'tunnels');
 const waitSeconds = Number(env.MNEMURON_TUNNEL_WAIT_SECONDS || 40);
-const systemctl = (...args) => execFileSync(env.MNEMURON_SYSTEMCTL || 'systemctl', args, {stdio: ['ignore', 'ignore', 'pipe'], timeout: 60000});
+const systemctl = (...args) => execFileSync(env.MNEMURON_SYSTEMCTL || 'systemctl', args, {stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 60000});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const unitOf = id => id === 'main' ? 'cloudflared-mnemuron.service' : `cloudflared-mnemuron@${id}.service`;
 const credentialOf = id => id === 'main' ? mainCredential : path.join(extraDir, `${id}.token`);
@@ -40,6 +40,18 @@ function writeOwned(file, value) {
 }
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const readToken = file => { try { return fs.readFileSync(file, 'utf8').trim() || null; } catch { return null; } };
+function stopInstance(unit) {
+  try { systemctl('disable', '--now', unit); return; } catch { /* verify an already stopped and disabled/absent instance */ }
+  try {
+    const properties = systemctl('show', '--property=LoadState,ActiveState,UnitFileState', unit);
+    const state = Object.fromEntries(properties.trim().split('\n').map(line => line.split('=')));
+    if (state.ActiveState === 'inactive' && (state.LoadState === 'not-found' || ['disabled', 'masked'].includes(state.UnitFileState))) return;
+  } catch { /* an unavailable manager or unknown state cannot confirm a stop */ }
+  throw Object.assign(new Error('Could not confirm the tunnel was stopped and disabled.'), {errorCode: 'TUNNEL_STOP_FAILED'});
+}
+function removeInstanceFiles(id) {
+  for (const file of [credentialOf(id), envFileOf(id)]) fs.rmSync(file, {force: true});
+}
 async function connected(url) {
   const until = Date.now() + waitSeconds * 1000;
   while (Date.now() < until) {
@@ -71,8 +83,8 @@ async function applyOne(id, want, key) {
   const unit = unitOf(id), credential = credentialOf(id);
   if (want.state === 'removing') {
     if (id === 'main') return {state: 'failed', error: 'TUNNEL_MAIN'};
-    try { systemctl('disable', '--now', unit); } catch { /* already stopped */ }
-    for (const f of [credential, envFileOf(id)]) fs.rmSync(f, {force: true});
+    stopInstance(unit);
+    removeInstanceFiles(id);
     return {state: 'removed'};
   }
   const token = unsealWith(key, want.user, 'tunnel-token', want.token_seal);
@@ -84,7 +96,7 @@ async function applyOne(id, want, key) {
   if (id === 'main' || previous) systemctl('restart', unit); else systemctl('enable', '--now', unit);
   if (await connected(url)) return {state: 'applied'};
   if (previous) { writePrivate(credential, previous + '\n'); systemctl('restart', unit); return {state: 'rolled_back', error: 'TUNNEL_NOT_CONNECTED', restored: await connected(url)}; }
-  if (id !== 'main') { try { systemctl('disable', '--now', unit); } catch { /* stopped */ } fs.rmSync(credential, {force: true}); }
+  if (id !== 'main') { stopInstance(unit); removeInstanceFiles(id); }
   return {state: 'rolled_back', error: 'TUNNEL_NOT_CONNECTED_NO_PREVIOUS'};
 }
 

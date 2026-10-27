@@ -105,7 +105,7 @@ export class TunnelSettings {
     return {id: r.id, name: r.name, main: r.id === 'main', unit: r.id === 'main' ? 'cloudflared-mnemuron' : `cloudflared-mnemuron@${r.id}`, metrics_port: r.metrics_port, state: r.state,
       configured: !!r.token_seal, token_fingerprint: r.token_fp || null, account_id: r.account_id || null, tunnel_id: r.tunnel_id || null,
       desired_revision: r.desired_revision, applied_revision: r.applied_revision, pending: r.desired_revision > r.applied_revision,
-      apply_state: r.state === 'removing' ? 'removing' : r.apply_state || null, apply_error: r.apply_error || null, applied_at: r.applied_at || null, updated_at: r.updated_at || null, updated_by: r.updated_by || null};
+      apply_state: r.state === 'removing' && r.apply_state !== 'failed' ? 'removing' : r.apply_state || null, apply_error: r.apply_error || null, applied_at: r.applied_at || null, updated_at: r.updated_at || null, updated_by: r.updated_by || null};
   }
   /** Fingerprints and state only: never a token. */
   list() { this.syncStatus(); this.syncDiscovery(); return this.rows().map(r => this.publicRow(r)); }

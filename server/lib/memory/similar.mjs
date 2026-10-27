@@ -1,5 +1,6 @@
 // Near-duplicate hints on save: after a memory is written, the caller is told which existing memories say much the
-// same thing, so an assistant can supersede instead of piling up copies. Advisory only: the save already committed.
+// same thing. Advisory only: the save already committed; superseding a hinted record creates another replacement.
+// Confirmed redundant saves can be explicitly retracted by their new ID; hints never authorize lifecycle writes.
 // Uses semantic search (one embedding call), because rewordings share few literal tokens. Calibrated on the synthetic
 // set with the cosine embedder: the closest pair of distinct memories scored 0.84, reworded duplicates 0.95-0.99.
 // Without a ready vector index only a body with the same search tokens (case and punctuation aside) is reported.
