@@ -47,7 +47,10 @@ export class CloudMemory {
     const row=this.db.prepare('SELECT receipt_json FROM cloud_memory_operations WHERE user_id=? AND connection_id=? AND operation_id=?').get(auth.user_id,connection,operation);
     if(!row)throw new NotFoundError('Operation not found.','OPERATION_NOT_FOUND');return JSON.parse(row.receipt_json);
   }
-  execute(auth,input){
+  execute(auth,input){return this.executeWithResult(auth,input).receipt;}
+  // Internal commit result: keep saved text out of durable/public receipts, and only expose the
+  // scrubbed write result for a newly committed save. Replays must not cause new query egress.
+  executeWithResult(auth,input){
     strict(input,['connection_id','action','operation_id','payload']);
     const binding=this.authorize(auth,input.connection_id),{action,operation_id,payload}=input;
     if(!['memory.save','memory.supersede','memory.retract'].includes(action)||!operation_id)throw new ValidationError('Invalid cloud operation.','INVALID_CLOUD_OPERATION');
@@ -64,7 +67,7 @@ export class CloudMemory {
     const hash=createHash('sha256').update(JSON.stringify(canonical({action,payload}))).digest('hex');
     return this.store.memoryTransaction(()=>{
       const old=this.db.prepare('SELECT * FROM cloud_memory_operations WHERE user_id=? AND connection_id=? AND operation_id=?').get(auth.user_id,binding.connection_id,operation_id);
-      if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictError('Operation ID has different parameters.','IDEMPOTENCY_CONFLICT');return JSON.parse(old.receipt_json);}
+      if(old){if(old.action!==action||old.request_hash!==hash)throw new ConflictError('Operation ID has different parameters.','IDEMPOTENCY_CONFLICT');return {receipt:JSON.parse(old.receipt_json)};}
       let prior;
       if(!saving){
         prior=this.db.prepare('SELECT * FROM memories WHERE user_id=? AND memory_id=?').get(auth.user_id,payload.memory_id);
@@ -92,7 +95,7 @@ export class CloudMemory {
       if(Buffer.byteLength(JSON.stringify(receipt))>2048)throw new ValidationError('Receipt limit.','OPERATION_RESULT_TOO_LARGE');
       this.db.prepare('INSERT INTO cloud_memory_operations VALUES(?,?,?,?,?,?,?,?)').run(auth.user_id,binding.connection_id,action,operation_id,hash,JSON.stringify(receipt),auth.credential_id,receipt.committed_at);
       this.store.audit({auth,action:'cloud.'+action,targetType:'memory',targetId:id,metadata:{operation_id,connection_id:binding.connection_id,account_id:binding.account_id,revision:revision.revision,capture_mode:'tool_only',evidence_kind:'model_submitted'}});
-      return receipt;
+      return {receipt,...(saving?{savedMemory:result}:{})};
     });
   }
 }

@@ -61,36 +61,42 @@ const agentName=id=>AGENTS.find(a=>a.id===id)?.name||id||'—';
 const ui={agent:'chatgpt',method:{},issued:{}};
 try{Object.assign(ui,JSON.parse(localStorage.getItem(STORE)||'{}'),{issued:{}});}catch{}
 const remember=()=>{try{localStorage.setItem(STORE,JSON.stringify({agent:ui.agent,method:ui.method}));}catch{}};
-let last={data:{},caps:{},extras:{}};
+let last={data:{},caps:{},extras:{},query:{}};
 
-/** Every live connection as one row. */
-export function connectionRows(data){
+/** The selected connection page, plus matching legacy grants and agent keys. */
+export function connectionRows(data,{section='active'}={}){
+ const history=section==='history';
  const rows=[];
- for(const c of data.connections||[])if(c.configuration_state!=='revoked')rows.push({id:c.connection_id,source:'connection',agent:c.agent||(c.kind==='chatgpt_oauth'?'chatgpt':'other'),label:c.label,method:METHOD_NAMES[c.kind],
+ for(const c of data.connections||[])if(history===(c.configuration_state==='revoked'||!!c.expired))rows.push({id:c.connection_id,source:'connection',agent:c.agent||(c.kind==='chatgpt_oauth'?'chatgpt':'other'),label:c.label,method:METHOD_NAMES[c.kind],
   access:c.profile==='memory_readwrite'?'读写':'只读',device:'—',created:c.created_at,last:c.last_successful_tool_at||c.last_authorized_at,
-  state:c.expired?'已过期':c.configuration_state==='disabled'?'已停用':c.kind==='chatgpt_oauth'?(c.active_grant_count?'已授权':'待授权'):c.health==='verified'?'已验证':'未使用',
-  disabled:c.configuration_state==='disabled',kind:c.kind,redirect:c.redirect_uri});
- for(const g of (data.legacy_connections||[]).flatMap(c=>c.grants||[]))rows.push({id:g.grant_id,source:'grant',agent:'chatgpt',label:'ChatGPT（旧版连接）',method:METHOD_NAMES.legacy,
+  state:c.configuration_state==='revoked'?'已撤销':c.expired?'已过期':c.configuration_state==='disabled'?'已停用':c.kind==='chatgpt_oauth'?(c.active_grant_count?'已授权':'待授权'):c.health==='verified'?'已验证':'未使用',
+  revoked:c.configuration_state==='revoked',disabled:c.configuration_state==='disabled',kind:c.kind,redirect:c.redirect_uri});
+ for(const g of history?[]:(data.legacy_connections||[]).flatMap(c=>c.grants||[]))rows.push({id:g.grant_id,source:'grant',agent:'chatgpt',label:'ChatGPT（旧版连接）',method:METHOD_NAMES.legacy,
   access:(g.scopes||[]).includes('memory:write')?'读写':'只读',device:'—',created:g.created,last:data.system_chatgpt?.last_token_at,state:'已授权'});
  for(const c of data.core_connections||[]){const scopes=Array.isArray(c.scopes)?c.scopes:[];
-  if(c.revoked_at||['mnemuron-console','chatgpt-web','mnemuron'].includes(c.agent_id))continue;
+  const inactive=!!c.revoked_at||c.state==='revoked'||c.state==='expired'||!!c.expires_at&&Date.parse(c.expires_at)<=Date.now();
+  if(history!==inactive||['mnemuron-console','chatgpt-web','mnemuron'].includes(c.agent_id))continue;
   rows.push({id:c.credential_id,source:'key',agent:AGENT_OF_KEY[c.agent_id]||c.agent_id,label:c.label,method:METHOD_NAMES.key,access:scopes.some(s=>s==='memory:write'||s==='capture:write')?'读写':'只读',
-   device:c.device_id,created:c.created_at,last:c.last_used_at,state:c.last_used_at?'已验证':'未使用'});}
+   device:c.device_id,created:c.created_at,last:c.last_used_at,revoked:!!c.revoked_at||c.state==='revoked',state:c.revoked_at||c.state==='revoked'?'已撤销':inactive?'已过期':c.last_used_at?'已验证':'未使用'});}
  return rows.sort((a,b)=>String(b.created??'').localeCompare(String(a.created??'')));
 }
 const rowActions=(r,can)=>{
+ if(r.revoked)return '';
  const b=(act,label,danger)=>`<button type="button" class="quiet${danger?' danger':''}" data-agent-row="${esc(act)}" data-id="${esc(r.id)}" data-source="${esc(r.source)}">${label}</button>`;
  if(r.source==='grant')return can('oauth.revoke')?b('oauth.revoke','撤销',true):'';
  if(r.source==='key')return [can('devices.rotate')?b('devices.rotate','轮换'):'',can('devices.revoke')?b('devices.revoke','撤销',true):''].join('');
  return [r.kind==='chatgpt_oauth'?b('connections.update','回调地址'):'',b('connections.rotate','轮换'),b(r.disabled?'connections.enable':'connections.disable',r.disabled?'启用':'停用'),b('connections.revoke','撤销',true)].join('');
 };
-function connectedTable(data,caps){
- const rows=connectionRows(data),can=a=>caps.allowed_actions?.includes(a)||a.startsWith('connections.');
- return `<section class="card agents-connected"><header class="section-head"><h2>已连接</h2><small class="muted">${rows.length} 个</small></header>
+function connectedTable(data,caps,query){
+ const rows=connectionRows(data,query),can=a=>caps.allowed_actions?.includes(a)||a.startsWith('connections.'),history=query.section==='history';
+ return `<section class="card agents-connected"><header class="section-head"><h2>${history?'连接历史':'已连接'}</h2><small class="muted">本页 ${rows.length} 个</small></header>
+  <form id="connection-filters" class="toolbar"><label>记录<select name="section"><option value="active"${history?'':' selected'}>当前连接</option><option value="history"${history?' selected':''}>过期和已撤销</option></select></label><label>连接器和 MCP 令牌名称<input name="search" maxlength="120" autocomplete="off" value="${esc(query.search||'')}"></label><div class="connection-filter-actions"><button type="submit">应用</button><button type="button" class="quiet" data-connection-reset>重置</button></div></form>
+  ${history?'<p class="muted">过期的 MCP 令牌仍占用连接名额，可轮换后继续使用，或撤销以释放名额。已撤销的记录仅供查看。</p>':''}
   ${rows.length?`<div class="table-scroll"><table class="agents-table"><thead><tr><th>Agent</th><th>权限</th><th>方式</th><th>设备</th><th>创建</th><th>最近活跃</th><th>状态</th><th></th></tr></thead><tbody>${rows.map(r=>`<tr>
    <td><strong>${esc(agentName(r.agent))}</strong><small>${esc(r.label)}</small></td><td><span class="tag" data-access="${r.access==='读写'?'rw':'ro'}">${r.access}</span></td><td>${esc(r.method)}</td><td>${esc(r.device)}</td>
    <td>${when(r.created)}</td><td>${when(r.last)}</td><td><span class="tag" data-state="${esc(r.state)}">${esc(r.state)}</span></td><td class="row-actions">${rowActions(r,can)}</td></tr>`).join('')}</tbody></table></div>`
-  :`<div class="agents-empty"><strong>还没有连接任何 agent</strong><p class="muted">在下方选一个 agent，按步骤生成凭证并接入。</p></div>`}</section>`;
+  :`<div class="agents-empty"><strong>${history?'没有匹配的历史记录':'没有匹配的当前连接'}</strong><p class="muted">${history?'可切换到当前连接查看正在使用的凭证。':'可查看过期和已撤销的记录，或在下方生成凭证并接入。'}</p></div>`}
+  <div class="library-footer"><p>匹配的连接器和 MCP 令牌：${esc(data.total??0)} 个；旧版授权和 Agent 密钥单独列出。</p><div class="pagination">${data.offset?`<button type="button" data-connection-page="${Math.max(0,data.offset-(data.limit||20))}">上一页</button>`:''}${data.next_offset!=null?`<button type="button" data-connection-page="${data.next_offset}">下一页</button>`:''}</div></div></section>`;
 }
 function stepRows(agent,method,endpoints){
  const issued=ui.issued[`${agent.id}:${method.id}`]||{},v=issued.values||{};
@@ -114,17 +120,17 @@ function setupPanel(data,caps,extras){
 /** Select an agent (and method) for the next render; tests use it, the page uses the picker. */
 export function selectAgent(agent,method){ui.agent=agent;if(method)ui.method[agent]=method;}
 /** The connections page body. `extras` holds per-agent settings (ChatGPT read and write rules, capture switches). */
-export function agentsView(data,caps,extras={}){
- last={data,caps,extras};
- return `<div data-agents-root>${connectedTable(data,caps)}${setupPanel(data,caps,extras)}</div>`;
+export function agentsView(data,caps,extras={},query={}){
+ last={data,caps,extras,query};
+ return `<div data-agents-root>${connectedTable(data,caps,query)}${setupPanel(data,caps,extras)}</div>`;
 }
-const repaint=()=>{const root=document.querySelector('[data-agents-root]');if(root){root.outerHTML=agentsView(last.data,last.caps,last.extras);syncAppearance();}};
+const repaint=()=>{const root=document.querySelector('[data-agents-root]');if(root){root.outerHTML=agentsView(last.data,last.caps,last.extras,last.query);syncAppearance();}};
 
 export function mountAgents({mutate,reload}){
  const dialog=document.createElement('dialog');dialog.className='agent-dialog';dialog.innerHTML='<form method="dialog"></form>';document.body.append(dialog);
  const form=dialog.querySelector('form');let pending=null;
  const password='<fieldset class="reauth"><legend>再次验证身份</legend><label>当前密码<input name="current_password" type="password" autocomplete="current-password" maxlength="1024" required></label></fieldset>';
- const open=(title,body,submit,onSubmit)=>{form.innerHTML=`<div class="dialog-header"><h2>${esc(title)}</h2><button type="button" data-close aria-label="关闭">×</button></div>${body}${password}<p class="agent-error" role="alert" hidden></p><div class="actions"><button type="submit" class="primary">${esc(submit)}</button><button type="button" data-close>取消</button></div>`;pending=onSubmit;dialog.showModal();form.querySelector('input,select')?.focus();};
+ const open=(title,body,submit,onSubmit,{reauthenticate=true}={})=>{form.innerHTML=`<div class="dialog-header"><h2>${esc(title)}</h2><button type="button" data-close aria-label="关闭">×</button></div>${body}${reauthenticate?password:''}<p class="agent-error" role="alert" hidden></p><div class="actions"><button type="submit" class="primary">${esc(submit)}</button><button type="button" data-close>取消</button></div>`;pending=onSubmit;dialog.showModal();form.querySelector('input,select')?.focus();};
  const show=(title,html)=>{form.innerHTML=`<div class="dialog-header"><h2>${esc(title)}</h2><button type="button" data-close aria-label="关闭">×</button></div>${html}<div class="actions"><button type="button" class="primary" data-close>我已保存</button></div>`;pending=null;if(!dialog.open)dialog.showModal();};
  form.addEventListener('click',e=>{if(e.target.closest('[data-close]')){dialog.close();}
   const copy=e.target.closest('[data-agent-copy]');if(copy)void copyFrom(copy);});
@@ -134,14 +140,15 @@ export function mountAgents({mutate,reload}){
  const op=()=>crypto.randomUUID();
  function generate(agentId,methodId){
   const agent=AGENTS.find(a=>a.id===agentId),method=agent.methods.find(m=>m.id===methodId),write=last.data.capabilities?.write_enabled!==false;
-  const access=`<label>权限<select name="access"><option value="read">只读：搜索和读取</option>${write||method.credential==='key'?'<option value="write" selected>读写：还能保存和修正记忆</option>':''}</select></label>`;
+  const continuity=agentId==='codex'&&methodId==='plugin';
+  const access=`<label>权限<select name="access"><option value="read">只读：搜索和读取</option>${write||method.credential==='key'?`<option value="write"${continuity?'':' selected'}>读写：还能保存和修正记忆</option>`:''}${continuity?'<option value="continuity" selected>插件完整功能：记忆、自动记录、创建与接续任务</option>':''}</select></label>`;
   const label=`<label>名称<input name="label" maxlength="80" required value="${esc(agent.name)}${method.credential==='key'?'':' · '+new Date().toLocaleDateString('zh-CN')}"></label>`;
   const device=method.credential==='key'?'<label>设备名<input name="device" maxlength="64" required pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,63}" placeholder="例如 macbook-pro" value=""></label>':'';
   open(`${agent.name} · ${method.label}`,label+device+access,'生成',async fd=>{
-   const rw=fd.get('access')==='write',key=`${agentId}:${methodId}`,name=String(fd.get('label')).trim();
+   const taskContinuity=continuity&&fd.get('access')==='continuity',rw=fd.get('access')==='write'||taskContinuity,key=`${agentId}:${methodId}`,name=String(fd.get('label')).trim();
    if(method.credential==='key'){
     const device=String(fd.get('device')).trim(),agentKey=agentId==='codex'?'codex':agentId;
-    const r=await mutate('devices.register',{label:name,agent_id:agentKey,device_id:device,access:rw?'read_write':'read',current_password:fd.get('current_password')},op());
+    const r=await mutate('devices.register',{label:name,agent_id:agentKey,device_id:device,access:rw?'read_write':'read',...(taskContinuity?{task_continuity:true}:{}),current_password:fd.get('current_password')},op());
     ui.issued[key]={label:name,values:{key:r.api_key,instance:r.credential?.agent_instance_id,device}};
    }else{
     const kind=method.credential==='chatgpt'?'chatgpt_oauth':'generic_mcp';
@@ -162,11 +169,11 @@ export function mountAgents({mutate,reload}){
    if(action==='devices.revoke'){const row=(last.data.core_connections||[]).find(c=>c.credential_id===id);Object.assign(payload,{agent_instance_id:row?.agent_instance_id});delete payload.credential_id;}
    if(action==='connections.update')payload.redirect_uri=String(fd.get('redirect_uri')).trim();
    for(const k of Object.keys(payload))if(payload[k]===undefined)delete payload[k];
-   const r=await mutate(action,{...payload,current_password:pw},op());
+   const r=await mutate(action,{...payload,...(action==='oauth.revoke'?{}:{current_password:pw})},op());
    dialog.close();await reload();
    const secret=r.secret||r.api_key;
    if(secret)show(names[action],`<p>新凭证只显示这一次，请现在复制，并更新对应 agent 的配置。</p><div class="agent-code"><pre><code>${esc(secret)}</code></pre><button type="button" class="quiet" data-agent-copy>复制</button></div>`);
-  });
+  },{reauthenticate:action!=='oauth.revoke'});
  }
  document.addEventListener('click',e=>{
   const pick=e.target.closest('[data-agent-pick]');if(pick){ui.agent=pick.dataset.agentPick;remember();repaint();return;}

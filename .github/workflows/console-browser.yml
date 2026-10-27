@@ -14,6 +14,27 @@ on:
 permissions:
   contents: read
 jobs:
+  agent-regressions:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Locked application and disposable browser dependencies
+        run: |
+          npm ci --prefix services/oauth --ignore-scripts
+          npm ci --prefix adapters/chatgpt-web --ignore-scripts
+          npm install --prefix "$RUNNER_TEMP/agent-browser-node" --ignore-scripts --no-audit --no-fund playwright@1.57.0
+      - name: Agent authorization, history and Codex continuity through real HTTP
+        run: |
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/agent-browser-node/node_modules/playwright/index.mjs"
+          export CHROMIUM_EXECUTABLE="$(command -v google-chrome)"
+          export MNEMURON_UI_EVIDENCE="$RUNNER_TEMP"
+          node scripts/test-console-agent-fixes.mjs
   browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 25

@@ -65,6 +65,17 @@ test('Connections by agent: one table of every connection, then per-agent setup 
   assert.doesNotMatch(actionPage('security',withOwner(o,{username:'S',sessions:[]}),caps),/data-read-policy/);
 });
 
+test('A failed tunnel removal offers a removal retry; pending removal and other mutations stay unavailable',()=>{
+  const tunnel={id:'t123456',name:'Synthetic tunnel',unit:'cloudflared-mnemuron@t123456',state:'removing',configured:true,main:false,apply_state:'failed',apply_error:'TUNNEL_STOP_FAILED'};
+  const render=(overrides={},allowed=['tunnel.remove','tunnel.token','tunnel.reapply'])=>actionPage('connections',withOwner(owner(),{features:{tunnel:{tunnels:[{...tunnel,...overrides}]}}}),{...caps,allowed_actions:allowed});
+  const failed=render();
+  assert.match(failed,/删除失败，可重试/);assert.match(failed,/TUNNEL_STOP_FAILED/);
+  assert.match(failed,/data-console-action="tunnel.remove" data-id="t123456"/);
+  assert.doesNotMatch(failed,/data-console-action="tunnel\.(token|reapply)"/);
+  assert.doesNotMatch(render({apply_state:'removing',apply_error:null}),/data-console-action="tunnel.remove"/);
+  assert.doesNotMatch(render({},[]),/data-console-action="tunnel.remove"/);
+});
+
 test('Health page: every check has a level, problems carry a fix, and missing reads are shown as unknown',()=>{
   const levels=html=>Object.fromEntries([...html.matchAll(/class="health-tile" data-health="([a-z]+)"[^>]*>[\s\S]*?<strong>([^<]+)<\/strong>/g)].map(m=>[m[2],m[1]]));
   const healthy=actionPage('storage',{counts:{memories:111},features:{'system-health':{owner:owner(),services:{core:'ready',search:'ready'}},'system-version':{schema_version:12,node:'v24.19.0'},

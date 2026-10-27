@@ -126,12 +126,12 @@ test('TUNNEL-02: tunnels can be added and removed; the main one cannot be remove
   assert.ok(f.s.config.history(f.user).some(h => h.key === `tunnel.${id}.name` && h.new === '家里 NAS'));
 });
 
-async function runApplier(f, {connects}) {
+async function runApplier(f, {connects = () => false, manager = {}} = {}) {
   const metrics = http.createServer((req, res) => { res.writeHead(connects() ? 200 : 503, {'content-type': 'application/json'}); res.end(JSON.stringify({readyConnections: connects() ? 2 : 0})); });
   await new Promise(resolve => metrics.listen(0, '127.0.0.1', resolve));
   const log = path.join(f.dir, 'systemctl.log'), fake = path.join(f.dir, 'systemctl');
   fs.rmSync(log, {force: true});
-  fs.writeFileSync(fake, `#!/bin/sh\necho "$@" >> ${log}\n`, {mode: 0o700});
+  fs.writeFileSync(fake, `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2), manager=${JSON.stringify(manager)};\nfs.appendFileSync(${JSON.stringify(log)},args.join(' ')+'\\n');\nif(args[0]==='disable')process.exit(manager.disableCode||0);\nif(args[0]==='show'){process.stdout.write(manager.showOutput||'');process.exit(manager.showCode||0);}\n`, {mode: 0o700});
   const child = spawn(process.execPath, [APPLIER], {env: {...process.env, MNEMURON_CONSOLE_KEY_FILE: f.keyFile, MNEMURON_TUNNEL_DIR: path.join(f.dir, 'tunnel'),
     MNEMURON_TUNNEL_CREDENTIAL: path.join(f.dir, 'credential'), MNEMURON_TUNNEL_ETC: path.join(f.dir, 'tunnels'), MNEMURON_SYSTEMCTL: fake, MNEMURON_TUNNEL_METRICS_URL: `http://127.0.0.1:${metrics.address().port}`,
     MNEMURON_TUNNEL_WAIT_SECONDS: '1', MNEMURON_TUNNEL_POLL_MS: '100'}});
@@ -194,4 +194,56 @@ test('TUNNEL-04: the token cloudflared runs with is discovered and shown, howeve
   later.tunnels.main.at = new Date(Date.now() + 1000).toISOString();
   fs.writeFileSync(f.s.tunnel.discoveredFile(), JSON.stringify(later));
   assert.equal(f.s.tunnel.summary().tunnel_id, '99999999-2222-3333-4444-555555555555');
+});
+
+async function removalFixture(t) {
+  const f = setup(t), {tunnel: {id}} = await f.act('tunnel.add', {name: 'Synthetic removal', token: token()});
+  fs.mkdirSync(path.join(f.dir, 'tunnels'), {recursive: true});
+  fs.writeFileSync(path.join(f.dir, 'tunnels', `${id}.token`), token() + '\n', {mode: 0o600});
+  fs.writeFileSync(path.join(f.dir, 'tunnels', `${id}.env`), 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47840\n', {mode: 0o600});
+  await f.act('tunnel.remove', {id});
+  return {...f, id};
+}
+
+test('TUNNEL-06: a failed stop preserves credentials and the failed removal row until an explicit retry succeeds', async t => {
+  const f = await removalFixture(t), id = f.id;
+  const failed = await runApplier(f, {manager: {disableCode: 1, showOutput: 'LoadState=loaded\nActiveState=active\nUnitFileState=disabled\n'}});
+  assert.deepEqual([failed.code, failed.status[id].state, failed.status[id].error], [1, 'failed', 'TUNNEL_STOP_FAILED']);
+  assert.deepEqual(failed.extra(id), {token: token(), env: 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47840'});
+  const summary = f.s.tunnel.summary(id);
+  assert.deepEqual([summary.state, summary.apply_state, summary.apply_error, summary.pending], ['removing', 'failed', 'TUNNEL_STOP_FAILED', false]);
+  assert.ok(f.s.tunnel.row(id).token_seal, 'sealed credential stays available for recovery');
+  const same = await runApplier(f);
+  assert.deepEqual(same.calls, [], 'a failed revision does not silently retry');
+  assert.equal(same.status[id].state, 'failed');
+  await f.act('tunnel.remove', {id});
+  assert.equal(f.s.tunnel.summary(id).pending, true);
+  const retried = await runApplier(f);
+  assert.deepEqual([retried.code, retried.status[id].state, retried.extra(id)], [0, 'removed', {token: null, env: null}]);
+  assert.deepEqual(f.s.tunnel.list().map(row => row.id), ['main']);
+});
+
+test('TUNNEL-07: only a confirmed inactive and absent or persistently disabled instance permits failed-stop cleanup', async t => {
+  const cases = [
+    ['absent', {disableCode: 1, showOutput: 'LoadState=not-found\nActiveState=inactive\nUnitFileState=\n'}, true],
+    ['disabled', {disableCode: 1, showOutput: 'LoadState=loaded\nActiveState=inactive\nUnitFileState=disabled\n'}, true],
+    ['masked', {disableCode: 1, showOutput: 'LoadState=masked\nActiveState=inactive\nUnitFileState=masked\n'}, true],
+    ['still enabled', {disableCode: 1, showOutput: 'LoadState=loaded\nActiveState=inactive\nUnitFileState=enabled\n'}, false],
+    ['unknown state', {disableCode: 1, showOutput: 'LoadState=not-found\n'}, false],
+    ['manager unavailable', {disableCode: 1, showCode: 1, showOutput: 'LoadState=not-found\nActiveState=inactive\n'}, false],
+  ];
+  for (const [name, manager, removed] of cases) await t.test(name, async t => {
+    const f = await removalFixture(t), result = await runApplier(f, {manager});
+    assert.deepEqual([result.code, result.status[f.id].state], removed ? [0, 'removed'] : [1, 'failed']);
+    assert.equal(result.extra(f.id).token, removed ? null : token());
+    assert.equal(f.s.tunnel.list().some(row => row.id === f.id), !removed);
+  });
+});
+
+test('TUNNEL-08: a new disconnected instance also retains its recovery files when rollback cannot stop it', async t => {
+  const f = setup(t), {tunnel: {id}} = await f.act('tunnel.add', {name: 'Synthetic rollback', token: token()});
+  const result = await runApplier(f, {manager: {disableCode: 1, showOutput: 'LoadState=loaded\nActiveState=active\nUnitFileState=disabled\n'}});
+  assert.deepEqual([result.code, result.status[id].state, result.status[id].error], [1, 'failed', 'TUNNEL_STOP_FAILED']);
+  assert.deepEqual(result.extra(id), {token: token(), env: 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47840'});
+  assert.equal(f.s.tunnel.summary(id).apply_state, 'failed');
 });

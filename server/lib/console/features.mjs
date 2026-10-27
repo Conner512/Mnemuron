@@ -5,6 +5,10 @@ import {ValidationError,ConflictError,NotFoundError,AuthorizationError} from '..
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
 
 export {FEATURE_VIEWS};
+// An explicit Codex plugin grant, separate from ordinary memory/capture credentials.
+// Preview, confirmation and delivery still enforce their existing session/owner checks.
+const CODEX_CONTINUITY_SCOPES=['resume:read','resume:confirm','task:bootstrap:preview','task:bootstrap:confirm','project:bootstrap:preview','project:bootstrap:confirm'];
+const DEVICE_WRITE_SCOPES=['memory:read','memory:write','capture:write'];
 // Memory flow over the last 7 days, counts only: new live memories by where they came from, and audited searches and
 // reads by who made them (ChatGPT, the console, or any other agent credential: coding assistants).
 const SOURCE_GROUP=source=>source==='model_submitted'?'chatgpt':source==='console_explicit'?'console':source==='capture_derived'?'agents':/import/.test(source||'')?'import':'other';
@@ -181,12 +185,14 @@ export class ConsoleFeatures {
       return store.pruneExpired({...auth,scopes:[...auth.scopes,'admin:retention']},{batchSize:limit,recordMaintenance:false});
     }
     if(action==='devices.register'){
-      object(p,['label','agent_id','device_id','access','receipt_session']);
+      object(p,['label','agent_id','device_id','access','task_continuity','receipt_session']);
       if(p.receipt_session!==undefined&&!/^[a-f0-9]{64}$/.test(p.receipt_session))throw new ValidationError('Invalid receipt binding.');
-      const {receipt_session,...input}=p,result=service.apply(auth,'connections.create',input);result.secret_expires_in_seconds=300;
-      // Capture is opt-in and never includes administration, bootstrap or Resume scopes.
+      if(p.task_continuity!==undefined&&typeof p.task_continuity!=='boolean')throw new ValidationError('Invalid task continuity choice.');
+      if(p.task_continuity===true&&(p.agent_id!=='codex'||p.access!=='read_write'))throw new ValidationError('Task continuity requires a read-write Codex plugin credential.');
+      const {receipt_session,task_continuity,...input}=p,result=service.apply(auth,'connections.create',input);result.secret_expires_in_seconds=300;
+      // Existing clients retain the memory/capture grant. Only explicit Codex plugin setup adds continuity.
       if(p.access==='read_write'){
-        const scopes=['memory:read','memory:write','capture:write'];
+        const scopes=[...DEVICE_WRITE_SCOPES,...(task_continuity?CODEX_CONTINUITY_SCOPES:[])];
         db.prepare('UPDATE credentials SET scopes_json=? WHERE user_id=? AND credential_id=?').run(JSON.stringify(scopes),user,result.credential.credential_id);
         result.credential.scopes=scopes;
       }return result;
@@ -197,7 +203,8 @@ export class ConsoleFeatures {
       const row=db.prepare('SELECT * FROM credentials WHERE user_id=? AND credential_id=?').get(user,p.credential_id);
       if(!row)throw new NotFoundError('Credential not found.');
       const scopes=JSON.parse(row.scopes_json);
-      if(['mnemuron-console','chatgpt-web','mnemuron'].includes(row.agent_id)||scopes.some(s=>!['memory:read','memory:write','capture:write'].includes(s)))throw new ConflictError('Managed credential.','MANAGED_CONNECTION');
+      const allowed=[...DEVICE_WRITE_SCOPES,...(row.agent_id==='codex'?CODEX_CONTINUITY_SCOPES:[])];
+      if(['mnemuron-console','chatgpt-web','mnemuron'].includes(row.agent_id)||scopes.some(s=>!allowed.includes(s)))throw new ConflictError('Managed credential.','MANAGED_CONNECTION');
       if(row.revoked_at||row.expires_at&&Date.parse(row.expires_at)<=Date.now())throw new ConflictError('Credential inactive.','CONNECTION_REVOKED');
       db.prepare('UPDATE credentials SET revoked_at=? WHERE user_id=? AND credential_id=?').run(new Date().toISOString(),user,row.credential_id);
       const created=store.issueCredential({label:row.label,userId:user,deviceId:row.device_id,agentId:row.agent_id,agentInstanceId:row.agent_instance_id,scopes,expiresAt:row.expires_at});

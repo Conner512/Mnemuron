@@ -139,6 +139,16 @@ lines.on('line',async line=>{
     const work=prepareConnectionBinding(ids,op,path.join(f.directory,'keys'));if(!work)continue;applyConnectionBinding(core.store,work);writePrivate(work.binding.credential_file,work.binding.api_key);finishConnectionBinding(ids,work);
    }reply={done:true};
   }
+  // Bounded, synthetic-only inventory for the Agent table's second page and expired-token recovery.
+  if(req.command==='seed-agent-connections'){
+   if(ids.connections.list(o.account.account_id).total!==0)throw new Error('Synthetic connection seed requires an empty inventory');
+   f.app.config.identity.connection_management.max_connections=21;
+   for(let n=0;n<21;n++)ids.connections.operatorChange(o.account.account_id,'connections.create',{kind:'generic_mcp',agent:'other',label:`Synthetic recovery ${String(n).padStart(2,'0')}`,profile:'readonly'});
+   reply={count:ids.connections.list(o.account.account_id).total};
+  }
+  if(req.command==='expire-agent-connections'){
+   reply={expired:ids.db.prepare("UPDATE identity_connection_tokens SET expires=? WHERE account_id=? AND connection_id IN (SELECT connection_id FROM identity_connections WHERE account_id=? AND label LIKE 'Synthetic recovery %')").run(seconds()-1,o.account.account_id,o.account.account_id).changes};
+  }
   if(req.command==='model-list-hold'){listing.hold=new Promise(r=>{listing.release=r;});reply={held:true};}
   if(req.command==='model-list-release'){listing.release?.();listing.hold=null;reply={released:true};}
   if(req.command==='model-list-requests')reply={requests:listing.requests};

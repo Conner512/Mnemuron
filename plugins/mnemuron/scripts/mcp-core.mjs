@@ -291,7 +291,7 @@ export const TOOLS = [
   },
   {
     name: "mnemuron_remember",
-    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step. Reuse operation_id and the same payload when retrying an uncertain remote save; separate saves use separate keys. The result may list similar_memories (relation duplicate or similar): if the new memory repeats or corrects one of them, use mnemuron_supersede_memory on that memory instead of keeping both.",
+    description: "Explicitly save an important Mnemuron fact, decision, constraint, or next step. Search before saving; for an explicit correction, use mnemuron_supersede_memory instead of first saving a separate record. Reuse operation_id and the same payload when retrying an uncertain remote save; separate saves use separate keys. A successful save is already committed. similar_memories are advisory, not permission to change either record. Do not supersede a hinted memory just to remove a duplicate: supersede creates another record. If the current user explicitly requests cleanup of a confirmed redundant save, retract the newly saved memory.memory_id returned by this call, not the hinted existing ID. Preserve new information and report any failed cleanup.",
     inputSchema: {
       type: "object",
       properties: {

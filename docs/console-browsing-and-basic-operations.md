@@ -25,6 +25,16 @@ Unavailable writes are explained as policy restrictions, not simulated actions.
 - Summaries and jobs use the same bounded list pagination. Stale summaries are
   labelled and link to original memories instead of offering a failing current
   summary read. Current summary claims link to their exact source revision.
+- The Agent connections table follows the server's 20-record pages for personal
+  connectors and MCP tokens. Its current/history selector includes expired and
+  revoked records; expired MCP tokens can be rotated or revoked to free a quota
+  slot. Revoked rows have no mutation controls. Name filtering and page totals
+  apply to personal connectors and tokens; legacy grants and Agent keys are
+  listed separately in the same table. Changing a filter resets the page offset.
+- Revoking a legacy ChatGPT grant uses the authenticated console session and the
+  exact `grant_id` payload. It does not request a password; connection/key changes
+  retain their fresh-password checks. Ownership and session validation still
+  happen in the identity service.
 - Audit pages advance both owner-scoped identity and Core streams independently.
   They are not a single globally ordered timeline; each stream retains its own
   order. The UI follows `next_offset` until both streams are exhausted.

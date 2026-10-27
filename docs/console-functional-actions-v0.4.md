@@ -151,6 +151,8 @@ Lists retain bounded page sizes (accounts 500, invitation inventory 1000, most a
 
 Actual paid models, production Cloudflare/TLS, existing personal databases and a real ChatGPT login require separate operator acceptance. No development test performs those actions.
 
+Tunnel removal is complete only after the privileged applier stops and disables the added instance. If that command fails, cleanup requires a successful status read proving that the instance is inactive and its unit is absent, disabled or persistently masked. Otherwise the applier reports `TUNNEL_STOP_FAILED` and keeps the token, environment file and console record for recovery. The console shows the failed removal and allows the owner to retry it under a new revision with the same confirmation requirements. Cleanup after a new tunnel fails to connect uses the same stop check. Local tests use a fake service manager; they do not manage a real tunnel or system service.
+
 ## 6. Validation
 
 ```bash

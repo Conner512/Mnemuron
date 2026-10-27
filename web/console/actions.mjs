@@ -157,7 +157,7 @@ function readPolicyCard(o){if(!o)return '';const current=o.preferences?.read_pol
 // panel's settings: ChatGPT's read and write rules, the capture switches for agents that upload activity.
 function connectionsPage(data,caps,q,o){
   const capture=o?agentCards(data,o):'';
-  return agentsView(data,caps,o?{chatgpt:chatgptCards(data,o),'codex:plugin':capture,openclaw:capture,hermes:capture}:{})+(o?tunnelCards(data.features?.tunnel,caps):'');}
+  return agentsView(data,caps,o?{chatgpt:chatgptCards(data,o),'codex:plugin':capture,openclaw:capture,hermes:capture}:{},q)+(o?tunnelCards(data.features?.tunnel,caps):'');}
 // Public access through Cloudflare Tunnels (server tunnel/settings.mjs): one card per tunnel with its connection, token
 // fingerprint and apply state. The main tunnel cannot be removed; every change asks for the password and an authenticator code.
 const TUNNEL_STATES={pending:'等待应用',applied:'已生效',rolled_back:'未连上，已恢复原令牌',failed:'应用失败'};
@@ -166,14 +166,14 @@ const tunnelSource=by=>!by?'—':TUNNEL_SOURCE[by]||(by.startsWith('cli:')?`命�
 // One tunnel as a panel inside the public entry card: name, connection state and its service in the head; the
 // details in two columns; its actions at the foot.
 function tunnelCard(d,can){
-  const c=d.connection||{},time=v=>v?esc(new Date(v).toLocaleString('zh-CN')):'';
-  const conn=d.state==='removing'?tone('正在删除','warn'):!c.reachable?tone('读不到 cloudflared','bad'):c.ready?tone(`已连接 · ${c.connections??'—'} 条线路`,'good'):tone('未连接','bad');
+  const c=d.connection||{},time=v=>v?esc(new Date(v).toLocaleString('zh-CN')):'',removeFailed=d.state==='removing'&&d.apply_state==='failed';
+  const conn=d.state==='removing'?tone(removeFailed?'删除失败，可重试':'正在删除',removeFailed?'bad':'warn'):!c.reachable?tone('读不到 cloudflared','bad'):c.ready?tone(`已连接 · ${c.connections??'—'} 条线路`,'good'):tone('未连接','bad');
   const facts=[['连接器令牌',d.configured?`<code>${esc(d.token_fingerprint)}</code> <small class="muted">${esc(tunnelSource(d.updated_by))}</small>`:'<span class="muted">还没有读到服务器上的令牌</span>'],
     ['Tunnel ID',d.tunnel_id?`<code>${esc(d.tunnel_id)}</code>`:'—'],['账户 ID',d.account_id?`<code>${esc(d.account_id)}</code>`:'—'],
     ['路由配置',c.config_version!=null?`v${esc(c.config_version)}`:'—'],
     ['应用状态',d.apply_state?`${esc(TUNNEL_STATES[d.apply_state]||d.apply_state)}${d.apply_error?` <code>${esc(d.apply_error)}</code>`:''}${d.applied_at?` · ${time(d.applied_at)}`:''}`:'—'],
     ['最近修改',d.updated_by?`${esc(tunnelSource(d.updated_by))} · ${time(d.updated_at)}`:'—']];
-  const buttons=d.state==='removing'?[]:[can('tunnel.token')?actionButton('tunnel.token','tunnelSetToken',{id:d.id}):'',d.configured&&can('tunnel.reapply')?actionButton('tunnel.reapply','tunnelReapply',{id:d.id}):'',
+  const buttons=d.state==='removing'?(removeFailed&&!d.main&&can('tunnel.remove')?[actionButton('tunnel.remove','tunnelRemove',{id:d.id})]:[]):[can('tunnel.token')?actionButton('tunnel.token','tunnelSetToken',{id:d.id}):'',d.configured&&can('tunnel.reapply')?actionButton('tunnel.reapply','tunnelReapply',{id:d.id}):'',
     !d.main&&can('tunnel.remove')?actionButton('tunnel.remove','tunnelRemove',{id:d.id}):''].filter(Boolean);
   return `<article class="tunnel-item" data-tunnel="${esc(d.id)}"><header><div><h3>${esc(d.name)}</h3><small class="muted"><code>${esc(d.unit)}</code> · 指标端口 ${esc(d.metrics_port)}</small></div>${conn}</header>
     <dl class="tunnel-facts">${facts.map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>${buttons.length?`<div class="actions">${buttons.join('')}</div>`:''}</article>`;
@@ -569,7 +569,7 @@ export function actionPage(page,data,caps,connectionQuery={}) {
       <td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&j.last_error_code!=='RESCHEDULED'&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[j.stale_taxonomy?actionButton('jobs.retry','rescheduleWithCategories',{id:j.job_id,stale:'true'}):actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
     <div class="section-foot">${pager(data)}</div>`,{aside:refresh()})+(caps.owner_mode?runsCard(owner):'');
 
-  if(page==='connections')return caps.owner_mode?connectionsPage(data,caps,connectionQuery,owner):agentsView(data,caps,{});
+  if(page==='connections')return caps.owner_mode?connectionsPage(data,caps,connectionQuery,owner):agentsView(data,caps,{},connectionQuery);
 
   if(page==='security')return `<div class="columns">${section('accountSecurity',`<div class="identity-row"><span class="avatar" aria-hidden="true">${esc([...(data.username||'·')][0])}</span><div><strong>${esc(data.username)}</strong>${tag(t(data.mfa_verified?'passwordTotp':'pending'))}</div></div>
       ${buttons([['security.password','changePassword'],['security.totp.begin','changeTotp'],['security.recovery_codes','rotateRecovery']].filter(([a])=>can(a)).map(([a,k])=>actionButton(a,k)))}${!can('security.password')?onlyRead():''}<p class="muted">${l('securityOperationsNote')}</p><a href="/recover">${l('recover')} →</a>`)}
