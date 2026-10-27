@@ -115,7 +115,7 @@ function librarySelection(){
  const filter={...(query?{query}:{}),...(topic?{topic}:{}),...(origin?{origin}:{}),...(review?{review}:{})};
  return Object.keys(filter).length?filter:{all:true};
 }
-async function load() {
+async function load({retainOnError=false}={}) {
  const sequence=++requestSequence;
  if(page==='resume'||page==='system'&&!capabilities.operator){currentData={};render(currentData);return;}
  const extras=async()=>Object.fromEntries(await Promise.all((completedViews[page]||[]).map(async view=>{try{return [view,await api(view,{})];}catch{return [view,null];}})));
@@ -150,6 +150,9 @@ async function load() {
    if(page==='memories')facets=facetData;
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);
  }catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')return;
+   // Agent issuance has already rendered its one-time credential. Let its caller
+   // report a failed refresh without replacing that result with a page error.
+   if(retainOnError&&currentData)throw e;
    root.innerHTML=`${pageHeading(t,{title:page})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
 }
 
@@ -335,7 +338,7 @@ featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
   reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
-mountAgents({api,mutate,reload:load});
+mountAgents({api,mutate,reload:()=>load({retainOnError:true})});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}

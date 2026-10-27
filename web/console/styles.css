@@ -524,6 +524,7 @@ body.pane-open .workspace{margin-right:var(--pane)}
 /* Six-box code: one transparent input covers six decorative boxes; the active box shows focus and caret. */
 .otp-shell{outline:none;position:relative;display:block;width:100%;height:52px;overflow:hidden;overflow:clip;overflow-clip-margin:3px}
 .otp-slots{position:relative;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:16px;height:100%;pointer-events:none}
+@media(max-width:360px){.otp-slots{gap:8px}}
 /* Keep equal box pitch for native pointer selection; the centre dash groups the code 3–3. */
 .otp-slots::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:1px;background:var(--muted);transform:translate(-50%,-50%)}
 /* Box borders use the same --muted boundary as every other field (at least 3:1 on --field). */

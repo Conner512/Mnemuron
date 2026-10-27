@@ -347,8 +347,8 @@ ins{color:var(--good);background:color-mix(in srgb,var(--good) 16%,transparent);
 .status-tile{height:100%}
 @media(max-width:1100px){.overview-hero>.live-stream{max-height:none;min-height:0}}
 /* Library pager: previous / page n of m (typed to jump) / next. */
-.pager{flex-wrap:wrap;align-items:center;gap:8px}
-.page-jump{display:flex;align-items:center;gap:8px;margin:0;font-size:13px;color:var(--muted)}
+.pager{flex-wrap:wrap;align-items:center;gap:8px;min-width:0;max-width:100%}
+.page-jump{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;min-width:0;max-width:100%;font-size:13px;color:var(--muted)}
 .page-jump label{margin:0;font-weight:400;font-size:13px;color:var(--muted)}
 .page-jump input{width:72px;min-height:32px;height:32px;padding:4px 8px;text-align:center;font-family:var(--font-mono);font-size:13px}
 .page-jump button{min-height:32px}
@@ -473,7 +473,7 @@ dialog::backdrop,.audit-date-dialog::backdrop{background:#14171D59;backdrop-filt
 .memory-filters{display:flex;flex-wrap:wrap;align-items:end;gap:10px;margin-bottom:16px}
 .memory-filters .query-field{flex:1 1 320px;min-width:0}
 .memory-filters>label:not(.query-field){flex:0 1 170px;min-width:130px}
-.memory-filters .filter-actions{flex:none}
+.memory-filters .filter-actions{flex:0 1 auto;flex-wrap:wrap;min-width:0;max-width:100%}
 .memory-library{padding:0}
 .memory-table th{font:500 10.5px var(--font-mono);letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
 .memory-table tbody tr{border-bottom:1px solid var(--border)}
@@ -503,7 +503,7 @@ dialog::backdrop,.audit-date-dialog::backdrop{background:#14171D59;backdrop-filt
 /* Audit: one toolbar row (tabs left, filter toggle right). The toggle never moves; its form is the next element and,
    while the toggle is open, fills a full row below as an outlined panel whose fields wrap to the width. */
 .audit-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin:8px 0 20px}
-.audit-sources{display:inline-flex;flex-wrap:nowrap;gap:2px;margin:0;max-width:100%}
+.audit-sources{display:inline-flex;flex-wrap:wrap;gap:2px;margin:0;max-width:100%}
 .audit-sources button{flex:none;white-space:nowrap;padding:0 16px;min-height:34px}
 .audit-toolbar>.audit-filter-panel{margin:0 0 0 auto;padding:0;border:0}
 .audit-toolbar>.audit-filter-panel>summary{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border:1.5px solid var(--ink);border-radius:999px;background:var(--surface);font-weight:600}
@@ -575,6 +575,7 @@ button.select-trigger[aria-expanded="true"]{box-shadow:var(--hard-sm);background
 .summary-row:last-child{border-bottom:0}
 .summary-row>.tag{margin-top:14px}
 .summary-main{min-width:0}
+.summary-main>.memory-link{width:100%}
 .summary-title{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font:700 15px/1.45 var(--font-display)}
 .summary-title .category-pill{border:1.5px solid var(--ink);border-radius:5px;background:var(--node);font:600 11.5px/20px var(--font-mono);padding:0 8px}
 .summary-title .summary-window{font-weight:600}

@@ -63,7 +63,7 @@ try{
   await language.click();await page.locator('.topbar-tools .select-trigger[aria-expanded="true"]').waitFor();check('header',label+' language opens with pointer',await page.locator('.select-popup:popover-open').count()===1);await page.keyboard.press('Escape');
   await page.locator('h1').click();const beforeShortcut=page.url();await page.keyboard.press('/');await page.keyboard.press('Control+k');check('header',label+' no cross-page search shortcut',page.url()===beforeShortcut);
   if(locale==='zh-CN')await page.locator('.topbar').screenshot({path:path.join(evidence,`header-${width}.png`)});
-  check('audit',label+' four tabs',await page.locator('[data-audit-group]').count()===4);
+  check('audit',label+' activity and configuration tabs',JSON.stringify(await page.locator('[data-audit-group]').evaluateAll(nodes=>nodes.map(n=>n.dataset.auditGroup)))===JSON.stringify(['system','memory','connections','security','config']));
   check('audit',label+' collapsed filters and IDs',!await page.locator('#audit-filter').isVisible()&&!await page.locator('.audit-id').first().isVisible());
   check('audit',label+' current title visible',await page.locator('.audit-event-title').allTextContents().then(a=>a.some(x=>x.includes('部署前备份与回滚准备'))));
   check('audit',label+' no horizontal overflow',await noOverflow(page));
@@ -78,6 +78,10 @@ try{
    const next=page.locator('[data-audit-next]');check('audit',label+' '+group+' pagination',await next.count()===1);
    await next.click();await page.locator('[data-audit-prev]').waitFor();await page.locator('[data-audit-prev]').click();
   }
+  // This fixture uses multiple accounts, without a configured single owner; the separate configuration view is denied.
+  const [configResponse]=await Promise.all([page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/config'),page.locator('[data-audit-group=config]').click()]);
+  await page.locator('#console-root > [role=alert]').waitFor();check('audit',label+' configuration history preserves its single-owner boundary',configResponse.status()===403&&await page.locator('[data-config-history]').count()===0);
+  await page.goto(cfg.url+'/app/audit?group=memory');await page.locator('.audit-timeline li').first().waitFor();
   await page.locator('.audit-filter-panel>summary').click();await page.locator('#audit-from').waitFor();
   await shot(page,`audit-filters-${width}-${locale}`,false);
   if(width===1440){const bottoms=await page.locator('#audit-filter').evaluate(e=>[...e.querySelectorAll(':scope>label')].map(l=>l.lastElementChild.getBoundingClientRect().bottom).concat(e.querySelector(':scope>button').getBoundingClientRect().bottom));check('audit',label+' controls aligned',Math.max(...bottoms)-Math.min(...bottoms)<=1);}

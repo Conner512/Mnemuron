@@ -17,7 +17,13 @@ def line(timeout=30):
    if r.strip().startswith('{'): return json.loads(r)
  raise RuntimeError('Fixture timeout')
 def cmd(command,**kwargs):
- proc.stdin.write(json.dumps(dict(command=command,**kwargs))+'\n');proc.stdin.flush();return line()
+ proc.stdin.write(json.dumps(dict(command=command,**kwargs))+'\n');proc.stdin.flush();result=line()
+ if 'fixture_error' in result:raise RuntimeError('Fixture '+command+' failed: '+json.dumps(result))
+ return result
+def run_jobs(job_ids):
+ result=cmd('tick',job_ids=job_ids);jobs=result.get('jobs',[])
+ if not result.get('done') or len(jobs)!=len(job_ids) or {j['job_id'] for j in jobs}!=set(job_ids) or any(j['state']!='succeeded' for j in jobs):
+  raise AssertionError('Requested jobs did not all succeed: '+json.dumps(result))
 def check(name,condition=True):
  if not condition:raise AssertionError(name)
  checks.append(name)
@@ -66,13 +72,13 @@ try:
   page.locator('[name=query]').fill('C9300');pick('[name=search_mode]','hybrid');page.locator('#search-form button[type=submit]').click();page.wait_for_timeout(200);check('Search form supports real retrieval-mode selection',page.locator('[name=search_mode]').input_value()=='hybrid')
   goto('models');begin('models.save');page.locator('[name=enabled]').check();page.locator('[name=base_url]').fill(cfg['model_url']);page.locator('[name=model]').fill('synthetic-organizer');page.locator('[name=egress_approved]').check();r=submit();check('Personal model settings persist through real API',r['model']['config']['model']=='synthetic-organizer');close()
   begin('models.test');r=submit();check('UI model test executes real loopback HTTP, no personal input',r['real_memory_sent']==False and r['status']=='verified');close()
-  goto('jobs');begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Classification is durably queued',len(r['jobs'])>=1);close();cmd('tick',job_ids=r['jobs']);page.locator('[data-retry]').click();expect(page.locator('[data-state="succeeded"]').first).to_be_visible();check('Worker publishes actual job results')
-  begin('jobs.schedule');pick('[name=type]','summary');page.locator('[name=include_open]').check();r=submit();check('Summary scheduling returns actual jobs',len(r['jobs'])>=1);close();cmd('tick',job_ids=r['jobs']);goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
+  goto('jobs');begin('jobs.schedule');expect(page.locator('[name=type]')).to_have_value('summary');pick('[name=periods]','daily_weekly');page.locator('[name=include_open]').check();r=submit();check('Daily and weekly summaries are durably queued',len(r['jobs'])>=2);summary_jobs=r['jobs'];close();run_jobs(summary_jobs);page.locator('[data-retry]').click();expect(page.locator('[data-state="succeeded"]').first).to_be_visible();check('Worker publishes every requested summary job')
+  begin('jobs.schedule');page.locator('[name=include_open]').check();r=submit();check('Repeated summary scheduling reuses the completed snapshot',set(r['jobs'])==set(summary_jobs));close();run_jobs(r['jobs']);goto('summaries');check('Derived summaries show real worker result',page.locator('[data-summary]').count()>0)
   page.locator('[data-summary]').first.click();page.locator('#memory-content .body-content').first.wait_for();check('Summary drawer loads source-grounded quotes',len(page.locator('#memory-content .body-content').first.inner_text())>0);page.locator('#memory-dialog .close-button').click()
   # Connection-specific lifecycle and secret cleanup run in test-console-connections.mjs.
-  goto('connections');page.locator('[data-connection-new]').first.click();page.locator('[data-connection-kind="generic_mcp"]').click()
-  check('Logical connection wizard uses resource tokens, not Core-key forms',page.locator('#connection-dialog [name=ttl_days]').count()==1 and page.locator('#connection-dialog [name=agent_id]').count()==0)
-  page.locator('#connection-dialog [data-connection-close]').first.click()
+  goto('connections');page.locator('[data-agent-pick="other"]').click();page.locator('[data-agent-generate="other:mcp"]').click();agent_dialog=page.locator('.agent-dialog');expect(agent_dialog).to_be_visible()
+  check('MCP setup uses access profiles without Core-key identity fields',agent_dialog.locator('[name=access]').count()==1 and agent_dialog.locator('[name=agent_id],[name=device]').count()==0)
+  agent_dialog.locator('[data-close]').last.click();expect(agent_dialog).not_to_be_visible()
   goto('storage');begin('storage.export')
   with page.expect_download() as download:
    r=submit()
