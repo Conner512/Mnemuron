@@ -48,6 +48,11 @@ export function initializeConnections(db){db.exec(`
 // Agents the console sets up; a connection names one of them. ChatGPT uses its OAuth connector, the others an MCP token.
 export const CONNECTION_AGENTS=Object.freeze({chatgpt_oauth:['chatgpt'],generic_mcp:['claude-code','codex','cursor','muse','other']});
 const agentOf=r=>r.agent||(r.kind==='chatgpt_oauth'?'chatgpt':'other');
+// Use the same live grant evidence for row permissions, detail grants and account totals.
+// A past grant is not usable after account security changes or a durable revocation.
+const liveGrant=(client,scope)=>`g.model='Grant' AND g.expires>:now AND NOT EXISTS(SELECT 1 FROM oauth_revoked_grants revoked WHERE revoked.id=g.id OR revoked.id=g.grant_id)
+ AND json_extract(g.payload,'$.accountId')=:subject AND json_extract(g.payload,'$.securityVersion')=:security AND json_extract(g.payload,'$.clientId')=${client}
+ AND EXISTS(SELECT 1 FROM json_each(g.payload,'$.resources') s WHERE s.key=:resource AND instr(' '||s.value||' ',' memory:read ')>0 AND instr(' '||s.value||' ',' ${scope} ')>0)`;
 
 export class ConnectionRegistry {
  constructor(ids,config={}){this.ids=ids;this.db=ids.db;this.config=config;initializeConnections(this.db);ids.store.connections=this;}
@@ -60,10 +65,17 @@ export class ConnectionRegistry {
  owner(account){const a=this.ids.byId(account);if(!a||!this.ids.eligible(a.subject))fail('SESSION_REQUIRED',401);return a;}
  row(account,id){const r=this.db.prepare('SELECT * FROM identity_connections WHERE account_id=? AND connection_id=?').get(account,id);if(!r)fail('CONNECTION_NOT_FOUND',404);return r;}
  current(r){const a=r&&this.ids.byId(r.account_id);return !!a&&this.ids.eligible(a.subject)&&r.state==='ready'&&r.binding_version===r.version&&r.binding_account_version===a.security_version&&!!r.binding_json;}
+ grantParams(r){const owner=this.ids.byId(r.account_id);return {now:seconds(),subject:owner.subject,security:owner.security_version,client:r.client_id,resource:this.config.resource};}
  activeGrants(r){if(r.kind!=='chatgpt_oauth'||!this.current(r))return [];
-   return this.db.prepare("SELECT g.id grant_id,g.expires FROM oauth_records g WHERE g.model='Grant' AND g.expires>? AND json_extract(g.payload,'$.accountId')=? AND json_extract(g.payload,'$.clientId')=? AND EXISTS(SELECT 1 FROM json_each(g.payload,'$.resources') s WHERE s.key=? AND instr(' '||s.value||' ',' memory:read ')>0) ORDER BY g.expires DESC LIMIT 50").all(seconds(),this.ids.byId(r.account_id).subject,r.client_id,this.config.resource);}
+   return this.db.prepare(`SELECT g.id grant_id,g.expires FROM oauth_records g WHERE ${liveGrant(':client','memory:read')} ORDER BY g.expires DESC LIMIT 50`).all(this.grantParams(r));}
+ authorizedScopes(r){
+   if(!this.current(r))return [];
+   if(r.kind==='generic_mcp')return this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND account_id=? AND version=? AND security_version=? AND revoked IS NULL AND expires>?').get(r.connection_id,r.account_id,r.version,this.ids.byId(r.account_id).security_version,seconds())?this.scopes(r):[];
+   const grants=this.db.prepare(`SELECT EXISTS(SELECT 1 FROM oauth_records g WHERE ${liveGrant(':client','memory:read')}) readable,EXISTS(SELECT 1 FROM oauth_records g WHERE ${liveGrant(':client','memory:write')}) writable`).get(this.grantParams(r));
+   return grants.readable?['memory:read',...(r.profile==='memory_readwrite'&&grants.writable?['memory:write']:[])]:[];
+ }
  public(r){const expired=r.kind==='generic_mcp'&&!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=?').get(r.connection_id,r.version)&&!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL AND expires>?').get(r.connection_id,r.version,seconds());
-   return {connection_id:r.connection_id,kind:r.kind,agent:agentOf(r),label:r.label,description:r.description,profile:r.profile,
+   return {connection_id:r.connection_id,kind:r.kind,agent:agentOf(r),label:r.label,description:r.description,profile:r.profile,authorized_scopes:this.authorizedScopes(r),
      configuration_state:r.state==='ready'&&!this.current(r)?'draft':r.state,provisioning:r.state==='ready'&&!this.current(r),health:expired?'unknown':r.health,expired,
      client_id:r.kind==='chatgpt_oauth'?r.client_id:null,...(r.kind==='chatgpt_oauth'?{active_grant_count:this.activeGrants(r).length}:{}),redirect_uri:r.callback,version:r.version,created_at:r.created,updated_at:r.updated,
      has_secret:r.state!=='revoked'&&(r.kind==='chatgpt_oauth'?!!r.secret_cipher:!!this.db.prepare('SELECT 1 FROM identity_connection_tokens WHERE connection_id=? AND version=? AND revoked IS NULL').get(r.connection_id,r.version)),
@@ -90,7 +102,7 @@ export class ConnectionRegistry {
    const current=`c.state NOT IN ('revoked','disabled') AND NOT ${expired}`;
    const counts=this.db.prepare(`SELECT COUNT(*) total,SUM(${current}) active,SUM(${current} AND c.profile='readonly') readonly,SUM(${current} AND c.profile='memory_readwrite') memory_readwrite,SUM(NOT ${expired} AND (c.state='draft' OR (c.state='ready' AND ${unbound}))) pending FROM identity_connections c WHERE c.account_id=?`).get(this.ids.byId(account).security_version,account);
    // Inventory totals describe saved configurations; authorization totals must use live, owner-bound evidence.
-   const grant=scope=>`EXISTS(SELECT 1 FROM oauth_records g,json_each(g.payload,'$.resources') s WHERE g.model='Grant' AND g.expires>:now AND json_extract(g.payload,'$.accountId')=:subject AND json_extract(g.payload,'$.clientId')=c.client_id AND s.key=:resource AND instr(' '||s.value||' ',' memory:read ')>0 AND instr(' '||s.value||' ',' ${scope} ')>0)`;
+   const grant=scope=>`EXISTS(SELECT 1 FROM oauth_records g WHERE ${liveGrant('c.client_id',scope)})`;
    const usable=`c.state='ready' AND c.binding_json IS NOT NULL AND c.binding_version=c.version AND c.binding_account_version=:security AND ((c.kind='chatgpt_oauth' AND ${grant('memory:read')}) OR (c.kind='generic_mcp' AND EXISTS(SELECT 1 FROM identity_connection_tokens t WHERE t.connection_id=c.connection_id AND t.account_id=c.account_id AND t.version=c.version AND t.security_version=:security AND t.revoked IS NULL AND t.expires>:now)))`;
    const authorization=this.db.prepare(`WITH inventory AS (SELECT c.*,COALESCE((${usable}),0) usable,(c.profile='memory_readwrite' AND (c.kind='generic_mcp' OR ${grant('memory:write')})) write_granted,(${expired}) expired FROM identity_connections c WHERE c.account_id=:account)
      SELECT SUM(usable) usable,SUM(usable AND NOT write_granted) readonly,SUM(usable AND write_granted) memory_readwrite,SUM(state IN ('draft','ready') AND NOT expired AND NOT usable) pending,SUM(usable AND health='verified') verified FROM inventory`).get({account,subject:owner.subject,security:owner.security_version,now:seconds(),resource:this.config.resource});

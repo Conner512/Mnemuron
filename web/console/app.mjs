@@ -335,7 +335,7 @@ featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
   reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
-mountAgents({mutate,reload:load});
+mountAgents({api,mutate,reload:load});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}

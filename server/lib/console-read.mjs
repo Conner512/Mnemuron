@@ -7,6 +7,7 @@ import {auditPage} from './console/audit.mjs';
 import {splitLeadingPath,memoryPresentation} from '../../shared/memory-display.mjs';
 import {projectProfile} from './memory/profile.mjs';
 import {CONFIG_KEYS} from './config/center.mjs';
+import {MEMORY_SEARCH_CONTEXT} from './memory/search-context.mjs';
 export const isConsoleReader=auth=>auth.agent_id==='mnemuron-console';
 function pagination(params,maximum=50){
   const offset=Number(params.offset??0),limit=Number(params.limit??25);
@@ -133,16 +134,18 @@ export async function consoleRead(store,auth,view,params={}) {
       const f=organizer.filter(user,params);
       if(f.query&&params.mode!=='lexical'){
         const statuses=f.status?[f.status]:['active','superseded','retracted'];
-        const found=await store.searchMemories(auth,{query:f.query,limit:20,...(params.mode?{mode:params.mode}:{}),statuses,personal_model_only:true});
+        const found=await store.searchMemories(auth,{query:f.query,limit:20,...(params.mode?{mode:params.mode}:{}),statuses,personal_model_only:true,[MEMORY_SEARCH_CONTEXT]:{filter:f}});
         if(found.retrieval.effective_mode==='lexical'){
           const {rows,truncated,aliases,plan,total}=organizer.rows(auth,f,{limit:limit+1,offset,count:true});
           return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,
             retrieval:{...found.retrieval,candidate_limit:500,aliases,alias_expanded:plan?.expanded,alias_ambiguous:plan?.ambiguous,alias_source_truncated:plan?.source_truncated}};
         }
-        // Keyword matches follow the ranked text and semantic matches, so a search also finds memories by their keywords.
-        const ranked=found.results.map(r=>r.memory_id),byConcept=organizer.conceptMatches(user,f.query).filter(x=>!ranked.includes(x));
-        const {query,...rest}=f,{rows,total}=organizer.rows(auth,rest,{ranked:[...ranked,...byConcept],limit:limit+1,offset,count:true});
-        return {read_only:true,results:rows.slice(0,limit).map(r=>snippet({...r,ranking:found.results.find(x=>x.memory_id===r.memory_id)?.ranking})),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated:found.truncated===true,retrieval:{...found.retrieval,window_limited:true,candidate_limit:20}};
+        // Body, topic and keywords already share the same relevance checks. Keep the ranked,
+        // pre-filtered window; do not append unvalidated keyword substring matches.
+        const ranked=found.results.map(r=>r.memory_id);
+        const {query,...rest}=f,{rows,total}=organizer.rows(auth,rest,{ranked,limit:limit+1,offset,count:true});
+        const truncated=found.truncated===true||found.retrieval.result_truncated===true||found.retrieval.candidate_truncated===true;
+        return {read_only:true,results:rows.slice(0,limit).map(r=>snippet({...r,ranking:found.results.find(x=>x.memory_id===r.memory_id)?.ranking})),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,retrieval:{...found.retrieval,window_limited:true,candidate_limit:20}};
       }
       // Filters apply inside the owner-scoped (and, for a search, bounded) candidate set before paging.
       // total: matching records across all pages, so the library can show the page count and jump to a page.

@@ -153,6 +153,16 @@ Actual paid models, production Cloudflare/TLS, existing personal databases and a
 
 Tunnel removal is complete only after the privileged applier stops and disables the added instance. If that command fails, cleanup requires a successful status read proving that the instance is inactive and its unit is absent, disabled or persistently masked. Otherwise the applier reports `TUNNEL_STOP_FAILED` and keeps the token, environment file and console record for recovery. The console shows the failed removal and allows the owner to retry it under a new revision with the same confirmation requirements. Cleanup after a new tunnel fails to connect uses the same stop check. Local tests use a fake service manager; they do not manage a real tunnel or system service.
 
+Token installation uses the same recovery path when the start/restart command
+fails or times out and when readiness does not arrive. Existing credential and
+environment files are restored before attempting to restart the previous service.
+An unconfirmed restart or readiness check is reported as failed, even when the
+old credential bytes were restored. Reapplying an unchanged token still requires
+readiness. Discovery can update the installed-token fingerprint after rollback,
+but it preserves the failed/rolled-back outcome until a new explicit revision
+succeeds. A first installation of the main tunnel has no previous token to restore;
+that failure is reported without treating the main service as a removable instance.
+
 ## 6. Validation
 
 ```bash

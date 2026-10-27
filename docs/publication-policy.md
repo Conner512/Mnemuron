@@ -31,6 +31,15 @@ mapping in the local plugin loader is allowlisted as code, not as a credential.
 It does not prove that every possible secret or personal fact is absent. Review
 the complete diff and any new documents manually as well.
 
+`scripts/publication-reviewed.mjs` contains the shared content reviews. The two
+self-hosted OFL fonts are accepted only at their exact paths and SHA-256 digests;
+their license remains in `web/console/FONTS-LICENSE.txt`. Four already-public test
+blobs from `58b7aa1` / `03c0d64` have exact path/hash reviews for their synthetic
+IP/UUID findings only. Those fixtures now use documentation addresses and the
+standard synthetic UUID prefix. No test directory, changed file, credential rule
+or private artifact path is exempted. Publication coverage reports the number of
+reviewed binary and historical synthetic files so these decisions remain visible.
+
 Removing content from the latest tree does not remove it from older commits.
 History rewriting is a separate, disruptive operation requiring repository-owner
 authorization and coordination with other clones. Local backups and private refs
@@ -74,8 +83,12 @@ History mode refuses shallow clones.
 It does not fetch remote objects or inspect unreachable objects and reflogs.
 
 Known private paths, links (including symlink parents), submodules, oversized
-files, binary content and LFS pointers block this scan instead of being silently
-skipped. A snapshot is limited to 50,000 entries and 256 MiB total, with a 4 MiB
+files, unreviewed binary content and LFS pointers block this scan instead of being
+silently skipped. The same two path/hash-pinned fonts are included in the snapshot
+digest and reported as `reviewed_binary_files` / `reviewed_binary_bytes`; they are
+not presented as text inspected by Gitleaks. `scanned_text_entries` counts the
+actual text inputs, including history metadata. Renamed or altered font bytes
+block all scan scopes. A snapshot is limited to 50,000 entries and 256 MiB total, with a 4 MiB
 per-file limit. Temporary directories/files use 0700/0600 and are removed after
 the run; forced termination may require private temporary-directory cleanup.
 Repository ignore fingerprints and inline Gitleaks allow comments cannot suppress

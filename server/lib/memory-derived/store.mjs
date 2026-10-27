@@ -110,10 +110,14 @@ export class DerivedMemory {
   }
   publishSummary(job,items,claims,now){
     for(const item of items){const source=this.validateItem(item);if(!source || !this.inSummaryGroup(source,job.metadata.taxonomy.version,job.metadata.category))fail('STALE_INPUT');}
-    const {category,window}=job.metadata,revision=this.db.prepare('SELECT COALESCE(MAX(revision),0)+1 AS n FROM memory_summaries WHERE group_key=?').get(job.group_key).n;
+    // An owner grant covers only its frozen manifest, not every record in the day. Keep its publication alongside
+    // earlier batches instead of replacing them or sending earlier sources outside the new grant. Period-wide jobs
+    // retain their original grouping. Deriving this at publication also protects jobs queued before this release.
+    const groupKey=job.metadata.owner_run?digest([job.group_key,'owner-summary-batch-v1',job.metadata.owner_run]):job.group_key;
+    const {category,window}=job.metadata,revision=this.db.prepare('SELECT COALESCE(MAX(revision),0)+1 AS n FROM memory_summaries WHERE group_key=?').get(groupKey).n;
     const summaryId=digest(['summary',job.job_id]);
-    this.db.prepare("UPDATE memory_summaries SET status='superseded' WHERE group_key=? AND status='current'").run(job.group_key);
-    this.db.prepare('INSERT INTO memory_summaries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(summaryId,job.group_key,revision,job.user_id,job.scope_key,category,JSON.stringify(window),
+    this.db.prepare("UPDATE memory_summaries SET status='superseded' WHERE group_key=? AND status='current'").run(groupKey);
+    this.db.prepare('INSERT INTO memory_summaries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(summaryId,groupKey,revision,job.user_id,job.scope_key,category,JSON.stringify(window),
       'current',job.profile,job.job_id,items.length,items.length-new Set(claims.map(c=>c.memory_id)).size,new Date(now).toISOString());
     for(const [i,claim] of claims.entries())this.db.prepare('INSERT INTO memory_summary_claims VALUES (?,?,?)').run(summaryId,i,JSON.stringify(claim));
     for(const item of items)this.db.prepare('INSERT INTO memory_summary_dependencies VALUES (?,?,?,?,?,?)').run(summaryId,item.user_id,item.memory_id,item.revision,item.state_hash,item.scope_key);

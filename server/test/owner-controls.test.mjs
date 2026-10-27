@@ -16,6 +16,47 @@ function setup(t){const f=fixture(t),{s}=f,user=f.auth.user_id,c=s.issueCredenti
  return {...f,auth,user,service,owner:service.owner,act,calls:()=>calls};}
 const enable=f=>f.act('features.save',{expected_revision:f.owner.policy().revision,flags:{processing:true,summary:true}});
 const preview=f=>f.act('processing.preview',{kind:'summary',limit:2,budget:1});
+const ruleDue=f=>{const p=f.owner.policy();f.s.db.prepare('UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?').run(JSON.stringify({...p.schedule,next_at:0}),f.user);};
+
+test('AUTO-CURSORS: summary and keyword fill advance separately when their candidate sets differ',async t=>{
+ const f=setup(t);await f.act('features.save',{expected_revision:0,flags:{processing:true,summary:true,traits:true}});
+ await f.act('schedule.save',{expected_revision:f.owner.policy().revision,enabled:true,kinds:['summary','traits'],interval_minutes:5,max_items:2,budget:2});
+ const memories=[];for(let n=1;n<=4;n++)memories.push(f.save('Synthetic channel cursor '+n,n<=2?{kind:'fact',concepts:['complete'],strength:5}:{}));
+ ruleDue(f);await f.service.tick();
+ assert.deepEqual(f.owner.policy().schedule.after_by_kind,{summary:2,traits:4});assert.equal(f.owner.policy().schedule.after_rowid,2);
+ await f.service.tick();ruleDue(f);await f.service.tick();await f.service.tick();
+ const ids=f.s.db.prepare('SELECT DISTINCT memory_id FROM memory_summary_dependencies').all().map(r=>r.memory_id).sort();
+ assert.deepEqual(ids,memories.map(m=>m.memory_id).sort());assert.deepEqual(f.owner.policy().schedule.after_by_kind,{summary:4,traits:4});
+ ruleDue(f);await f.service.tick();assert.equal(f.owner.policy().schedule.checks.summary.found,0);
+});
+
+test('AUTO-CURSORS: legacy progress is preserved and a newly enabled channel does not send older records',async t=>{
+ const f=setup(t),old=f.save('Synthetic before any processing permission');await enable(f);
+ // Simulate a persisted schedule from before per-channel cursors were introduced.
+ const legacy=f.owner.policy().schedule;delete legacy.after_by_kind;
+ f.s.db.prepare('UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?').run(JSON.stringify(legacy),f.user);
+ const beforeTraits=f.save('Synthetic before keyword-fill permission');
+ await f.act('features.save',{expected_revision:f.owner.policy().revision,flags:{traits:true}});
+ assert.deepEqual(f.owner.policy().schedule.after_by_kind,{summary:1,traits:2});
+ const fresh=f.save('Synthetic after both permissions');ruleDue(f);await f.service.tick();await f.service.tick();
+ const assigned=kind=>f.s.db.prepare('SELECT i.memory_id FROM owner_processing_items i JOIN owner_processing_runs r ON r.run_id=i.run_id WHERE r.kind=?').all(kind).map(r=>r.memory_id).sort();
+ assert.deepEqual(assigned('summary'),[beforeTraits.memory_id,fresh.memory_id].sort());assert.deepEqual(assigned('traits'),[fresh.memory_id]);
+ assert.ok(!assigned('summary').includes(old.memory_id));
+});
+
+test('OWNER-SUMMARY: separate authorized batches in one day stay readable without resending earlier sources',async t=>{
+ const f=setup(t),old=f.save('Synthetic history outside the grant');await enable(f);
+ await f.act('schedule.save',{expected_revision:f.owner.policy().revision,enabled:true,kinds:['summary'],interval_minutes:5,max_items:2,budget:2});
+ const sent=[],provider=f.service.models.provider;
+ f.service.models.provider=(...args)=>{const model=provider(...args),generate=model.generateStructured;model.generateStructured=(input,...rest)=>{sent.push(input.sources.map(s=>s.memory_id));return generate(input,...rest);};return model;};
+ const first=[f.save('Synthetic first batch one'),f.save('Synthetic first batch two')];ruleDue(f);await f.service.tick();
+ const second=[f.save('Synthetic second batch one'),f.save('Synthetic second batch two')];ruleDue(f);await f.service.tick();
+ assert.deepEqual(sent,[first.map(m=>m.memory_id),second.map(m=>m.memory_id)]);
+ const summaries=f.s.memorySummaries(f.auth,{scope:'user'}).results;
+ assert.equal(summaries.length,2);assert.ok(summaries.every(s=>s.status==='current'&&s.coverage_basis==='authorized_batch'&&s.coverage===2));
+ assert.deepEqual(summaries.flatMap(s=>s.claims.map(c=>c.memory_id)).sort(),[...first,...second].map(m=>m.memory_id).sort());
+ assert.ok(!sent.flat().includes(old.memory_id));
+});
 test('HARDEN-OWNER all owner actions reject a foreign subject; run IDs never cross owner boundaries',async t=>{
  const f=setup(t);f.save('Synthetic owner boundary');
  for(const action of ['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel']){

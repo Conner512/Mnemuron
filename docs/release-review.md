@@ -14,9 +14,14 @@ Release preparation adds:
 - Core schema v7: old readers refuse the explicit-private contract rather than
   silently ignoring its denial table. Cloud receipt backfill and reviewed grants
   remain authoritative; no existing memory or receipt is rewritten.
-- A pinned historical-source, two-account Core/OAuth upgrade and recovery exercise.
-  It checks preserved identities, encrypted identity material, memories and receipts,
-  post-upgrade writes, owner boundaries and rejection by the old reader.
+- A two-account Core migration and paired OAuth recovery exercise. It uses the
+  checksum-verified, checked-in Core v7 reader, upgrades to the current schema,
+  and checks preserved identities, encrypted identity material, memories and
+  receipts, post-upgrade writes, owner boundaries and rejection by that old reader.
+  OAuth is seeded with the current identity implementation: this exercises paired
+  backup/restore, not migration from an unavailable historical OAuth release.
+  The test needs neither old Git objects nor a network fetch and runs in source
+  snapshots and shallow clones; history publication checks still need a full clone.
 - Compatible gateway lockfile patches for `fast-uri` and `ip-address`; direct runtime
   dependencies are unchanged. Reinstall both lockfiles before validation.
 - A date-independent retrieval regression fixture, and browser assertions based on

@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isUtf8 } from 'node:buffer';
-import { createHash } from 'node:crypto';
+import {isReviewedBinary, reviewedSyntheticRules} from './publication-reviewed.mjs';
 
 const prohibitedPath = /(?:^(?:private|evidence|backups|tmp|dist)\/|(?:^|\/)(?:credentials|node_modules|__pycache__|\.mnemuron|exports|vector-data|vector-snapshots|model-cache|audit-private|job-spool)\/|\.(?:sqlite3?|db)(?:-.*)?$|\.(?:log|jsonl|snapshot|dump|zip|tar|tgz|gz|bundle|key|pem|p12|pfx)$|(?:^|\/)(?:EXECUTION_STATUS|worktree-files|identity-map|accounts|recovery|memory-export|memories-export)\.json$)/i;
 const publicEmail = value => /^(?:noreply@github\.com|[^\s@]+@(?:users\.noreply\.github\.com|example\.(?:com|org|net))|\s*)$/.test(value.trim());
@@ -20,17 +20,11 @@ const rules = [
   ['non-synthetic-uuid', /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/gi],
 ];
 
-// Reviewed binaries, pinned by content: the console's self-hosted OFL fonts (web/console/FONTS-LICENSE.txt).
-// Any other binary, or a changed font, is still reported.
-const reviewedBinaries = {
-  'web/console/display-font.woff2': '85f55a58a31e61a2e19e8bb25fed503181bf2a6b4cab76c589992cfaac377447',
-  'web/console/mono-font.woff2': '29bf2691317290c0693d305d51abd52ddc027c93207f528f7efa8cf0f8b504ca',
-};
-
 export function scanPublicationFile(file, content) {
   const findings = [];
   const add = (rule, line = 1) => findings.push({ file, rule, line });
-  if (Buffer.isBuffer(content) && reviewedBinaries[file] === createHash('sha256').update(content).digest('hex')) return findings;
+  if (isReviewedBinary(file, content)) return findings;
+  const reviewed = reviewedSyntheticRules(file, content);
   if (Buffer.isBuffer(content)) {
     if (!isUtf8(content)) add('binary-content');
     content = content.toString('utf8');
@@ -53,6 +47,7 @@ export function scanPublicationFile(file, content) {
       if (rule !== 'non-synthetic-uuid' || !/^(?:11111111|00000000)-/i.test(match[0])) add(rule);
     }
     for (const match of content.matchAll(pattern)) {
+      if (reviewed.includes(rule)) continue;
       if (rule === 'non-synthetic-uuid' && /^(?:11111111|00000000)-/i.test(match[0])) continue;
       // Exact public configuration-symbol mapping; not an exemption for fixtures or example secrets.
       if (file === 'plugins/mnemuron/scripts/storage.mjs' && rule === 'inline-secret-review'
@@ -80,10 +75,14 @@ export function checkPublication(args, cwd = path.resolve(import.meta.dirname, '
   const gitBytes = argv => execFileSync('git', argv, {cwd, maxBuffer:64*1024*1024});
   const findings = [];
   let scanned = 0;
-  const coverage = { files: 0, commits: 0, tags: 0, refs: [], shallow: git(['rev-parse', '--is-shallow-repository']).trim() === 'true',
+  const coverage = { files: 0, commits: 0, tags: 0, reviewed_binary_files: 0, reviewed_synthetic_files: 0, refs: [], shallow: git(['rev-parse', '--is-shallow-repository']).trim() === 'true',
     remote_refs: 'not_inspected', pr: 'not_inspected', issues: 'not_inspected', releases: 'not_inspected',
     actions: 'not_inspected', lfs_payloads: 'not_inspected', forks_and_cached_refs: 'not_inspected' };
-  const scan = (file, content) => { findings.push(...scanPublicationFile(file, content)); scanned += 1; };
+  const scan = (file, content) => {
+    if (isReviewedBinary(file, content)) coverage.reviewed_binary_files++;
+    if (reviewedSyntheticRules(file, content).length) coverage.reviewed_synthetic_files++;
+    findings.push(...scanPublicationFile(file, content)); scanned += 1;
+  };
   const inspect = (file, size, read) => {
     const pathFindings=scanPublicationFile(file,'');
     if(pathFindings.some(f=>f.rule==='private-artifact') || size>4*1024*1024) {

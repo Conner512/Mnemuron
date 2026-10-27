@@ -136,6 +136,24 @@ means total dependency count, not successfully summarized sources. A succeeded
 job means its output was durably processed; it does not imply complete coverage
 or semantic quality. Source detail remains authoritative.
 
+`coverage_basis` distinguishes a `period_snapshot` produced by the period-wide
+maintenance scheduler from an `authorized_batch` produced by an owner processing
+grant. Owner grants send only their frozen manifests: another batch in the same
+day stays alongside earlier batches and does not replace them or resend their
+sources. `complete` describes that response's dependencies, not every record in
+the calendar day. Existing period-wide summaries retain their grouping.
+
+Owner automatic summary and keyword-fill rules retain independent
+`after_by_kind` cursors. An existing schedule without those cursors resumes from
+its saved `after_rowid`; enabling a new channel starts it at the current row
+boundary. An upgrade does not replay older records or restore already superseded
+summaries. Review and explicitly authorize any desired historical processing.
+
+Workers renew their fenced leases during model requests, including one permitted
+output-repair request. If a stalled or crashed attempt still expires, its
+`LEASE_LOST` outcome is persisted and bounded by the configured attempt limit;
+late results cannot overwrite a replacement worker's lease.
+
 ## Local CLI
 
 The published runtime Schema is checked offline with the full Draft 2020-12

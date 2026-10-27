@@ -189,7 +189,7 @@ Status: schema v11 adds the owner-scoped entity evidence graph to the v10 lifecy
 ## Owner controls and handoff policy access review
 
 - `server/bin/mnemuron-owner-migrate.mjs` uses two metadata-only `memories` reads to require exactly one represented owner and confirm the requested owner. This explicit offline migration intentionally counts all retained rows, including deleted-project records; filtering them would hide a conflicting owner. It requires paused legacy workers and checks the inventory inside `BEGIN IMMEDIATE`. It reads no memory bodies and grants no processing authority.
-- `server/lib/console/owner.mjs` has four literal `memories` reads and one `project_lifecycle` read. Migration and schedule saves use owner-scoped maximum rowids as high-water marks, including retained history so it cannot become newly eligible work. The owner-only read-impact count restricts active rows by user, web-read policy and the absence of a non-active lifecycle row; this aggregate is not a source authorization check. The bounded preview selects owner-scoped IDs and reloads every candidate through `DerivedMemory.currentSource`, enforcing effective lifecycle, revision and privacy before freezing items. Start, resume, execution and publication revalidate source state and lifecycle generation. Helper-mediated reads remain covered by the derived-source rules.
+- `server/lib/console/owner.mjs` has six literal `memories` reads and one `project_lifecycle` read. Migration and schedule saves use owner-scoped maximum rowids as high-water marks, including retained history so it cannot become newly eligible work. The owner-only read-impact count restricts active rows by user, web-read policy and the absence of a non-active lifecycle row; this aggregate is not a source authorization check. The bounded preview selects owner-scoped IDs and reloads every candidate through `DerivedMemory.currentSource`, enforcing effective lifecycle, revision and privacy before freezing items. Start, resume, execution and publication revalidate source state and lifecycle generation. Helper-mediated reads remain covered by the derived-source rules.
 - `server/lib/handoff-policy.mjs` now has three literal `resumes` reads. The additional read snapshots confirmed deliveries when the owner disables handoff, inside the caller's memory transaction. Like the startup snapshot, it intentionally retains existing drain membership rather than creating new work. Receipt and injection handling still applies owner, preview-version, attempt and lifecycle checks in Store; a snapshot is not delivery authorization.
 
 The owner-control, handoff and lifecycle behavior tests remain required alongside the literal-site inventory check. These reviewed metadata/snapshot reads do not exempt normal content reads or publication from lifecycle enforcement.
@@ -301,7 +301,7 @@ The new declaration probe in `memory-retrieval.mjs` uses the resolved lifecycle 
   `owner_processing_items` of that run joined to the owner's `memories` row (content and topic, used only to derive a display
   title). The manifest was frozen at preview time and is revalidated on start. Read-only; no lifecycle write.
 - Keywords (replacing entities): `server/lib/console/organize.mjs` reads `memory_traits` keywords joined to the owner's
-  `memories` for the keyword filter, keyword search matches (newest 200) and the 30 most used keywords (live projects only);
+  `memories` for the keyword filter and the 30 most used keywords (live projects only);
   the `attention` memory map in `server/lib/console/features.mjs` now reads each shown memory's kind and keywords from
   `memory_traits` and no entity tables. `scheduleTraits` in `server/lib/memory-jobs/worker.mjs` and the owner preview for the
   `traits` kind select active memories still missing a kind or strength. The keyword fill writes only `memory_traits`.
@@ -331,3 +331,32 @@ The new declaration probe in `memory-retrieval.mjs` uses the resolved lifecycle 
   workflow memories and recent problems, within a token budget. Scope via `resolveMemoryScope` / `memoryScopeSql` plus
   Web visibility (deleted projects refused); one `projects` name read. Audited as `memory.context`. Read-only; no
   lifecycle write.
+
+## Reliability fixes: search, owner scheduling and worker leases
+
+The inventory changes below were reviewed individually. They add no writes to lifecycle-relevant tables.
+
+| File | Literal `memories` reads | Access review |
+|---|---|---|
+| `server/lib/console/organize.mjs` | 8 → 7 | Removes the independent keyword substring lookup. Keywords use the main search index, whose candidates retain owner, live scope and Web visibility checks. The organizer still reapplies its current filters to ranked results. |
+| `server/lib/memory-entities/store.mjs` | 5 → 6 | The member lookup joins the authoritative memory on both owner and memory ID and applies the current library filter before the member limit. Every returned member still passes `validProof` / `currentSource`, exact entity scope, `inScope` with resolved live-project SQL, requested status/type and tombstone checks. Seeds, anchors and bridges retain their separate proof and visibility checks. |
+| `server/lib/memory/search-context.mjs` | 0 → 1 | The stale-review predicate correlates `mf` to the caller's `m` on both owner and memory ID. It only adds a restriction; it never selects a different source or grants access. The caller retains responsibility for the owner, scope, lifecycle and visibility checks described above. Trait lookups are also correlated by owner and memory ID; filter values are bound parameters. |
+| `server/lib/vector-stores/index.mjs` | 7 → 8 | The new document allowlist selects only the owner's active memories matching resolved live scope, Web visibility and the current library filter before vector top-k selection. The 2,000-document bound is checked without silently truncating the allowlist: overflow explicitly degrades hybrid search or rejects semantic search. After provider waits, scope and filters are rebuilt and every hit is revalidated against current source revision, content, profile and visibility. |
+
+The filter helper is used by the existing lexical candidate, entity-member and vector reads. It does not replace their
+authorization checks. Console filters are validated before an internal Symbol carries them to retrieval; JSON callers
+cannot supply this context. The internal save-time similarity probe skips only lexical query planning, retaining normal
+query validation, scope resolution, permissions, lifecycle checks and provider budget/egress policy.
+
+The owner/worker changes retain their existing lifecycle-table site counts. The moved owner high-water read remains an
+owner-scoped maximum rowid without content; newly enabled channels start at that opt-in boundary. Per-channel cursor
+advancement and run creation remain in the existing schedule transaction, with source manifests revalidated on start
+and execution. Lease renewal and failure handling now check and update the same fence inside `memoryTransaction`;
+expired-attempt retirement changes job metadata only. Heartbeats cover the initial provider request and repair, while
+source, grant and budget checks remain before each reservation and before publication.
+
+Summary publication changes the bound group key for an owner run, not its SQL access sites. The key includes the existing
+owner/scope-bound job group and that run's ID, so a new authorized batch does not supersede another batch or expand the
+frozen source manifest. `MemoryJobs.publish` still validates owner, exact scope, lease and every current source inside
+the publication transaction; `publishSummary` rechecks each source before writing summaries and dependencies. Delivery
+continues to revalidate dependencies, and the response identifies these summaries as `authorized_batch` coverage.

@@ -22,6 +22,9 @@ const flag=kind=>kind==='vector'?'vector_build':kind;
 const modelKind=kind=>kind==='vector'?'embedder':'organizer';
 const error=(code)=>{throw new ConflictError(code,code);};
 const now=()=>Date.now();
+// Older schedules have one cursor. Resume each channel from that saved boundary without replaying history.
+const channelAfter=(schedule,kind)=>schedule.after_by_kind?.[kind]??schedule.after_rowid??0;
+const sharedAfter=(cursors,fallback)=>Object.keys(cursors).length?Math.min(...Object.values(cursors)):fallback;
 
 // Explicit migration only. Constructor never initializes policy or authorizes existing work.
 export function migrateOwner(db,user,defaults){
@@ -92,9 +95,12 @@ export class OwnerControls{
   // to the automatic rule (new memories only), switching it off removes it. The semantic index is kept current by
   // incremental indexing instead, so 'vector' is never part of the rule. Pacing (interval, items, calls) is kept.
   const kinds=AUTO_KINDS.filter(k=>flags[k]),before=old.schedule,sameKinds=JSON.stringify(kinds)===JSON.stringify((before.kinds||[]).filter(k=>AUTO_KINDS.includes(k)));
+  const highwater=this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(user).n;
+  // Existing channels retain their own progress; a newly enabled channel starts at its own opt-in boundary.
+  const cursors=Object.fromEntries(kinds.map(kind=>[kind,before.enabled&&before.kinds?.includes(kind)?channelAfter(before,kind):highwater]));
   const schedule=sameKinds&&!(before.kinds||[]).includes('vector')?before:{...before,enabled:kinds.length>0,kinds,credential_id:kinds.length?credentialId:before.credential_id,error_code:undefined,
     model_revisions:Object.fromEntries(kinds.map(k=>[k,this.service.models.raw(user,modelKind(k))?.revision||0])),
-    after_rowid:before.enabled&&kinds.some(k=>before.kinds?.includes(k))?before.after_rowid:this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(user).n,
+    after_by_kind:cursors,after_rowid:sharedAfter(cursors,highwater),
     next_at:now()+(before.interval_minutes||60)*60000};
   this.db.prepare('UPDATE owner_feature_policy SET flags_json=?,schedule_json=?,revision=revision+1 WHERE user_id=?').run(JSON.stringify(flags),JSON.stringify(schedule),user);
   return {status:'saved',features:this.view(user),processing_started:false};
@@ -104,7 +110,7 @@ export class OwnerControls{
   number(p.interval_minutes,5,10080);number(p.max_items,1,100);number(p.budget,1,1000);
   // Explicitly scoped to newly created memories after this save, never old revisions/outbox replays.
   const highwater=this.db.prepare('SELECT COALESCE(MAX(rowid),0) n FROM memories WHERE user_id=?').get(user).n;
-  const schedule={...p,credential_id:credentialId,model_revisions:Object.fromEntries(p.kinds.map(k=>[k,this.service.models.raw(user,modelKind(k))?.revision||0])),after_rowid:highwater,next_at:now()+p.interval_minutes*60000};delete schedule.expected_revision;
+  const schedule={...p,credential_id:credentialId,model_revisions:Object.fromEntries(p.kinds.map(k=>[k,this.service.models.raw(user,modelKind(k))?.revision||0])),after_by_kind:Object.fromEntries(p.kinds.map(kind=>[kind,highwater])),after_rowid:highwater,next_at:now()+p.interval_minutes*60000};delete schedule.expected_revision;
   this.fenceAll(user);this.db.prepare('UPDATE owner_feature_policy SET schedule_json=?,revision=revision+1 WHERE user_id=?').run(JSON.stringify(schedule),user);
   return {status:'saved',features:this.view(user),processing_started:false,new_memories_only:true};
  }
@@ -184,8 +190,17 @@ export class OwnerControls{
    try{this.store.memoryTransaction(()=>{
     // Per-channel grants cover only new rows since the explicit schedule activation.
     // checks: when each automatic kind last looked for new memories and how many it queued, shown on its card.
-    let after=schedule.after_rowid;const checks={...(schedule.checks||{})};for(const kind of schedule.kinds){if(!channels.includes(kind)||!p.flags[flag(kind)])continue;try{if((this.service.models.raw(this.user,modelKind(kind))?.revision||0)!==schedule.model_revisions?.[kind])error('MODEL_VERSION_CHANGED');const preview=this.preview(this.user,{kind,limit:schedule.max_items,budget:schedule.budget},{automatic:true,after:schedule.after_rowid,credentialId:schedule.credential_id});if(preview.status==='no_work'){after=Math.max(after,preview.after_rowid);checks[kind]={at:now(),found:0};continue;}this.start(this.user,{run_id:preview.run_id,digest:preview.digest});after=Math.max(after,this.run(this.user,preview.run_id).metadata.after_rowid);checks[kind]={at:now(),found:preview.count,run_id:preview.run_id};}catch(e){if(e.errorCode!=='MANIFEST_EMPTY')throw e;checks[kind]={at:now(),found:0};}}
-    this.db.prepare("UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?").run(JSON.stringify({...schedule,after_rowid:after,checks,next_at:now()+schedule.interval_minutes*60000}),this.user);
+    const cursors=Object.fromEntries(schedule.kinds.map(kind=>[kind,channelAfter(schedule,kind)])),checks={...(schedule.checks||{})};
+    for(const kind of schedule.kinds){
+     if(!channels.includes(kind)||!p.flags[flag(kind)])continue;
+     if((this.service.models.raw(this.user,modelKind(kind))?.revision||0)!==schedule.model_revisions?.[kind])error('MODEL_VERSION_CHANGED');
+     const preview=this.preview(this.user,{kind,limit:schedule.max_items,budget:schedule.budget},{automatic:true,after:cursors[kind],credentialId:schedule.credential_id});
+     if(preview.status==='no_work'){cursors[kind]=preview.after_rowid;checks[kind]={at:now(),found:0};continue;}
+     this.start(this.user,{run_id:preview.run_id,digest:preview.digest});
+     cursors[kind]=this.run(this.user,preview.run_id).metadata.after_rowid;checks[kind]={at:now(),found:preview.count,run_id:preview.run_id};
+    }
+    // Keep the legacy cursor at the slowest channel for compatible readers; only the per-channel map drives new work.
+    this.db.prepare("UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?").run(JSON.stringify({...schedule,after_by_kind:cursors,after_rowid:sharedAfter(cursors,schedule.after_rowid),checks,next_at:now()+schedule.interval_minutes*60000}),this.user);
    });}catch(e){this.db.prepare('UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?').run(JSON.stringify({...schedule,enabled:false,error_code:e.errorCode||e.code||'SCHEDULE_BLOCKED'}),this.user);}
   }
   const rows=this.db.prepare("SELECT run_id FROM owner_processing_runs WHERE user_id=? AND state IN ('queued','running') ORDER BY created_at LIMIT 1").all(this.user);

@@ -64,6 +64,7 @@ export class SummaryPagination {
       const header=isWebReader(auth)?{summary_id:row.summary_id,revision:row.revision,category:row.category,created_at:row.created_at,status:row.status}
         :Object.fromEntries(Object.entries(row).filter(([key])=>key!=='cursor_id'));
       const item={...header,kind:'derived_summary',independently_fact_checked:false,claims:[],claim_offset:state.claim,claims_truncated:false,
+        coverage_basis:metadata.owner_run?'authorized_batch':'period_snapshot',
         dependency_count:deps.length,coverage_status:omitted.length?'partial':'complete',selected_source_count:deps.length-omitted.length,
         omitted_source_count:omitted.length,omitted_sources:omitted.slice(0,100).map(({memory_id,revision})=>({memory_id,revision})),omitted_sources_truncated:omitted.length>100};
       const claims=this.db.prepare('SELECT claim_json FROM memory_summary_claims WHERE summary_id=? ORDER BY ordinal LIMIT 101 OFFSET ?').all(row.summary_id,state.claim);

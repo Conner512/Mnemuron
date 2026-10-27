@@ -82,8 +82,12 @@ export class TunnelSettings {
       const d = found[r.id];
       if (!d?.token_fp || !d.token_seal || d.token_fp === r.token_fp || r.state !== 'active' || r.desired_revision > r.applied_revision) continue;
       if (r.updated_at && typeof d.at === 'string' && d.at < r.updated_at) continue;
-      this.db.prepare(`UPDATE tunnels SET user_id=?, token_seal=?, token_fp=?, account_id=?, tunnel_id=?, apply_state='applied', apply_error=NULL, applied_at=?, updated_at=?, updated_by='server' WHERE id=?`)
-        .run(d.user, d.token_seal, d.token_fp, d.account_id, d.tunnel_id, d.at, d.at, r.id);
+      // Discovery reports installed bytes, not a successful start. The applier discovers after rollback too;
+      // adopting that restored token must not erase its failed/rolled-back outcome or claim verified readiness.
+      const preserveOutcome = ['failed', 'rolled_back'].includes(r.apply_state);
+      this.db.prepare(`UPDATE tunnels SET user_id=?, token_seal=?, token_fp=?, account_id=?, tunnel_id=?, apply_state=?, apply_error=?, applied_at=?, updated_at=?, updated_by='server' WHERE id=?`)
+        .run(d.user, d.token_seal, d.token_fp, d.account_id, d.tunnel_id, preserveOutcome ? r.apply_state : 'applied',
+          preserveOutcome ? r.apply_error : null, preserveOutcome ? r.applied_at : d.at, d.at, r.id);
       if (d.user && this.store.config) this.store.config.log(d.user, `tunnel.${r.id}.token`, r.token_fp || null, d.token_fp, 'cli', 'server:cloudflared');
     }
   }

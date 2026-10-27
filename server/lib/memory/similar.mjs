@@ -4,6 +4,8 @@
 // Uses semantic search (one embedding call), because rewordings share few literal tokens. Calibrated on the synthetic
 // set with the cosine embedder: the closest pair of distinct memories scored 0.84, reworded duplicates 0.95-0.99.
 // Without a ready vector index only a body with the same search tokens (case and punctuation aside) is reported.
+import { MEMORY_SEARCH_CONTEXT } from './search-context.mjs';
+import { comparableSemanticScore } from '../search-query.mjs';
 
 export const SIMILAR_SCORE = 0.9, DUPLICATE_SCORE = 0.95, MAX_SIMILAR = 3;
 
@@ -11,14 +13,17 @@ export const SIMILAR_SCORE = 0.9, DUPLICATE_SCORE = 0.95, MAX_SIMILAR = 3;
 export async function similarMemories(store, auth, memory) {
   if (!memory?.memory_id || !auth?.scopes?.includes('memory:read')) return [];
   try {
-    const result = await store.searchMemories(auth, { query: memory.content.slice(0, 2000), mode: 'semantic', limit: MAX_SIMILAR + 1 });
+    const result = await store.searchMemories(auth, { query: memory.content.slice(0, 2000), mode: 'semantic', limit: MAX_SIMILAR + 1,
+      [MEMORY_SEARCH_CONTEXT]: { documentSimilarity: true } });
     const retrieval = result.retrieval || {};
-    if (!retrieval.degraded && retrieval.effective_mode !== 'lexical') {
+    if (!retrieval.degraded && retrieval.effective_mode !== 'lexical' && comparableSemanticScore(0, retrieval) !== null) {
       return result.results
-        .filter(r => r.memory_id !== memory.memory_id && Number(r.ranking?.semantic_score) >= SIMILAR_SCORE)
+        .map(r => ({ memory_id: r.memory_id, similarity: comparableSemanticScore(r.ranking?.semantic_score, retrieval) }))
+        .filter(r => r.memory_id !== memory.memory_id && r.similarity !== null && r.similarity >= SIMILAR_SCORE)
+        .sort((a,b) => b.similarity - a.similarity || a.memory_id.localeCompare(b.memory_id))
         .slice(0, MAX_SIMILAR)
-        .map(r => ({ memory_id: r.memory_id, similarity: Number(Number(r.ranking.semantic_score).toFixed(3)),
-          relation: r.ranking.semantic_score >= DUPLICATE_SCORE ? 'duplicate' : 'similar' }));
+        .map(r => ({ memory_id: r.memory_id, similarity: Number(r.similarity.toFixed(3)),
+          relation: r.similarity >= DUPLICATE_SCORE ? 'duplicate' : 'similar' }));
     }
   } catch { /* fall through to the exact check */ }
   try {

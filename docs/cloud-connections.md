@@ -70,20 +70,29 @@ until rotation/revocation, independently of access-token/PAT/invitation lifetime
 
 ## Using the console
 
-1. Open Connections, choose Add connection, then ChatGPT plugin or Generic MCP.
-2. Enter its purpose/name and readonly or memory-readwrite profile (readonly is
-   the default). For ChatGPT, compare the prefilled callback with the exact URI
-   shown in ChatGPT and replace it if needed. Read the per-version disclosure
-   explanation; choose a finite lifetime for a PAT.
+Connections groups setup by Agent. **Current authorized access** comes from live
+owner-bound grants or PATs; **Configured access limit** is the permission ceiling
+chosen for that connection. A read/write configuration with only read consent
+therefore shows read-only current access. Summary counts use the same live
+authorization evidence, independent of list filters and pagination. Expired,
+revoked or old account-version credentials cannot imply current access.
+
+1. Open Connections, choose an Agent and its connection method, then Generate.
+   Existing rows and newly generated results both offer **View & configure** to
+   reopen the complete guide and connection-management controls.
+2. Enter its name and choose readonly or memory-readwrite access. PATs use the
+   configured finite lifetime. For ChatGPT, compare the prefilled callback with
+   the exact URI shown in ChatGPT and use View & configure to replace it if needed.
 3. Reauthenticate and securely save the resulting **Client ID + Client Secret**
    or **resource PAT**. No automatic clipboard copy or browser persistence occurs.
-4. For ChatGPT, the final wizard page provides its name/description, optional
-   locally generated PNG icon, MCP URL, Client ID, masked one-time Client Secret,
-   token method and OAuth scopes with individual copy buttons. Choose a custom
+4. For ChatGPT, the generated setup steps include the MCP URL, Client ID,
+   one-time Client Secret, token method, complete **Base scopes** and the
+   client-specific **OIDC configuration URL**. View & configure provides the full
+   field-by-field guide, including name/description and an optional locally
+   generated PNG icon, with individual copy buttons. Choose a custom
    OAuth client and `client_secret_post` in ChatGPT; do not choose DCR/CIMD or
    fill a registration URL. The advanced section provides authorization/token
-   endpoints, issuer, resource and OIDC discovery URL if discovery needs manual
-   configuration. OAuth scopes include `openid offline_access` plus only the
+   endpoints, issuer and resource. OAuth scopes include `openid offline_access` plus only the
    memory permissions selected for this connection. No project/handoff scope
    is added. Never use a temporary interaction URL as an endpoint or callback.
    Public OAuth/OIDC discovery and the initial MCP challenge advertise only
@@ -115,8 +124,10 @@ This is a visual configuration guide, not an automatic ChatGPT installer: the
 user still creates the plugin and consents in ChatGPT. Exact callbacks may also
 be updated through Configure later. Missing guide metadata is reported with a
 retry action, without regenerating the credential. Secrets expire from the
-page, are cleared when the dialog closes, and are never persisted in browser
-storage or copied automatically.
+complete credential wizard and are cleared when that dialog closes. Agent setup
+keeps newly issued credentials in page memory so they can be copied into the
+setup commands; a browser refresh clears them. Neither flow persists secrets in
+browser storage or copies them automatically.
 
 The open detail guide polls for up to one minute and refreshes when focus returns;
 manual Refresh restarts the window. Unchanged results preserve focus and scroll.
@@ -139,6 +150,11 @@ generation response is lost, retry the same action/operation ID and parameters
 in the **same login** during the configured receipt window. A different login,
 changed intent, elapsed window or invalidated connection cannot recover it.
 Encrypted short-lived receipts are pruned; rotate if the secret was not saved.
+Agent dialogs automatically retain the operation ID when retrying the same
+request, including after correcting the password. Editing connection fields or
+starting a new action creates a new intent. If issuance succeeds but refreshing
+the list fails, the generated/rotated credential remains visible with a refresh
+warning; refresh the list after saving it instead of generating another one.
 
 Rotation invalidates old access/refresh/PAT credentials immediately. Disable
 blocks all connection access; enable generates new credentials. Revoke is final
