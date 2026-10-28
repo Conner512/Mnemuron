@@ -73,3 +73,22 @@ test('ISO-10 INT-05: delayed authenticated A read is rejected after logout while
  const own=await json(b.browser,'/console-api/memories');assert.equal(own.status,200);assert.deepEqual(own.data.results.map(m=>m.memory_id),[b.memory.memory_id]);
  release();const denied=await late;assert.equal(denied.status,401);assert.ok(!JSON.stringify(denied.data).includes(a.memory.memory_id));
 });
+
+test('ISO-SEARCH-DIAGNOSTICS: authenticated Console reads retain safe Core failure reasons end to end',async t=>{
+  const core=await memoryFixture(t),f=await consoleFixture(t,{core}),ids=f.app.accounts;
+  const owner={name:'Synthetic_Search_Diagnostics',...await pendingAccount({identities:ids},'Synthetic_Search_Diagnostics')};
+  ids.takeRecoveryCodes(owner.session.token);ids.acknowledgeRecovery(owner.session.token);
+  provisionIdentities(ids,core.store,{credentialDirectory:path.join(f.directory,'keys'),identityMapFile:path.join(f.directory,'map.json')});
+  const browser=await login(f,owner),original=core.store.searchMemories;
+  let degradation='VECTOR_FILTER_TOO_BROAD';
+  core.store.searchMemories=async()=>{throw Object.assign(new Error('PRIVATE_SYNTHETIC_PROVIDER_DIAGNOSTIC'),{
+    statusCode:503,errorCode:'SEMANTIC_UNAVAILABLE',code:'SEMANTIC_UNAVAILABLE',degradation_code:degradation});};
+  t.after(()=>{core.store.searchMemories=original;});
+  for(const reason of ['VECTOR_FILTER_TOO_BROAD','VECTOR_SCOPE_TOO_BROAD','VECTOR_AUTH_FAILED','VECTOR_PROFILE_MISMATCH','PRIVATE_SYNTHETIC_UNKNOWN']){
+    degradation=reason;
+    const response=await json(browser,'/console-api/memories?query=synthetic&mode=semantic');
+    assert.equal(response.status,503);assert.equal(response.data.error_code,'SEMANTIC_UNAVAILABLE');
+    assert.equal(response.data.degradation_code,reason==='PRIVATE_SYNTHETIC_UNKNOWN'?'VECTOR_UNAVAILABLE':reason);
+    assert.doesNotMatch(JSON.stringify(response.data),/PRIVATE_SYNTHETIC/);
+  }
+});

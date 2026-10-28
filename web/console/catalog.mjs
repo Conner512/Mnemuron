@@ -1137,6 +1137,45 @@ Object.assign(catalog.en,{
 
 export const text=(key,locale='zh-CN')=>catalog[locale]?.[key]??catalog.en[key]??key;
 
+// Retrieval reasons are fixed local messages, never provider-supplied prose.
+export const retrievalReasonKey=code=>typeof code==='string'&&Object.hasOwn(catalog.en,'retrieval_'+code)?'retrieval_'+code:'retrievalUnavailableReason';
+Object.assign(catalog['zh-CN'],{
+ searchUnavailableTitle:'语义检索未完成',retrievalUnavailableReason:'语义检索暂时不可用，请检查模型与索引状态。',
+ searchFailureRetained:'筛选条件已保留。可调整范围或检索方式后重新搜索。',
+ retrieval_EGRESS_DENIED:'查询文本尚未获准发送到模型，请检查查询外发设置。',
+ retrieval_BUDGET_EXHAUSTED:'当前模型调用额度已用完，请检查调用限额。',
+ retrieval_VECTOR_NOT_READY:'尚无可用的向量索引，请检查建立与激活状态。',
+ retrieval_VECTOR_DISABLED:'向量检索尚未启用。',
+ retrieval_VECTOR_STALE:'向量索引尚未追上当前记忆版本，请检查索引同步状态。',
+ retrieval_VECTOR_FILTER_TOO_BROAD:'筛选结果超过向量查询范围上限，请缩小范围或切换关键词检索。',
+ retrieval_VECTOR_SCOPE_TOO_BROAD:'查询涉及的作用域过多，请缩小范围或切换关键词检索。',
+ retrieval_RELEVANCE_NOT_CONFIGURED:'当前模型尚未配置语义相关性判断规则。',
+ retrieval_AUTH_FAILED:'嵌入模型认证失败，请检查模型凭据。',
+ retrieval_NOT_CONFIGURED:'尚未配置可用的嵌入模型。',
+ retrieval_VECTOR_UNAVAILABLE:'向量服务暂时不可用，请检查服务状态后重试。',
+ retrieval_VECTOR_AUTH_FAILED:'向量服务认证失败，请检查其访问凭据。',
+ retrieval_VECTOR_COLLECTION_MISSING:'配置的向量集合不存在，请检查集合配置。',
+ retrieval_VECTOR_PROFILE_MISMATCH:'索引与当前嵌入模型不匹配，请检查或重建索引。',
+});
+Object.assign(catalog.en,{
+ searchUnavailableTitle:'Semantic search did not complete',retrievalUnavailableReason:'Semantic search is unavailable. Check the model and index status.',
+ searchFailureRetained:'Your filters are preserved. Adjust the scope or retrieval mode and search again.',
+ retrieval_EGRESS_DENIED:'Sending query text to the model is not approved. Check query egress settings.',
+ retrieval_BUDGET_EXHAUSTED:'The current model call budget is exhausted. Check the call limits.',
+ retrieval_VECTOR_NOT_READY:'No usable vector index is available. Check its build and activation status.',
+ retrieval_VECTOR_DISABLED:'Vector retrieval is not enabled.',
+ retrieval_VECTOR_STALE:'The vector index is behind the current memory revisions. Check index synchronization.',
+ retrieval_VECTOR_FILTER_TOO_BROAD:'The filtered set exceeds the vector query limit. Narrow the filters or use keyword search.',
+ retrieval_VECTOR_SCOPE_TOO_BROAD:'The query spans too many scopes. Narrow the scope or use keyword search.',
+ retrieval_RELEVANCE_NOT_CONFIGURED:'Semantic relevance rules are not configured for the current model.',
+ retrieval_AUTH_FAILED:'The embedding model rejected authentication. Check the model credential.',
+ retrieval_NOT_CONFIGURED:'No usable embedding model is configured.',
+ retrieval_VECTOR_UNAVAILABLE:'The vector service is unavailable. Check its status before retrying.',
+ retrieval_VECTOR_AUTH_FAILED:'The vector service rejected authentication. Check its credential.',
+ retrieval_VECTOR_COLLECTION_MISSING:'The configured vector collection does not exist. Check the collection settings.',
+ retrieval_VECTOR_PROFILE_MISMATCH:'The index does not match the current embedding model. Check or rebuild the index.',
+});
+
 // Memory organization: categories with names, facets for large imports, one preview-confirmed move with undo.
 Object.assign(catalog['zh-CN'],{
  moveToCategory:'移到分类','memory.organize':'整理到分类','memory.organize_undo':'撤销整理','category.manage':'管理分类','category.create':'新建分类','category.rename':'重命名分类','category.delete':'删除分类',

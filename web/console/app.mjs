@@ -7,6 +7,7 @@ import {projectProfileView,SELECTION_LIMIT,overviewView,libraryView,summariesVie
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 import {mountAgents} from './agents.mjs';
+import {retrievalReasonKey} from './catalog.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
@@ -23,6 +24,8 @@ let projectOffset=0,projectArchived='false',taskOffset=0,contextGeneration=0;con
 
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const l=(key,tag='span')=>`<${tag} data-i18n="${key}">${esc(t(key))}</${tag}>`;
+const requestError=data=>Object.assign(new Error(data.error_code||'UNAVAILABLE'),
+ data.error_code==='SEMANTIC_UNAVAILABLE'&&retrievalReasonKey(data.degradation_code)!=='retrievalUnavailableReason'?{degradation_code:data.degradation_code}:{});
 
 // Audit tabs: the four event groups, and configuration changes (web and CLI edits, read from the config view).
 const AUDIT_TABS=['system','memory','connections','security','config'];
@@ -41,7 +44,7 @@ async function api(view,params={}) {
    const response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});
    if(response.status===401){clear();location.replace('/login');throw new Error('SESSION_REQUIRED');}
    const data=await response.json();if(!state.accepts(ticket))throw new Error('STALE_ACCOUNT');
-   if(!response.ok)throw new Error(data.error_code||'UNAVAILABLE');return data;
+   if(!response.ok)throw requestError(data);return data;
  } finally {state.finish(ticket);}
 }
 async function mutate(action,payload,operation_id) {
@@ -83,7 +86,7 @@ function render(data) {
  contextGeneration++;contextRequests.clear();
  let html='';
  if(page==='overview')html=overviewStatus(data)+overviewView(data,{t,memoryRows:rows=>memoryRows(rows,t),labels:capabilities.category_labels||{},taxonomy:capabilities.taxonomy?.categories||[],descriptions:capabilities.category_descriptions||{}});
- else if(page==='memories')html=libraryView(t,{data,query,searchMode,kind,concept,status,topic,origin,review,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data)});
+ else if(page==='memories')html=libraryView(t,{data,query,searchMode,kind,concept,status,topic,origin,review,facets,selected:[...selected.keys()],selectAll,labels:capabilities.category_labels||{},categories:capabilities.taxonomy?.categories||[],focusSources:new URLSearchParams(location.search).get('focus')==='sources',readOnly:!canAct(capabilities,'memory.create'),allowedActions:capabilities.allowed_actions||[],pagination:pagination(data),failure:data.read_failure});
  else if(page==='summaries')html=summariesView(t,{data,pagination:pagination(data),labels:capabilities.category_labels||{}});
  else if(page==='audit'&&auditGroup==='config')html=auditView(t,{group:'config'})+configHistoryCard(data);
  else if(page==='audit')html=auditView(t,{data,source:'grouped',group:auditGroup,pagination:pagination(data),filters:auditFilters});
@@ -153,6 +156,9 @@ async function load({retainOnError=false}={}) {
    // Agent issuance has already rendered its one-time credential. Let its caller
    // report a failed refresh without replacing that result with a page error.
    if(retainOnError&&currentData)throw e;
+   if(page==='memories'&&e.message==='SEMANTIC_UNAVAILABLE'){
+     currentData={results:[],read_failure:{code:e.message,degradation_code:e.degradation_code}};render(currentData);return;
+   }
    root.innerHTML=`${pageHeading(t,{title:page})}<div class="card" role="alert">${l(e.message==='BLOCKED_POLICY'?'blocked':'unavailable','h2')}${l('errorNote','p')}<button type="button" data-retry>${l('retry')}</button></div>`;}
 }
 

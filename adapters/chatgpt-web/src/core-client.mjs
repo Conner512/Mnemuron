@@ -1,4 +1,5 @@
 import { BoundaryError, fetchJson, readPrivate, CORE_SCOPES, MEMORY_WRITE_CORE_SCOPES } from "../../../shared/oauth-common.mjs";
+import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 // Core reports which read policy it enforces for this credential; anything else fails closed.
 export const WEB_READ_POLICIES=Object.freeze(['web-memory-visibility-v1','web-memory-active-uniform-v1']);
 
@@ -36,7 +37,7 @@ export class ReadonlyCoreClient {
     if ([401, 403].includes(result.status)) throw new BoundaryError(503, "CORE_AUTH_UNAVAILABLE");
     if (result.status === 503 && ["SEARCH_UNAVAILABLE", "SEARCH_RETRYABLE", "SEMANTIC_UNAVAILABLE"].includes(result.data.error_code)) {
       const error=new BoundaryError(503, result.data.error_code);
-      if(['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED','VECTOR_UNAVAILABLE'].includes(result.data.degradation_code))error.degradation_code=result.data.degradation_code;
+      if(isRetrievalDegradation(result.data.degradation_code))error.degradation_code=result.data.degradation_code;
       throw error;
     }
     if (result.status === 409 && result.data.error_code === 'TASK_VERSION_CHANGED') throw new BoundaryError(409, 'TASK_VERSION_CHANGED');

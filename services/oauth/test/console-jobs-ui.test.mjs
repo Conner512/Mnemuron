@@ -2,7 +2,7 @@ import test from 'node:test';import assert from 'node:assert/strict';
 globalThis.document={body:{dataset:{}},documentElement:{dataset:{},lang:'zh-CN'},querySelectorAll:()=>[],addEventListener:()=>{}};
 const {actionPage,batchJobsView}=await import('../../../web/console/actions.mjs');
 const caps={enabled:true,writable:true,allowed_actions:['jobs.schedule','jobs.cancel','jobs.retry']};
-const job=(id,patch)=>({job_id:id,job_type:'classification',state:'blocked_config',processed:0,total:3,...patch});
+const job=(id,patch)=>({job_id:id,job_type:'summary',state:'blocked_config',processed:0,total:3,...patch});
 
 test('JOBS-UI-01: a job fenced by a category change offers a working reschedule, never a bare retry',()=>{
   const html=actionPage('jobs',{jobs:[job('synthetic-stale',{last_error_code:'STALE_TAXONOMY',stale_taxonomy:true})],worker_enabled:true},caps);

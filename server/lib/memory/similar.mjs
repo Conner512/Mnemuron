@@ -6,6 +6,7 @@
 // Without a ready vector index only a body with the same search tokens (case and punctuation aside) is reported.
 import { MEMORY_SEARCH_CONTEXT } from './search-context.mjs';
 import { comparableSemanticScore } from '../search-query.mjs';
+import { webMemorySql } from './web-visibility.mjs';
 
 export const SIMILAR_SCORE = 0.9, DUPLICATE_SCORE = 0.95, MAX_SIMILAR = 3;
 
@@ -28,10 +29,12 @@ export async function similarMemories(store, auth, memory) {
   } catch { /* fall through to the exact check */ }
   try {
     // Same owner and visibility as a read, and never a memory of a deleted project (the semantic path gets this from search).
-    return store.db.prepare(`SELECT memory_id, project_id FROM memories WHERE user_id=? AND status='active' AND memory_id<>?
-        AND length(content) BETWEEN ? AND ? AND memory_search_tokens(content)=memory_search_tokens(?) LIMIT ?`)
-      .all(auth.user_id, memory.memory_id, Math.floor(memory.content.length / 2), memory.content.length * 2, memory.content, MAX_SIMILAR)
-      .filter(row => store.webVisibility.visible(auth, row.memory_id) && store.lifecycle.projectState(auth.user_id, row.project_id) !== 'deleted')
+    // Hidden records must be excluded before LIMIT; otherwise they can consume every hint slot.
+    const live=store.lifecycle.live(auth.user_id).sql('m.project_id');
+    return store.db.prepare(`SELECT m.memory_id FROM memories m WHERE m.user_id=? AND m.status='active' AND m.memory_id<>?
+        AND ${live.sql} AND ${webMemorySql(auth)}
+        AND length(m.content) BETWEEN ? AND ? AND memory_search_tokens(m.content)=memory_search_tokens(?) LIMIT ?`)
+      .all(auth.user_id, memory.memory_id,...live.params,Math.floor(memory.content.length / 2), memory.content.length * 2, memory.content, MAX_SIMILAR)
       .map(row => ({ memory_id: row.memory_id, similarity: 1, relation: 'duplicate' }));
   } catch { return []; }
 }

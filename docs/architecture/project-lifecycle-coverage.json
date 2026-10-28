@@ -400,11 +400,11 @@
     "write": 0
    },
    "memory_summaries": {
-    "read": 1,
+    "read": 2,
     "write": 7
    },
    "memory_summary_dependencies": {
-    "read": 10,
+    "read": 11,
     "write": 1
    }
   },

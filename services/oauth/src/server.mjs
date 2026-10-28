@@ -18,6 +18,7 @@ import {acquireAuthorizationLease} from './process-lease.mjs';
 import {storageDoctor} from '../../../server/lib/storage-policy.mjs';
 import {invalidateBrowserAuthorization} from './browser-session.mjs';
 import {applySecurityHeaders} from '../../../shared/security-headers.mjs';
+import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 
 function bootstrapMetadata(config) {
   return { issuer: config.issuer, authorization_endpoint: `${config.issuer}/authorize`,
@@ -194,7 +195,8 @@ export function createAuthorizationServer(input, { isolated = false, logger = ()
       }
       if (!response.headersSent) sendJson(response, error instanceof BoundaryError ? error.status : 503,
         { error: error instanceof BoundaryError && error.status < 500 ? "invalid_request" : "temporarily_unavailable",
-          error_code: error instanceof BoundaryError ? error.code : "AUTH_DEPENDENCY_UNAVAILABLE" });
+          error_code: error instanceof BoundaryError ? error.code : "AUTH_DEPENDENCY_UNAVAILABLE",
+          ...(error instanceof BoundaryError&&error.status===503&&error.code==='SEMANTIC_UNAVAILABLE'&&isRetrievalDegradation(error.degradation_code)?{degradation_code:error.degradation_code}:{}) });
       else if (!response.writableEnded) response.end();
     }
   });

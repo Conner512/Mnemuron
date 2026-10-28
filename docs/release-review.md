@@ -22,11 +22,13 @@ Release preparation adds:
   backup/restore, not migration from an unavailable historical OAuth release.
   The test needs neither old Git objects nor a network fetch and runs in source
   snapshots and shallow clones; history publication checks still need a full clone.
-- Compatible gateway lockfile patches for `fast-uri` and `ip-address`; direct runtime
-  dependencies are unchanged. Reinstall both lockfiles before validation.
+- The merged baseline pins the gateway's MCP SDK to `1.32.2` and Zod to `4.6.7`,
+  with compatible transitive security updates. Reinstall both locked dependency
+  trees before validation.
 - A date-independent retrieval regression fixture, and browser assertions based on
   the real job state rather than untranslated English or an ambiguous connection button.
-- All four browser suites in CI, with explicit synthetic storage cleanup checks.
+- All browser suites declared in `.github/workflows/console-browser.yml`, with
+  explicit synthetic storage cleanup checks.
   `.node-version` and development documentation select Node 24 LTS.
 
 ## Reproducible local acceptance
@@ -49,8 +51,8 @@ node scripts/check-secrets.mjs --history
 ```
 
 The secret wrapper requires exactly Gitleaks 8.24.3; a missing scanner is blocked,
-not a pass. For browser commands and pinned disposable dependencies, follow
-`.github/workflows/console-browser.yml`. The four suites exercise real local HTTP,
+not a pass. Run every browser suite declared in `.github/workflows/console-browser.yml`,
+using its commands and pinned disposable dependencies. Together they exercise real local HTTP,
 CSP, registration/TOTP, form operations, permission denial, connection lifecycle,
 models, translations and layout. No test disables production TOTP. Synthetic
 operator fixtures exist only to test operator functions and are destroyed with
