@@ -29,10 +29,9 @@ try{
   const op=page.locator('#operation-dialog'),detail=page.locator('#feature-dialog');
   const begin=async action=>{await page.locator(`[data-console-action="${action}"]`).first().click();await op.locator('form').waitFor();};
   const pick=async(selector,value)=>{const native=page.locator(selector),index=await native.evaluate((s,v)=>[...s.options].findIndex(o=>o.value===v),value);assert.ok(index>=0);const button=native.locator('..').locator('> .select-trigger');await button.click();await page.locator('#'+await button.getAttribute('aria-controls')).locator(`[data-index="${index}"]`).click();};
-  const proof=async()=>{await op.locator('[name=current_password]').fill(cfg.password);await op.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);};
   const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor({state:'attached'});return JSON.parse(await op.locator('.operation-result').first().textContent());};
   const close=async()=>{await op.locator('[data-operation-close]').first().click();await op.waitFor({state:'hidden'});};
-  await goto('overview');check('Attention shows real account counts',await page.locator('[data-feature="OVW-03"] .metadata-grid').count()===1);await shot('overview');
+  await goto('overview');const overview=await page.evaluate(()=>fetch('/console-api/overview').then(r=>r.json()));check('Overview shows real account counts',await page.locator('[data-metric=memories] strong').innerText()===overview.counts.memories.toLocaleString()&&await page.locator('.attention-card').count()===1);await shot('overview');
   await goto('summaries');check('Summaries page offers no category editing',await page.locator('[data-console-action="taxonomy.save"],[data-console-action="category.manage"]').count()===0);
   check('Summaries are grouped by what they cover',await page.locator('.summary-group,.empty').count()>0);
   await goto('memories');
@@ -51,7 +50,7 @@ try{
   check('Selection has no extra visible label',!(await page.locator('.memory-table').innerText()).includes('选择这条记忆')&&await boxes.first().getAttribute('aria-label')==='选择这条记忆');
   let selectionWrites=0;const countWrites=req=>{if(req.method()==='POST')selectionWrites++;};page.on('request',countWrites);
   await boxes.first().focus();await page.keyboard.press('Space');await boxes.nth(1).check();
-  check('Keyboard selection enables nearby actions and exact count',await selection.locator('[data-selection-count]').innerText()==='2'&&await selection.locator('[data-console-action]:enabled').count()===2);
+  check('Keyboard selection enables retraction and the exact count',await selection.locator('[data-selection-count]').innerText()==='2'&&await selection.locator('[data-console-action]:enabled').count()===1&&await selection.locator('[data-console-action="memory.batch_retract"]').isEnabled());
   check('Selecting does not open memory detail',!(await page.locator('#memory-dialog').isVisible()));
   await shot('memory-selection');await selection.locator('[data-clear-selection]').click();
   check('Clear resets checkboxes and action state',await page.locator('[data-batch-memory]:checked').count()===0&&await selection.locator('[data-selection-count]').innerText()==='0'&&await selection.locator('[data-console-action]:enabled').count()===0);
@@ -76,16 +75,26 @@ try{
   check('No privacy page remains in the navigation',await page.locator('a[href="/app/privacy"]').count()===0);
   await goto('memories');await begin('memory.create');check('New form has no sensitivity field (levels were removed)',await op.locator('[name=sensitivity]').count()===0);await op.locator('[name=content]').fill('Synthetic private default acceptance.');const created=await submit();check('Private memory saved',created.status==='saved');await close();
   const metadata=await (await ctx.request.get(cfg.url+'/console-api/memory-meta?memory_id='+created.memory_id)).json();check('No sensitivity and no per-memory ChatGPT flag are exposed',metadata.sensitivity===undefined&&metadata.web_allowed===undefined);
-  await goto('connections');await begin('devices.register');await op.locator('[name=label]').fill('Synthetic browser Agent');await op.locator('[name=agent_id]').fill('synthetic-console-agent');await op.locator('[name=device_id]').fill('synthetic-device');await proof();
-  const registered=await submit();check('Agent key minted, not a simulated credential',registered.api_key.startsWith('mnm_'));await close();
-  await begin('devices.rotate');await proof();const rotated=await submit();check('Agent rotation changes actual key',rotated.api_key!==registered.api_key);await close();
-  check('Server observations do not claim local hooks are healthy',(await page.locator('[data-feature="CON-04"]').innerText()).includes('Hook'));await shot('connections');
-  await goto('security');check('Authentication history shows real proof activity',await page.locator('[data-feature="SEC-05"] tbody tr').count()>0);await shot('security');
-  await goto('audit?group=system');await page.locator('.audit-filter-panel summary').click();await page.locator('#audit-filter [name=action]').fill('console.taxonomy.save');await page.locator('#audit-filter button[type=submit]').click();
-  await page.waitForFunction(()=>{const rows=[...document.querySelectorAll('.timeline-item strong')];return rows.length>0&&rows.every(n=>n.textContent==='console.taxonomy.save');});
-  check('Audit filter returns only selected action',(await page.locator('.timeline-item strong').allInnerTexts()).every(s=>s==='console.taxonomy.save'));
+  await goto('connections');await page.locator('[data-agent-pick=codex]').click();await page.locator('[data-agent-generate="codex:plugin"]').click();
+  const agentDialog=page.locator('.agent-dialog'),agentRow=page.locator('.agents-table tbody tr').filter({hasText:'Synthetic browser Agent'});
+  const agentSubmit=async action=>{const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/action'&&r.request().method()==='POST'&&new URLSearchParams(r.request().postData()||'').get('action')===action);
+    await agentDialog.locator('[name=current_password]').fill(cfg.password);await agentDialog.locator('button[type=submit]').click();const r=await response;assert.equal(r.status(),200);return r.json();};
+  await agentDialog.locator('[name=label]').fill('Synthetic browser Agent');await agentDialog.locator('[name=device]').fill('synthetic-device');
+  const registered=await agentSubmit('devices.register');check('Agent key is minted through the real authenticated BFF',registered.api_key.startsWith('mnm_'));await agentDialog.waitFor({state:'hidden'});await agentRow.waitFor();
+  check('The one-time setup instructions contain the issued key',(await page.locator('.agent-panel').innerText()).includes(registered.api_key));
+  await agentRow.locator('[data-agent-row="devices.rotate"]').click();const rotated=await agentSubmit('devices.rotate');check('Agent rotation changes the actual key',rotated.api_key.startsWith('mnm_')&&rotated.api_key!==registered.api_key);
+  await agentDialog.locator('.agent-code code').waitFor();check('The rotation dialog preserves the new key',await agentDialog.locator('.agent-code code').innerText()===rotated.api_key);await agentDialog.locator('[data-close]').last().click();await agentDialog.waitFor({state:'hidden'});
+  const capture=await page.evaluate(()=>fetch('/console-api/capture-status').then(r=>r.json()));check('Server observations leave local hook and queue health unknown',capture.local_hook_failures==='not_observable'&&capture.local_queue==='not_observable'&&await agentRow.locator('[data-state="未使用"]').count()===1);await shot('connections');
+  // Password-only connection reauthentication is a security audit event; the login-history view lists sign-ins.
+  // Perform a real password + authenticator sign-in so the history assertion has its own current-contract evidence.
+  const login=await browser.newContext(),lp=await login.newPage();await lp.goto(cfg.url+'/login');await lp.locator('#username').fill(cfg.accounts[0].username);await lp.locator('#password').fill(cfg.password);await lp.locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);
+  await Promise.all([lp.waitForURL(u=>u.pathname.startsWith('/app')),lp.locator('button.primary[type=submit]').click()]);await login.close();
+  await goto('security');check('Authentication history shows the real password and authenticator sign-in',(await page.locator('[data-feature="SEC-05"] tbody tr').allInnerTexts()).some(text=>text.includes('account.login')));await shot('security');
+  await goto('audit?group=system');await page.locator('.audit-filter-panel summary').click();await page.locator('#audit-filter [name=action]').fill('console.privacy.defaults');await page.locator('#audit-filter button[type=submit]').click();
+  await page.waitForFunction(()=>{const rows=[...document.querySelectorAll('.audit-event-title strong')];return rows.length>0&&rows.every(n=>n.textContent==='console.privacy.defaults');});
+  check('Audit filter returns only the privacy action performed above',(await page.locator('.audit-event-title strong').allInnerTexts()).every(s=>s==='console.privacy.defaults'));
   const download=page.waitForEvent('download');await page.locator('[data-audit-export]').click();const file=await download;await file.saveAs(path.join(evidence,'synthetic-audit.json'));
-  const exported=JSON.parse(fs.readFileSync(path.join(evidence,'synthetic-audit.json'),'utf8'));check('Audit export uses real filtered metadata',exported.entries.length>0&&exported.entries.every(e=>e.action==='console.taxonomy.save'));await shot('audit');
+  const exported=JSON.parse(fs.readFileSync(path.join(evidence,'synthetic-audit.json'),'utf8'));check('Audit export uses real filtered metadata',exported.entries.length>0&&exported.entries.every(e=>e.action==='console.privacy.defaults'));await shot('audit');
   await goto('models');check('Unconfigured usage is not fabricated',await page.locator('[data-feature="MOD-04"] table').count()===1);
   // Project/task editing and Console archive are offered (phase 3); handoff bootstrap and reconciliation writes are not.
   await goto('tasks');check('Task page does not expose handoff bootstrap or reconciliation writes',await page.locator('[data-console-action$=".bootstrap"],[data-console-action="tasks.reconcile"]').count()===0);
@@ -98,11 +107,12 @@ try{
   const detachedOpen=await detail.count()?await detail.evaluate(d=>d.open):false;
   check('Real owner project context opens inline and read-only',await contextButton.getAttribute('aria-expanded')==='true'&&(await contextRegion.innerText()).trim().length>0&&!detachedOpen);
   await shot('tasks');
-  // Service, version and backup checks moved from the former system page to the health page (storage slug).
-  await goto('storage');check('Unconfigured backups are an explicit health reminder',(await page.locator('li[data-health="warn"]',{hasText:'备份'}).innerText()).includes('没有配置定期备份'));await shot('health');
+  // The health page uses service tiles; backups retain a separate operator-only read API.
+  await goto('storage');check('Health shows the actual ready Core service',await page.locator('.health-tile[data-health=ok]',{hasText:'核心服务'}).count()===1);
+  const backups=await ctx.request.get(cfg.url+'/console-api/backups'),backupState=await backups.json();check('Unconfigured backups remain explicit and unverified',backups.status()===200&&backupState.status==='not_configured'&&backupState.verified===false&&backupState.entries.length===0);await shot('health');
   await page.locator('#locale').selectOption({value:'en'},{force:true});check('English page title follows the locale',(await page.locator('#console-root h1').innerText()).trim()==='Health');await shot('health-en');
-  const member=await browser.newContext();await member.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const mp=await member.newPage();await mp.goto(cfg.url+'/app/storage');await mp.locator('#console-root h1').waitFor();await mp.locator('.health-list').waitFor();
-  check('Member sees no operator service data',await mp.locator('li[data-health]',{hasText:'核心服务'}).count()===0);check('Member denied at BFF as well',(await member.request.get(cfg.url+'/console-api/system-health')).status()===403);await member.close();
+  const member=await browser.newContext();await member.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const mp=await member.newPage();await mp.goto(cfg.url+'/app/storage');await mp.locator('#console-root h1').waitFor();await mp.locator('.health-head').waitFor();
+  check('Member sees no operator service data',await mp.locator('.health-tile',{hasText:'核心服务'}).count()===0);check('Member denied at the service and backup APIs',(await member.request.get(cfg.url+'/console-api/system-health')).status()===403&&(await member.request.get(cfg.url+'/console-api/backups')).status()===403);await member.close();
   await command('basic-memory-only');await goto('memories');
   check('Basic-only account keeps new-memory operation',await page.locator('[data-console-action="memory.create"]').count()===1);
   // Basic memory rights cover create, correct and retract; batch actions need full console rights.

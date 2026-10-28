@@ -105,6 +105,17 @@ function literalScore(query,text,entities=[]) {
   return coverage.reduce((a,b)=>a+b,0)/coverage.length*0.8;
 }
 export function aliasAnchorsMatch(plan,text) {return (plan?.anchors||[]).every(group=>group.some(term=>containsTerm(text,term)));}
+// Semantic candidates must preserve the same named subjects as lexical candidates. Accepted
+// alias groups can satisfy a subject by any equivalent name; graph-backed names use the separately
+// validated authority_ids proof instead of requiring the alias to be repeated in every body.
+export function querySubjectsMatch(plan,text) {
+  if(!aliasAnchorsMatch(plan,text))return false;
+  const query=plan?.queries?.[0]||'';
+  return (plan?.required||[]).every(term=>!containsTerm(query,term)
+    || plan.authority_terms?.includes(term)
+    || plan.anchors?.some(group=>group.includes(term))
+    || containsTerm(text,term));
+}
 // The searchable text of a memory: body, topic and, when it has any, its keywords (concepts). A memory without keywords
 // keeps exactly the text earlier index versions stored.
 export const conceptsText=memory=>memory.concepts_text ?? (Array.isArray(memory.concepts)?memory.concepts.join(' '):'');
@@ -154,6 +165,15 @@ export function acceptsSemanticScore(score,policy) {
   if(policy.bounded&&(score< -1.000001||score>1.000001))return false;
   if(policy.direction==='maximum')return score>=0&&score<=policy.threshold;
   return score>=policy.threshold;
+}
+
+// Similarity hints have cosine-calibrated thresholds. Only return a comparable score when
+// the configured metric has a known conversion; unnormalized Dot/Euclid need their own calibration.
+export function comparableSemanticScore(score,{semantic_distance:distance,semantic_normalization:normalization}={}) {
+  if(typeof score!=='number'||!Number.isFinite(score))return null;
+  if(distance==='Cosine'||distance==='Dot'&&normalization==='l2')return score>=-1.000001&&score<=1.000001?Math.max(-1,Math.min(1,score)):null;
+  if(distance==='Euclid'&&normalization==='l2'&&score>=0&&score<=2.000001)return Math.max(-1,Math.min(1,1-score*score/2));
+  return null;
 }
 
 export function aliasSubjectMatches(query,name,memory){

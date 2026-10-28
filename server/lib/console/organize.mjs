@@ -60,10 +60,8 @@ export class ConsoleOrganizer {
     if(f.query){
       // The search window is cut after the live filter, so deleted-project records never take candidate slots.
       const scope=resolveMemoryScope(this.db,user,{},{lifecycle:this.store.lifecycle});
-      const found=this.store.memorySearch.candidates(user,f.query,scope,{auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES});
+      const found=this.store.memorySearch.candidates(user,f.query,scope,{auth,statuses:f.status?[f.status]:['active','superseded','retracted'],memoryTypes:MEMORY_TYPES,searchContext:{filter:f}});
       truncated=found.truncated===true;plan=found.plan;aliases=found.aliases;dependencyToken=found.dependency_token;matchById=new Map(found.rows.map(r=>[r.memory_id,r._entity_match]));order=found.rows.map(r=>r.memory_id);
-      // Memories whose keywords contain the query join the result after the text matches (bounded, owner scoped).
-      const extra=this.conceptMatches(user,f.query).filter(x=>!order.includes(x));order=[...order,...extra];
       ids=ids?ids.filter(x=>order.includes(x)):order;
     }
     const now=Date.now(),stale=f.review==='stale'?staleSql(now):null;
@@ -94,10 +92,6 @@ export class ConsoleOrganizer {
     const reasons=stale?staleReasons(this.db,user,rows,now):null;
     return {rows:rows.map(({concepts_json,...r})=>({...r,concepts:conceptList(concepts_json),imported:r.imported===1,...(matchById.has(r.memory_id)?{ranking:matchById.get(r.memory_id)}:{}),...(reasons?{review:reasons.get(r.memory_id)}:{})})),truncated,plan,aliases,dependencyToken,...(count?{total}:{})};
   }
-  /** Memory IDs whose keywords contain the query (case-insensitive), newest first, at most 200. */
-  conceptMatches(user,query){const q=String(query).trim();if(!q||[...q].length>40)return [];
-    return this.db.prepare(`SELECT DISTINCT t.memory_id FROM memory_traits t JOIN memories m ON m.user_id=t.user_id AND m.memory_id=t.memory_id, json_each(t.concepts_json) c
-      WHERE t.user_id=? AND instr(lower(c.value),lower(?))>0 ORDER BY m.created_at DESC LIMIT 200`).all(user,q).map(r=>r.memory_id);}
   /** Most used keywords of active memories (live projects only), for the library and the overview map. */
   concepts(user,limit=30){const live=this.live(user).sql('m.project_id');
     return this.db.prepare(`SELECT c.value concept,COUNT(*) count FROM memory_traits t JOIN memories m ON m.user_id=t.user_id AND m.memory_id=t.memory_id, json_each(t.concepts_json) c

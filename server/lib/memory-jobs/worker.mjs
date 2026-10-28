@@ -52,9 +52,19 @@ export function validateSummary(sources,results,multiSpan){
 }
 export class MemoryWorker {
   constructor(store,jobs,organizer,{workerId='local-memory-worker',userId=null,profileFilter=null,quota=null,runId=null}={}){this.store=store;this.jobs=jobs;this.organizer=organizer;this.workerId=workerId;this.userId=userId;this.profileFilter=profileFilter;this.quota=quota;this.runId=runId;}
+  async withLease(job,operation){
+    let heartbeatError;
+    const check=()=>{if(heartbeatError)throw heartbeatError;if(!this.jobs.owns(job))fail('LEASE_LOST');};
+    const timer=setInterval(()=>{
+      try{this.jobs.renew(job);}catch(error){heartbeatError=error;clearInterval(timer);}
+    },Math.max(1,Math.floor(this.jobs.leaseMs/3)));
+    timer.unref?.();
+    try{const result=await operation(check);check();return result;}
+    finally{clearInterval(timer);}
+  }
   async runOne(){
-    const job=this.jobs.claim(this.workerId,{userId:this.userId,profile:this.profileFilter,runId:this.runId});if(!job)return null;
     const profile=this.organizer?.profile,retry=profile?.retry || {max_attempts:1,base_ms:1000,max_ms:1000};
+    const job=this.jobs.claim(this.workerId,{userId:this.userId,profile:this.profileFilter,runId:this.runId,maxAttempts:retry.max_attempts});if(!job)return null;
     try{
       if(!profile?.enabled || profile.fingerprint!==job.profile)fail('NOT_CONFIGURED');
       const taxonomyFence=()=>{if(job.job_type==='classification'&&!classificationContextCurrent(this.store,job))fail('STALE_TAXONOMY');};
@@ -79,8 +89,9 @@ export class MemoryWorker {
           sources:sources.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
             ...(['entities','traits'].includes(job.job_type)?{}:{current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})})),
           instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='traits'?TRAITS_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction};
-        const reply=await this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):job.job_type==='traits'?traitsOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null}),{
-          reserve:()=>this.store.memoryTransaction(()=>{taxonomyFence();entityFence();return this.jobs.reserve(job,profile.limits.daily_requests,this.quota,items);})});
+        // Keep the same fenced lease through the entire provider call, including its optional repair request.
+        const reply=await this.withLease(job,check=>this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):job.job_type==='traits'?traitsOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null}),{
+          reserve:()=>this.store.memoryTransaction(()=>{check();taxonomyFence();entityFence();return this.jobs.reserve(job,profile.limits.daily_requests,this.quota,items);})}));
         taxonomyFence();entityFence();let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
         else if(new Set(results.map(r=>r.memory_id)).size!==results.length)fail('INVALID_SOURCE_SET');

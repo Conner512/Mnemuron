@@ -29,23 +29,27 @@ try{
  const shot=async name=>{await page.screenshot({path:path.join(evidence,name+'.png'),fullPage:true});};
  await goto('models');check('Models page has two distinct configurable roles',await page.locator('.model-card').count()===2);
  check('Missing worker and vector storage are explained',(await page.locator('.model-pipeline').innerText()).includes('后台处理已暂停')&&(await page.locator('.model-pipeline').innerText()).includes('向量库尚未配置'));
- const blocked=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Paused worker and unavailable vectors remain server-enforced',blocked.processing.classification.blockers.includes('WORKER_DISABLED')&&blocked.processing.vector.blockers.includes('VECTOR_DISABLED'));
+ const blocked=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Paused worker and unavailable vectors remain server-enforced',blocked.processing.summary.blockers.includes('WORKER_DISABLED')&&blocked.processing.vector.blockers.includes('VECTOR_DISABLED'));
+ check('Processing offers summaries and vectors without retired classification',blocked.processing.classification===undefined&&await page.locator('[data-model-stage=summary]').count()===1&&await page.locator('[data-model-stage=vector]').count()===1&&await page.locator('[data-model-stage=classification]').count()===0);
  check('Unconfigured processing cannot be launched',await page.locator('.model-pipeline button:enabled').count()===0);await shot('models-unconfigured');
  for(const kind of ['organizer','embedder']){
   await begin('models.save',kind);await op.locator('[name=base_url]').fill(cfg.model_url);await op.locator('[name=model]').fill('synthetic-browser-'+kind);
   await op.locator('[name=api_key]').fill('synthetic-local-only-key');await op.locator('[name=enabled]').check();await op.locator('[name=egress_approved]').check();
   if(kind==='embedder'){await op.locator('[name=dimensions]').fill('3');await op.locator('[name=query_approved]').check();}
   await shot('configure-'+kind);check(kind+' configuration persists through real BFF',(await submit()).status==='saved');await close();
-  await begin('models.test',kind);const result=await submit();check(kind+' capability tests succeed with synthetic data only',result.status==='verified'&&result.real_memory_sent===false&&result.checks.length===2);await close();
+  await begin('models.test',kind);const result=await submit();const expected=kind==='organizer'?['summary']:['document_embedding','query_embedding'];check(kind+' capability tests succeed with synthetic data only',result.status==='verified'&&result.real_memory_sent===false&&JSON.stringify(result.checks)===JSON.stringify(expected)&&result.skipped.length===0);await close();
  }
  check('Both current revisions show successful verification',await page.locator('[data-i18n=probeVerified]').count()===2);
  check('The saved secret never appears in page text',!(await page.locator('#console-root').innerText()).includes('synthetic-local-only-key'));
- await command('enable-synthetic-processing');await goto('models');check('Ready pipelines have enabled actions',await page.locator('.model-pipeline button:enabled').count()===4);
+ await command('enable-synthetic-processing');await goto('models');check('Ready summary and vector pipelines have enabled actions',await page.locator('.model-pipeline button:enabled').count()===3);
 check('The vector stage offers the bounded first-run preparation',await page.locator('.model-pipeline [data-first-run] [data-console-action="vector.prepare"]:enabled').count()===1);
- await page.locator('[data-model-stage=classification] [data-console-action]').click();await op.locator('form').waitFor();const classification=await submit();check('Classification submits to the worker',classification.status==='queued');await close();await command('tick',{job_ids:classification.jobs});
- await goto('memories');check('LLM classifications are visible in the memory library',(await page.locator('.memory-table').innerText()).includes('技术'));
- await goto('jobs');await page.locator('[data-console-action="jobs.schedule"][data-type=summary]').click();await op.locator('form').waitFor();await op.locator('[name=include_open]').check();await pick('periods','daily');
- const summary=await submit();check('Daily summary submits explicitly',summary.status==='queued');await close();await command('tick',{job_ids:summary.jobs});await goto('summaries');check('LLM grounded summaries have inspectable records',await page.locator('[data-summary]').count()>0);
+ await page.locator('[data-model-stage=summary] [data-console-action="jobs.schedule"]').click();await op.locator('form').waitFor();
+ check('The processing form fixes the operation to summary',await op.locator('input[type=hidden][name=type]').inputValue()==='summary'&&await op.locator('select[name=type]').count()===0);
+ await op.locator('[name=include_open]').check();await pick('periods','daily');const daily=await submit();check('Daily summary submits to the worker',daily.status==='queued'&&daily.jobs.length>0);await close();
+ const dailyDone=await command('tick',{job_ids:daily.jobs});check('The real HTTP organizer completes every daily summary job',dailyDone.jobs.length===daily.jobs.length&&dailyDone.jobs.every(j=>j.state==='succeeded'));
+ await goto('summaries');check('Daily grounded summaries have inspectable records',await page.locator('[data-summary]').count()>0);
+ await goto('jobs');await page.locator('[data-console-action="jobs.schedule"][data-type=summary]').click();await op.locator('form').waitFor();await op.locator('[name=include_open]').check();await pick('periods','weekly');
+ const summary=await submit();check('Weekly summary submits explicitly from the jobs page',summary.status==='queued'&&summary.jobs.length>0);await close();await command('tick',{job_ids:summary.jobs});await goto('summaries');check('Daily and weekly grounded summaries have inspectable records',await page.locator('[data-summary]').count()>=2);
  await command('enable-synthetic-processing');await goto('models');await begin('vector.schedule');check('Vector indexing is explicitly queued',(await submit()).status==='queued');await close();await command('tick');await goto('models');
  const data=await page.evaluate(()=>fetch('/console-api/models').then(r=>r.json()));check('Personal index completes with real HTTP embeddings',data.processing.vector.state==='succeeded'&&data.processing.vector.indexed_documents===2&&data.processing.vector.search_ready===true);
  const search=await page.evaluate(()=>fetch('/console-api/memories?query=network&mode=semantic').then(r=>r.json()));check('Semantic retrieval returns only this account',search.results.length===2&&!JSON.stringify(search).includes('private B sentinel'));
@@ -77,7 +81,7 @@ check('The vector stage offers the bounded first-run preparation',await page.loc
  check('No limit is saved as an explicit null and no count is lowered',unlimited.status==='saved'&&unlimited.quota.mode==='manual'&&unlimited.quota.daily.limit===null&&unlimited.quota.total.limit===null&&unlimited.quota.total.used>=legacy.quotas.embedder.total.used);await close();
  const after=(await models()).processing.vector.first_run;check('Changing limits keeps the first-run state, budget record and inactive index',JSON.stringify(after)===JSON.stringify(legacy.vector.first_run)&&after.serving===false&&after.budget.used===legacy.vector.first_run.budget.used&&after.budget.total===10);
  await goto('models');check('The card shows no limit in words',(await page.locator('[data-call-limits=embedder]').innerText()).includes('不限制'));
- check('Replaced legacy caps are labelled as records, not limits',(await page.locator('[data-first-run]').innerText()).includes('已由手动调用次数限制取代')&&(await page.locator('.model-card').nth(1).innerText()).includes('已由手动调用次数限制取代'));
+ check('The old first-run cap is labelled as a record and the model card shows the current daily limit',(await page.locator('[data-first-run]').innerText()).includes('已由手动调用次数限制取代')&&await page.locator('.model-card').nth(1).locator('[data-i18n=dailyRequests]').evaluate(n=>n.closest('dt').nextElementSibling.textContent.trim()==='不限制'));
  check('Usage table states no limit in words',(await page.locator('[data-feature="MOD-04"]').innerText()).includes('不限制'));await shot('call-limits-unlimited');
  await setLimits('embedder',null,'');await op.locator('button[type=submit]').click();await op.locator('[data-operation-error]').waitFor();
  check('A limit without a number is refused, not read as 0 or no limit',(await op.locator('[data-operation-error]').innerText()).includes('上限必须'));await close();

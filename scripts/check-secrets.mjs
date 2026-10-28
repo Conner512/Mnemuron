@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { scanPublicationFile } from './check-publication.mjs';
+import {isReviewedBinary} from './publication-reviewed.mjs';
 import { storageDoctor } from '../server/lib/storage-policy.mjs';
 
 export const GITLEAKS_VERSION = '8.24.3';
@@ -40,7 +41,7 @@ function selectSources(scope, cwd) {
   const text=args=>git(args).toString('utf8');
   const root=realpathSync(text(['rev-parse','--show-toplevel']).trim());
   if(realpathSync(cwd)!==root) fail('REPOSITORY_ROOT_REQUIRED');
-  const coverage={files:0,bytes:0,commits:0,tags:0,tree_refs:0,metadata_records:0,shallow:text(['rev-parse','--is-shallow-repository']).trim()==='true',
+  const coverage={files:0,bytes:0,commits:0,tags:0,tree_refs:0,metadata_records:0,reviewed_binary_files:0,reviewed_binary_bytes:0,scanned_text_entries:0,shallow:text(['rev-parse','--is-shallow-repository']).trim()==='true',
     index:scope==='--staged'?'complete_snapshot':'not_inspected',ignored_untracked:'not_inspected',remote_inventory:'not_inspected',
     local_history:scope==='--history'?'all_local_reachable_commit_snapshots':'not_inspected',payloads_not_inspected:0};
   const entries=[];
@@ -51,7 +52,7 @@ function selectSources(scope, cwd) {
     if(!Number.isSafeInteger(source.size) || source.size<0 || source.size>FILE_LIMIT) fail('OVERSIZED_PAYLOAD_NOT_INSPECTED');
     coverage.bytes+=source.size;
     if(coverage.bytes>SNAPSHOT_LIMIT || entries.length>=50000) fail('SNAPSHOT_LIMIT_EXCEEDED');
-    entries.push({file:`${prefix}/${file}`,...source});
+    entries.push({file:`${prefix}/${file}`,sourcePath:file,...source});
     if(metadata) coverage.metadata_records++;else coverage.files++;
   };
   const blob=oid=>({size:Number(text(['cat-file','-s',oid]).trim()),read:()=>git(['cat-file','blob',oid])});
@@ -125,11 +126,17 @@ export function checkSecrets(args = ['--history'], {cwd = path.resolve(import.me
     for(const entry of selected.entries) {
       const content=entry.read();
       if(content.length!==entry.size) fail('SOURCE_CHANGED');
+      // Hash-reviewed assets are part of the exact snapshot manifest, with their coverage explicitly reported.
+      // Retain the original path separately from history prefixes; no suffix-based binary exemption is allowed.
+      if(isReviewedBinary(entry.sourcePath,content)) {
+        coverage.reviewed_binary_files++;coverage.reviewed_binary_bytes+=content.length;
+        manifest.push([entry.file,sha256(content)]);continue;
+      }
       if(!isUtf8(content) || content.includes(0)) fail('BINARY_PAYLOAD_NOT_INSPECTED');
       if(content.toString('utf8').startsWith('version https://git-lfs.github.com/spec/v1')) fail('LFS_PAYLOAD_NOT_INSPECTED');
-      if(scanPublicationFile(entry.file,content).some(f=>f.rule==='memory-export-review')) fail('MEMORY_EXPORT_NOT_INSPECTED');
+      if(scanPublicationFile(entry.sourcePath,content).some(f=>f.rule==='memory-export-review')) fail('MEMORY_EXPORT_NOT_INSPECTED');
       const destination=path.join(inputs,entry.file);mkdirSync(path.dirname(destination),{recursive:true,mode:0o700});
-      writeFileSync(destination,content,{flag:'wx',mode:0o600});manifest.push([entry.file,sha256(content)]);
+      writeFileSync(destination,content,{flag:'wx',mode:0o600});manifest.push([entry.file,sha256(content)]);coverage.scanned_text_entries++;
     }
     const configPath=path.join(scratch,'scanner.toml'),ignorePath=path.join(scratch,'empty-ignore'),reportPath=path.join(scratch,'report.json');
     writeFileSync(configPath,configBytes,{flag:'wx',mode:0o600});writeFileSync(ignorePath,'',{flag:'wx',mode:0o600});

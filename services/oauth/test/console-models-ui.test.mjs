@@ -39,12 +39,12 @@ test('MODEL-LIMIT-01: a model card shows the daily limit actually enforced; with
 test('HOSTS-UI-01: the models page lists host records with edit and remove, and offers adding one; the two explanation cards are gone in owner mode',async()=>{
   const {actionPage}=await import('../../../web/console/actions.mjs');
   const caps={enabled:true,writable:true,owner_mode:true,allowed_actions:['models.save','hosts.set','hosts.remove']};
-  const html=actionPage('models',{models:[],processing:{},hosts:[{hostname:'api.example.com',address:'192.168.1.20',updated_at:'2026-10-27T05:00:00Z'}]},caps);
+  const html=actionPage('models',{models:[],processing:{},hosts:[{hostname:'api.example.com',address:'192.0.2.20',updated_at:'2026-10-27T05:00:00Z'}]},caps);
   assert.match(html,/id="model-hosts"[\s\S]*data-console-action="hosts.set"[^>]*>[\s\S]*?添加解析/);
-  assert.match(html,/data-host="api.example.com"><td><code>api.example.com<\/code><\/td><td><code>192.168.1.20<\/code>[\s\S]*?data-console-action="hosts.set" data-id="api.example.com"[\s\S]*?data-console-action="hosts.remove" data-id="api.example.com"/);
+  assert.match(html,/data-host="api.example.com"><td><code>api.example.com<\/code><\/td><td><code>192.0.2.20<\/code>[\s\S]*?data-console-action="hosts.set" data-id="api.example.com"[\s\S]*?data-console-action="hosts.remove" data-id="api.example.com"/);
   assert.doesNotMatch(html,/data-i18n="modelPipeline"|data-i18n="modelBoundary"/);
-  const sys=actionPage('models',{models:[],processing:{},hosts:[],system_hosts:[{hostname:'relay.example.com',address:'10.0.0.52'}],hosts_apply:{writes_file:true,revision:2,pending:false,state:'applied'}},caps);
-  assert.match(sys,/data-host="relay.example.com"><td><code>relay.example.com<\/code><\/td><td><code>10.0.0.52<\/code><\/td><td><span class="tag"><span data-i18n="hostSourceSystem">系统 \/etc\/hosts<\/span><\/span>[\s\S]*?data-console-action="hosts.set" data-id="relay.example.com"[\s\S]*?data-console-action="hosts.remove" data-id="relay.example.com"/,'system entries can be edited and removed');
+  const sys=actionPage('models',{models:[],processing:{},hosts:[],system_hosts:[{hostname:'relay.example.com',address:'192.0.2.52'}],hosts_apply:{writes_file:true,revision:2,pending:false,state:'applied'}},caps);
+  assert.match(sys,/data-host="relay.example.com"><td><code>relay.example.com<\/code><\/td><td><code>192.0.2.52<\/code><\/td><td><span class="tag"><span data-i18n="hostSourceSystem">系统 \/etc\/hosts<\/span><\/span>[\s\S]*?data-console-action="hosts.set" data-id="relay.example.com"[\s\S]*?data-console-action="hosts.remove" data-id="relay.example.com"/,'system entries can be edited and removed');
   assert.match(sys,/data-tone="good">已写入 \/etc\/hosts/);assert.doesNotMatch(sys,/还没有解析记录/);
   assert.match(actionPage('models',{models:[],processing:{},hosts:[],system_hosts:[],hosts_apply:{writes_file:true,revision:3,pending:false,state:'failed',error:'HOST_ADDRESS_DENIED'}},caps),/data-tone="bad">写入 \/etc\/hosts 失败 HOST_ADDRESS_DENIED/);
   assert.match(actionPage('models',{models:[],processing:{},hosts:[]},caps),/还没有解析记录/);

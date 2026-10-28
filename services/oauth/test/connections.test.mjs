@@ -27,7 +27,7 @@ test('B-28: created OAuth clients are pending until a current owner grant exists
  const list=q=>x.registry.list(x.a.id,q),counts=()=>list({search:'no matching row'}).authorization_counts;
  assert.equal(list({}).counts.active,1,'Created inventory is retained; a failed authorization never deletes the client');
  assert.deepEqual(counts(),{usable:0,readonly:0,memory_readwrite:0,pending:1,verified:0});
- const grant=(key,subject,expires,scope='memory:read')=>x.store.db.prepare("INSERT INTO oauth_records(model,id,payload,expires) VALUES('Grant',?,?,?)").run(key,JSON.stringify({accountId:subject,clientId:r.connection.client_id,resources:{[x.config.resource]:scope}}),expires);
+ const grant=(key,subject,expires,scope='memory:read')=>x.store.db.prepare("INSERT INTO oauth_records(model,id,payload,expires) VALUES('Grant',?,?,?)").run(key,JSON.stringify({accountId:subject,securityVersion:x.identities.account(subject).security_version,clientId:r.connection.client_id,resources:{[x.config.resource]:scope}}),expires);
  grant('foreign',x.identities.byId(x.b.id).subject,seconds()+600);grant('expired',x.identities.byId(x.a.id).subject,seconds()-1);
  assert.equal(counts().usable,0);assert.equal(list({}).connections[0].active_grant_count,0);
  grant('current',x.identities.byId(x.a.id).subject,seconds()+600);
@@ -124,7 +124,7 @@ test('B-26: setup guide matches registered OAuth client; expired or revoked gran
  const detail=()=>x.registry.detail(x.a.id,r.connection.connection_id),d=detail(),client=x.registry.client(r.connection.client_id);
  assert.equal(d.guide.oauth_scopes.join(' '),client.scope);assert.deepEqual(d.guide.scopes,['memory:read']);assert.equal(d.guide.issuer,x.config.issuer);
  assert.equal(d.guide.discovery_url,x.config.issuer+'/.well-known/openid-configuration?client_id='+r.connection.client_id);assert.equal(d.connection.active_grant_count,0);
- const grant=(id,expires,subject=x.identities.byId(x.a.id).subject)=>x.store.db.prepare('INSERT INTO oauth_records(model,id,payload,expires) VALUES(?,?,?,?)').run('Grant',id,JSON.stringify({accountId:subject,clientId:r.connection.client_id,resources:{[x.config.resource]:'memory:read'}}),expires);
+ const grant=(id,expires,subject=x.identities.byId(x.a.id).subject)=>x.store.db.prepare('INSERT INTO oauth_records(model,id,payload,expires) VALUES(?,?,?,?)').run('Grant',id,JSON.stringify({accountId:subject,securityVersion:x.identities.account(subject).security_version,clientId:r.connection.client_id,resources:{[x.config.resource]:'memory:read'}}),expires);
  grant('synthetic-expired',seconds()-1);grant('synthetic-other-owner',seconds()+100,x.identities.byId(x.b.id).subject);
  assert.equal(detail().connection.active_grant_count,0);assert.equal(detail().grants.length,0);
  grant('synthetic-active',seconds()+100);assert.equal(detail().connection.active_grant_count,1);

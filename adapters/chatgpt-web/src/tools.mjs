@@ -146,7 +146,10 @@ export async function prepareTool(name, args, { config, auth, core, id, signal }
 }
 
 export function createMcpServer({ config, auth, core, id, onError=()=>{}, onResult=()=>{} }) {
-  const server = new McpServer({ name: "mnemuron-readonly-web", version: "0.3.0" },{instructions:enabledTools(config,auth).includes('mnemuron_save_memory')?CLOUD_INSTRUCTIONS:SERVER_INSTRUCTIONS});
+  // Count nested keys and array elements before schema validation. Current valid tools need fewer than 64;
+  // the authenticated HTTP parser independently retains its 64 KiB bound for the whole JSON-RPC request.
+  const server = new McpServer({ name: "mnemuron-readonly-web", version: "0.3.0" },{maxToolInputElements:256,
+    instructions:enabledTools(config,auth).includes('mnemuron_save_memory')?CLOUD_INSTRUCTIONS:SERVER_INSTRUCTIONS});
   for (const name of enabledTools(config,auth)) {
     const definition = toolDefinitions[name];
     // SDK publishes object schemas; success and safe business errors share this object contract.

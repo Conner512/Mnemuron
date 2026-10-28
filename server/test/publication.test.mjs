@@ -53,6 +53,20 @@ test('publication guard permits documented synthetic examples but rejects popula
   assert.ok(scanPublicationFile('server/seed/example.json', JSON.stringify({ ...seed, progress: ['synthetic result that belongs in a private report'] })).some(f => f.rule === 'seed-history'));
 });
 
+test('publication binary reviews require both the exact asset path and unchanged font bytes', () => {
+  const file = 'web/console/display-font.woff2';
+  const bytes = readFileSync(new URL('../../' + file, import.meta.url));
+  assert.deepEqual(scanPublicationFile(file, bytes), []);
+  assert.ok(scanPublicationFile('web/console/unreviewed.woff2', bytes).some(f => f.rule === 'binary-content'));
+  const changed = Buffer.from(bytes); changed[changed.length - 1] ^= 1;
+  assert.ok(scanPublicationFile(file, changed).some(f => f.rule === 'binary-content'));
+  // A reviewed historical test path is not a blanket exemption for new identifiers or credentials.
+  for (const file of ['server/test/config-tunnel.test.mjs', 'server/test/console-hosts.test.mjs', 'services/oauth/test/console-models-ui.test.mjs']) {
+    assert.ok(scanPublicationFile(file, ['10', '23', '45', '67'].join('.')).some(f => f.rule === 'private-ip'));
+    assert.ok(scanPublicationFile(file, 'mnm_' + 'x'.repeat(40)).some(f => f.rule === 'project-or-model-key'));
+  }
+});
+
 test('publication permits the exact GitHub no-reply address but rejects private and lookalike metadata', t => {
   for (const [email, allowed] of [
     ['noreply@github.com', true],

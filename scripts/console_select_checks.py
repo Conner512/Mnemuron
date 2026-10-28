@@ -106,7 +106,7 @@ def check_selects(page, goto, check, previews):
         page.set_viewport_size({'width': width, 'height': 1000})
         for locale in ['zh-CN', 'en']:
             choose_select(page, '#locale', locale)
-            page.locator('[data-select-name="category"]').click()
+            page.locator('[data-select-name="kind"]').click()
             pop = page.locator('.select-popup:popover-open'); r = pop.bounding_box()
             fit = page.evaluate('() => document.documentElement.scrollWidth <= innerWidth')
             check('Anchored dropdown / desktop layout ' + str((width, locale)), fit and r['x'] >= 0 and r['x'] + r['width'] <= width + 1 and r['y'] >= 0 and r['y'] + r['height'] <= 1001)

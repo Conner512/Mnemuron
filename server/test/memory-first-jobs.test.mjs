@@ -62,6 +62,7 @@ test('S-02 S-04 S-07 S-08 S-10: locked categories stay, summaries group scope an
   // One summary per scope and period: a category no longer splits the group, so both memories share each period's summary.
   const summaries=rows(f.s,'memory_summaries');assert.equal(summaries.length,2);assert.ok(summaries.every(s=>s.category==='all'&&s.coverage===2));
   const visible=f.s.derivedMemory.summaries(f.auth.user_id,summaries[0].scope_key);assert.equal(visible.results.length,2);
+  assert.ok(visible.results.every(summary=>summary.coverage_basis==='period_snapshot'));
   for(const summary of visible.results){assert.equal(summary.omitted,0);assert.equal(summary.kind,'derived_summary');assert.equal(summary.independently_fact_checked,false);assert.match(summary.claims[0].quote,/not approved/);}
   f.s.retractMemory(f.auth,memory.memory_id);assert.equal(f.s.derivedMemory.summaries(f.auth.user_id,summaries[0].scope_key).results.length,0);
   assert.equal(rows(f.s,'memory_summaries').filter(s=>s.status==='stale').length,2);

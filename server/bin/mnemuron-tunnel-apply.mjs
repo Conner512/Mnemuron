@@ -4,8 +4,8 @@
 // tunnel whose revision is newer than its last outcome it opens the token with the console key, installs it, starts or
 // restarts that cloudflared and waits for it to connect. The main tunnel (unit cloudflared-mnemuron) keeps its
 // credential path; added tunnels run as cloudflared-mnemuron@<id> with a token and an env file under tunnels/. A token
-// that does not connect is rolled back (the previous token restored; a new tunnel stopped and cleaned up), so a bad token
-// never cuts the console off. Removals stop the instance and delete its files. Outcomes go to the status file the service
+// that fails to start/connect triggers rollback (restore the previous files, or stop and clean up a new extra tunnel).
+// Unconfirmed recovery is reported as failed. Removals stop the instance and delete its files. Outcomes go to the status file the service
 // reads; discover mode reports the tokens cloudflared runs with. It never opens the database.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,7 +24,7 @@ const requestFile = path.join(dir, 'apply.request'), statusFile = path.join(dir,
 const mainCredential = env.MNEMURON_TUNNEL_CREDENTIAL || '/etc/cloudflared-mnemuron/tunnel-token';
 const extraDir = env.MNEMURON_TUNNEL_ETC || path.join(path.dirname(mainCredential), 'tunnels');
 const waitSeconds = Number(env.MNEMURON_TUNNEL_WAIT_SECONDS || 40);
-const systemctl = (...args) => execFileSync(env.MNEMURON_SYSTEMCTL || 'systemctl', args, {stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: 60000});
+const systemctl = (...args) => execFileSync(env.MNEMURON_SYSTEMCTL || 'systemctl', args, {stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8', timeout: Number(env.MNEMURON_SYSTEMCTL_TIMEOUT_MS || 60000)});
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const unitOf = id => id === 'main' ? 'cloudflared-mnemuron.service' : `cloudflared-mnemuron@${id}.service`;
 const credentialOf = id => id === 'main' ? mainCredential : path.join(extraDir, `${id}.token`);
@@ -40,6 +40,8 @@ function writeOwned(file, value) {
 }
 const readJson = file => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
 const readToken = file => { try { return fs.readFileSync(file, 'utf8').trim() || null; } catch { return null; } };
+const readPrevious = file => { try { return fs.readFileSync(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+const restoreFile = (file, previous) => previous === null ? fs.rmSync(file, {force: true}) : writePrivate(file, previous);
 function stopInstance(unit) {
   try { systemctl('disable', '--now', unit); return; } catch { /* verify an already stopped and disabled/absent instance */ }
   try {
@@ -89,15 +91,41 @@ async function applyOne(id, want, key) {
   }
   const token = unsealWith(key, want.user, 'tunnel-token', want.token_seal);
   decodeTunnelToken(token);
-  const previous = readToken(credential), url = metricsOf(id, want.metrics_port);
-  if (id !== 'main') writePrivate(envFileOf(id), `MNEMURON_TUNNEL_METRICS=127.0.0.1:${want.metrics_port}\n`);
-  if (previous === token) { if (id === 'main') systemctl('start', unit); else systemctl('enable', '--now', unit); return {state: 'applied', unchanged: true}; }
-  writePrivate(credential, token + '\n');
-  if (id === 'main' || previous) systemctl('restart', unit); else systemctl('enable', '--now', unit);
-  if (await connected(url)) return {state: 'applied'};
-  if (previous) { writePrivate(credential, previous + '\n'); systemctl('restart', unit); return {state: 'rolled_back', error: 'TUNNEL_NOT_CONNECTED', restored: await connected(url)}; }
-  if (id !== 'main') { stopInstance(unit); removeInstanceFiles(id); }
-  return {state: 'rolled_back', error: 'TUNNEL_NOT_CONNECTED_NO_PREVIOUS'};
+  const previous = readPrevious(credential), previousEnv = id === 'main' ? null : readPrevious(envFileOf(id));
+  const desiredEnv = `MNEMURON_TUNNEL_METRICS=127.0.0.1:${want.metrics_port}\n`;
+  const unchanged = previous?.trim() === token && (id === 'main' || previousEnv === desiredEnv);
+  let error = 'TUNNEL_NOT_CONNECTED';
+  // Installation, unit-manager failures (including timeouts), and readiness failures share the same rollback.
+  // Capture both files before writing either: a failed restart must never leave the replacement token installed.
+  try {
+    if (id !== 'main') writePrivate(envFileOf(id), desiredEnv);
+    if (!unchanged) writePrivate(credential, token + '\n');
+    if (unchanged) { if (id === 'main') systemctl('start', unit); else systemctl('enable', '--now', unit); }
+    else if (id === 'main' || previous !== null) systemctl('restart', unit);
+    else systemctl('enable', '--now', unit);
+    if (await connected(metricsOf(id, want.metrics_port))) return {state: 'applied', ...(unchanged ? {unchanged: true} : {})};
+  } catch { error = 'TUNNEL_APPLY_FAILED'; }
+  if (previous !== null) {
+    // Restore bytes even when restarting the old service also fails. Its recovery state is reported separately.
+    try {
+      restoreFile(credential, previous);
+      if (id !== 'main') restoreFile(envFileOf(id), previousEnv);
+    } catch { return {state: 'failed', error: 'TUNNEL_RESTORE_FILES_FAILED', cause: error, restored: false}; }
+    try { systemctl('restart', unit); }
+    catch { return {state: 'failed', error: 'TUNNEL_RESTORE_START_FAILED', cause: error, credential_restored: true, restored: false}; }
+    const previousPort = Number(previousEnv?.match(/^MNEMURON_TUNNEL_METRICS=127\.0\.0\.1:(\d+)$/m)?.[1]) || want.metrics_port;
+    const restored = await connected(metricsOf(id, previousPort));
+    return {state: restored ? 'rolled_back' : 'failed', error: restored ? error : 'TUNNEL_RESTORE_NOT_CONNECTED',
+      ...(restored ? {} : {cause: error}), credential_restored: true, restored};
+  }
+  if (id !== 'main') {
+    // A new instance may still be running after a failed enable. Delete its files only after a confirmed stop.
+    stopInstance(unit);
+    removeInstanceFiles(id);
+    if (previousEnv !== null) restoreFile(envFileOf(id), previousEnv);
+    return {state: 'rolled_back', error: error === 'TUNNEL_NOT_CONNECTED' ? 'TUNNEL_NOT_CONNECTED_NO_PREVIOUS' : error};
+  }
+  return {state: 'failed', error: error === 'TUNNEL_NOT_CONNECTED' ? 'TUNNEL_NOT_CONNECTED_NO_PREVIOUS' : error, restored: false};
 }
 
 if (process.argv.includes('--discover')) { discover(); process.exit(0); }
@@ -109,7 +137,7 @@ const status = readJson(statusFile)?.tunnels || {};
 let key, failed = false;
 for (const [id, want] of Object.entries(request.tunnels)) {
   if (!TUNNEL_ID.test(id) || !Number.isInteger(want?.revision) || want.revision <= (status[id]?.revision || 0)) continue;
-  try { key ??= readConsoleKey(config.console.key_file); status[id] = {revision: want.revision, ...await applyOne(id, want, key)}; }
+  try { key ??= readConsoleKey(config.console.key_file); status[id] = {revision: want.revision, ...await applyOne(id, want, key)}; if (status[id].state === 'failed') failed = true; }
   catch (error) { status[id] = {revision: want.revision, state: 'failed', error: error.errorCode || error.code || 'APPLY_FAILED'}; failed = true; }
   status[id].at = new Date().toISOString();
   writeOwned(statusFile, {version: 2, tunnels: status});

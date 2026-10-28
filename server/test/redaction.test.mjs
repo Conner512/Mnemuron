@@ -47,6 +47,18 @@ function everything(store){
   return tables.map(name=>JSON.stringify(store.db.prepare(`SELECT * FROM "${name}"`).all())).join('\n');
 }
 
+test('redaction: retraction reasons stay scrubbed in HTTP replies, stored history and audits; replay adds no audit',async t=>{
+  const f=await memoryFixture(t),memory=f.store.saveMemory(f.a.auth,{scope:'user',content:'Synthetic record to retract.'}).memory;
+  const privateText='synthetic-removal-detail',payload={reason:`Rotated ${fake.github}; <private>${privateText}</private>`};
+  const result=await f.request('POST',`/v1/memories/${memory.memory_id}/retract`,payload);
+  assert.equal(result.status,200);assert.equal(result.body.memory.lifecycle.reason,'Rotated [REDACTED:github_token]; [REDACTED:private]');
+  assert.ok(payload.reason.includes(fake.github),'caller input remains untouched');
+  const replay=f.store.retractMemory(f.a.auth,memory.memory_id,payload);assert.equal(replay.idempotent,true);
+  const stored=everything(f.store);noSecret(stored,'retraction database');assert.ok(!stored.includes(privateText));
+  const audit=f.store.db.prepare("SELECT target_id,metadata_json FROM audit_events WHERE action='privacy.redacted'").all();
+  assert.equal(audit.length,1);assert.equal(audit[0].target_id,memory.memory_id);assert.deepEqual(JSON.parse(audit[0].metadata_json).fields,['reason']);
+});
+
 test('redaction: direct saves, supersedes, console and ChatGPT cloud writes store and audit only scrubbed text',async t=>{
   const f=await memoryFixture(t);Object.assign(f.store.runtime,{cloudMemory:true,cloudSubmittedGrant:true});
   const op=randomUUID(),payload={scope:'user',content:`部署用 ${fake.openai} 和 GITHUB_TOKEN=${fake.github}`,topic:`key ${fake.aws}`};

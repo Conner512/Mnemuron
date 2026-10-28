@@ -181,6 +181,34 @@ test('P-16: symlink parents, oversized, binary and LFS source payloads cannot be
   }
   assert.equal(captured.length,0);
 });
+
+test('P-16: the same pinned fonts are reviewed in worktree, index and history; changed or renamed binaries still block',t=>{
+  const {root,git,commit}=secretFixture(t),file='web/console/display-font.woff2';
+  const bytes=readFileSync(new URL('../../'+file,import.meta.url));
+  mkdirSync(path.dirname(path.join(root,file)),{recursive:true});
+  writeFileSync(path.join(root,file),bytes);writeFileSync(root+'/source.txt','SCANNED-SYNTHETIC');
+  git(['add','.']);commit('Synthetic reviewed font');
+  for(const scope of ['--worktree','--staged','--history']) {
+    const captured=[],result=checkSecrets([scope],{cwd:root,run:captureScanner(captured)});
+    assert.equal(result.status,'passed',scope);
+    assert.equal(result.coverage.reviewed_binary_files,1);
+    assert.equal(result.coverage.reviewed_binary_bytes,bytes.length);
+    assert.equal(result.coverage.scanned_text_entries,captured.length);
+    assert.ok(captured.some(f=>f.body==='SCANNED-SYNTHETIC'));
+    assert.ok(!captured.some(f=>f.file.endsWith('.woff2')));
+    assert.match(result.snapshot_sha256,/^[a-f0-9]{64}$/);
+  }
+  const captured=[],run=captureScanner(captured),changed=Buffer.from(bytes);changed[changed.length-1]^=1;
+  writeFileSync(path.join(root,file),changed);
+  assert.equal(checkSecrets(['--worktree'],{cwd:root,run}).error_code,'BINARY_PAYLOAD_NOT_INSPECTED');
+  git(['add',file]);assert.equal(checkSecrets(['--staged'],{cwd:root,run}).error_code,'BINARY_PAYLOAD_NOT_INSPECTED');
+  commit('Synthetic changed font');
+  writeFileSync(path.join(root,file),bytes);git(['add',file]);commit('Restore reviewed bytes');
+  assert.equal(checkSecrets(['--history'],{cwd:root,run}).error_code,'BINARY_PAYLOAD_NOT_INSPECTED','removed binary revisions remain covered');
+  writeFileSync(root+'/renamed.woff2',bytes);
+  assert.equal(checkSecrets(['--worktree'],{cwd:root,run}).error_code,'BINARY_PAYLOAD_NOT_INSPECTED');
+  assert.equal(captured.length,0,'a failed preflight never silently proceeds with an incomplete snapshot');
+});
 test('P-16: incomplete history and malformed scanner reports fail closed',t=>{
   const {root,git,commit}=secretFixture(t);git(['add','.']);commit('Synthetic baseline');
   writeFileSync(root+'/.git/shallow',git(['rev-parse','HEAD']).trim()+'\n');

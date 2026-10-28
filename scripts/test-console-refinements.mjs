@@ -74,10 +74,13 @@ async function otpSection() {
     markup.label==='动态验证码'&&markup.hint.includes('6 位数字')&&markup.pattern==='[0-9]{6}'&&markup.required&&markup.autocomplete==='one-time-code'&&markup.inputmode==='numeric');
   check(S,'Six boxes are aria-hidden decoration and never take focus',markup.slots===6&&!markup.slotsFocusable);
   await shot(page,'otp-01-login-1440-zh');
+  const focusTheme=await page.evaluate(()=>{const probe=document.createElement('span');
+    probe.style.cssText='position:fixed;visibility:hidden;border:1px solid var(--ink);box-shadow:var(--hard-sm)';
+    document.body.append(probe);const style=getComputedStyle(probe),theme={border:style.borderTopColor,shadow:style.boxShadow};probe.remove();return theme;});
   for(const name of ['username','password']){
     await page.locator('#'+name).focus();await frame(page);
     await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
-    check(S,`${name}: focus uses the theme border and a soft halo`,await page.locator('#'+name).evaluate(e=>{const st=getComputedStyle(e);return st.borderTopColor==='rgb(174, 63, 44)'&&st.outlineStyle==='none'&&st.boxShadow!=='none'&&st.transitionDuration.includes('0.16s');}));
+    check(S,`${name}: focus uses the current theme border and visible shadow`,await page.locator('#'+name).evaluate((e,theme)=>{const st=getComputedStyle(e);return document.activeElement===e&&st.borderTopColor===theme.border&&st.outlineStyle==='none'&&st.boxShadow!=='none'&&st.boxShadow===theme.shadow&&st.transitionDuration.includes('0.16s');},focusTheme));
     await shot(page,`field-focus-${name}-1440-zh`);
   }
 
@@ -139,18 +142,19 @@ async function otpSection() {
   check(S,'After composition ends, full-width digits are folded and kept',s.value==='12'&&s.slots.join('')==='12');
 
   // Contrast and keyboard focus.
-  // Resting valid boxes (not focused, not :user-invalid) are compared with the resting username field.
+  // Resting valid boxes and ordinary inputs each retain a visible boundary against their background.
   await reset(page,'123456');await otp.blur();await frame(page);await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
-  const colours=await page.evaluate(()=>{const slot=getComputedStyle(document.querySelectorAll('.otp-slot')[5]);const parse=c=>c.match(/\d+(\.\d+)?/g).slice(0,3).map(Number);
+  const colours=await page.evaluate(()=>{const slot=getComputedStyle(document.querySelectorAll('.otp-slot')[5]),field=getComputedStyle(document.querySelector('#username'));const parse=c=>c.match(/\d+(\.\d+)?/g).slice(0,3).map(Number);
     const lum=c=>{const [r,g,b]=parse(c).map(v=>{v/=255;return v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4;});return 0.2126*r+0.7152*g+0.0722*b;};
-    const a=lum(slot.borderTopColor),b=lum(slot.backgroundColor);return {ratio:(Math.max(a,b)+0.05)/(Math.min(a,b)+0.05),border:slot.borderTopColor,field:getComputedStyle(document.querySelector('#username')).borderTopColor};});
-  check(S,`Box borders keep at least 3:1 against the box (${colours.ratio.toFixed(2)}:1; box ${colours.border}, username field ${colours.field})`,colours.ratio>=3&&colours.border===colours.field);
+    const contrast=style=>{const a=lum(style.borderTopColor),b=lum(style.backgroundColor);return (Math.max(a,b)+0.05)/(Math.min(a,b)+0.05);};
+    return {slotRatio:contrast(slot),fieldRatio:contrast(field)};});
+  check(S,`Box and ordinary field borders each keep at least 3:1 against their backgrounds (${colours.slotRatio.toFixed(2)}:1 and ${colours.fieldRatio.toFixed(2)}:1)`,colours.slotRatio>=3&&colours.fieldRatio>=3);
   await page.locator('#password').focus();await page.keyboard.press('Tab');
   if(await page.evaluate(()=>document.activeElement?.dataset?.passwordToggle!==undefined))await page.keyboard.press('Tab');
   await page.evaluate(()=>Promise.all(document.getAnimations().filter(a=>a.effect?.getTiming().iterations!==Infinity).map(a=>a.finished)));
   const ring=await page.evaluate(()=>{const shell=document.querySelector('.otp-shell'),style=getComputedStyle(shell.querySelector('.otp-slot.is-active,.otp-slot.is-selected'));
     return {focused:document.activeElement?.name,shadow:style.boxShadow,styleName:style.outlineStyle,shellStyle:getComputedStyle(shell).outlineStyle};});
-  check(S,'Keyboard focus marks the active box without an outer frame',ring.focused==='otp'&&ring.shadow.includes('3px')&&!ring.shadow.includes('inset')&&ring.styleName==='none'&&ring.shellStyle==='none');
+  check(S,'Keyboard focus marks the active box with the current theme shadow and no outer frame',ring.focused==='otp'&&ring.shadow!=='none'&&ring.shadow===focusTheme.shadow&&!ring.shadow.includes('inset')&&ring.styleName==='none'&&ring.shellStyle==='none');
   await page.keyboard.type('12');await shot(page,'otp-03-keyboard-focus-1440-zh',false);
 
   // Native validation: an incomplete code is not submitted.
@@ -196,9 +200,9 @@ async function otpSection() {
     const v=await newPage({width,height:900},{locale});await v.page.goto(cfg.url+'/login');
     await v.page.locator('input[data-otp]').click();await v.page.keyboard.type('1234');
     const box=await v.page.evaluate(()=>{const s=[...document.querySelectorAll('.otp-slot')].map(x=>x.getBoundingClientRect());return {min:Math.min(...s.map(r=>r.width)),right:Math.max(...s.map(r=>r.right))};});
-    check(S,`${width}px ${locale}: six boxes fit without overflow`,await noOverflow(v.page)&&box.min>=32&&box.right<=width);
+    check(S,`${width}px ${locale}: six boxes fit without overflow (minimum box ${box.min.toFixed(2)}px, right edge ${box.right.toFixed(2)}px)`,await noOverflow(v.page)&&box.min>=32&&box.right<=width);
     const layout=await v.page.evaluate(()=>{const shell=document.querySelector('.otp-shell'),slots=shell.querySelector('.otp-slots'),u=document.querySelector('#username').getBoundingClientRect(),r=shell.getBoundingClientRect();return {aligned:Math.abs(u.left-r.left)<.5&&Math.abs(u.right-r.right)<.5,dash:getComputedStyle(slots,'::after').width,gap:parseFloat(getComputedStyle(slots).gap)};});
-    check(S,`${width}px ${locale}: OTP aligns with text fields and has a centre dash`,layout.aligned&&layout.dash==='8px'&&layout.gap===16);
+    check(S,`${width}px ${locale}: OTP aligns with text fields and has a centre dash`,layout.aligned&&layout.dash==='8px'&&layout.gap===(width<=360?8:16));
     await v.page.emulateMedia({reducedMotion:'reduce',colorScheme:'dark'});
     check(S,`${width}px ${locale}: reduced motion disables transitions; OS dark keeps supported palette`,await v.page.locator('.otp-slot').first().evaluate(e=>getComputedStyle(e).transitionDuration==='0s'&&getComputedStyle(document.documentElement).colorScheme==='light'));
     await shot(v.page,`otp-reduced-dark-${width}-${locale}`);
@@ -252,7 +256,9 @@ async function summariesSection() {
   const S='summaries';
   const seeded=await command('seed-summaries');assert.equal(seeded.summaries,9);
   const settle=async p=>{await p.locator('#console-root h1').waitFor();await p.locator('.loading-card').waitFor({state:'detached'});};
-  const row=(p,text)=>p.locator('.summary-row').filter({hasText:text});
+  // Scope names are shared by their group header; each row keeps its own period, revision and source facts.
+  const group=(p,text)=>p.locator('.summary-group').filter({hasText:text});
+  const row=(p,text)=>group(p,text).locator('.summary-row');
   // The pane slides in with an opacity animation; capture it only once every animation has finished
   // and the pane is fully opaque, so screenshots never show the list through a half-faded pane.
   const settledPane=async(p,label)=>{
@@ -274,8 +280,9 @@ async function summariesSection() {
       const texts=await page.locator('.summary-row').allInnerTexts();
       check(S,'All nine seeded summaries are listed, current and superseded',layout.rows===9);
       check(S,'Rows show daily/weekly windows with their time zones',['日摘要','周摘要','Asia/Shanghai','UTC','America/Los_Angeles'].every(k=>texts.some(x=>x.includes(k))));
-      check(S,'Rows show personal, project, task › workstream and session scopes',['个人范围','项目 Synthetic UI Project','任务 Synthetic UI Task','工作流 Synthetic branch','会话'].every(k=>texts.some(x=>x.includes(k))));
-      const twins=texts.filter(x=>x.includes('工作流 Synthetic branch'));
+      const scopes=await page.locator('.summary-group-head').allInnerTexts();
+      check(S,'Group headers show personal, project, task › workstream and session scopes',['个人范围','项目 Synthetic UI Project','任务 Synthetic UI Task','工作流 Synthetic branch','会话'].every(k=>scopes.some(x=>x.includes(k))));
+      const twins=scopes.filter(x=>x.includes('工作流 Synthetic branch'));
       const readable=twins.map(x=>x.split('范围标识')[0]);
       check(S,'Same-titled task/workstream summaries in two projects read differently through their project',twins.length===2&&readable[0]!==readable[1]
         &&readable.some(x=>x.includes('Synthetic UI Project Twin'))&&readable.some(x=>x.includes('Synthetic UI Project ›')));
@@ -285,7 +292,10 @@ async function summariesSection() {
       const ids=await page.evaluate(()=>[...document.querySelectorAll('.summary-id')].every(n=>n.getBoundingClientRect().right<=document.querySelector('.list-panel').getBoundingClientRect().right+1));
       check(S,'Long scope and summary IDs wrap inside the list',ids);
     }
-    if(width===320)check(S,`${tag}: the long session identifier wraps inside its row`,await row(page,'long-identifier').evaluate(r=>r.scrollWidth<=r.clientWidth+1));
+    if(width===320){
+      const session=row(page,'long-identifier');await session.locator('.summary-technical > summary').click();
+      check(S,`${tag}: the expanded long session identifier wraps inside its row`,await session.evaluate(r=>r.scrollWidth<=r.clientWidth+1));
+    }
     await shot(page,`summaries-01-list-${tag}`);
     if(width<=390){
       await row(page,'Synthetic UI Project Twin').locator('button[data-summary]').click();
@@ -340,7 +350,7 @@ async function summariesSection() {
   await page.goto(cfg.url+'/app/summaries');await settle(page);
   let releaseFirst;const firstHeld=new Promise(r=>releaseFirst=r);let held=0;
   await page.route(/\/console-api\/summary\?/,async route=>{if(held++===0){await firstHeld;}await route.continue();});
-  await row(page,'Asia/Shanghai').filter({hasText:'项目'}).filter({hasNotText:'任务'}).locator('button[data-summary]').click();
+  await group(page,'Asia/Shanghai').filter({hasText:'项目'}).filter({hasNotText:'任务'}).locator('.summary-row button[data-summary]').click();
   await row(page,'Synthetic UI Project Twin').locator('button[data-summary]').click();await page.locator('#memory-content .claim-list').waitFor();
   releaseFirst();await page.waitForTimeout(400);
   check(S,'A late reply for an earlier summary is ignored after a newer one opened',(await page.locator('#memory-content .summary-detail-facts').innerText()).includes('Synthetic UI Project Twin'));
@@ -654,7 +664,7 @@ async function modelsSection() {
   await op(page).locator('button[type=submit]').click();await op(page).locator('.operation-result').first().waitFor({state:'attached'});
   await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});await settle(page);
   check(S,'Closing the saved result returns focus to that card\'s Configure button',await page.evaluate(()=>document.activeElement?.matches('[data-console-action="models.save"][data-kind="embedder"]')===true));
-  const name=await page.locator('.model-card').nth(1).locator('.metadata-grid dd').first().innerText();
+  const name=await page.locator('.model-card').nth(1).locator('.model-name').locator('..').innerText();
   check(S,'Embedder dimensions sit beside the model name',/synthetic-embed-small\s+3\s*维/.test(name));
   check(S,'No separate dimensions row shifts the embedder card',await page.locator('.model-card').nth(1).locator('.metadata-grid dt').filter({hasText:/^维度$/}).count()===0);
   const boxes=await page.locator('.model-card').evaluateAll(cards=>cards.map(c=>{const r=c.getBoundingClientRect(),t=c.querySelector(':scope > .action-toolbar')?.getBoundingClientRect();return {top:r.top,height:r.height,toolbar:t?.top};}));
@@ -742,7 +752,7 @@ async function lifecycleSearchSection() {
     check(S,'The source and another owner project are never eligible targets',await radio(source).count()===0&&await radio('synthetic-browser-project-1').count()===0);
     await preview.click();const confirm=dialog.locator('form[data-lifecycle-step="confirm"]');await confirm.waitFor();
     const request=posts.at(-1);
-    check(S,'The explicit preview submits the retained exact source and target and still requires fresh factors',request?.action==='projects.lifecycle_preview'&&request.payload.project_id===source&&request.payload.target_project_id===target&&await confirm.locator('[name=current_password]').count()===1&&await confirm.locator('[name=otp]').count()===1);
+    check(S,'The explicit preview submits the retained exact source and target and requires the current password',request?.action==='projects.lifecycle_preview'&&request.payload.project_id===source&&request.payload.target_project_id===target&&await confirm.locator('[name=current_password]').count()===1&&await confirm.locator('[name=otp]').count()===0);
     await close();const state=await command('lifecycle-state',{project_ids:[source,target]});
     check(S,'Search, preview, and Cancel send no merge confirmation and leave both projects live',posts.length===1&&posts.every(p=>p.action==='projects.lifecycle_preview')&&state.states[source]==='live'&&state.states[target]==='live'&&state.canonical[source]===source);
     check(S,'No page errors',errors.length===0);
@@ -758,7 +768,8 @@ async function lifecycleSection() {
   const settle=async p=>{await p.locator('#console-root h1').waitFor();await p.locator('.loading-card').waitFor({state:'detached'});await p.locator('.project-list,.view-switch').first().waitFor();};
   const op=p=>p.locator('#operation-dialog');
   const row=(p,id)=>p.locator(`[data-project-row="${id}"]`);
-  const factors=async(p,{otp}={})=>{await op(p).locator('[name=current_password]').fill(cfg.password);await op(p).locator('[name=otp]').fill(otp??(await command('otp',{fresh:true})).otp);};
+  // The fixture command resets the isolated reauthentication rate window; lifecycle confirms use the password.
+  const factors=async p=>{await command('otp',{fresh:true});await op(p).locator('[name=current_password]').fill(cfg.password);};
   const confirmForm=p=>op(p).locator('form[data-lifecycle-step="confirm"]');
   const {context,page,errors}=await newPage({width:1440,height:1000},{account:0});
   const posts=[];page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/console-api/action'))posts.push(new URLSearchParams(r.postData()||'').get('action'));});
@@ -777,7 +788,7 @@ async function lifecycleSection() {
   await showRow(page,'synthetic-life-del');
   const del=row(page,'synthetic-life-del').locator('[data-console-action="projects.lifecycle_delete"]');
   await del.focus();await page.keyboard.press('Enter');await confirmForm(page).waitFor();
-  check(S,'Delete opens from the keyboard with impact, typed name and password + code fields',await op(page).locator('.lifecycle-impact').count()===1&&await op(page).locator('[name=confirm_name]').count()===1&&await op(page).locator('[name=current_password]').count()===1&&await op(page).locator('[name=otp]').count()===1);
+  check(S,'Delete opens from the keyboard with impact, typed name and current-password reauthentication',await op(page).locator('.lifecycle-impact').count()===1&&await op(page).locator('[name=confirm_name]').count()===1&&await op(page).locator('[name=current_password]').count()===1&&await op(page).locator('[name=otp]').count()===0);
   check(S,'The impact lists the project, its task and its memory',(await op(page).locator('.lifecycle-impact').innerText()).includes(names['synthetic-life-del'].slice(0,20)));
   await op(page).evaluate(async d=>{await Promise.all(d.getAnimations({subtree:true}).map(a=>a.finished));});
   await shot(page,'lifecycle-01-delete-preview-1440-zh');
@@ -786,29 +797,27 @@ async function lifecycleSection() {
   check(S,'Cancel sends no confirm and leaves the project live',confirms()===0&&(await state('synthetic-life-del'))['synthetic-life-del']==='live');
   check(S,'Cancel returns focus to the Delete button',await page.evaluate(()=>document.activeElement?.dataset?.consoleAction==='projects.lifecycle_delete'));
 
-  // A typo in the name is answered before the factors are used; wrong factors are refused and cleared.
+  // A typo in the name is answered before reauthentication; a wrong password is refused and cleared.
   await del.click();await confirmForm(page).waitFor();
   await op(page).locator('[name=confirm_name]').fill('Synthetic typo');await factors(page);
-  const code=await op(page).locator('[name=otp]').inputValue();
   await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').click();
   await op(page).locator('[data-operation-error]').filter({hasText:/名称|name/}).waitFor();
   check(S,'A name typo is refused, the project stays live, and focus is on the name field',(await state('synthetic-life-del'))['synthetic-life-del']==='live'&&await page.evaluate(()=>document.activeElement?.name==='confirm_name'));
-  check(S,'After a name typo the (unused) factors are kept',await op(page).locator('[name=otp]').inputValue()===code&&await op(page).locator('[name=current_password]').inputValue()===cfg.password);
-  await op(page).locator('[name=confirm_name]').fill(names['synthetic-life-del']);await op(page).locator('[name=otp]').fill('000000');
+  check(S,'After a name typo the unused password is kept',await op(page).locator('[name=current_password]').inputValue()===cfg.password);
+  await op(page).locator('[name=confirm_name]').fill(names['synthetic-life-del']);await op(page).locator('[name=current_password]').fill('Synthetic wrong lifecycle password');
   const typoText=await op(page).locator('[data-operation-error]').innerText();
   await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').click();
   await page.waitForFunction(old=>{const n=document.querySelector('#operation-dialog [data-operation-error]');return n&&n.textContent&&n.textContent!==old;},typoText);
-  check(S,'Wrong factors are refused, cleared, and the typed name kept',(await state('synthetic-life-del'))['synthetic-life-del']==='live'&&await op(page).locator('[name=otp]').inputValue()===''&&await op(page).locator('[name=confirm_name]').inputValue()===names['synthetic-life-del']);
-  // A stale preview (an unrelated write) is refreshed in place; the typed name and factors are kept and still work.
+  check(S,'A wrong password is refused and cleared, while the typed name is kept',(await state('synthetic-life-del'))['synthetic-life-del']==='live'&&await op(page).locator('[name=current_password]').inputValue()===''&&await op(page).locator('[name=confirm_name]').inputValue()===names['synthetic-life-del']);
+  // A stale preview (an unrelated write) is refreshed in place; the typed name and password are kept and still work.
   await command('unrelated-write');
   await factors(page);const before=await confirmForm(page).getAttribute('data-preview-id');
   await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').click();
   await op(page).locator('[data-lifecycle-message]').waitFor();
-  check(S,'A stale preview is refreshed in place; the name and password are kept and a new code is asked for',await confirmForm(page).getAttribute('data-preview-id')!==before&&await op(page).locator('[name=confirm_name]').inputValue()===names['synthetic-life-del']&&await op(page).locator('[name=current_password]').inputValue()===cfg.password&&await op(page).locator('[name=otp]').inputValue()==='');
+  check(S,'A stale preview is refreshed in place and keeps the name and password',await confirmForm(page).getAttribute('data-preview-id')!==before&&await op(page).locator('[name=confirm_name]').inputValue()===names['synthetic-life-del']&&await op(page).locator('[name=current_password]').inputValue()===cfg.password&&await op(page).locator('[name=otp]').count()===0);
   check(S,'The refresh message has focus for screen readers',await page.evaluate(()=>document.activeElement?.hasAttribute('data-lifecycle-message')));
-  // Repeated submission sends one confirm: Enter pressed twice in the code field.
-  await op(page).locator('[name=otp]').fill((await command('otp',{fresh:true})).otp);
-  const sent=confirms();await op(page).locator('[name=otp]').focus();await page.keyboard.press('Enter');await page.keyboard.press('Enter');
+  // Repeated submission sends one confirm: Enter pressed twice in the password field.
+  const sent=confirms();await op(page).locator('[name=current_password]').focus();await page.keyboard.press('Enter');await page.keyboard.press('Enter');
   await op(page).locator('[data-lifecycle-result]').waitFor();
   check(S,'Enter pressed twice sends one confirm and the project is deleted',confirms()-sent===1&&(await state('synthetic-life-del'))['synthetic-life-del']==='deleted');
   check(S,'The result is announced and focused',await page.evaluate(()=>document.activeElement?.hasAttribute('data-lifecycle-result')));
@@ -820,7 +829,7 @@ async function lifecycleSection() {
   check(S,'The deleted view lists the project with Restore',await row(page,'synthetic-life-del').locator('[data-console-action="projects.lifecycle_restore"]').count()===1);
   await shot(page,'lifecycle-03-deleted-view-1440-zh');
   await row(page,'synthetic-life-del').locator('[data-console-action="projects.lifecycle_restore"]').click();await confirmForm(page).waitFor();
-  check(S,'Restore needs no typed name but does need factors',await op(page).locator('[name=confirm_name]').count()===0&&await op(page).locator('[name=otp]').count()===1);
+  check(S,'Restore needs no typed name but does need the current password',await op(page).locator('[name=confirm_name]').count()===0&&await op(page).locator('[name=current_password]').count()===1&&await op(page).locator('[name=otp]').count()===0);
   await factors(page);await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').click();await op(page).locator('[data-lifecycle-result]').waitFor();
   check(S,'Restore brings the project back',(await state('synthetic-life-del'))['synthetic-life-del']==='live');
   await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});await settle(page);

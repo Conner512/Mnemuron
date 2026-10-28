@@ -2,9 +2,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-const [source,root]=process.argv.slice(2);
-const load=rel=>import(pathToFileURL(path.join(source,rel)));
-const {MnemuronStore}=await load('server/lib/store.mjs');
+const [source,root,oauthSource]=process.argv.slice(2);
+const load=rel=>import(pathToFileURL(path.join(oauthSource,rel)));
+const {MnemuronStore}=await import(pathToFileURL(path.join(source,'server/lib/store.mjs')));
 const {AuthStore}=await load('services/oauth/src/sqlite-adapter.mjs');
 const {IdentityRepository}=await load('services/oauth/src/identity-repository.mjs');
 const {pendingAccount}=await load('services/oauth/test/helpers/identity-fixture.mjs');
@@ -27,9 +27,9 @@ try {
   const owner=core.authenticate(readPrivate(binding.credential_file));
   const memory=core.saveMemory(owner,{scope:'user',content:'Synthetic upgrade memory '+account.username}).memory;
   core.webVisibility.setPolicy(owner,{read_all:true,expected_revision:0});
-  // Reproduce the durable pre-fix cloud receipt, not an invented privacy field.
+  // The original v7 writer creates its own durable receipt and denial; no schema or privacy fields are fabricated.
   Object.assign(core.runtime,{cloudMemory:true,cloudSubmittedGrant:true});
-  const {CLOUD_CORE_SCOPES}=await load('server/lib/memory/cloud.mjs');
+  const {CLOUD_CORE_SCOPES}=await import(pathToFileURL(path.join(source,'server/lib/memory/cloud.mjs')));
   const credential=core.issueCredential({userId:account.user_id,deviceId:'synthetic-upgrade',agentId:'chatgpt-web',agentInstanceId:'upgrade-'+account.account_id,scopes:CLOUD_CORE_SCOPES,expiresAt:new Date(Date.now()+3600000).toISOString()});
   const writer=core.authenticate(credential.api_key),connection=account.account_id.replaceAll('-','').padEnd(64,'0');
   core.cloudMemory.bind(writer,{connection_id:connection,account_id:account.account_id,security_version:1,allow_submitted_revision_grant:true});

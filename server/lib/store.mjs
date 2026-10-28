@@ -36,6 +36,7 @@ export { AuthenticationError, AuthorizationError, ConflictError, NotFoundError, 
 import { MEMORY_TYPES as STRUCTURED_MEMORY_TYPES, memoryPayload, memoryContent, memoryType as validateMemoryType, memoryTopic, memoryIntent, memoryOperationId } from "./memory-validation.mjs";
 import { resolveMemoryScope, SCOPE_LIFECYCLE } from "./memory-scope.mjs";
 import { INDEX_VERSION, MemorySearch, lexicalScore } from "./memory-retrieval.mjs";
+import { MEMORY_SEARCH_CONTEXT } from "./memory/search-context.mjs";
 import { memorySummary, boundMemoryResponse, unicodeSlice, MEMORY_RESPONSE_BYTES } from "./memory-projection.mjs";
 import { readTaskContext } from './task-context-read.mjs';
 import { TASK_READ_OPTIONS, TASK_FIELD_NOTE, taskFieldAvailability } from '../../shared/task-read-contract.mjs';
@@ -3239,7 +3240,7 @@ export class MnemuronStore {
       catch(error){
         // Lifecycle, validation and authorization outcomes are answers, not provider degradation (e.g. PROJECT_DELETED).
         if(isDeterministicReadError(error))throw error;
-        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','VECTOR_FILTER_TOO_BROAD','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
       }
@@ -3288,7 +3289,7 @@ export class MnemuronStore {
     const includeShared = payload.include_shared !== false;
     const effectiveScope = resolveMemoryScope(this.db, auth.user_id, payload, { workstreamIds });
     const selection = this.memorySearch.candidates(auth.user_id, payload.query, effectiveScope,
-      {workstreamIds, includeShared, statuses, memoryTypes, auth});
+      {workstreamIds, includeShared, statuses, memoryTypes, auth, searchContext: payload[MEMORY_SEARCH_CONTEXT]});
     const rows = selection.rows,entityMatches=new Map(rows.map(row=>[row.memory_id,row._entity_match]));
     const currentTime = Date.now();
     const salience = this.salience.of(auth.user_id, rows.map((row) => row.memory_id), currentTime);
@@ -3678,6 +3679,13 @@ export class MnemuronStore {
   }
 
   retractMemory(auth, memoryId, payload = {}) {
+    const redaction = redactFields(payload, MEMORY_TEXT_FIELDS);
+    const result = this.retractScrubbedMemory(auth, memoryId, redaction.value);
+    if (!result.idempotent) this.auditRedaction(auth, "memory", result.memory?.memory_id, redaction);
+    return result;
+  }
+
+  retractScrubbedMemory(auth, memoryId, payload) {
     this.requireScope(auth, "memory:write");
     if (!this.runtime.memory) throw new ConflictError("New memory writes are disabled.", "MEMORY_DISABLED");
     assertIdentifier(memoryId, "memory_id");

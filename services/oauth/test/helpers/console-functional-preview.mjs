@@ -174,10 +174,12 @@ lines.on('line',async line=>{
   if(req.command==='tick'){
    const requested=req.job_ids||[];if(!Array.isArray(requested)||requested.length>100||requested.some(id=>core.store.memoryJobs.get(id)?.user_id!==o.account.user_id))throw new Error('Invalid synthetic target jobs');
    core.store.memoryConfig.console.worker_enabled=true;
-   try{for(let n=0;n<100;n++){await core.store.consoleService.tick();const states=requested.map(id=>({job_id:id,state:core.store.memoryJobs.get(id)?.state}));
+   let states=[];
+   try{for(let n=0;n<100;n++){await core.store.consoleService.tick();states=requested.map(id=>{const job=core.store.memoryJobs.get(id);return {job_id:id,state:job?.state,last_error_code:job?.last_error_code};});
      if(!states.length||states.every(j=>j.state==='succeeded')){reply={done:true,jobs:states};break;}
-     if(states.some(j=>!['pending','leased','retry_wait'].includes(j.state)))throw new Error('Synthetic target job failed: '+JSON.stringify(states));
-   }if(!reply)throw new Error('Synthetic target job did not settle');}finally{core.store.memoryConfig.console.worker_enabled=false;}
+     // A tick drains one job; completed siblings are valid while the rest of the requested batch is pending.
+     if(states.some(j=>!['pending','leased','retry_wait','succeeded'].includes(j.state)))throw Object.assign(new Error('Synthetic target job failed'),{code:'SYNTHETIC_JOB_FAILED',jobs:states});
+   }if(!reply)throw Object.assign(new Error('Synthetic target job did not settle'),{code:'SYNTHETIC_JOBS_UNSETTLED',jobs:states});}finally{core.store.memoryConfig.console.worker_enabled=false;}
   }
   if(req.command==='enable-synthetic-processing'){
    core.store.memoryConfig.console.worker_enabled=true;core.store.memoryConfig.vector_store={enabled:true};
@@ -273,6 +275,6 @@ lines.on('line',async line=>{
    reply={result:core.store.upsertTask(writer.auth,{...task,blockers:[...task.blockers,'blocker added by a synthetic agent']}).status};}
   if(req.command==='revoke-console-sessions'){ids.db.prepare("DELETE FROM identity_sessions WHERE account_id=? AND purpose='console'").run(o.account.account_id);reply={done:true};}
   console.log(JSON.stringify({request:req.command,...reply}));
- }catch(error){console.log(JSON.stringify({fixture_error:error.code||error.errorCode||'FAILED'}));}
+ }catch(error){console.log(JSON.stringify({fixture_error:error.code||error.errorCode||'FAILED',...(error.jobs?{jobs:error.jobs}:{})}));}
 });
 for(const signal of ['SIGTERM','SIGINT'])process.once(signal,stop);

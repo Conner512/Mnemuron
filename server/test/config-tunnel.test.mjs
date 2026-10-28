@@ -30,7 +30,7 @@ function setup(t, {fetchImpl} = {}) {
   s.tunnel.requestFile = () => path.join(dir, 'tunnel', 'apply.request'); s.tunnel.statusFile = () => path.join(dir, 'tunnel', 'apply.status');
   s.tunnel.discoveredFile = () => path.join(dir, 'tunnel', 'discovered.json');
   const act = (action, payload) => service.execute(auth, {action, payload, operation_id: randomUUID()});
-  return {...f, s, user, auth, service, act, dir, keyFile};
+  return {...f, s, user, auth, service, act, dir, keyFile, cleanup: callback => t.after(callback)};
 }
 
 test('CFG-01: a CLI change and a console change go through the same owner functions and are both logged with their source', async t => {
@@ -106,7 +106,7 @@ test('TUNNEL-01: a token is stored sealed, decoded for its IDs, handed to the ap
 test('TUNNEL-02: tunnels can be added and removed; the main one cannot be removed and bad input changes nothing', async t => {
   const f = setup(t);
   await f.act('tunnel.token', {id: 'main', token: token()});
-  const added = await f.act('tunnel.add', {name: '家里 NAS', token: token('22222222-2222-3333-4444-555555555555')});
+  const added = await f.act('tunnel.add', {name: '家里 NAS', token: token('11111111-2222-3333-4444-222222225555')});
   const id = added.tunnel.id;
   assert.match(id, /^t[0-9a-f]{6}$/);
   assert.deepEqual([added.tunnel.name, added.tunnel.metrics_port, added.tunnel.unit], ['家里 NAS', 47840, `cloudflared-mnemuron@${id}`]);
@@ -126,15 +126,18 @@ test('TUNNEL-02: tunnels can be added and removed; the main one cannot be remove
   assert.ok(f.s.config.history(f.user).some(h => h.key === `tunnel.${id}.name` && h.new === '家里 NAS'));
 });
 
-async function runApplier(f, {connects = () => false, manager = {}} = {}) {
+async function runApplier(f, {connects = () => false, manager = {}, managerTimeout = 60000, discoverOwner = false} = {}) {
   const metrics = http.createServer((req, res) => { res.writeHead(connects() ? 200 : 503, {'content-type': 'application/json'}); res.end(JSON.stringify({readyConnections: connects() ? 2 : 0})); });
   await new Promise(resolve => metrics.listen(0, '127.0.0.1', resolve));
+  f.cleanup(() => { metrics.closeAllConnections(); metrics.close(); });
   const log = path.join(f.dir, 'systemctl.log'), fake = path.join(f.dir, 'systemctl');
   fs.rmSync(log, {force: true});
-  fs.writeFileSync(fake, `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2), manager=${JSON.stringify(manager)};\nfs.appendFileSync(${JSON.stringify(log)},args.join(' ')+'\\n');\nif(args[0]==='disable')process.exit(manager.disableCode||0);\nif(args[0]==='show'){process.stdout.write(manager.showOutput||'');process.exit(manager.showCode||0);}\n`, {mode: 0o700});
+  fs.writeFileSync(fake, `#!${process.execPath}\nimport fs from 'node:fs';\nconst args=process.argv.slice(2), manager=${JSON.stringify(manager)}, log=${JSON.stringify(log)};\nfs.appendFileSync(log,args.join(' ')+'\\n');\nconst attempt=fs.readFileSync(log,'utf8').trim().split('\\n').filter(line=>line.startsWith(args[0]+' ')).length;\nif(args[0]==='restart' && attempt===1 && manager.firstRestartDelay)Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,manager.firstRestartDelay);\nif(args[0]==='disable')process.exit(manager.disableCode||0);\nif(args[0]==='show'){process.stdout.write(manager.showOutput||'');process.exit(manager.showCode||0);}\nprocess.exit(manager[args[0]+'Codes']?.[attempt-1]||0);\n`, {mode: 0o700});
   const child = spawn(process.execPath, [APPLIER], {env: {...process.env, MNEMURON_CONSOLE_KEY_FILE: f.keyFile, MNEMURON_TUNNEL_DIR: path.join(f.dir, 'tunnel'),
     MNEMURON_TUNNEL_CREDENTIAL: path.join(f.dir, 'credential'), MNEMURON_TUNNEL_ETC: path.join(f.dir, 'tunnels'), MNEMURON_SYSTEMCTL: fake, MNEMURON_TUNNEL_METRICS_URL: `http://127.0.0.1:${metrics.address().port}`,
-    MNEMURON_TUNNEL_WAIT_SECONDS: '1', MNEMURON_TUNNEL_POLL_MS: '100'}});
+    MNEMURON_TUNNEL_WAIT_SECONDS: '1', MNEMURON_TUNNEL_POLL_MS: '100', MNEMURON_SYSTEMCTL_TIMEOUT_MS: String(managerTimeout),
+    ...(discoverOwner ? {MNEMURON_OWNER_USER_ID: f.user} : {})}});
+  f.cleanup(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
   let stderr = ''; child.stderr.on('data', d => stderr += d);
   const code = await new Promise(resolve => child.on('close', resolve));
   if (!fs.existsSync(path.join(f.dir, 'tunnel', 'apply.status'))) throw new Error('applier wrote no status: ' + stderr);
@@ -151,8 +154,9 @@ test('TUNNEL-03: the applier installs a token that connects, and puts the previo
   const ok = await runApplier(f, {connects: () => true});
   assert.deepEqual([ok.code, ok.status.main.state, ok.credential, ok.calls], [0, 'applied', token(), ['restart cloudflared-mnemuron.service']]);
   assert.equal(f.s.tunnel.summary().apply_state, 'applied');
-  await f.act('tunnel.token', {id: 'main', token: token('99999999-2222-3333-4444-555555555555')});
-  const bad = await runApplier(f, {connects: () => false});
+  await f.act('tunnel.token', {id: 'main', token: token('11111111-9999-3333-4444-999999995555')});
+  const bad = await runApplier(f, {connects: () => fs.readFileSync(path.join(f.dir, 'credential'), 'utf8').trim() === token()});
+  assert.equal(bad.status.main.restored, true);
   assert.deepEqual([bad.status.main.state, bad.status.main.error, bad.credential], ['rolled_back', 'TUNNEL_NOT_CONNECTED', token()], 'the working token is restored');
   assert.equal(bad.calls.filter(c => c.startsWith('restart')).length, 2);
   const again = await runApplier(f, {connects: () => true});
@@ -163,12 +167,12 @@ test('TUNNEL-03: the applier installs a token that connects, and puts the previo
 
 test('TUNNEL-05: an added tunnel runs as its own instance, a new one that does not connect is cleaned up, and removal stops it', async t => {
   const f = setup(t);
-  const {tunnel: {id}} = await f.act('tunnel.add', {name: 'Lab', token: token('22222222-2222-3333-4444-555555555555')});
+  const {tunnel: {id}} = await f.act('tunnel.add', {name: 'Lab', token: token('11111111-2222-3333-4444-222222225555')});
   const ok = await runApplier(f, {connects: () => true});
-  assert.deepEqual([ok.status[id].state, ok.extra(id).token, ok.extra(id).env, ok.calls], ['applied', token('22222222-2222-3333-4444-555555555555'), 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47840', [`enable --now cloudflared-mnemuron@${id}.service`]]);
+  assert.deepEqual([ok.status[id].state, ok.extra(id).token, ok.extra(id).env, ok.calls], ['applied', token('11111111-2222-3333-4444-222222225555'), 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47840', [`enable --now cloudflared-mnemuron@${id}.service`]]);
   assert.equal(ok.status.main, undefined, 'tunnels without a new revision are left alone');
   assert.equal(f.s.tunnel.summary(id).apply_state, 'applied');
-  const {tunnel: {id: other}} = await f.act('tunnel.add', {name: 'Broken', token: token('33333333-2222-3333-4444-555555555555')});
+  const {tunnel: {id: other}} = await f.act('tunnel.add', {name: 'Broken', token: token('11111111-3333-3333-4444-333333335555')});
   const bad = await runApplier(f, {connects: () => false});
   assert.deepEqual([bad.status[other].state, bad.status[other].error, bad.extra(other).token], ['rolled_back', 'TUNNEL_NOT_CONNECTED_NO_PREVIOUS', null]);
   assert.deepEqual(bad.calls, [`enable --now cloudflared-mnemuron@${other}.service`, `disable --now cloudflared-mnemuron@${other}.service`]);
@@ -189,11 +193,11 @@ test('TUNNEL-04: the token cloudflared runs with is discovered and shown, howeve
   assert.deepEqual([found.configured, found.tunnel_id, found.apply_state, found.updated_by], [true, '11111111-2222-3333-4444-555555555555', 'applied', 'server']);
   assert.deepEqual(f.s.config.history(f.user).filter(h => h.key === 'tunnel.main.token').map(h => [h.source, h.actor]), [['cli', 'server:cloudflared']]);
   // A console change still being applied keeps its own token even though the server still runs the old one.
-  await f.act('tunnel.token', {id: 'main', token: token('99999999-2222-3333-4444-555555555555')});
+  await f.act('tunnel.token', {id: 'main', token: token('11111111-9999-3333-4444-999999995555')});
   const later = JSON.parse(fs.readFileSync(f.s.tunnel.discoveredFile(), 'utf8'));
   later.tunnels.main.at = new Date(Date.now() + 1000).toISOString();
   fs.writeFileSync(f.s.tunnel.discoveredFile(), JSON.stringify(later));
-  assert.equal(f.s.tunnel.summary().tunnel_id, '99999999-2222-3333-4444-555555555555');
+  assert.equal(f.s.tunnel.summary().tunnel_id, '11111111-9999-3333-4444-999999995555');
 });
 
 async function removalFixture(t) {
@@ -204,6 +208,75 @@ async function removalFixture(t) {
   await f.act('tunnel.remove', {id});
   return {...f, id};
 }
+
+test('TUNNEL-09: a failed restart or manager timeout restores the previous credential and confirms recovery', async t => {
+  for (const [name, manager, managerTimeout] of [
+    ['restart failure', {restartCodes: [1, 0]}, 60000],
+    ['restart timeout', {firstRestartDelay: 3000}, 1000],
+  ]) await t.test(name, async t => {
+    const f = setup(t), old = token('11111111-7777-3333-4444-555555555555');
+    fs.writeFileSync(path.join(f.dir, 'credential'), old + '\n', {mode: 0o600});
+    await f.act('tunnel.token', {id: 'main', token: token()});
+    const result = await runApplier(f, {manager, managerTimeout, connects: () => fs.readFileSync(path.join(f.dir, 'credential'), 'utf8').trim() === old});
+    assert.deepEqual([result.code, result.status.main.state, result.status.main.error, result.status.main.restored, result.credential],
+      [0, 'rolled_back', 'TUNNEL_APPLY_FAILED', true, old]);
+    assert.deepEqual(result.calls, ['restart cloudflared-mnemuron.service', 'restart cloudflared-mnemuron.service']);
+  });
+});
+
+test('TUNNEL-10: rollback restores an existing instance environment and reports an unconfirmed recovery as failed', async t => {
+  const f = setup(t), old = token('11111111-7777-3333-4444-555555555555');
+  const {tunnel: {id}} = await f.act('tunnel.add', {name: 'Synthetic recovery', token: token()});
+  fs.mkdirSync(path.join(f.dir, 'tunnels'), {recursive: true});
+  const oldEnv = 'MNEMURON_TUNNEL_METRICS=127.0.0.1:47850\n';
+  fs.writeFileSync(path.join(f.dir, 'tunnels', `${id}.token`), old + '\n', {mode: 0o600});
+  fs.writeFileSync(path.join(f.dir, 'tunnels', `${id}.env`), oldEnv, {mode: 0o600});
+  const result = await runApplier(f, {manager: {restartCodes: [1, 1]}, connects: () => true});
+  assert.deepEqual([result.code, result.status[id].state, result.status[id].error, result.status[id].restored], [1, 'failed', 'TUNNEL_RESTORE_START_FAILED', false]);
+  assert.deepEqual(result.extra(id), {token: old, env: oldEnv.trim()});
+  assert.equal(result.status[id].credential_restored, true);
+  assert.equal(f.s.tunnel.summary(id).apply_state, 'failed');
+});
+
+test('TUNNEL-11: a failed new enable is cleaned up only after a confirmed stop', async t => {
+  for (const stopped of [true, false]) await t.test(stopped ? 'stopped' : 'unconfirmed stop', async t => {
+    const f = setup(t), {tunnel: {id}} = await f.act('tunnel.add', {name: 'Synthetic enable', token: token()});
+    const result = await runApplier(f, {manager: {enableCodes: [1], disableCode: stopped ? 0 : 1, showCode: 1}});
+    assert.deepEqual([result.code, result.status[id].state, result.status[id].error], stopped
+      ? [0, 'rolled_back', 'TUNNEL_APPLY_FAILED'] : [1, 'failed', 'TUNNEL_STOP_FAILED']);
+    assert.equal(result.extra(id).token, stopped ? null : token());
+    assert.ok(result.calls.includes(`disable --now cloudflared-mnemuron@${id}.service`));
+  });
+});
+
+test('TUNNEL-12: an unchanged token still requires readiness and does not claim an unsuccessful restore', async t => {
+  const f = setup(t);
+  fs.writeFileSync(path.join(f.dir, 'credential'), token() + '\n', {mode: 0o600});
+  await f.act('tunnel.token', {id: 'main', token: token()});
+  const result = await runApplier(f);
+  assert.deepEqual([result.code, result.status.main.state, result.status.main.error, result.status.main.restored, result.credential],
+    [1, 'failed', 'TUNNEL_RESTORE_NOT_CONNECTED', false, token()]);
+  assert.deepEqual(result.calls, ['start cloudflared-mnemuron.service', 'restart cloudflared-mnemuron.service']);
+});
+
+test('TUNNEL-13: post-rollback discovery updates the token without erasing the actual apply outcome', async t => {
+  for (const recovered of [true, false]) await t.test(recovered ? 'recovered' : 'recovery failed', async t => {
+    const f = setup(t), oldId = '11111111-7777-3333-4444-555555555555', old = token(oldId);
+    fs.writeFileSync(path.join(f.dir, 'credential'), old + '\n', {mode: 0o600});
+    await f.act('tunnel.token', {id: 'main', token: token()});
+    const result = await runApplier(f, {manager: {restartCodes: [1, recovered ? 0 : 1]}, connects: () => true, discoverOwner: true});
+    const summary = f.s.tunnel.summary();
+    assert.equal(summary.token_fingerprint, result.status.main.credential_restored && f.s.tunnel.readJson(f.s.tunnel.discoveredFile()).tunnels.main.token_fp);
+    assert.equal(summary.tunnel_id, oldId);
+    assert.equal(summary.apply_state, recovered ? 'rolled_back' : 'failed');
+    assert.equal(summary.apply_error, recovered ? 'TUNNEL_APPLY_FAILED' : 'TUNNEL_RESTORE_START_FAILED');
+    await f.act('tunnel.reapply', {id: 'main'});
+    const retried = await runApplier(f, {connects: () => true, discoverOwner: true});
+    assert.equal(retried.status.main.state, 'applied');
+    assert.equal(f.s.tunnel.summary().apply_state, 'applied');
+    assert.equal(f.s.tunnel.summary().apply_error, null);
+  });
+});
 
 test('TUNNEL-06: a failed stop preserves credentials and the failed removal row until an explicit retry succeeds', async t => {
   const f = await removalFixture(t), id = f.id;

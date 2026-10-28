@@ -29,6 +29,10 @@ The server reads at most 500 recent candidates and returns at most 20 results. R
 
 The response is capped at the existing 128 KiB read-preview boundary. It is read-only with respect to Resume, Task Scope, injected context, Canonical Task, and Memory lifecycle. A `memory.query` audit event is retained.
 
+Body, topic and concept keywords use the same token boundaries and relevance checks. Hybrid and semantic candidates preserve explicitly recognized project/task subjects, including accepted aliases and validated entity associations; a high vector score alone does not waive those subject constraints.
+
+Console kind, topic, concept, origin and cleanup-review filters apply before candidate limits and are checked again after vector requests. Current SQLite traits produce a bounded vector document allowlist, rather than relying on copied traits in vector payloads. If more than 2000 active documents satisfy that filter, hybrid explicitly falls back to filtered lexical retrieval with `VECTOR_FILTER_TOO_BROAD`; semantic returns 503 with that degradation code. The allowlist is never silently truncated. A ranked result window that omits further matches reports `truncated` and its retrieval diagnostics.
+
 ## Topic and conflict boundary
 
 Explicit saves may provide `topic`. Automatic labelled statements may use `类型[主题]：内容`, for example `决定[存储后端]：使用 SQLite。`.
@@ -52,6 +56,10 @@ Different unscoped statements are never classified as conflicts. Potential confl
 Neither operation changes Canonical Task state. Superseded and retracted rows are excluded from default retrieval and previews but remain queryable when their statuses are explicitly requested.
 
 ## Similarity hints after saving
+
+Save-time similarity probes send a bounded document to the vector query path without applying the public lexical search's 64-term limit. They retain the same read authorization, current visibility, lifecycle, embedding egress permission and request budgets. Ordinary search requests keep the term limit; no JSON field enables the internal document probe.
+
+Hint thresholds use a cosine-comparable score: Cosine and normalized Dot use their similarity directly, while normalized Euclid converts distance with `1 - distance² / 2`. Unnormalized Dot/Euclid have no universal conversion and fall back to the exact-token check instead of receiving unsupported duplicate labels.
 
 A successful save has already committed its new Memory. `similar_memories` is an advisory list of existing records, not a preflight decision, an authorization to merge, or an automatic deduplication result. Search before saving; an explicit correction should call supersede on the existing record without first creating a separate save.
 

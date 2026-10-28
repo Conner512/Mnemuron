@@ -240,7 +240,7 @@
     "write": 0
    },
    "memories": {
-    "read": 8,
+    "read": 7,
     "write": 0
    },
    "memory_revisions": {
@@ -410,7 +410,7 @@
   },
   "server/lib/memory-entities/store.mjs": {
    "memories": {
-    "read": 5,
+    "read": 6,
     "write": 0
    },
    "memory_revisions": {
@@ -516,6 +516,12 @@
    "memory_revisions": {
     "read": 1,
     "write": 1
+   }
+  },
+  "server/lib/memory/search-context.mjs": {
+   "memories": {
+    "read": 1,
+    "write": 0
    }
   },
   "server/lib/memory/service.mjs": {
@@ -636,7 +642,7 @@
   },
   "server/lib/vector-stores/index.mjs": {
    "memories": {
-    "read": 7,
+    "read": 8,
     "write": 0
    },
    "memory_vector_documents": {

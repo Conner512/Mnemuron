@@ -1,6 +1,7 @@
 import { ValidationError } from './errors.mjs';
 import { memoryScopeSql, SCOPE_LIFECYCLE } from './memory-scope.mjs';
 import {webMemorySql,isWebReader} from './memory/web-visibility.mjs';
+import {memorySearchFilterSql} from './memory/search-context.mjs';
 
 // Keywords (memory_traits.concepts_json) are indexed with the body and topic. That needs no version change: a memory
 // without keywords keeps its v3 document, and validate() rebuilds on open when any stored document differs.
@@ -160,15 +161,19 @@ export class MemorySearch {
     plan.required=[...names].filter(term=>term.length>=2);
     const known=reserved.some(term=>containsTerm(query,term));
     if(known){
+      plan.authority_terms=reserved.filter(term=>containsTerm(query,term));
       const expansion=this.entities.expand(auth,query,scope,options);
       plan.authority_ids=[...expansion.matches].filter(([,m])=>aliasSubjectMatches(query,m.explanation.matched_name,m.row)).map(([id])=>id);
     }
     return plan;
   }
   candidates(userId, query, scope, options) {
+    // A save-time similarity probe uses the full bounded document as vector input. It still
+    // passes the Store's normal query/scope/authorization validation but needs no lexical candidates.
+    if(options.searchContext?.documentSimilarity)return {rows:[],truncated:false,plan:makeQueryPlan(query)};
     if (this.status().state!=='ready') throw searchUnavailable();
     if(searchTokens(query).length>64) throw new ValidationError('Query exceeds the 64 search-term budget.','QUERY_TOO_COMPLEX');
-    const filter=memoryScopeSql(scope,options);
+    const filter=memoryScopeSql(scope,options),library=memorySearchFilterSql(options.searchContext?.filter);
     try {
       let plan;
       // Alias expansion is optional evidence: a bad alias row must not disable the whole index.
@@ -180,11 +185,11 @@ export class MemorySearch {
       const json=JSON.stringify(plan);
       const rows=this.db.prepare(`SELECT m.*,${conceptsSql('m')} AS concepts_text,memory_search_relevance(m.content,m.topic,${conceptsSql('m')},?) AS search_relevance FROM memory_search_fts
         JOIN memory_search_docs d ON d.doc_id=memory_search_fts.rowid JOIN memories m USING(memory_id)
-        WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)}
+        WHERE memory_search_fts MATCH ? AND m.user_id=? AND ${filter.sql} AND ${webMemorySql(options.auth)} AND ${library.sql}
         AND m.status IN (${options.statuses.map(()=>'?').join(',')}) AND m.memory_type IN (${options.memoryTypes.map(()=>'?').join(',')})
         AND search_relevance>0
         ORDER BY search_relevance DESC, memory_search_fts.rank, coalesce(m.updated_at,m.created_at) DESC,m.memory_id LIMIT 501`
-      ).all(json,tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...options.statuses,...options.memoryTypes);
+      ).all(json,tokens.map(token=>'"'+encode(token)+'"').join(' OR '),userId,...filter.params,...library.params,...options.statuses,...options.memoryTypes);
       const expansion=this.entities?.expand(options.auth||{user_id:userId},query,scope,options);
       const matches=new Map(rows.map(row=>[row.memory_id,{row,kind:originalMatchKind(query,row)||'alias'}]));
       for(const [id,match] of expansion?.matches||[])if(!matches.has(id)&&aliasSubjectMatches(query,match.explanation.matched_name,match.row))matches.set(id,{row:match.row,kind:'alias',explanation:match.explanation});

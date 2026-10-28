@@ -5,6 +5,7 @@ import {ownerEpoch,globalEpoch} from '../lifecycle/protection.mjs';
 import {searchTokens} from '../memory-retrieval.mjs';
 import {isWebReader} from '../memory/web-visibility.mjs';
 import {memoryScopeSql} from '../memory-scope.mjs';
+import {memorySearchFilterSql} from '../memory/search-context.mjs';
 import {entityName,normalizedName,explicitEquivalence,sourceContainsName,ENTITY_LIMITS} from './contracts.mjs';
 export function parseEntityProof(value){try{const data=JSON.parse(value);if(!data||typeof data!=='object'||Array.isArray(data))throw new Error();return data;}catch{throw new ConflictError('Object proof is unavailable; repair the derived record before using it.','ENTITY_PROOF_INVALID');}}
 const parse=parseEntityProof,now=()=>new Date().toISOString();
@@ -151,7 +152,7 @@ export class MemoryEntities {
   }
   /** Search is purely local. A naming overflow fails closed rather than selecting an arbitrary subset. */
   expand(auth,query,scope,options){const inventory=this.namingRows(auth.user_id),empty={matches:new Map(),truncated:inventory.truncated,ambiguous:false,dependency_token:this.dependencyToken(auth)};
-    const normalized=normalizedName(query),filter=memoryScopeSql(scope,options),eligible=new Map(),entries=[];
+    const normalized=normalizedName(query),filter=memoryScopeSql(scope,options),library=memorySearchFilterSql(options.searchContext?.filter),eligible=new Map(),entries=[];
     const inScope=id=>!!this.db.prepare(`SELECT 1 FROM memories m WHERE m.user_id=? AND m.memory_id=? AND ${filter.sql}`).get(auth.user_id,id,...filter.params);
     for(const n of inventory.rows){if(n.state!=='accepted'||isWebReader(auth)&&n.origin!=='model')continue;const e=this.get(auth.user_id,n.entity_id);
       if(!this.anchor(e,auth)||!inScope(e.anchor_memory_id)||!this.validProof(parse(n.proof_json),auth))continue;
@@ -168,7 +169,8 @@ export class MemoryEntities {
     const add=(entity,seed,bridge=null)=>{if(!entity||!this.anchor(entity,auth)||!inScope(entity.anchor_memory_id))return;
       const names=this.names(entity,auth,{search:true});for(const n of names)for(const term of searchTokens(n.normalized))termNames.add(term);
       if(termNames.size>ENTITY_LIMITS.terms){truncated=true;return;}
-      const members=this.db.prepare("SELECT * FROM memory_entity_members WHERE user_id=? AND entity_id=? AND state='accepted' ORDER BY memory_id LIMIT 501").all(auth.user_id,entity.entity_id);if(members.length>500)truncated=true;
+      const members=this.db.prepare(`SELECT em.* FROM memory_entity_members em JOIN memories m ON m.user_id=em.user_id AND m.memory_id=em.memory_id
+        WHERE em.user_id=? AND em.entity_id=? AND em.state='accepted' AND ${library.sql} ORDER BY em.memory_id LIMIT 501`).all(auth.user_id,entity.entity_id,...library.params);if(members.length>500)truncated=true;
       for(const member of members.slice(0,500)){const source=this.validProof(parse(member.proof_json),auth);if(!source||source.scope_key!==entity.scope_key||!inScope(source.memory_id)||!options.statuses.includes(source.status)||!options.memoryTypes.includes(source.memory_type))continue;
         if(this.tombstone(auth.user_id,'member',this.objectKey(entity),member.memory_id))continue;
         if(!matches.has(source.memory_id)){if(matches.size>=500){truncated=true;continue;}matches.set(source.memory_id,{row:source,explanation:{source:'alias',matched_name:seed.name,entity_id:entity.entity_id,proof_memory_id:seed.proof.memory_id,...(bridge?{bridge_id:bridge.proposal_id}:{})}});}}

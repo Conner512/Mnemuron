@@ -131,3 +131,38 @@ test("MCP-08 Origin, header credential, request budget and private-route boundar
   }
   assert.equal((await f.mcp("tools/list", undefined, token)).status, 200);
 });
+
+test("MCP-09 nested tool elements are bounded before schema validation and normal calls remain usable", async (t) => {
+  const core = await memoryFixture(t);
+  const workstreams = Array.from({ length: 20 }, (_, n) => ({ workstream_id: `synthetic-workstream-${n}`, name: `Synthetic ${n}`, status: "active" }));
+  core.store.upsertTask(core.a.auth, { ...core.alpha, workstreams });
+  const memory = core.store.saveMemory(core.a.auth, { scope: "workstream", task_id: core.alpha.task_id,
+    workstream_id: workstreams[0].workstream_id, content: "Synthetic bounded-input memory." }).memory;
+  approveWebMemory(core, memory);
+  const f = await gatewayFixture(t, { profile: "readonly", coreFixture: core });
+  const token = (await f.exchange(await f.authorize())).data.access_token;
+  const call = f.gateway.core.call.bind(f.gateway.core);
+  let coreCalls = 0;
+  f.gateway.core.call = (...args) => { coreCalls++; return call(...args); };
+  // Hundreds of nested elements in a tiny request: exercise the SDK guard, never an OOM-sized probe.
+  const params = { name: "mnemuron_search_memories", arguments: { query: "synthetic", source_workstream_ids:
+    Array.from({ length: 20 }, () => ({ nested: Array.from({ length: 32 }, () => 0) })) } };
+  const bytes = Buffer.byteLength(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }));
+  assert.ok(bytes < 4096 && bytes < f.gatewayConfig.limits.request_body_bytes);
+  const rejected = await f.mcp("tools/call", params, token);
+  assert.equal(rejected.status, 200);
+  assert.equal(rejected.data.result.isError, true);
+  assert.match(rejected.data.result.content[0].text, /arguments contain more than the maximum of 256 elements/);
+  assert.equal(coreCalls, 0, "element rejection happens before the tool invokes Core");
+  const normal = await f.mcp("tools/call", { name: "mnemuron_search_memories", arguments: {
+    query: "synthetic", task_id: core.alpha.task_id, mode: "lexical", limit: 20, include_shared: false,
+    source_workstream_ids: workstreams.map(workstream => workstream.workstream_id),
+    statuses: ["active", "superseded", "retracted"],
+    memory_types: ["goal", "fact", "constraint", "decision", "completed", "blocker", "remaining", "next_step"],
+  } }, token);
+  assert.equal(normal.status, 200, JSON.stringify(normal.data));
+  assert.notEqual(normal.data.result.isError, true, JSON.stringify(normal.data));
+  assert.equal(normal.data.result.structuredContent.read_only, true);
+  assert.equal(normal.data.result.structuredContent.results[0].memory_id, memory.memory_id);
+  assert.equal(coreCalls, 1, "the next valid request still reaches Core with its largest supported arrays");
+});
