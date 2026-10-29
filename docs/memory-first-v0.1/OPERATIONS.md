@@ -143,6 +143,15 @@ day stays alongside earlier batches and does not replace them or resend their
 sources. `complete` describes that response's dependencies, not every record in
 the calendar day. Existing period-wide summaries retain their grouping.
 
+Within a period-wide publication group, the current summary follows durable job
+enqueue order, including jobs queued in the same millisecond. An older snapshot
+that succeeds after a newer valid snapshot keeps its own durable result as
+`superseded`; its job still succeeds and its `result_ref` still identifies that
+job's result. Repeating the same frozen request leaves that receipt unchanged.
+The newer summary's sources are revalidated before it takes precedence: a result
+whose sources were retracted or expired cannot suppress a valid older result.
+Separate owner grants retain their independent `authorized_batch` groups.
+
 Owner automatic summary and keyword-fill rules retain independent
 `after_by_kind` cursors. An existing schedule without those cursors resumes from
 its saved `after_rowid`; enabling a new channel starts it at the current row
@@ -153,6 +162,15 @@ Workers renew their fenced leases during model requests, including one permitted
 output-repair request. If a stalled or crashed attempt still expires, its
 `LEASE_LOST` outcome is persisted and bounded by the configured attempt limit;
 late results cannot overwrite a replacement worker's lease.
+
+Owner ticks select a run with work ready to advance, or a terminal job outcome to
+settle. A run waiting only for a future `retry_wait` deadline or an active lease
+does not block another ready grant. Each tick still advances at most one run, and
+the existing global memory-job concurrency limit, fenced leases and call budgets
+still apply. Waiting consumes no additional attempt or model call; due retries
+resume normally. If a job committed before its run was settled, a later tick
+records the run's completed or blocked outcome without replaying the model call.
+These rules do not replay historical work or broaden any processing grant.
 
 ## Local CLI
 

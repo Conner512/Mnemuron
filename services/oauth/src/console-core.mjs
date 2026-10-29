@@ -1,6 +1,7 @@
 import {BoundaryError,readPrivate,fetchJson} from '../../../shared/oauth-common.mjs';
 import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,consoleActionWritable,exactScopes} from '../../../shared/console-contract.mjs';
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
+import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 export class ConsoleCore {
   constructor(config,principal,binding) {
     if(!binding||binding.purpose!=='console'||!config?.base_url)throw new BoundaryError(503,'CONSOLE_CORE_UNAVAILABLE');
@@ -24,7 +25,9 @@ export class ConsoleCore {
         // Lifecycle mutations (preview, then a re-authenticated confirm).
         'PREVIEW_EXPIRED','PROJECT_MERGE_CONFLICT','PROJECT_NOT_DELETED','CONFIRMATION_MISMATCH','NOT_FOUND',
         'INVALID_EMBEDDING','INVALID_EMBEDDING_COUNT','INVALID_EMBEDDING_ORDER','INVALID_SOURCE_SET','INVALID_MODEL_OUTPUT','INVALID_JSON','INCOMPLETE_OUTPUT','OUTPUT_TOO_LARGE','INPUT_TOO_LARGE','AUTH_FAILED','HTTP_REJECTED','REDIRECT_DENIED','DNS_UNAVAILABLE','RATE_LIMITED','REQUEST_TIMEOUT','NETWORK_ERROR','REMOTE_UNAVAILABLE','SENSITIVITY_DENIED'];
-      throw new BoundaryError([400,403,404,409,413,429,503].includes(r.status)?r.status:503,codes.includes(r.data.error_code)?r.data.error_code:'CONSOLE_REQUEST_FAILED');
+      const error=new BoundaryError([400,403,404,409,413,429,503].includes(r.status)?r.status:503,codes.includes(r.data.error_code)?r.data.error_code:'CONSOLE_REQUEST_FAILED');
+      if(r.status===503&&error.code==='SEMANTIC_UNAVAILABLE'&&isRetrievalDegradation(r.data.degradation_code))error.degradation_code=r.data.degradation_code;
+      throw error;
     }
     return r.data;
   }

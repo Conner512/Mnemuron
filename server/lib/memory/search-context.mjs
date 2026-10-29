@@ -4,9 +4,14 @@ import { staleSql } from './review.mjs';
 // supply SQL. Console filters are validated by ConsoleOrganizer.filter before they reach here.
 export const MEMORY_SEARCH_CONTEXT = Symbol('mnemuron.memory.search.context');
 
-/** A current-row filter, shared by lexical candidates, entity members and vector hydration. */
-export function memorySearchFilterSql(filter = {}) {
+/** A current-row filter, shared by lexical candidates, entity members and vector hydration.
+ * memoryTypes is the public type selection after Store validation, separate from writer-chosen kind. */
+export function memorySearchFilterSql(filter = {}, {memoryTypes} = {}) {
   const clauses = [], params = [];
+  if (memoryTypes) {
+    clauses.push(`m.memory_type IN (${memoryTypes.map(()=>'?').join(',')})`);
+    params.push(...memoryTypes);
+  }
   if (filter.topic) { clauses.push('m.topic=?'); params.push(filter.topic); }
   if (filter.kind) {
     clauses.push("COALESCE((SELECT t.kind FROM memory_traits t WHERE t.user_id=m.user_id AND t.memory_id=m.memory_id),'none')=?");

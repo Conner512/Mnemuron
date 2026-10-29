@@ -203,7 +203,16 @@ export class OwnerControls{
     this.db.prepare("UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?").run(JSON.stringify({...schedule,after_by_kind:cursors,after_rowid:sharedAfter(cursors,schedule.after_rowid),checks,next_at:now()+schedule.interval_minutes*60000}),this.user);
    });}catch(e){this.db.prepare('UPDATE owner_feature_policy SET schedule_json=? WHERE user_id=?').run(JSON.stringify({...schedule,enabled:false,error_code:e.errorCode||e.code||'SCHEDULE_BLOCKED'}),this.user);}
   }
-  const rows=this.db.prepare("SELECT run_id FROM owner_processing_runs WHERE user_id=? AND state IN ('queued','running') ORDER BY created_at LIMIT 1").all(this.user);
+  // A run waiting for its retry deadline or another worker's lease is not runnable work. Let other authorized
+  // channels progress while keeping one run per tick; MemoryJobs.claim still enforces the global lease limit.
+  // Include finished/blocked jobs so an interrupted tick can settle the run without making another model call.
+  const at=this.store.memoryJobs.clock(),rows=this.db.prepare(`SELECT r.run_id FROM owner_processing_runs r
+   WHERE r.user_id=? AND r.state IN ('queued','running') AND (r.kind='vector'
+    OR NOT EXISTS(SELECT 1 FROM owner_processing_jobs g JOIN memory_jobs j ON j.job_id=g.job_id WHERE g.run_id=r.run_id AND j.state<>'succeeded')
+    OR EXISTS(SELECT 1 FROM owner_processing_jobs g JOIN memory_jobs j ON j.job_id=g.job_id LEFT JOIN memory_profile_state p ON p.profile=j.profile
+      WHERE g.run_id=r.run_id AND j.user_id=r.user_id AND j.profile=r.profile AND (j.state NOT IN ('pending','retry_wait','leased','succeeded')
+       OR COALESCE(p.state,'ready')='ready' AND ((j.state IN ('pending','retry_wait') AND j.run_after<=?) OR (j.state='leased' AND j.lease_expires<=?)))))
+   ORDER BY r.created_at,r.rowid LIMIT 1`).all(this.user,at,at);
   for(const row of rows){const r=this.run(this.user,row.run_id);try{
    this.guard(r.run_id);this.db.prepare("UPDATE owner_processing_runs SET state='running' WHERE run_id=?").run(r.run_id);
    if(r.kind==='vector'){const index=this.vector(r),result=await index.sync(r.generation,{maxDocuments:1});this.guard(r.run_id);if(result.complete){this.db.prepare("UPDATE owner_processing_runs SET state='completed' WHERE run_id=?").run(r.run_id);this.db.prepare("UPDATE console_vector_requests SET state='built',error_code=NULL,updated_at=? WHERE user_id=? AND generation=?").run(now(),r.user_id,r.generation);}}

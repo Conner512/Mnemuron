@@ -6,6 +6,7 @@ import path from 'node:path';
 import {once} from 'node:events';
 import {ConsoleCore} from '../src/console-core.mjs';
 import {BoundaryError} from '../../../shared/oauth-common.mjs';
+import {RETRIEVAL_DEGRADATIONS} from '../../../shared/retrieval-diagnostics.mjs';
 
 // Every error code a console action or read can raise reaches the browser as that code (never as
 // CONSOLE_REQUEST_FAILED) and has a message in both languages. Codes only; messages never cross the BFF.
@@ -80,4 +81,27 @@ test('ERRORS-03: owner/category errors preserve status and expose only allowlist
     });
   }
   assert.equal(requests,cases.length);
+});
+
+test('ERRORS-04: semantic availability reasons cross the Console boundary without private diagnostics',async t=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'console-search-errors-'));
+  t.after(()=>fs.rmSync(directory,{recursive:true,force:true}));
+  const credential=path.join(directory,'credential');fs.writeFileSync(credential,'synthetic-console-token',{mode:0o600});
+  let code='SEMANTIC_UNAVAILABLE',degradation;
+  const server=http.createServer((req,res)=>{res.writeHead(503,{'content-type':'application/json'});
+    res.end(JSON.stringify({error_code:code,degradation_code:degradation,message:'PRIVATE_SYNTHETIC_PROVIDER_DIAGNOSTIC'}));});
+  t.after(()=>new Promise(resolve=>{server.close(resolve);server.closeAllConnections();}));
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const core=new ConsoleCore({base_url:`http://127.0.0.1:${server.address().port}`},{user_id:'synthetic-owner'},
+    {purpose:'console',credential_file:credential});
+  for(const reason of [...RETRIEVAL_DEGRADATIONS,'PRIVATE_SYNTHETIC_UNKNOWN']){
+    degradation=reason;
+    await assert.rejects(core.request('/v1/console/memories'),error=>{
+      assert.equal(error.code,'SEMANTIC_UNAVAILABLE');assert.equal(error.status,503);
+      assert.equal(error.degradation_code,reason==='PRIVATE_SYNTHETIC_UNKNOWN'?undefined:reason);
+      assert.doesNotMatch(JSON.stringify(error)+error.stack,/PRIVATE_SYNTHETIC/);return true;
+    });
+  }
+  code='FEATURE_DISABLED';degradation='VECTOR_FILTER_TOO_BROAD';
+  await assert.rejects(core.request('/v1/console/memories'),error=>error.code===code&&error.degradation_code===undefined);
 });

@@ -115,3 +115,27 @@ test('WEB-MEM-03: SDK preserves the default mode and distinguishes egress, budge
   const semantic=await call('semantic');assert.equal(semantic.isError,true);assert.equal(semantic.structuredContent.error.degradation_code,'VECTOR_STALE');
   assert.notEqual((await call('lexical')).isError,true);
 });
+
+test('SEARCH-DIAGNOSTICS-02: real Core and SDK retain safe reasons and distinguish query limits from operator repairs',async t=>{
+  const core=await memoryFixture(t),f=await gatewayFixture(t,{profile:'readonly',coreFixture:core});
+  const token=(await f.exchange(await f.authorize())).data.access_token,model=embedder();
+  const memory=core.store.saveMemory(core.a.auth,{scope:'user',content:'Synthetic router network diagnostics'}).memory;
+  approveWebMemory(core,memory);
+  const backend=new MockVectorStore(),index=new VectorIndex(core.store,backend,new Map([[model.profile.fingerprint,model]]));
+  core.store.vectorIndex=index;
+  const generation=index.begin(model.profile.fingerprint);await index.sync(generation);index.activate(generation);
+  const call=async mode=>(await f.mcp('tools/call',{name:'mnemuron_search_memories',arguments:{query:'network',mode}},token)).data.result;
+  for(const code of ['VECTOR_FILTER_TOO_BROAD','VECTOR_SCOPE_TOO_BROAD','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH']){
+    backend.search=async()=>{throw Object.assign(new Error('synthetic private provider response'),{code});};
+    const hybrid=await call('hybrid');
+    assert.notEqual(hybrid.isError,true);assert.equal(hybrid.structuredContent.retrieval.degradation_code,code);
+    assert.equal(hybrid.structuredContent.retrieval.effective_mode,'lexical');
+    const semantic=await call('semantic');
+    assert.equal(semantic.isError,true);
+    assert.deepEqual(semantic.structuredContent.error,{code:'SEMANTIC_UNAVAILABLE',retryable:false,
+      next_action:code.endsWith('_TOO_BROAD')?'refine_request':'contact_operator',degradation_code:code});
+    assert.ok(!JSON.stringify([hybrid,semantic,f.gatewayLogs]).includes('synthetic private provider response'));
+  }
+  backend.search=async()=>{throw Object.assign(new Error('synthetic private provider response'),{code:'SYNTHETIC_PRIVATE_PROVIDER_DETAIL'});};
+  assert.equal((await call('semantic')).structuredContent.error.degradation_code,'VECTOR_UNAVAILABLE');
+});

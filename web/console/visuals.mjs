@@ -1,5 +1,6 @@
 import {auditLocalValue} from './audit.mjs';
 import {pagePath} from './routes.mjs';
+import {retrievalReasonKey} from './catalog.mjs';
 // Pure console views for the memory workbench. No API calls, account selection or
 // authorization here: controllers pass owner-scoped data in and get markup strings out.
 // The escaping template tag and the icon set live here too: browsers may load only the
@@ -206,15 +207,15 @@ export const strengthMeter = (t, value) => Number.isInteger(value) ? html`<span 
 export const SELECTION_LIMIT = 100;
 
 /** Library: facets, filters, a four-column table, one organize toolbar and a pager. The detail opens in the side pane. */
-export function libraryView(t, {data, query = '', searchMode = 'lexical', kind = '', concept = '', status = '', topic = '', origin = '', review = '', categories = [], labels = {}, facets, selected = [], selectAll = false, focusSources = false, readOnly = false, allowedActions = [], pagination = ''}) {
+export function libraryView(t, {data, query = '', searchMode = 'lexical', kind = '', concept = '', status = '', topic = '', origin = '', review = '', categories = [], labels = {}, facets, selected = [], selectAll = false, focusSources = false, readOnly = false, allowedActions = [], pagination = '', failure = null}) {
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
-  const rows = data.results || [];
+  const rows = failure ? [] : data.results || [];
   const chosen = new Set(selected);
   // Kinds are chosen by the writer, so the only batch action left is retraction.
   const batchActions = [['memory.batch_retract', 'batchRetract']].filter(([action]) => allowedActions.includes(action));
   const selectable = batchActions.length > 0 && rows.some(m => m.status === 'active');
   const count = selectAll ? null : chosen.size;
-  const selection = selectable || selectAll ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
+  const selection = !failure && (selectable || selectAll) ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
     <p role="status" aria-live="polite">${selectAll ? i18n(t, 'allMatchingSelected') : html`${i18n(t, 'selectedMemories')} <strong data-selection-count>${count}</strong> / 50`}</p>
     <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${selectAll || !count ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
   // A topic already shown as the title is not repeated; an imported namespace topic is a labelled tag.
@@ -227,7 +228,8 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', kind =
   // Cleanup review (server memory/review.mjs): why a memory is listed.
   const reviewNote = m => m.review ? html`<small class="review-note">${m.review.strength !== null && m.review.strength <= 3 ? html`${i18n(t, 'strength')} ${m.review.strength} · ` : ''}${i18n(t, 'reviewCreated')} ${m.review.age_days} ${i18n(t, 'reviewDaysAgo')} · ${m.review.last_read_days === null ? i18n(t, 'reviewNeverRead') : html`${i18n(t, 'reviewLastRead')} ${m.review.last_read_days} ${i18n(t, 'reviewDaysAgo')}`}</small>` : '';
   const meta = m => html`${reviewNote(m)}${projectChip(m)}${conceptChips(m)}${taskType(m)}${topicChip(m)}${m.status && m.status !== 'active' ? statusTag(t, m.status) : ''}${m.imported ? html`<small class="import-note">${i18n(t, 'importedOrigin')}${m.original_created_at ? html` · ${i18n(t, 'originalDate')} <time>${formatDate(m.original_created_at)}</time>` : ''}</small>` : ''}`;
-  const table = rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
+  const table = failure ? html`<div role="alert" data-search-failure>${i18n(t,'searchUnavailableTitle','h2')}${i18n(t,retrievalReasonKey(failure.degradation_code),'p')}${i18n(t,'searchFailureRetained','p')}<button type="button" data-retry>${i18n(t,'retry')}</button></div>`
+    : rows.length ? html`<div class="table-scroll"><table class="memory-table"><colgroup><col class="col-content"><col class="col-category"><col class="col-state"><col class="col-date"></colgroup>
     <thead><tr><th>${i18n(t, 'memories')}</th><th>${i18n(t, 'kind')}</th><th>${i18n(t, 'strength')}</th><th>${i18n(t, 'updated')}</th></tr></thead>
     <tbody>${rows.map(m => html`<tr data-group="${kindGroup(m.kind)}"${chosen.has(m.memory_id) || (selectAll && m.status === 'active') ? trusted(' data-batch-selected') : ''}><td><div class="memory-content-cell">${selectable&&m.status==='active'?html`<input class="memory-select" type="checkbox" data-batch-memory="${m.memory_id}"${chosen.has(m.memory_id) || selectAll ? trusted(' checked') : ''}${selectAll ? trusted(' disabled') : ''} data-i18n-aria-label="selectMemory" aria-label="${t('selectMemory')}">`:''}<button type="button" class="memory-link" data-memory="${m.memory_id}">${memoryText(m)}${entityMatch(t,m)}</button></div><div class="memory-extra">${meta(m)}</div></td>
       <td>${kindPill(t, m.kind)}</td><td>${strengthMeter(t, m.strength)}</td><td class="memory-date"><time datetime="${m.updated_at || m.created_at || ''}" title="${formatDate(m.updated_at || m.created_at)}">${relativeTime(m.updated_at || m.created_at)}</time></td></tr>`)}</tbody></table></div>`
@@ -243,12 +245,12 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', kind =
   ${chips.length ? html`<div class="filter-chips">${chips.map(([facet, , label]) => html`<span class="filter-chip">${label}<button type="button" class="quiet" data-clear-facet="${facet}" data-i18n-aria-label="clearFilter" aria-label="${t('clearFilter')}">×</button></span>`)}</div>` : ''}
   <section class="card memory-library">${focusSources ? html`<p class="library-note">${i18n(t, 'inspectSourcesNote')}</p>` : ''}${review ? html`<p class="policy-box library-note">${i18n(t, 'reviewNote')}</p>` : ''}
     ${data.truncated || data.retrieval?.window_limited ? html`<p class="policy-box library-note">${i18n(t, 'boundedSearchNote')} (${data.retrieval?.candidate_limit})</p>` : ''}
-    ${data.retrieval?.degraded?html`<p class="policy-box library-note" data-search-degraded>${i18n(t,'searchDegradedNote')} ${data.retrieval.degradation_code||'VECTOR_UNAVAILABLE'}</p>`:''}
+    ${data.retrieval?.degraded?html`<p class="policy-box library-note" data-search-degraded>${i18n(t,'searchDegradedNote')} ${i18n(t,retrievalReasonKey(data.retrieval.degradation_code))}</p>`:''}
     ${data.retrieval?.alias_ambiguous?html`<p class="policy-box library-note">${i18n(t,'searchAliasAmbiguous')}</p>`:''}
     ${data.retrieval?.aliases?.truncated?html`<p class="policy-box library-note">${i18n(t,'entitySearchTruncated')}</p>`:''}
     ${data.retrieval?.aliases?.ambiguous?html`<p class="policy-box library-note">${i18n(t,'entitySearchAmbiguous')}</p>`:''}
     ${selection}<div id="memory-rows">${table}</div>
-    <div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div></section>
+    ${failure?'':html`<div class="library-footer"><p>${rows.length} ${i18n(t, 'resultCount')}${readOnly ? html` · ${i18n(t, 'readOnly')}` : ''}</p>${trusted(pagination)}</div>`}</section>
 </div></div>`);
 }
 

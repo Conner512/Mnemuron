@@ -1,6 +1,7 @@
 import * as z from "zod/v4";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { BoundaryError } from "../../../shared/oauth-common.mjs";
+import {isRetrievalDegradation,isRetrievalQueryLimit} from '../../../shared/retrieval-diagnostics.mjs';
 import { requireScope } from "./authorization.mjs";
 
 const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/);
@@ -98,12 +99,14 @@ const safeCodes=new Set(["CORE_UNAVAILABLE","CORE_AUTH_UNAVAILABLE","CORE_RESPON
 for(const code of ['IDEMPOTENCY_CONFLICT','OPERATION_NOT_FOUND','INVALID_CLOUD_OPERATION','CLOUD_READ_POLICY_DENIED','CLOUD_MEMORY_DISABLED','OPERATION_RESULT_TOO_LARGE','OPERATION_STATUS_UNKNOWN','PROJECT_UNAVAILABLE'])safeCodes.add(code);
 function safeError(error) {
   const code=error instanceof BoundaryError && safeCodes.has(error.code)?error.code:"CORE_UNAVAILABLE";
-  const retryable=["CORE_UNAVAILABLE","SEARCH_UNAVAILABLE","SEARCH_RETRYABLE"].includes(code);
-  return {error:errorSchema.parse({code,retryable,next_action:code==='OPERATION_STATUS_UNKNOWN'?'query_same_operation':retryable?"retry_later":
+  const degradation_code=error instanceof BoundaryError&&['SEMANTIC_UNAVAILABLE','SEARCH_UNAVAILABLE','SEARCH_RETRYABLE'].includes(code)
+    &&isRetrievalDegradation(error.degradation_code)?error.degradation_code:undefined;
+  const refine=isRetrievalQueryLimit(degradation_code),retryable=!refine&&["CORE_UNAVAILABLE","SEARCH_UNAVAILABLE","SEARCH_RETRYABLE"].includes(code);
+  return {error:errorSchema.parse({code,retryable,next_action:refine?'refine_request':code==='OPERATION_STATUS_UNKNOWN'?'query_same_operation':retryable?"retry_later":
     ["CURSOR_EXPIRED","MEMORY_VERSION_CHANGED","SOURCE_MANIFEST_CHANGED","SUMMARY_VERSION_CHANGED","INVALID_CURSOR"].includes(code)?"restart_read":
       ["INVALID_CORE_QUERY","INVALID_TOOL_ARGUMENTS","MEMORY_NOT_FOUND","TOOL_RESPONSE_TOO_LARGE","PROJECT_UNAVAILABLE"].includes(code)?"refine_request":"contact_operator",
     ...(error?.operation_id?{operation_id:error.operation_id}:{}),
-    ...(["EGRESS_DENIED","BUDGET_EXHAUSTED","VECTOR_NOT_READY","VECTOR_DISABLED","VECTOR_STALE","RELEVANCE_NOT_CONFIGURED","AUTH_FAILED","NOT_CONFIGURED","VECTOR_UNAVAILABLE"].includes(error?.degradation_code)?{degradation_code:error.degradation_code}:{})})};
+    ...(degradation_code?{degradation_code}:{})})};
 }
 
 function projectReadSummary(result) {

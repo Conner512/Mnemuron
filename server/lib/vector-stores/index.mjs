@@ -9,6 +9,8 @@ import {normalizeSearch,searchTokens,lexicalScore,originalMatchKind} from '../me
 import {isWebReader,webMemorySql} from '../memory/web-visibility.mjs';
 import {protectTables,assertProtection} from '../lifecycle/protection.mjs';
 import {isDeterministicReadError} from '../errors.mjs';
+import {MEMORY_TYPES} from '../memory-validation.mjs';
+import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 
 export const surrogate=value=>digest(['vector-private-v1',value]);
 // A bounded document allowlist lets the current SQLite traits filter the vector backend
@@ -276,10 +278,13 @@ export class VectorIndex {
     // Existing validation and exact scope resolution remain authoritative.
     let lexical=this.store.queryMemories(auth,{...payload,limit:Math.min(payload.limit || 10,20)});
     let scope=resolveMemoryScope(this.db,auth.user_id,payload);const limit=lexical.result_limit;
+    // Public memory_type filters need the same pre-window document restriction as Console traits.
+    // An explicit selection of all types is equivalent to the default and needs no extra allowlist.
+    const memoryTypes=payload.memory_types&&new Set(payload.memory_types).size<MEMORY_TYPES.size?payload.memory_types:undefined;
     try{
       const snapshot=this.snapshot(),e=this.embedders.get(snapshot.profile);if(!e)fail('NOT_CONFIGURED');
       const relevance=semanticPolicy(this.store.memoryConfig.memory?.retrieval,e.profile);if(!relevance)fail('RELEVANCE_NOT_CONFIGURED');
-      let scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false}),library=memorySearchFilterSql(searchContext?.filter);
+      let scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false}),library=memorySearchFilterSql(searchContext?.filter,{memoryTypes});
       const assertWebIndexFresh=()=>{
         if(!isWebReader(auth))return;
         const documents=this.db.prepare(`SELECT m.memory_id,d.revision,d.state_hash,d.scope_key,d.state FROM memories m
@@ -307,7 +312,7 @@ export class VectorIndex {
       // lifecycle filter then backs the web freshness check and hit hydration; the narrow grant checks are unchanged.
       scope=resolveMemoryScope(this.db,auth.user_id,payload);
       scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false});
-      library=memorySearchFilterSql(searchContext?.filter);
+      library=memorySearchFilterSql(searchContext?.filter,{memoryTypes});
       assertWebIndexFresh();
       // Network waits may outlive a privacy change; rebuild lexical results and conflicts now.
       lexical=this.store.queryMemories(auth,{...payload,limit});
@@ -346,8 +351,13 @@ export class VectorIndex {
       const salience=this.store.salience.of(auth.user_id,[...ranked.keys()]);
       for(const r of ranked.values()){r.salience=salience.get(r.item.memory_id);r.score=r.rrf*r.salience.factor;}
       const priority={raw_query:0,original_terms:1,alias:2,semantic:3};
-      const result=[...ranked.values()].sort((a,b)=>(mode==='semantic'?Number(b.kind==='raw_query')-Number(a.kind==='raw_query'):priority[a.kind]-priority[b.kind])||b.score-a.score||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
-        .map(r=>({...r.item,ranking:{...r.item.ranking,method:'rrf-salience-v2',score:r.score,rrf_score:r.rrf,strength_score:r.salience.strength_term,read_score:r.salience.read_term,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
+      // Save-time duplicate hints ask for the nearest documents. Applying the general search's salience
+      // before their small result window can displace a true duplicate with a popular, less similar record.
+      const similarity=mode==='semantic'&&searchContext?.documentSimilarity;
+      const compare=(a,b)=>similarity?scoreOrder({score:semanticScores.get(b.item.memory_id)})-scoreOrder({score:semanticScores.get(a.item.memory_id)}):
+        (mode==='semantic'?Number(b.kind==='raw_query')-Number(a.kind==='raw_query'):priority[a.kind]-priority[b.kind])||b.score-a.score;
+      const result=[...ranked.values()].sort((a,b)=>compare(a,b)||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
+        .map(r=>({...r.item,ranking:{...r.item.ranking,method:similarity?'semantic-score-v1':'rrf-salience-v2',score:similarity?semanticScores.get(r.item.memory_id):r.score,rrf_score:r.rrf,strength_score:r.salience.strength_term,read_score:r.salience.read_term,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
       lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length,semantic_rejected:rejected,semantic_threshold:relevance.threshold,semantic_threshold_direction:relevance.direction,semantic_distance:relevance.distance,semantic_normalization:e.profile.normalization,relevance_policy:'query-relevance-v1',alias_expanded:plan.expanded,alias_ambiguous:plan.ambiguous,alias_source_truncated:plan.source_truncated};
       lexical.retrieval.result_truncated ||= ranked.size>limit;
       boundMemoryResponse(lexical);return lexical;
@@ -355,7 +365,7 @@ export class VectorIndex {
       // A lifecycle/validation/authorization outcome during or after the wait (e.g. the requested project was deleted
       // meanwhile: PROJECT_DELETED) is the answer, not provider degradation.
       if(isDeterministicReadError(error))throw error;
-      const code=['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_STALE','VECTOR_FILTER_TOO_BROAD','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(error.code)?error.code:'VECTOR_UNAVAILABLE';
+      const code=isRetrievalDegradation(error.code)?error.code:'VECTOR_UNAVAILABLE';
       if(mode==='semantic')throw Object.assign(new Error('Semantic retrieval unavailable.'),{statusCode:503,code:'SEMANTIC_UNAVAILABLE',errorCode:'SEMANTIC_UNAVAILABLE',degradation_code:code});
       lexical=this.store.queryMemories(auth,{...payload,limit});
       lexical.retrieval={...lexical.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return lexical;

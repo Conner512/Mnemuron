@@ -116,12 +116,20 @@ export class DerivedMemory {
     const groupKey=job.metadata.owner_run?digest([job.group_key,'owner-summary-batch-v1',job.metadata.owner_run]):job.group_key;
     const {category,window}=job.metadata,revision=this.db.prepare('SELECT COALESCE(MAX(revision),0)+1 AS n FROM memory_summaries WHERE group_key=?').get(groupKey).n;
     const summaryId=digest(['summary',job.job_id]);
-    this.db.prepare("UPDATE memory_summaries SET status='superseded' WHERE group_key=? AND status='current'").run(groupKey);
+    // A delayed retry can finish after a newer snapshot. Queue row order survives retries and distinguishes jobs
+    // created in the same millisecond; completion time must never let the older snapshot displace the newer one.
+    // Revalidate the newer view: expired raw sources can invalidate it without changing its stored status.
+    const newer=this.db.prepare(`SELECT s.summary_id FROM memory_summaries s JOIN memory_jobs j ON j.job_id=s.job_id
+      WHERE s.group_key=? AND s.status='current' AND j.rowid>(SELECT rowid FROM memory_jobs WHERE job_id=?)`).all(groupKey,job.job_id)
+      .some(row=>{const dependencies=this.db.prepare('SELECT * FROM memory_summary_dependencies WHERE summary_id=?').all(row.summary_id);
+        return dependencies.length&&dependencies.every(item=>{const source=this.validateItem(item);return source&&this.inSummaryGroup(source,job.metadata.taxonomy.version,category);});});
+    const status=newer?'superseded':'current';
+    if(!newer)this.db.prepare("UPDATE memory_summaries SET status='superseded' WHERE group_key=? AND status='current'").run(groupKey);
     this.db.prepare('INSERT INTO memory_summaries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)').run(summaryId,groupKey,revision,job.user_id,job.scope_key,category,JSON.stringify(window),
-      'current',job.profile,job.job_id,items.length,items.length-new Set(claims.map(c=>c.memory_id)).size,new Date(now).toISOString());
+      status,job.profile,job.job_id,items.length,items.length-new Set(claims.map(c=>c.memory_id)).size,new Date(now).toISOString());
     for(const [i,claim] of claims.entries())this.db.prepare('INSERT INTO memory_summary_claims VALUES (?,?,?)').run(summaryId,i,JSON.stringify(claim));
     for(const item of items)this.db.prepare('INSERT INTO memory_summary_dependencies VALUES (?,?,?,?,?,?)').run(summaryId,item.user_id,item.memory_id,item.revision,item.state_hash,item.scope_key);
-    this.db.prepare('INSERT OR REPLACE INTO memory_derived_outbox VALUES (?,?,?)').run(summaryId,'upsert','disabled');
+    this.db.prepare('INSERT OR REPLACE INTO memory_derived_outbox VALUES (?,?,?)').run(summaryId,newer?'hide':'upsert','disabled');
     return summaryId;
   }
   summaries(user,scope,options={}){

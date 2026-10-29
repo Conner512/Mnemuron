@@ -41,3 +41,23 @@ test('R-07: readonly gateway preserves only safe Core search availability codes'
   code='PRIVATE_DIAGNOSTIC';await assert.rejects(client.request('/v1/memories/query',{}),error=>error.code==='CORE_UNAVAILABLE' && !error.message.includes('private'));
   status=400;code='SEMANTIC_UNAVAILABLE';await assert.rejects(client.request('/v1/memories/query',{}),error=>error.code==='INVALID_CORE_QUERY');
 });
+
+test('SEARCH-DIAGNOSTICS-01: Core client preserves actionable search reasons without provider details', async t => {
+  const root=mkdtempSync(path.join(os.tmpdir(),'mnemuron-search-diagnostics-'));
+  let degradation='VECTOR_FILTER_TOO_BROAD';
+  const server=http.createServer((req,res)=>{
+    res.writeHead(503,{'content-type':'application/json'});
+    res.end(JSON.stringify({error_code:'SEMANTIC_UNAVAILABLE',degradation_code:degradation,error:'synthetic private provider response'}));
+  });
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));rmSync(root,{recursive:true,force:true});});
+  writePrivate(root+'/key','mnm_synthetic_only');
+  const client=new ReadonlyCoreClient({core:{base_url:`http://127.0.0.1:${server.address().port}`,credential_file:root+'/key',timeout_ms:1000,max_response_bytes:4096}});
+  for(const code of ['VECTOR_FILTER_TOO_BROAD','VECTOR_SCOPE_TOO_BROAD','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH']){
+    degradation=code;
+    await assert.rejects(client.request('/v1/memories/query',{query:'synthetic',mode:'semantic'}),error=>
+      error.code==='SEMANTIC_UNAVAILABLE'&&error.degradation_code===code&&!error.message.includes('private'));
+  }
+  degradation='SYNTHETIC_PRIVATE_PROVIDER_DETAIL';
+  await assert.rejects(client.request('/v1/memories/query',{}),error=>error.code==='SEMANTIC_UNAVAILABLE'&&error.degradation_code===undefined);
+});

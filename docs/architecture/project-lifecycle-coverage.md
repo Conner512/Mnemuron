@@ -194,6 +194,10 @@ Status: schema v11 adds the owner-scoped entity evidence graph to the v10 lifecy
 
 The owner-control, handoff and lifecycle behavior tests remain required alongside the literal-site inventory check. These reviewed metadata/snapshot reads do not exempt normal content reads or publication from lifecycle enforcement.
 
+### Summary publication order
+
+`server/lib/memory-derived/store.mjs` adds one `memory_summaries` read and one `memory_summary_dependencies` read to prevent a delayed older job from displacing a newer valid snapshot. The current-summary lookup is confined to the same publication group, which binds owner, scope and, for owner-authorized work, the frozen run. It runs inside the existing job publication transaction after the owner, scope, lease fence and input checks. Dependencies are loaded only for the selected summary ID and each is revalidated through `validateItem` / `currentSource`, including revision, lifecycle and source availability. A newer summary with invalid dependencies cannot suppress an otherwise valid older result. No lifecycle write site or authorization exception is added.
+
 ## Rules for enforcement
 - **Normal reads** (scoped or unscoped) exclude projects whose effective state is deleted, and resolve merged project IDs to their canonical target. Every record keeps its own authorization: canonical membership groups results and never grants access. Web denials, keep-private, exact-version cloud grants, scopes and agent/session/workstream ownership stay in force.
 - **Normal writes** validate the canonical lifecycle state inside the same write transaction (no check-then-write gap), and refuse deleted projects. Writes through an old (merged) ID are routed to the canonical target with requested-ID provenance in `project_route_log`; origin `project_id` values are never rewritten.

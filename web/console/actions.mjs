@@ -114,11 +114,16 @@ export const BATCH_PAGE=10;
 const PERIOD={daily:'每日',weekly:'每周'};
 const jobScope=j=>{const s=j.scope||{},w=j.window;const where=s.kind==='project'?`项目 ${s.project_name||s.project_id||''}`:s.kind==='task'?`任务 ${s.task_title||s.task_id||''}`:s.kind==='workstream'?`工作流 ${s.workstream_name||s.workstream_id||''}`:s.kind==='session'?'会话':s.kind==='user'?'全部记忆':'—';
   return `${where}${w?.local_start?` · ${w.local_start}${PERIOD[w.period]?`（${PERIOD[w.period]}）`:''}`:''}`;};
-export function batchJobsView(d){
+const jobActions=(j,can)=>buttons([
+  ...(can('jobs.cancel')&&!['succeeded','cancelled'].includes(j.state)?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),
+  ...(can('jobs.retry')&&j.job_type!=='classification'&&!j.retired&&j.last_error_code!=='RESCHEDULED'&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)
+    ?[j.stale_taxonomy||j.last_error_code==='STALE_TAXONOMY'?actionButton('jobs.retry','rescheduleWithCategories',{id:j.job_id,stale:'true'}):actionButton('jobs.retry','retry',{id:j.job_id})]:[]),
+]);
+export function batchJobsView(d,can=()=>false){
   const pages=Math.max(1,Math.ceil(d.total/(d.limit||BATCH_PAGE))),current=Math.floor(d.offset/(d.limit||BATCH_PAGE))+1;
   const rows=d.jobs.map(j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(jobScope(j))}</button></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td>
-    <td>${progress(j.processed,j.total)}</td><td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span>`:'—'}</td><td>${esc(clock(j.updated_at))}</td></tr>`).join('');
-  return `<table class="batch-jobs"><thead><tr><th>内容</th><th>状态</th><th>进度</th><th>问题</th><th>更新</th></tr></thead><tbody>${rows}</tbody></table>
+    <td>${progress(j.processed,j.total)}</td><td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span>`:'—'}</td><td>${esc(clock(j.updated_at))}</td><td>${jobActions(j,can)||'—'}</td></tr>`).join('');
+  return `<table class="batch-jobs"><thead><tr><th>内容</th><th>状态</th><th>进度</th><th>问题</th><th>更新</th><th>${l('actions')}</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="pagination batch-pager"><span class="muted">第 ${current} / ${pages} 页 · 共 ${esc(d.total)} 个</span>${d.offset>0?`<button type="button" data-batch-page="${Math.max(0,d.offset-(d.limit||BATCH_PAGE))}">${l('previous')}</button>`:''}${d.next_offset!=null?`<button type="button" data-batch-page="${d.next_offset}">${l('next')}</button>`:''}</div>`;
 }
 const RUN_PURPOSE={summary:'把选中的历史记忆按项目和日期分组，生成摘要',traits:'为记忆补全类型、关键词和重要度',vector:'把全部活动记忆重新嵌入一个新的语义索引'};
@@ -566,7 +571,7 @@ export function actionPage(page,data,caps,connectionQuery={}) {
     ${!data.worker_enabled?note('workerDisabledNote'):''}
     ${data.batches?batchTable(data.batches,can):table(data.jobs,['scope','state','progress','error','actions'],j=>`<tr><td><button type="button" class="link-button" data-job-detail="${esc(j.job_id)}">${esc(t(j.job_type))}</button><small><code>${esc(j.job_id)}</code></small></td><td><span class="state-dot" data-state="${esc(j.state)}">${l('jobState_'+j.state)}</span></td><td>${progress(j.processed,j.total)}</td>
       <td>${j.last_error_code?`<span class="job-error">${esc(t(j.last_error_code))}</span><small><code>${esc(j.last_error_code)}</code></small>${j.stale_taxonomy&&j.last_error_code!=='RESCHEDULED'?`<small class="job-hint">${l('jobStaleTaxonomyHint')}</small>`:''}`:'—'}</td>
-      <td>${buttons([...(can('jobs.cancel')&&j.state!=='succeeded'&&j.state!=='cancelled'?[actionButton('jobs.cancel','cancelJob',{id:j.job_id})]:[]),...(can('jobs.retry')&&j.last_error_code!=='RESCHEDULED'&&['dead_letter','blocked_auth','blocked_budget','blocked_config','review_required','retry_wait','cancelled'].includes(j.state)?[j.stale_taxonomy?actionButton('jobs.retry','rescheduleWithCategories',{id:j.job_id,stale:'true'}):actionButton('jobs.retry','retry',{id:j.job_id})]:[])])}</td></tr>`)}
+      <td>${jobActions(j,can)}</td></tr>`)}
     <div class="section-foot">${pager(data)}</div>`,{aside:refresh()})+(caps.owner_mode?runsCard(owner):'');
 
   if(page==='connections')return caps.owner_mode?connectionsPage(data,caps,connectionQuery,owner):agentsView(data,caps,{},connectionQuery);
@@ -1132,16 +1137,25 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     }catch(e){if(seq!==sequence||!isActive())return;const error=content.querySelector('[data-operation-error]');if(error)error.textContent=`${t(e.message)} · ${t('operationId')}: ${opId}`;}
     finally{working=false;controls.forEach(c=>c.disabled=false);}
   });
-  async function loadBatch(box,offset){if(!box)return;
-    try{const d=await api('jobs',{batch_id:box.dataset.batchJobs,offset,limit:BATCH_PAGE});if(box.isConnected&&isActive()){box.innerHTML=batchJobsView(d);syncAppearance();}}
-    catch(e){if(box.isConnected&&e.name!=='AbortError')box.innerHTML=`<p class="muted" role="status">${esc(t(e.message))}</p>`;}}
+  const batchLoads=new WeakMap();let batchEpoch=0;
+  async function loadBatch(box,offset){if(!box||!isActive())return;
+    // Each expanded batch has its own latest intent and last successful page. An older success or failure must
+    // never replace a newer page; an explicit account/page clear also invalidates requests whose DOM is retained.
+    const request={epoch:batchEpoch,data:batchLoads.get(box)?.data};batchLoads.set(box,request);
+    const current=()=>box.isConnected&&isActive()&&request.epoch===batchEpoch&&batchLoads.get(box)===request;
+    box.setAttribute('aria-busy','true');
+    try{const d=await api('jobs',{batch_id:box.dataset.batchJobs,offset,limit:BATCH_PAGE});if(!current())return;
+      request.data=d;box.innerHTML=batchJobsView(d,can);syncAppearance();}
+    catch(e){if(current()&&e.name!=='AbortError'){
+      box.innerHTML=(request.data?batchJobsView(request.data,can):'')+`<div class="policy-box" data-batch-error><p role="status">${esc(t(e.message))}</p><button type="button" data-batch-retry="${offset}">${l('retry')}</button></div>`;syncAppearance();}}
+    finally{if(current())box.removeAttribute('aria-busy');}}
   document.addEventListener('click',event=>{const b=event.target.closest('[data-console-action]');if(b){void begin(b.dataset.consoleAction,b);return;}if(event.target.closest('[data-operation-close]')&&!working){modal.close();restoreFocus();returnFocus=null;}
     const inspection=event.target.closest('[data-inspect]');if(inspection){const keys={models:'kind',connections:'grant_id',core_connections:'credential_id',sessions:'session_id'};const key=keys[inspection.dataset.inspect];if(!key)return;const item=getData()[inspection.dataset.inspect]?.find(row=>String(row[key])===inspection.dataset.id);if(item){open('inspectDetails');inspectResult(item);}return;}
     const toggle=event.target.closest('[data-batch-toggle]');if(toggle){const row=toggle.closest('tr'),open=row.nextElementSibling?.classList.contains('batch-detail');
       if(open){row.nextElementSibling.remove();toggle.setAttribute('aria-expanded','false');return;}
       const detail=document.createElement('tr');detail.className='batch-detail';detail.innerHTML=`<td colspan="5"><div data-batch-jobs="${esc(toggle.dataset.batchToggle)}"><p class="muted">加载中…</p></div></td>`;
       row.after(detail);toggle.setAttribute('aria-expanded','true');void loadBatch(detail.querySelector('[data-batch-jobs]'),0);return;}
-    const batchPage=event.target.closest('[data-batch-page]');if(batchPage){void loadBatch(batchPage.closest('[data-batch-jobs]'),Number(batchPage.dataset.batchPage));return;}
+    const batchPage=event.target.closest('[data-batch-page]')||event.target.closest('[data-batch-retry]');if(batchPage){void loadBatch(batchPage.closest('[data-batch-jobs]'),Number(batchPage.dataset.batchPage??batchPage.dataset.batchRetry));return;}
     const job=event.target.closest('[data-job-detail]');if(job){open('jobs');const seq=sequence;void api('jobs',{job_id:job.dataset.jobDetail}).then(data=>{if(seq===sequence&&modal.open&&isActive())inspectResult(data);}).catch(e=>{if(seq===sequence&&modal.open&&isActive())content.textContent=t(e.message);});}});
   modal.addEventListener('cancel',event=>{event.preventDefault();if(!working){modal.close();restoreFocus();returnFocus=null;}});
   // A save reloads the page content behind the dialog, so the trigger may be gone by now. Prefer the trigger,
@@ -1159,5 +1173,5 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     target?.focus();
   }
   modal.addEventListener('close',()=>{if(modal.open)return;clearTimeout(lifecycleTimer);sequence++;intent=null;flow=null;opId=null;lastPayload=null;content.replaceChildren();if(returnFocus)restoreFocus();returnFocus=null;});
-  return {clear(){sequence++;intent=null;flow=null;opId=null;lastPayload=null;working=false;returnFocus=null;content.replaceChildren();modal.close();}};
+  return {clear(){sequence++;batchEpoch++;intent=null;flow=null;opId=null;lastPayload=null;working=false;returnFocus=null;content.replaceChildren();modal.close();}};
 }

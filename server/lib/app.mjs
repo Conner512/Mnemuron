@@ -5,6 +5,7 @@ import {isConsoleReader,consoleRead} from './console-read.mjs';
 import {similarMemories} from './memory/similar.mjs';
 import {projectProfile} from './memory/profile.mjs';
 import {sessionContext} from './memory/session-context.mjs';
+import {isRetrievalDegradation} from '../../shared/retrieval-diagnostics.mjs';
 import {
   AuthenticationError,
   MnemuronStore,
@@ -448,7 +449,7 @@ export function createMnemuronApp({
           error: responseStatus >= 500 ? "Internal server error." : error.message,
           error_code: responseStatus >= 500 && !['SEARCH_UNAVAILABLE','SEARCH_RETRYABLE','SEMANTIC_UNAVAILABLE'].includes(error.errorCode) ? "INTERNAL_ERROR" : error.errorCode
             || (responseStatus === 413 ? "REQUEST_BODY_TOO_LARGE" : "REQUEST_FAILED"),
-          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:['EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_NOT_READY','VECTOR_DISABLED','VECTOR_STALE','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','NOT_CONFIGURED'].includes(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
+          ...(error.errorCode==='SEMANTIC_UNAVAILABLE'?{degradation_code:isRetrievalDegradation(error.degradation_code)?error.degradation_code:'VECTOR_UNAVAILABLE'}:{}),
         });
       }
     } finally {

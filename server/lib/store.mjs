@@ -12,6 +12,7 @@ import { DerivedMemory,scopeKey } from './memory-derived/store.mjs';
 import {MemoryJobs} from './memory-jobs/store.mjs';
 import {Organizer,Embedder} from './model-providers/providers.mjs';
 import {ModelError} from './model-providers/contracts.mjs';
+import {isRetrievalDegradation} from '../../shared/retrieval-diagnostics.mjs';
 import {VectorIndex} from './vector-stores/index.mjs';
 import {QdrantStore} from './vector-stores/qdrant.mjs';
 import {MemorySources} from './memory/sources.mjs';
@@ -3240,7 +3241,7 @@ export class MnemuronStore {
       catch(error){
         // Lifecycle, validation and authorization outcomes are answers, not provider degradation (e.g. PROJECT_DELETED).
         if(isDeterministicReadError(error))throw error;
-        const candidate=error.degradation_code||error.code||error.errorCode,code=['NOT_CONFIGURED','VECTOR_DISABLED','VECTOR_NOT_READY','EGRESS_DENIED','BUDGET_EXHAUSTED','VECTOR_STALE','VECTOR_FILTER_TOO_BROAD','RELEVANCE_NOT_CONFIGURED','AUTH_FAILED','VECTOR_AUTH_FAILED','VECTOR_COLLECTION_MISSING','VECTOR_PROFILE_MISMATCH'].includes(candidate)?candidate:'VECTOR_UNAVAILABLE';
+        const candidate=error.degradation_code||error.code||error.errorCode,code=isRetrievalDegradation(candidate)?candidate:'VECTOR_UNAVAILABLE';
         if(mode==='semantic')throw Object.assign(new ModelError('SEMANTIC_UNAVAILABLE'),{degradation_code:code});
         const result=this.queryMemories(auth,payload);result.retrieval={...result.retrieval,mode,requested_mode:mode,effective_mode:'lexical',degraded:true,fallback:'lexical',degradation_code:code};return result;
       }

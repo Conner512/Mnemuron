@@ -75,6 +75,7 @@ jobs:
           node scripts/test-console-refinements.mjs
           node scripts/test-console-audit.mjs
           node scripts/test-console-responsive.mjs
+          node scripts/test-console-workflow-continuity.mjs
       - name: Synthetic non-secret preview screenshots
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -90,5 +91,6 @@ jobs:
             ${{ runner.temp }}/mnemuron-audit-browser-*/*.png
             ${{ runner.temp }}/entities-browser-*/*.png
             ${{ runner.temp }}/responsive-browser-*/*.png
+            ${{ runner.temp }}/workflow-continuity-browser-*/*.png
           retention-days: 3
           if-no-files-found: error
