@@ -281,11 +281,19 @@ export default definePluginEntry({
         }
         if (pending.handed_off_at) return undefined;
         await currentClient.submitInjectionRecord(pending, "injected");
-        if (!store.markHandedOff(pending.attempt_id)) return undefined;
-        if (pending.confirmed_scope) scopes.stage({ packet: pending.confirmed_scope, context, workstreamId: pending.workstream_id });
-        scopes.activate(context);
-        api.logger.info(`Mnemuron injecting confirmed Resume Packet ${pending.resume_id} v${pending.preview_version}.`);
-        return { prependContext: pending.text };
+        const result = { prependContext: pending.text };
+        if (!store.markHandedOff(pending.attempt_id, (current, handoff) => {
+          const prepared = current.confirmed_scope
+            ? scopes.stage({ packet: current.confirmed_scope, context, workstreamId: current.workstream_id, handoff })
+            : null;
+          // Console activation is derived from the atomic handoff receipt. Manual conversation bindings retain
+          // their existing activation path; a failed Console preparation must not supersede those bindings.
+          if (!handoff) scopes.activate(context);
+          try { api.logger.info(`Mnemuron injecting confirmed Resume Packet ${pending.resume_id} v${pending.preview_version}.`); } catch {}
+          return prepared;
+        }, context)) return undefined;
+        // All fallible work is complete. Nothing after the durable marker may discard the prepared context.
+        return result;
       } catch (error) {
         if (pending) {
           const failed = store.fail(pending.attempt_id, {

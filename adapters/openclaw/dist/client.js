@@ -551,6 +551,19 @@ function matchesContext(record, context = {}) {
   return routesMatch(storedRoute, currentRoute, { requireSender: true });
 }
 
+// Pin the prepared task binding to the same destination and content identifiers as the durable handoff receipt.
+const TASK_SCOPE_IDENTITY_FIELDS = [
+  "resume_id", "preview_version", "project_id", "task_id", "workstream_id",
+  "session_key", "host_session_id", "canonical_session_id", "trigger", "channel", "chat_id", "sender_id",
+  "account_id", "peer_type", "from", "to", "message_thread_id",
+];
+function taskScopeIdentity(record) {
+  return Object.fromEntries(TASK_SCOPE_IDENTITY_FIELDS.map((key) => [key, record[key] ?? null]));
+}
+function sameTaskScopeIdentity(left, right) {
+  return Boolean(left && right && TASK_SCOPE_IDENTITY_FIELDS.every((key) => left[key] === right[key]));
+}
+
 export class PendingResumeStore {
   constructor(directory, {
     workstreamId = "workstream-openclaw",
@@ -584,8 +597,10 @@ export class PendingResumeStore {
     this.ensure();
     const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(temporary, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: "wx" });
+    chmodSync(temporary, 0o600);
+    // The replacement already has private permissions. Rename is the final commit: a fallible chmod afterwards
+    // could report failure after a handoff marker was persisted, even though no context reached the host.
     renameSync(temporary, file);
-    chmodSync(file, 0o600);
   }
 
   target(resumeId, previewVersion) {
@@ -599,12 +614,16 @@ export class PendingResumeStore {
   queue({ packet, text, context = {}, workstreamId = this.workstreamId, preserveExisting = false, confirmedScope = null, authorizationSource = null }) {
     assertIdentifier(workstreamId, "workstream_id");
     const target = this.target(packet.resume_id, packet.preview_version);
+    let previousScopeCommit = null;
     if (existsSync(target)) {
       const existing = this.read(target);
       const expiredPending = existing.status === "pending" && Date.parse(existing.expires_at) <= Date.now();
       // A fresh server response can renew an expired, never-handed-off local envelope. Active, cancelled and
       // completed attempts keep their existing fence; merely polling again must never reset them.
       if (existing.status === "delivered" || preserveExisting && !expiredPending) return existing;
+      if (existing.authorization_source === "console" && authorizationSource === "console") {
+        previousScopeCommit = existing.scope_commit;
+      }
     }
     const now = new Date().toISOString();
     const record = {
@@ -619,6 +638,7 @@ export class PendingResumeStore {
       text,
       status: "pending",
       ...(confirmedScope ? { confirmed_scope: confirmedScope, authorization_source: authorizationSource } : {}),
+      ...(previousScopeCommit ? { scope_commit: previousScopeCommit } : {}),
       ...contextFields(context),
       created_at: now,
       updated_at: now,
@@ -709,11 +729,37 @@ export class PendingResumeStore {
 
   // Host hooks can overlap or repeat for the same run. The central injected event is idempotent, and this
   // synchronous local fence makes only one callback in this host process return context to that run.
-  markHandedOff(attemptId) {
+  markHandedOff(attemptId, prepare = () => {}, context = null) {
     for (const file of this.files()) {
       const record = this.read(file);
       if (record.status !== "in_flight" || record.attempt_id !== attemptId || record.handed_off_at) continue;
-      const handed = { ...record, handed_off_at: new Date().toISOString() };
+      if (context && record.authorization_source === "console"
+          && (record.claimed_session_id !== canonicalSessionIdentifier(context)
+            || record.claimed_host_session_id !== context.sessionId)) return null;
+      // Recheck after the awaited Core response before preparing any task-scope side effects. Preparation and
+      // the marker commit are synchronous, so overlapping host callbacks cannot prepare the same attempt twice.
+      const now = new Date().toISOString();
+      const scopeCommit = record.authorization_source === "console" && record.confirmed_scope ? {
+        attempt_id: attemptId,
+        committed_at: now,
+        identity: taskScopeIdentity({
+          ...record,
+          // A retry may use a new host session for the same authorized route. Pin the scope to the current
+          // centrally accepted claim, rather than incidental context saved when the envelope was queued.
+          ...(context ? contextFields(context) : {}),
+          project_id: record.confirmed_scope.project.project_id,
+          task_id: record.confirmed_scope.task.task_id,
+        }),
+      } : null;
+      const prepared = prepare(record, scopeCommit ? { pending_file: file, ...scopeCommit } : null);
+      if (prepared?.then) throw new Error("Context handoff preparation must be synchronous.");
+      if (scopeCommit && prepared?.handoff?.attempt_id === attemptId
+          && sameTaskScopeIdentity(prepared.handoff.identity, scopeCommit.identity)) {
+        scopeCommit.committed_at = prepared.handoff.committed_at;
+      }
+      // A prepared Console binding becomes usable only through this same atomic write. Failed preparation or a
+      // failed marker write cannot activate it or supersede a previously committed binding.
+      const handed = { ...record, handed_off_at: now, ...(scopeCommit ? { scope_commit: scopeCommit } : {}) };
       this.write(file, handed);
       return handed;
     }
@@ -858,7 +904,7 @@ export class TaskScopeStore {
     return path.join(this.directory, `${resumeId}-v${previewVersion}.json`);
   }
 
-  stage({ packet, context = {}, workstreamId }) {
+  stage({ packet, context = {}, workstreamId, handoff = null }) {
     const resumeId = packet?.resume_id;
     const previewVersion = packet?.preview_version;
     const projectId = packet?.project?.project_id;
@@ -867,8 +913,20 @@ export class TaskScopeStore {
     assertIdentifier(projectId, "project_id");
     assertIdentifier(taskId, "task_id");
     assertIdentifier(workstreamId, "workstream_id");
-    const target = this.target(resumeId, previewVersion);
-    if (existsSync(target)) return this.read(target);
+    const baseTarget = this.target(resumeId, previewVersion);
+    if (handoff) assertIdentifier(handoff.attempt_id, "attempt_id");
+    // Separate attempts cannot overwrite the scope backed by an earlier successful delivery.
+    const target = handoff ? `${baseTarget.slice(0, -5)}-${handoff.attempt_id}.json` : baseTarget;
+    // A failed marker and failed retry-state write can leave this same attempt prepared on disk. Re-prepare it
+    // against the currently active bindings before committing; manual staging remains idempotent.
+    if (!handoff && existsSync(target)) return this.read(target);
+    if (handoff) {
+      // Receipt-backed scopes coexist with older bindings until commit. Give the new receipt a strict ordering
+      // even when both deliveries occur within one millisecond or the wall clock moves backwards.
+      const activeTimes = this.records().filter(({ record }) => record.status === "active")
+        .map(({ record }) => Date.parse(record.activated_at)).filter(Number.isFinite);
+      handoff = { ...handoff, committed_at: new Date(Math.max(Date.parse(handoff.committed_at), ...activeTimes.map(time => time + 1))).toISOString() };
+    }
     const now = new Date().toISOString();
     const record = {
       schema_version: "mnemuron-task-scope-v0.1",
@@ -877,18 +935,37 @@ export class TaskScopeStore {
       project_id: projectId,
       task_id: taskId,
       workstream_id: workstreamId,
-      status: "pending",
+      status: handoff ? "prepared" : "pending",
       ...contextFields(context),
+      ...(handoff ? { handoff, run_id: context.runId || null } : {}),
       created_at: now,
       updated_at: now,
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
     };
+    if (handoff && !sameTaskScopeIdentity(taskScopeIdentity(record), handoff.identity)) {
+      throw new Error("Prepared task scope does not match the accepted handoff destination.");
+    }
     this.write(target, record);
     return record;
   }
 
+  effective(record) {
+    if (!record.handoff || record.status === "superseded") return record;
+    const pending = record.handoff;
+    let commit;
+    try { commit = JSON.parse(readFileSync(pending.pending_file, "utf8")).scope_commit; } catch {}
+    // A prepared file alone is never authority. Re-read its immutable identity and receipt on every consumer,
+    // including after restart, so a partial stage or an old attempt cannot become active through ordinary capture.
+    if (!commit || commit.attempt_id !== pending.attempt_id
+        || !sameTaskScopeIdentity(commit.identity, pending.identity)
+        || !sameTaskScopeIdentity(commit.identity, taskScopeIdentity(record))) {
+      return { ...record, status: "prepared" };
+    }
+    return { ...record, status: "active", activated_at: commit.committed_at };
+  }
+
   records() {
-    return this.files().map((file) => ({ file, record: this.read(file) }));
+    return this.files().map((file) => ({ file, record: this.effective(this.read(file)) }));
   }
 
   activate(context = {}) {
@@ -909,7 +986,9 @@ export class TaskScopeStore {
           || current.record.run_id === context.runId) return current.record;
       const rebound = {
         ...current.record,
-        ...contextFields(context),
+        // Later sparse capture hooks use this run binding. Keep the receipt's original destination intact
+        // while rebinding a Console scope that matched the new user turn's authorized route.
+        ...(current.record.handoff ? {} : contextFields(context)),
         run_id: context.runId,
         run_bound_at: now,
         updated_at: now,
@@ -948,6 +1027,7 @@ export class TaskScopeStore {
   counts() {
     const counts = { pending: 0, active: 0, superseded: 0 };
     for (const { record } of this.records()) {
+      if (record.status === "prepared") { counts.pending += 1; continue; }
       if (Object.hasOwn(counts, record.status)) counts[record.status] += 1;
     }
     return counts;

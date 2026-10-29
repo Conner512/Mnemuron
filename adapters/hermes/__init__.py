@@ -208,13 +208,15 @@ class PluginRuntime:
             if pending.get("context_returned_at"):
                 return None
             try:
+                result = {"context": pending["text"]}
                 client.submit_injection_record(pending, "injected")
-                if not pending_store.mark_context_returned(str(pending.get("attempt_id") or "")):
-                    return None
+                prepare = None
                 if pending.get("console_confirmed_scope"):
-                    self.task_scopes().stage(pending["console_confirmed_scope"], scope_tokens(session_id=session_id),
-                                             pending["workstream_id"])
-                    self.task_scopes().activate(candidates, session_id)
+                    def prepare(commit):
+                        return self.task_scopes().stage(pending["console_confirmed_scope"], scope_tokens(session_id=session_id),
+                                                       pending["workstream_id"], handoff_commit=commit)
+                if not pending_store.mark_context_returned(str(pending.get("attempt_id") or ""), prepare):
+                    return None
             except Exception as error:
                 permanent = {"RESUME_TARGET_UNAVAILABLE", "RESUME_TARGET_MISMATCH", "RESUME_CONTEXT_CHANGED",
                              "RESUME_VERSION_CHANGED", "RESUME_ALREADY_DELIVERED",
@@ -234,11 +236,9 @@ class PluginRuntime:
                     client.queue_injection_event(failed["record"], failed["phase"])
                 LOGGER.warning("Mnemuron Resume injection deferred: %s", error)
                 return None
-            LOGGER.info(
-                "Mnemuron injecting confirmed Resume Packet %s v%s",
-                pending.get("resume_id"), pending.get("preview_version"),
-            )
-            return {"context": pending["text"]}
+            # The marker is committed. Do not run fallible logging or storage before
+            # handing this already constructed result to the host.
+            return result
         return None
 
     def post_llm_call(self, **kwargs):

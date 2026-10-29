@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -84,16 +85,18 @@ def _atomic_json_write(target: Path, value: Mapping[str, Any]) -> None:
     descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
             json.dump(value, handle, ensure_ascii=False, separators=(",", ":"))
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
+        # The temporary inode already has private permissions. Rename is the commit point;
+        # no fallible chmod/cleanup may report failure after the new record became visible.
         os.replace(temporary, target)
-        os.chmod(target, 0o600)
     finally:
         try:
             temporary.unlink()
-        except FileNotFoundError:
+        except OSError:
             pass
 
 
@@ -384,8 +387,10 @@ class PendingResumeStore:
         with self._lock:
             self._ensure()
             target = self._target(resume_id, version)
+            previous_scope_commit = None
             if target.exists():
                 existing = self._read(target)
+                previous_scope_commit = existing.get("scope_commit")
                 renewed = (console_confirmed and existing.get("console_confirmed_scope") and existing.get("status") == "pending"
                            and _parse_utc(existing["expires_at"]) <= datetime.now(timezone.utc))
                 # Only a fresh, validated Core pull may renew an expired local pending copy. Never reset an
@@ -409,6 +414,7 @@ class PendingResumeStore:
                 "updated_at": now,
                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=PENDING_TTL_HOURS)).isoformat().replace("+00:00", "Z"),
                 **({"console_confirmed_scope": confirmed_scope} if confirmed_scope else {}),
+                **({"scope_commit": previous_scope_commit} if previous_scope_commit else {}),
             }
             _atomic_json_write(target, record)
             return record
@@ -448,8 +454,8 @@ class PendingResumeStore:
                 return claimed
         return None
 
-    def mark_context_returned(self, attempt_id: str) -> bool:
-        """Persist once-only host context handoff, separately from the real session-completion acknowledgement."""
+    def mark_context_returned(self, attempt_id: str, prepare=None) -> bool:
+        """Prepare under the shared attempt lock, then atomically commit scope and once-only handoff."""
         with self._lock:
             for target in self._files():
                 record = self._read(target)
@@ -457,7 +463,25 @@ class PendingResumeStore:
                     continue
                 if record.get("context_returned_at"):
                     return False
-                record["context_returned_at"] = utc_now()
+                now = utc_now()
+                if prepare is not None:
+                    packet = record["console_confirmed_scope"]
+                    scope = {"resume_id": record["resume_id"], "preview_version": record["preview_version"],
+                             "project_id": packet["project"]["project_id"], "task_id": packet["task"]["task_id"],
+                             "workstream_id": record["workstream_id"], "target_tokens": record["target_tokens"],
+                             "session_id": record["claimed_session_id"]}
+                    commit = {"attempt_id": attempt_id, "committed_at": now, "scope": scope}
+                    result = prepare({**commit, "file": str(target.resolve())})
+                    if inspect.isawaitable(result):
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise TypeError("Scope preparation must be synchronous")
+                    if isinstance(result, Mapping) and result.get("prepared_at"):
+                        commit["committed_at"] = result["prepared_at"]
+                    # Kept across failed turns/recovery: a later attempt cannot erase a binding
+                    # that was already handed to the host. A failed prepare leaves it unchanged.
+                    record["scope_commit"] = commit
+                record["context_returned_at"] = now
                 _atomic_json_write(target, record)
                 return True
         return False
@@ -643,6 +667,26 @@ def _tokens_match(record_tokens: Any, candidate_tokens: Any) -> bool:
     return bool(record_set.intersection(candidate_set))
 
 
+def _session_scope(record: Mapping[str, Any]) -> bool:
+    targets = record.get("target_tokens") or []
+    return bool(targets) and all(str(token).startswith("session:") for token in targets)
+
+
+def _binding_tokens(record: Mapping[str, Any], *, active: bool = False) -> list[str]:
+    # Original targets also recognize pre-fix Console files whose active_tokens were
+    # broadened by a gateway callback. Never trust that widened copy for a session scope.
+    targets = record.get("target_tokens") or []
+    return targets if _session_scope(record) or not active else record.get("active_tokens") or targets
+
+
+def _next_activation_time(records, now: str) -> str:
+    latest = max((_parse_utc(row["activated_at"]) for row in records if row.get("status") == "active"), default=None)
+    value = _parse_utc(now)
+    if latest is not None and value <= latest:
+        value = latest + timedelta(microseconds=1)
+    return value.isoformat().replace("+00:00", "Z")
+
+
 class TaskScopeStore:
     def __init__(self, directory: Path):
         self.directory = Path(directory)
@@ -657,12 +701,33 @@ class TaskScopeStore:
         return sorted(self.directory.glob("*.json"))
 
     def _read(self, target: Path) -> dict[str, Any]:
-        return json.loads(target.read_text(encoding="utf-8"))
+        record = json.loads(target.read_text(encoding="utf-8"))
+        handoff = record.get("handoff_commit")
+        if not handoff or record.get("status") not in {"prepared", "active"}:
+            return record
+        # Prepared Console files are inert until the pending record commits their exact
+        # identity. No rollback writes are needed when preparation or the commit fails.
+        expected = {key: record.get(key) for key in
+                    ("resume_id", "preview_version", "project_id", "task_id", "workstream_id", "target_tokens")}
+        expected["session_id"] = record.get("active_session_id")
+        try:
+            pending = json.loads(Path(handoff["file"]).read_text(encoding="utf-8"))
+            commit = pending.get("scope_commit") or {}
+            if (commit.get("attempt_id") == handoff["attempt_id"] and commit.get("scope") == expected
+                    and pending.get("resume_id") == record["resume_id"]
+                    and pending.get("preview_version") == record["preview_version"]
+                    and isinstance(commit.get("committed_at"), str)):
+                return {**record, "status": "active", "active_tokens": record["target_tokens"],
+                        "activated_at": commit["committed_at"]}
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            pass
+        return {**record, "status": "prepared", "active_tokens": []}
 
     def _target(self, resume_id: str, version: int) -> Path:
         return self.directory / f"{_identifier(resume_id, 'resume_id')}-v{int(version)}.json"
 
-    def stage(self, packet: Mapping[str, Any], target_tokens: list[str], workstream_id: str) -> dict[str, Any]:
+    def stage(self, packet: Mapping[str, Any], target_tokens: list[str], workstream_id: str, *,
+              handoff_commit: Mapping[str, Any] | None = None) -> dict[str, Any]:
         resume_id = _identifier(packet.get("resume_id"), "resume_id")
         version = int(packet.get("preview_version") or 0)
         project_id = _identifier((packet.get("project") or {}).get("project_id"), "project_id")
@@ -672,10 +737,22 @@ class TaskScopeStore:
             raise ValueError("preview_version is invalid")
         if not target_tokens:
             raise ValueError("No Hermes conversation scope is available for task binding")
+        if handoff_commit:
+            scope = handoff_commit["scope"]
+            expected = {"resume_id": resume_id, "preview_version": version, "project_id": project_id,
+                        "task_id": task_id, "workstream_id": target_workstream,
+                        "target_tokens": sorted(set(target_tokens)), "session_id": scope["session_id"]}
+            if scope != expected or target_tokens != scope_tokens(session_id=scope["session_id"]):
+                raise ValueError("Console task scope must match the exact handoff destination")
         with self._lock:
             self._ensure()
             target = self._target(resume_id, version)
-            if target.exists():
+            if handoff_commit:
+                attempt = _identifier(handoff_commit["attempt_id"], "attempt_id")
+                target = target.with_name(f"{target.stem}-handoff-{attempt}.json")
+            # Pending persistence may also prevent rotating a failed attempt. Re-prepare
+            # that attempt against current bindings instead of reusing stale ordering.
+            if target.exists() and not handoff_commit:
                 return self._read(target)
             now = utc_now()
             record = {
@@ -691,7 +768,12 @@ class TaskScopeStore:
                 "created_at": now,
                 "updated_at": now,
                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=PENDING_TTL_HOURS)).isoformat().replace("+00:00", "Z"),
+                **({"status": "prepared", "active_session_id": handoff_commit["scope"]["session_id"],
+                    "handoff_commit": {"file": handoff_commit["file"], "attempt_id": handoff_commit["attempt_id"]}}
+                   if handoff_commit else {}),
             }
+            if handoff_commit:
+                record["prepared_at"] = _next_activation_time((self._read(file) for file in self._files()), now)
             _atomic_json_write(target, record)
             return record
 
@@ -703,15 +785,20 @@ class TaskScopeStore:
                 (target, record) for target, record in records
                 if record.get("status") == "pending"
                 and record.get("expires_at", "") > now
-                and _tokens_match(record.get("target_tokens"), candidate_tokens)
+                and _tokens_match(_binding_tokens(record), candidate_tokens)
             ]
             if not pending:
                 return self.resolve(candidate_tokens)
             target, record = max(pending, key=lambda item: item[1].get("created_at", ""))
+            activated_at = _next_activation_time((row for _, row in records), now)
             for other_target, other in records:
                 if other.get("status") != "active":
                     continue
-                if not _tokens_match(other.get("active_tokens") or other.get("target_tokens"), candidate_tokens):
+                # An exact session choice must not remove a manual chat binding still
+                # serving other sessions. The newest matching scope wins in resolve().
+                if _session_scope(record) and not _session_scope(other):
+                    continue
+                if not _tokens_match(_binding_tokens(other, active=True), candidate_tokens):
                     continue
                 other.update({
                     "status": "superseded",
@@ -722,9 +809,10 @@ class TaskScopeStore:
             active = {
                 **record,
                 "status": "active",
-                "active_tokens": sorted(set((record.get("target_tokens") or []) + candidate_tokens)),
+                "active_tokens": list(record["target_tokens"]) if _session_scope(record)
+                                 else sorted(set((record.get("target_tokens") or []) + candidate_tokens)),
                 "active_session_id": session_id or None,
-                "activated_at": now,
+                "activated_at": activated_at,
                 "updated_at": now,
             }
             _atomic_json_write(target, active)
@@ -737,9 +825,9 @@ class TaskScopeStore:
                 record = self._read(target)
                 if record.get("status") != "active":
                     continue
-                if _tokens_match(record.get("active_tokens") or record.get("target_tokens"), candidate_tokens):
+                if _tokens_match(_binding_tokens(record, active=True), candidate_tokens):
                     active.append(record)
-            return max(active, key=lambda record: record.get("activated_at", ""), default=None)
+            return max(active, key=lambda record: _parse_utc(record["activated_at"]), default=None)
 
     def counts(self) -> dict[str, int]:
         result = {"pending": 0, "active": 0, "superseded": 0}
