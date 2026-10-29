@@ -1,6 +1,6 @@
 import {BoundaryError,readPrivate,fetchJson} from '../../../shared/oauth-common.mjs';
 import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,consoleActionWritable,exactScopes} from '../../../shared/console-contract.mjs';
-import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS} from '../../../shared/console-contract.mjs';
 import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 export class ConsoleCore {
   constructor(config,principal,binding) {
@@ -25,7 +25,7 @@ export class ConsoleCore {
         // Lifecycle mutations (preview, then a re-authenticated confirm).
         'PREVIEW_EXPIRED','PROJECT_MERGE_CONFLICT','PROJECT_NOT_DELETED','CONFIRMATION_MISMATCH','NOT_FOUND',
         'INVALID_EMBEDDING','INVALID_EMBEDDING_COUNT','INVALID_EMBEDDING_ORDER','INVALID_SOURCE_SET','INVALID_MODEL_OUTPUT','INVALID_JSON','INCOMPLETE_OUTPUT','OUTPUT_TOO_LARGE','INPUT_TOO_LARGE','AUTH_FAILED','HTTP_REJECTED','REDIRECT_DENIED','DNS_UNAVAILABLE','RATE_LIMITED','REQUEST_TIMEOUT','NETWORK_ERROR','REMOTE_UNAVAILABLE','SENSITIVITY_DENIED'];
-      const error=new BoundaryError([400,403,404,409,413,429,503].includes(r.status)?r.status:503,codes.includes(r.data.error_code)?r.data.error_code:'CONSOLE_REQUEST_FAILED');
+      const error=new BoundaryError([400,403,404,409,413,429,503].includes(r.status)?r.status:503,codes.includes(r.data.error_code)||CONSOLE_WORKFLOW_ERRORS.includes(r.data.error_code)?r.data.error_code:'CONSOLE_REQUEST_FAILED');
       if(r.status===503&&error.code==='SEMANTIC_UNAVAILABLE'&&isRetrievalDegradation(r.data.degradation_code))error.degradation_code=r.data.degradation_code;
       throw error;
     }
@@ -48,7 +48,7 @@ export class ConsoleCore {
       if(!/^[A-Za-z0-9_.:-]{1,160}$/.test(memory_id||'')||Object.keys(options).some(k=>!['content_offset','content_limit','source_offset','revision','source_version','include_history'].includes(k)))throw new BoundaryError(400,'INVALID_DETAIL_REQUEST');
       return this.request(`/v1/memories/${encodeURIComponent(memory_id)}?${new URLSearchParams(options)}`);
     }
-    if(!['entities','overview','memories','summaries','summary','jobs','job','storage','connections','audit','capabilities','models','memory-meta','export','projects','metadata-values','task-detail','project-profile','tunnel','config','operation','lifecycle-preview-check',...FEATURE_VIEWS].includes(view))throw new BoundaryError(404,'NOT_FOUND');
+    if(!['entities','overview','memories','summaries','summary','jobs','job','storage','connections','audit','capabilities','models','memory-meta','export','projects','metadata-values','task-detail','project-profile','tunnel','config','operation','lifecycle-preview-check',...FEATURE_VIEWS,...CONSOLE_WORKFLOW_VIEWS].includes(view))throw new BoundaryError(404,'NOT_FOUND');
     return this.request(`/v1/console/${view}?${new URLSearchParams(params)}`);
   }
   async action(input) {

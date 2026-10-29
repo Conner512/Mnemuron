@@ -137,7 +137,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ## 11. 本轮补齐的合同与边界
 
-本轮按既有清单实现独立的记忆、连接、用量、隐私及系统查看功能，不启用 handoff、不改变其 Hook、确认或回执协议。`production_ready` 继续为 `false`。
+基础独立功能阶段已实现记忆、连接、用量、隐私及系统查看，未启用 handoff。后续任务工作流与 Hook 的接通范围见下方“任务创建、对账与接续联动”；代码实现仍不自动启用 handoff，`production_ready` 继续为 `false`。
 
 ### 接口与数据
 
@@ -159,7 +159,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ### 未完成及环境边界
 
-- `RES-01～04` 继续延后；`TSK-05` 的 bootstrap 确认及 `TSK-06` 的协调写操作依赖现有 handoff 门禁，因此不绕过门禁开放。任务、项目、检查点和协调提案只能查看。
+- `TSK-05～10` 已在下方“任务创建、对账与接续联动”中接通。原 `RES-01～04` 已并入 `TSK-07～10`，不再是独立待开发页面；这些操作仍遵守既有 handoff 门禁，代码实现不会替运维启用 handoff 或扩大已有凭据权限。
 - `CON-04` 仅反映服务器实际收到的事件和处理状态。本机 Hook 超时、未发送队列没有可信上报入口，保持 `not_observable`，不是健康通过。
 - `MOD-04` 显示当前个人模型配置的当日预留请求及预算，包含失败尝试；没有计费金额数据，不推算费用。`models.quota` 让账户所有者为整理模型和向量模型分别设置每日与累计调用次数上限（`null` 为明确的不限制，0 为不允许调用）；修改不清零计数，不改模型配置、索引、启用状态或任务。
 - `SYS-02` 可验证当前 Core 数据库及搜索状态；worker、向量和 MCP 的配置/进程健康分开显示，没有探测证据时为 `not_probed`。`SYS-03` 的数据库版本是实际 SQLite `user_version`，不是完整的迁移审计报告。
@@ -182,6 +182,19 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - **概览**：类型构成色块条和图例，图例可直接跳到对应类型；流水线的“类型”一格显示已标注/全部有效记忆；记忆地图按类型着色。
 - **已退役的分类功能**：单条分类（`memory.classify`）、整理到分类与撤销（`memory.organize`、`memory.organize_undo`）、批量分类（`memory.batch_classify`）、分类管理（`category.create`、`category.rename`、`category.delete`）、修改分类体系（`taxonomy.save`）、整理预览读取（`memories?part=preview`）、模型自动分类（`jobs.schedule type=classification`、单人模式的“自动分类”开关与处理类型）都已移除，请求返回 403/404/400。已有的分类数据（`memory_annotations`、`memory_category_overrides`、整理批次表）保留不删；旧的按分类生成的摘要仍可打开，并标注“旧版按分类”。旧的分类任务不能重试（`CLASSIFICATION_RETIRED`），审计里的历史分类记录仍归在记忆组。
 - **一次性转换**：现有记忆从分类转换到类型是预览后由 owner 确认的一次性写入（只写 `memory_traits`，不改记忆内容和修订）。
+
+### 任务创建、对账与接续联动（2026-10-29）
+
+- **创建先预览后确认**：`projects.bootstrap_preview / projects.bootstrap_confirm` 创建项目及首个任务，`tasks.bootstrap_preview / tasks.bootstrap_confirm` 在明确选中的现有项目中创建任务。完整预览通过 `task-workflow-preview` 单独读取，绑定原 Console 凭据、到期时间、版本和项目生命周期；提交结果只有标识符和回执，不把冻结正文放进可重放的操作回执。重复项目、任务及待处理候选明确显示，不静默新建重复项。创建只建立 Console 自己的工作分支，不宣称某个 Agent 已接管。
+- **任务对账要明确决策**：`tasks.reconciliation_preview` 冻结选择的检查点和权威版本，即便提案全部属于安全更新也不自动应用；页面展示各字段的前后值、冲突及来源。`tasks.reconciliation_resolve` 接受或拒绝的是整份提案，不是未实现的逐字段独立提交。并发的权威任务更新不会被旧提案覆盖；有冲突只能拒绝并重新生成。
+- **接续要指定真实目标**：`resume-targets` 仅列出本账户已捕获的 Codex、OpenClaw、Hermes 会话，目标凭据必须仍具备 `capture:write / resume:read / resume:confirm`。浏览器只能选择服务器返回的 `target_event_id`，不能填写或冒充 Agent、实例、会话。会话最近被观察到不等于在线，界面不伪造心跳状态。
+- **冻结来源与确认**：`resume.preview` 使用明确的任务和所选来源分支；`resume-status` 返回当前仍可读取的冻结预览、目标和阻断原因。来源修订、原始内容过期、项目删除/恢复、目标失效后，正文会被隐藏且旧授权不能继续投递。`resume.confirm` 只确认这个 ID/版本，成功表示 `queued`，不返回 Resume Packet，也不表示已经注入。
+- **完整内容与响应边界**：冻结接续预览限制为 160 KiB，超过时整个预览事务回滚并提示缩小来源范围，不悄悄截断正文。详情与历史页限制为 240 KiB；详情按协议显示最多 20 项、24 KiB 的近期回执，同时给出真实总数及省略标记；历史用摘要及实际返回数量计算 `next_offset`，不会因字节分页遗漏记录。
+- **实际交付与 ACK**：目标 Agent 在下一次正常工作入口调用 `POST /v1/resume/pending` 领取至多一份上下文；重复领取不记录投递。Codex 沿现有 `take_pending_resume` / delivery-receipt / Stop ACK 路径，OpenClaw 沿 `before_prompt_build` / injection-event / `agent_end` 路径，Hermes 沿 `pre_llm_call` / injection-event / `on_session_end` 路径交付。中央投递声明被接受前不返回上下文、不提前切换任务归属；完成先于本地上下文交付时不生成成功 ACK。临时失败保留重试状态，已明确失效的本地 Console 授权不能永久挡住新的预览确认。
+- **历史与状态不混用**：`resume-history` 按账户和当前可用项目先过滤再分页，历史与详情区分“待确认 / 已排队 / 已投递 / 本轮已完成 / 失败 / 被阻断”。“本轮已完成”表示真实配对回执，不等于整个任务已经完成。只读、basic、hand-off 禁用及无可用目标分别显示真实限制，不返回假的成功。
+- **重新验证与重试**：以上四个确认/解决操作均要求当前密码和未复用的 TOTP；两者只在 BFF 验证，绝不传入 Core。先核对预览或已完成操作的精确请求 hash、权限和来源，再消费验证因素；相同业务请求的响应丢失可用同一个 `operation_id` 与新的验证码重试，反向决策或修改请求不能复用 ID。无自动重试写操作。提交后列表刷新失败会保留已提交回执并明确提示。
+- **存储与回退边界**：仅新增 `console_task_workflow_previews` 这一幂等初始化的 Console 预览表，不改变数据库 `user_version`、不重写旧业务记录。Resume 目标附着于现有冻结记录，确认状态承担持久排队语义，不另设第二个队列权威。部署应同时更新 Core、OAuth 静态资源/精确 ingress 和需要消费 Console 接续的 Agent 插件；旧插件不会被伪报为成功消费。回退不得把仍有新 Console 排队授权的数据库直接交给不了解目标绑定的旧 Core；先停止新增接续并在新版本核清/处理待投递记录，保留备份，不做破坏性 down migration。
+- **验收入口**：新增 `server/test/console-task-workflows.test.mjs`、`server/test/console-resume-workflows.test.mjs`、`server/test/console-hermes-workflow.test.mjs`；Codex/OpenClaw 各自的 `test/console-resume.test.mjs`、Hermes 的 `test_console_resume.py`；BFF/UI 的 `console-actions.test.mjs`、`console-task-workflows-ui.test.mjs`；真实浏览器 `scripts/test-console-task-workflows.mjs`。所有运行仅使用合成身份、临时库和回环地址，`production_ready` 仍为 `false`。
 
 ## 12. 功能表
 
@@ -207,12 +220,12 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | TSK-02 | 项目与任务 | 任务与来源分支 | live | task-branches | — |
 | TSK-03 | 项目与任务 | 项目上下文预览 | live | project-context | — |
 | TSK-04 | 项目与任务 | 检查点与权威任务状态 | live | task-checkpoints | — |
-| TSK-05 | 项目与任务 | 新建项目与任务 | planned | — | projects.bootstrap, tasks.bootstrap |
-| TSK-06 | 项目与任务 | 任务对账 | planned | task-reconciliation | tasks.reconcile |
-| TSK-07 | 项目与任务 | 接续预览 | planned | resume-preview | — |
-| TSK-08 | 项目与任务 | 确认接续 | planned | — | resume.confirm |
-| TSK-09 | 项目与任务 | 投递与完成回执 | planned | resume-deliveries | — |
-| TSK-10 | 项目与任务 | 接续历史 | planned | resume-history | — |
+| TSK-05 | 项目与任务 | 新建项目与任务 | live | task-workflow-preview | projects.bootstrap_preview, projects.bootstrap_confirm, tasks.bootstrap_preview, tasks.bootstrap_confirm |
+| TSK-06 | 项目与任务 | 任务对账 | live | task-reconciliation, task-workflow-preview | tasks.reconciliation_preview, tasks.reconciliation_resolve |
+| TSK-07 | 项目与任务 | 接续预览 | live | resume-targets, task-branches, resume-status | resume.preview |
+| TSK-08 | 项目与任务 | 确认接续 | live | resume-status, resume-history | resume.confirm |
+| TSK-09 | 项目与任务 | 投递与完成回执 | live | resume-status, resume-history | — |
+| TSK-10 | 项目与任务 | 接续历史 | live | resume-history | — |
 | JOB-01 | 整理任务 | 任务队列与执行状态 | live | jobs, job | — |
 | JOB-02 | 整理任务 | 创建与定期计划 | live | — | jobs.schedule |
 | JOB-03 | 整理任务 | 取消与重试 | live | — | jobs.cancel, jobs.retry |

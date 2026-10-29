@@ -7,7 +7,8 @@ import {icon} from '../../../web/console/visuals.mjs';
 import {text} from '../../../web/console/catalog.mjs';
 import {clientSnapshot} from './session-client.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
-import {CONSOLE_LIFECYCLE_CONFIRMS,CONSOLE_TUNNEL_FIELDS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_LIFECYCLE_CONFIRMS,CONSOLE_TUNNEL_FIELDS,CONSOLE_WORKFLOW_CONFIRMS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS} from '../../../shared/console-contract.mjs';
+import {fingerprint} from '../../../server/lib/console/state.mjs';
 
 // A one-time-code field stays one submitted input; data-otp lets the shared asset draw six boxes over it.
 const otpHint=name=>`<small id="${name}-hint" class="field-hint" data-i18n="otpHint">${text('otpHint')}</small>`;
@@ -191,6 +192,32 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       await ids.console.reauthenticate(account.account_id,session,payload,{otp:true});
       result=await coreFor(account.subject).action({action,operation_id,payload:Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]))});
     }
+    else if(Object.hasOwn(CONSOLE_WORKFLOW_CONFIRMS,action)){
+      const fields=CONSOLE_WORKFLOW_CONFIRMS[action],resume=action==='resume.confirm',key=resume?'resume_id':'preview_id';
+      if(Object.keys(payload).some(k=>![...fields,'current_password','otp'].includes(k))
+        ||typeof payload[key]!=='string'||!/^[A-Za-z0-9_.:-]{1,160}$/.test(payload[key])
+        ||!Number.isSafeInteger(payload.preview_version)||payload.preview_version<1
+        ||(action==='tasks.reconciliation_resolve'?!['confirm','reject'].includes(payload.decision):typeof payload.confirmed!=='boolean'))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const core=coreFor(account.subject),safe=Object.fromEntries(fields.map(k=>[k,payload[k]]));let completed=false;
+      // A lost response may be retried with the same operation. Only metadata is read here; Core still compares the
+      // exact business payload hash under its transaction, and every retry still needs fresh factors.
+      try{const operation=await core.view('operation',{operation_id,action,request_hash:fingerprint(safe)});
+        if(operation.action!==action)throw new BoundaryError(409,'IDEMPOTENCY_CONFLICT');completed=operation.state==='completed';
+      }catch(error){if(error.status!==404)throw error;}
+      ids.session(token,'console');
+      if(!completed){
+        const check=await core.view(resume?'resume-status':'task-workflow-preview',{[key]:payload[key]});
+        if(check[key]!==payload[key]||check.preview_version!==payload.preview_version)throw new BoundaryError(409,'PREVIEW_CHANGED');
+        const permission=action==='tasks.reconciliation_resolve'?(payload.decision==='confirm'?'can_confirm':'can_reject'):payload.confirmed?'can_confirm':'can_cancel';
+        if(check[permission]!==true){
+          const code=(check.blockers||[]).find(c=>CONSOLE_WORKFLOW_ERRORS.includes(c)||c==='HANDOFF_DISABLED');
+          throw new BoundaryError(409,code||(action==='tasks.reconciliation_resolve'?'RECONCILIATION_CONFLICT':'PREVIEW_CHANGED'));
+        }
+      }
+      ids.session(token,'console');
+      await ids.console.reauthenticate(account.account_id,session,payload,{otp:true});
+      result=await core.action({action,operation_id,payload:safe});
+    }
     else if(Object.hasOwn(CONSOLE_LIFECYCLE_CONFIRMS,action)){
       // Deleting, restoring or merging a project changes what every agent can read and write: fresh password + OTP here,
       // then only the confirm fields go to Core (factors never leave the BFF). Previews need no factors.
@@ -295,7 +322,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
   }
   if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
-  if(coreFor && request.method==='GET' && /^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname)) {
+  if(coreFor && request.method==='GET' && (CONSOLE_WORKFLOW_VIEWS.some(view=>pathname===`/console-api/${view}`)||/^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname))) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     let result=await core.view(view,Object.fromEntries(url.searchParams));
     // Configuration lives in Core (settings, models, agent keys, tunnels) and here (connections): one combined view.

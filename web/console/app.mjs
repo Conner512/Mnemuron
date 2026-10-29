@@ -7,13 +7,14 @@ import {projectProfileView,SELECTION_LIMIT,overviewView,libraryView,summariesVie
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 import {mountAgents} from './agents.mjs';
+import {mountTaskWorkflows} from './task-workflows.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections,featureReads,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
+let capabilities={enabled:false,writable:false},actions,connections,featureReads,taskWorkflows,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let detailMeta=null,query='',searchMode='hybrid',kind='',concept='',status='active',topic='',origin='',review='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
@@ -34,7 +35,7 @@ function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('
 readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
- actions?.clear();connections?.clear();featureReads?.clear();state.clear();requestSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
+ actions?.clear();connections?.clear();featureReads?.clear();taskWorkflows?.clear();state.clear();requestSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
  currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';kind='';concept='';status='active';topic='';origin='';review='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
  for(const input of document.querySelectorAll('input'))input.value='';
@@ -96,6 +97,7 @@ function render(data) {
  if(!prototypePages.includes(page))html+=completedFeaturePanels(t,page,data,capabilities);
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
+ taskWorkflows?.afterRender();
  // The overview map and live stream draw after the markup exists; both stop once the page is replaced.
  const openFromMap=memory_id=>void openMemory({memory_id,content_limit:1024,include_history:'true'},true);
  if(page==='overview')mountOverview({api,root,data,isActive:()=>!!state.account,openMemory:openFromMap});
@@ -124,7 +126,7 @@ async function load({retainOnError=false}={}) {
  const extras=async()=>Object.fromEntries(await Promise.all((completedViews[page]||[]).map(async view=>{try{return [view,await api(view,{})];}catch{return [view,null];}})));
  // Prototype pages read existing views for their live cards; a failure only degrades that card.
  if(page==='tasks'||page==='system'){
-   const read=async(view,params)=>{try{return await api(view,params);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError')throw e;return null;}};
+   const read=async(view,params)=>{try{return await api(view,params);}catch(e){if(sequence!==requestSequence||!state.account||e.name==='AbortError'||retainOnError&&currentData)throw e;return null;}};
    let data;
    try{
      if(page==='system')data={};
@@ -136,13 +138,13 @@ async function load({retainOnError=false}={}) {
          if(sequence!==requestSequence||!state.account)return;
          if(emptied(projects?.projects,projectOffset))projectOffset=Math.max(0,projectOffset-25);
          if(emptied(tasks?.tasks,taskOffset))taskOffset=Math.max(0,taskOffset-10);
-         return load();
+         return load({retainOnError});
        }
        data={...(projects??{unavailable:true}),features:{'task-branches':tasks}};
        if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
      }
      data.features=await extras();
-   }catch{return;}
+   }catch(error){if(retainOnError&&currentData&&sequence===requestSequence&&state.account&&error.name!=='AbortError')throw error;return;}
    if(sequence!==requestSequence||!state.account)return;currentData=data;render(data);return;
  }
  try {
@@ -344,6 +346,8 @@ featureReads=mountFeatureReads({api,isActive:()=>!!state.account,getAuditParams:
 actions=mountActions({api,mutate,getData:()=>currentData||{},getCaps:()=>capabilities,getFacets:()=>facets,getSelection:librarySelection,
   reload:async({keepSelection=false}={})=>{closePane();if(!keepSelection)resetSelection();try{capabilities={...capabilities,...await api('capabilities')};}catch{}await load();},isActive:()=>!!state.account});
 connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,isActive:()=>!!state.account});
+taskWorkflows=mountTaskWorkflows({api,mutate,getCaps:()=>capabilities,getData:()=>currentData||{},getAccount:()=>state.account,
+ isActive:()=>!!state.account&&page==='tasks',reload:()=>load({retainOnError:true}),syncAppearance});
 mountAgents({api,mutate,reload:()=>load({retainOnError:true})});
 
 try {

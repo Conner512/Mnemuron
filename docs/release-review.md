@@ -1,8 +1,8 @@
 # Release review and recovery
 
 This is a release-candidate checklist, not production approval. `production_ready`
-remains `false`. See the [feature matrix](release-feature-matrix.md) for all 63
-console entries and the [existing production contract](production-readiness-evidence-matrix-v0.1.md)
+remains `false`. See the current [feature matrix](release-feature-matrix.md) for
+the 58 console entries and their validation boundaries, and the [existing production contract](production-readiness-evidence-matrix-v0.1.md)
 for real-host, capacity, recovery and seven-day stability thresholds.
 
 ## Candidate content

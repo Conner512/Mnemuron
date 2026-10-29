@@ -268,14 +268,22 @@ export default definePluginEntry({
       let pending = null;
       try {
         const currentClient = client();
+        const scopes = taskScopes();
         await currentClient.flushInjectionEventOutbox();
         pending = store.claim(context);
         if (!pending) {
-          taskScopes().activate(context);
+          await currentClient.pullPendingResume(context, { pendingStore: store, scopeStore: scopes });
+          pending = store.claim(context);
+        }
+        if (!pending) {
+          scopes.activate(context);
           return undefined;
         }
+        if (pending.handed_off_at) return undefined;
         await currentClient.submitInjectionRecord(pending, "injected");
-        taskScopes().activate(context);
+        if (!store.markHandedOff(pending.attempt_id)) return undefined;
+        if (pending.confirmed_scope) scopes.stage({ packet: pending.confirmed_scope, context, workstreamId: pending.workstream_id });
+        scopes.activate(context);
         api.logger.info(`Mnemuron injecting confirmed Resume Packet ${pending.resume_id} v${pending.preview_version}.`);
         return { prependContext: pending.text };
       } catch (error) {
@@ -284,6 +292,13 @@ export default definePluginEntry({
             errorMessage: `The Mnemuron server did not confirm the injection declaration: ${error.message}`,
           });
           if (failed) client().queueInjectionRecord(failed.record, failed.phase);
+          const permanent = ['RESUME_CONTEXT_CHANGED', 'RESUME_TARGET_UNAVAILABLE', 'RESUME_VERSION_CHANGED',
+            'LIFECYCLE_AUTHORITY_STALE', 'PROJECT_DELETED'];
+          // Only a precise stale-authority conflict can retire an unreturned Console claim. Gateway/auth failures
+          // remain retryable, and a late duplicate callback cannot cancel context already handed to the host.
+          if (failed && pending.authorization_source === 'console' && error.statusCode === 409 && permanent.includes(error.errorCode)) {
+            store.cancelAuthorization(pending.resume_id, pending.preview_version, error.errorCode);
+          }
         }
         api.logger.warn(`Mnemuron pending Resume injection unavailable: ${error.message}`);
         return undefined;

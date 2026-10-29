@@ -74,7 +74,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
 }
 // Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
 // add a module only together with its ingress route, or fold it into an existing one.
-const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','routes.mjs','visuals.mjs','actions.mjs','connections.mjs','agents.mjs'];
+const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','routes.mjs','visuals.mjs','actions.mjs','connections.mjs','agents.mjs','task-workflows.mjs'];
 const STYLESHEETS=['styles.css','controls.css'];
 const stylesheetContent=()=>Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')]));
 // New markup must not reuse a prior release's cached palette; keep the allowlisted path unchanged.

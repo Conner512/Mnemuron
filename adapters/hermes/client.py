@@ -290,11 +290,64 @@ class AdapterConfig:
         )
 
 
+_PENDING_LOCKS = threading.local()
+
+
+class _PendingDirectoryLock:
+    """One kernel lock per pending directory, reentrant across its store instances in the same thread."""
+    def __init__(self, directory: Path):
+        self.directory = Path(directory).resolve()
+
+    def _held(self):
+        process_id = os.getpid()
+        if getattr(_PENDING_LOCKS, "process_id", process_id) != process_id:
+            # A fork must not mistake its parent's open-file description for a lock acquired by the child.
+            # Close inherited descriptors without LOCK_UN, which would unlock the parent's shared description.
+            for descriptor, _depth in getattr(_PENDING_LOCKS, "held", {}).values():
+                os.close(descriptor)
+            _PENDING_LOCKS.held = {}
+        _PENDING_LOCKS.process_id = process_id
+        if not hasattr(_PENDING_LOCKS, "held"):
+            _PENDING_LOCKS.held = {}
+        return _PENDING_LOCKS.held
+
+    def __enter__(self):
+        import fcntl
+        held = self._held()
+        if self.directory in held:
+            held[self.directory][1] += 1
+            return self
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.directory, 0o700)
+        descriptor = os.open(self.directory / ".pending.lock", os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        try:
+            # Separate opens in other threads/processes contend on this same inode. Never unlink or steal it;
+            # the kernel releases the lock on process death, and unrelated pending directories remain independent.
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        held[self.directory] = [descriptor, 1]
+        return self
+
+    def __exit__(self, _kind, _error, _traceback):
+        import fcntl
+        held = self._held()
+        entry = held[self.directory]
+        entry[1] -= 1
+        if not entry[1]:
+            try:
+                fcntl.flock(entry[0], fcntl.LOCK_UN)
+            finally:
+                del held[self.directory]
+                os.close(entry[0])
+
+
 class PendingResumeStore:
     def __init__(self, directory: Path, workstream_id: str = "workstream-hermes"):
         self.directory = Path(directory)
         self.workstream_id = _identifier(workstream_id, "workstream_id")
-        self._lock = threading.RLock()
+        self._lock = _PendingDirectoryLock(self.directory)
 
     def _ensure(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -310,19 +363,34 @@ class PendingResumeStore:
     def _target(self, resume_id: str, version: int) -> Path:
         return self.directory / f"{_identifier(resume_id, 'resume_id')}-v{int(version)}.json"
 
-    def queue(self, packet: Mapping[str, Any], target_tokens: list[str]) -> dict[str, Any]:
+    def queue(self, packet: Mapping[str, Any], target_tokens: list[str], *,
+              workstream_id: str | None = None, console_confirmed: bool = False) -> dict[str, Any]:
         resume_id = _identifier(packet.get("resume_id"), "resume_id")
         version = int(packet.get("preview_version") or 0)
         if version < 1:
             raise ValueError("preview_version is invalid")
         if not target_tokens:
             raise ValueError("No Hermes session or gateway scope is available for safe injection")
+        target_workstream = _identifier(workstream_id or self.workstream_id, "workstream_id")
+        confirmed_scope = None
+        if console_confirmed:
+            # Retain only the binding IDs for an interrupted delivery. Activation still waits for the real server
+            # injection acceptance; a pull or local queue entry is not authority to relabel later captured events.
+            confirmed_scope = {
+                "resume_id": resume_id, "preview_version": version,
+                "project": {"project_id": _identifier((packet.get("project") or {}).get("project_id"), "project_id")},
+                "task": {"task_id": _identifier((packet.get("task") or {}).get("task_id"), "task_id")},
+            }
         with self._lock:
             self._ensure()
             target = self._target(resume_id, version)
             if target.exists():
                 existing = self._read(target)
-                if existing.get("status") in {"pending", "in_flight", "delivered"}:
+                renewed = (console_confirmed and existing.get("console_confirmed_scope") and existing.get("status") == "pending"
+                           and _parse_utc(existing["expires_at"]) <= datetime.now(timezone.utc))
+                # Only a fresh, validated Core pull may renew an expired local pending copy. Never reset an
+                # in-flight or handed-off record just because its local cache TTL elapsed.
+                if existing.get("status") in {"pending", "in_flight", "delivered"} and not renewed:
                     return existing
             now = utc_now()
             record = {
@@ -333,13 +401,14 @@ class PendingResumeStore:
                 "attempt_id": str(uuid.uuid4()),
                 "injection_event_id": str(uuid.uuid4()),
                 "injection_method": "hermes-pre-llm-call",
-                "workstream_id": self.workstream_id,
+                "workstream_id": target_workstream,
                 "text": build_resume_injection_text(packet),
                 "target_tokens": sorted(set(target_tokens)),
                 "status": "pending",
                 "created_at": now,
                 "updated_at": now,
                 "expires_at": (datetime.now(timezone.utc) + timedelta(hours=PENDING_TTL_HOURS)).isoformat().replace("+00:00", "Z"),
+                **({"console_confirmed_scope": confirmed_scope} if confirmed_scope else {}),
             }
             _atomic_json_write(target, record)
             return record
@@ -379,12 +448,45 @@ class PendingResumeStore:
                 return claimed
         return None
 
+    def mark_context_returned(self, attempt_id: str) -> bool:
+        """Persist once-only host context handoff, separately from the real session-completion acknowledgement."""
+        with self._lock:
+            for target in self._files():
+                record = self._read(target)
+                if record.get("status") != "in_flight" or record.get("attempt_id") != attempt_id:
+                    continue
+                if record.get("context_returned_at"):
+                    return False
+                record["context_returned_at"] = utc_now()
+                _atomic_json_write(target, record)
+                return True
+        return False
+
+    def cancel_console_authorization(self, attempt_id: str, code: str) -> bool:
+        """A permanently stale Console authorization must not block newer, separately confirmed packets."""
+        with self._lock:
+            for target in self._files():
+                record = self._read(target)
+                if record.get("attempt_id") != attempt_id or not record.get("console_confirmed_scope"):
+                    continue
+                if record.get("context_returned_at"):
+                    return False
+                # Keep only non-content receipt metadata. This is a local cancellation, not a server delivery.
+                record.pop("text", None)
+                record.pop("console_confirmed_scope", None)
+                record.update({"status": "cancelled", "error_code": code, "updated_at": utc_now()})
+                _atomic_json_write(target, record)
+                return True
+        return False
+
     def release(self, attempt_id: str) -> dict[str, Any] | None:
         with self._lock:
             for target in self._files():
                 record = self._read(target)
                 if record.get("status") != "in_flight" or record.get("attempt_id") != attempt_id:
                     continue
+                if record.get("console_confirmed_scope") and record.get("context_returned_at"):
+                    return None
                 record.update({
                     "status": "pending",
                     "claimed_session_id": None,
@@ -392,6 +494,7 @@ class PendingResumeStore:
                     "claimed_turn_id": None,
                     "injected_at": None,
                     "claimed_at": None,
+                    "context_returned_at": None,
                     "updated_at": utc_now(),
                 })
                 _atomic_json_write(target, record)
@@ -406,6 +509,10 @@ class PendingResumeStore:
                 record = self._read(target)
                 if record.get("status") != "in_flight" or record.get("attempt_id") != attempt_id:
                     continue
+                # Another callback may have returned this same attempt while this request was awaiting Core.
+                # A late transport/stale reply cannot undo that handoff; only a real terminal hook may retry it.
+                if record.get("console_confirmed_scope") and record.get("context_returned_at"):
+                    return None
                 now = utc_now()
                 failed = {
                     **record,
@@ -431,6 +538,7 @@ class PendingResumeStore:
             "claimed_turn_id": None,
             "injected_at": None,
             "claimed_at": None,
+            "context_returned_at": None,
             "updated_at": now,
         }
 
@@ -442,7 +550,8 @@ class PendingResumeStore:
                 if record.get("status") != "in_flight" or record.get("claimed_session_id") != session_id:
                     continue
                 now = utc_now()
-                if success:
+                handoff_missing = bool(record.get("console_confirmed_scope")) and not record.get("context_returned_at")
+                if success and not handoff_missing:
                     record.update({
                         "status": "delivered",
                         "acknowledged_event_id": record.get("acknowledged_event_id") or str(uuid.uuid4()),
@@ -456,8 +565,8 @@ class PendingResumeStore:
                         **record,
                         "failed_event_id": record.get("failed_event_id") or str(uuid.uuid4()),
                         "failed_at": now,
-                        "error_code": "agent_turn_failed",
-                        "error_message": "Hermes reported that the Agent turn did not complete successfully.",
+                        "error_code": "context_not_handed_off" if success and handoff_missing else "agent_turn_failed",
+                        "error_message": "Hermes completed before the pending context was handed off." if success and handoff_missing else "Hermes reported that the Agent turn did not complete successfully.",
                     }
                     _atomic_json_write(target, self._retry_record(record, now))
                     finished.append({"phase": "failed", "record": failed})
@@ -668,6 +777,37 @@ class MnemuronClient:
         if (base.scheme, base.netloc) != (resolved.scheme, resolved.netloc):
             raise ValueError('Cross-origin request blocked')
         return request_json(request, self.config.request_timeout_seconds)
+
+    def pending_resume(self, session_id: str, workstream_id: str | None = None) -> dict[str, Any] | None:
+        """Read one Console-authorized packet for the exact host destination; this never records delivery."""
+        if self.config.agent_id != "hermes" or not str(session_id or "").strip():
+            return None
+        destination = {"session_id": _session_identifier(session_id),
+                       "workstream_id": _identifier(workstream_id or self.config.workstream_id, "workstream_id")}
+        try:
+            result = self.request("POST", "/v1/resume/pending", destination)
+        except Exception as error:
+            # Older servers have no Console pending route. Authorization/network failures remain visible to the
+            # caller, never become an empty queue or a successful delivery.
+            if getattr(error, "status_code", None) == 404:
+                return None
+            raise
+        if not isinstance(result, dict) or result.get("delivery_recorded") is not False:
+            raise ValueError("Invalid Console pending response")
+        if result.get("status") == "empty" and result.get("resume_packet") is None and result.get("target") is None:
+            return None
+        packet, target = result.get("resume_packet"), result.get("target")
+        if result.get("status") != "pending" or not isinstance(packet, dict) or not isinstance(target, dict):
+            raise ValueError("Invalid Console pending response")
+        expected = {**destination, "device_id": self.config.device_id, "agent_id": self.config.agent_id,
+                    "agent_instance_id": self.config.agent_instance_id}
+        if any(target.get(key) != value for key, value in expected.items()):
+            raise ValueError("Console pending destination does not match this Hermes session")
+        _identifier(target.get("credential_id"), "credential_id")
+        _identifier(packet.get("resume_id"), "resume_id")
+        if type(packet.get("preview_version")) is not int or packet["preview_version"] < 1:
+            raise ValueError("Console pending preview version is invalid")
+        return result
 
     def remember(self, body: Mapping[str, Any]) -> dict[str, Any]:
         operation_id = body.get("operation_id", str(uuid.uuid4()))

@@ -110,7 +110,7 @@ export class ConsoleFeatures {
       return result({day,unit:'reserved_requests',cost:null,cost_status:'not_metered',models,history,searches_7d:searches});
     }
     if(view==='task-branches'){
-      if(p.task_id){this.task(auth,p.task_id);return result({preview:store.previewTaskBranches(auth,{query:p.task_id})});}
+      if(p.task_id){this.task(auth,p.task_id);return result({preview:store.previewTaskBranches(auth,{query:p.task_id,signals:{task_id:p.task_id}})});}
       const pg=page(p);let members=null;
       if(p.project_id){id(p.project_id);if(!db.prepare('SELECT 1 FROM projects WHERE user_id=? AND project_id=?').get(user,p.project_id))throw new NotFoundError('Project not found.');
         // A merged source's tasks belong to its canonical project; each task keeps its origin project_id.

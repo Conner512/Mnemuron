@@ -32,6 +32,99 @@ async function setup(t,{maintenance=false,recovery=false,writable=true,managemen
  const proof=async(owner=a,future=0)=>({current_password:'Synthetic password with spaces  ',otp:await generate({secret:owner.setup.secret,epoch:seconds()+future})});
  return {core,f,ids,a,b,get,act,proof};
 }
+
+function taskWorkflowSeed(x,owner=x.a){
+ const store=x.core.store,user=owner.record.user_id,suffix=randomUUID(),project_id=`workflow-project-${suffix}`,task_id=`workflow-task-${suffix}`,workstream_id=`workflow-stream-${suffix}`;
+ const issue=(agentId,scopes)=>{const key=store.issueCredential({userId:user,deviceId:`workflow-device-${agentId}`,agentId,agentInstanceId:`workflow-instance-${agentId}`,scopes});return {...key,auth:store.authenticate(key.api_key)};};
+ const admin=issue('synthetic',['admin:tasks','capture:write','memory:write']);
+ const task={project_id,project_name:'Synthetic workflow source',task_id,title:'Synthetic workflow task',goal:'Exact task content',status:'active',workstreams:[{workstream_id,name:'Synthetic branch',status:'active'}]};
+ store.upsertTask(admin.auth,task);
+ const agent=issue('codex',['capture:write','resume:read','resume:confirm']),event={event_id:randomUUID(),event_type:'session_start',project_id,task_id,workstream_id,session_id:`workflow-session-${suffix}`,content:{synthetic:true}};
+ store.appendEvents(agent.auth,{event});
+ return {store,user,admin,agent,task,event};
+}
+
+test('HTTP-WORKFLOW-01: project creation requires both fresh factors, never forwards them, and retries the same receipt without creating twice',async t=>{
+ const x=await setup(t),store=x.core.store,seen=[],execute=store.consoleService.execute.bind(store.consoleService);
+ store.consoleService.execute=(auth,input)=>{seen.push({action:input.action,payload:{...input.payload}});return execute(auth,input);};
+ const before=store.db.prepare('SELECT COUNT(*) n FROM tasks').get().n;
+ const p=await x.act('projects.bootstrap_preview',{project_name:'Synthetic browser creation',task_title:'Review exact creation',task_goal:'Frozen private goal'});
+ assert.equal(p.status,200,JSON.stringify(p.body));assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tasks').get().n,before);
+ assert.ok(!JSON.stringify(p.body).includes('Frozen private goal'));
+ const path=`task-workflow-preview?preview_id=${p.body.preview_id}`;
+ assert.equal((await new Browser(x.f.config.issuer).request('/console-api/'+path)).status,401);
+ assert.equal((await x.get(path,x.b)).status,404);assert.equal((await x.get(path)).body.preview.task.goal,'Frozen private goal');
+ const payload={preview_id:p.body.preview_id,preview_version:p.body.preview_version,confirmed:true};
+ assert.equal((await x.act('projects.bootstrap_confirm',{...payload,session_id:'not-a-browser-field',...await x.proof()})).status,400);
+ assert.equal((await x.act('projects.bootstrap_confirm',payload)).status,403);
+ assert.equal((await x.act('projects.bootstrap_confirm',{...payload,current_password:'Synthetic password with spaces  '})).status,403);
+ assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tasks').get().n,before);
+ const op=randomUUID(),done=await x.act('projects.bootstrap_confirm',{...payload,...await x.proof()},x.a,op);
+ assert.equal(done.status,200,JSON.stringify(done.body));assert.equal(done.body.status,'confirmed');
+ assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tasks').get().n,before+1);
+ const retry=await x.act('projects.bootstrap_confirm',{...payload,...await x.proof(x.a,30)},x.a,op);
+ assert.equal(retry.status,200,JSON.stringify(retry.body));assert.equal(retry.body.replayed,true);assert.equal(retry.body.task_id,done.body.task_id);
+ assert.equal(store.db.prepare('SELECT COUNT(*) n FROM tasks').get().n,before+1);
+ let invalidProofs=0;const proof=x.ids.console.reauthenticate;x.ids.console.reauthenticate=function(...args){invalidProofs++;return proof.apply(this,args);};
+ const conflict=await x.act('projects.bootstrap_confirm',{...payload,confirmed:false,...await x.proof(x.a,30)},x.a,op);
+ assert.equal(conflict.status,409);assert.equal(conflict.body.error_code,'IDEMPOTENCY_CONFLICT');assert.equal(invalidProofs,0,'opposite intent is rejected before consuming another proof');
+ assert.equal((await x.get(`operation?operation_id=${op}`)).body.request_hash,undefined);
+ for(const call of seen)assert.ok(!Object.hasOwn(call.payload,'current_password')&&!Object.hasOwn(call.payload,'otp'),'proof stays at BFF');
+ assert.equal((await x.a.browser.request('/assets/task-workflows.mjs')).status,200);
+});
+
+test('HTTP-WORKFLOW-02: stale and malformed previews fail before proof; cancellation uses only the frozen server identity',async t=>{
+ const x=await setup(t),seed=taskWorkflowSeed(x),p=await x.act('tasks.bootstrap_preview',{project_id:seed.task.project_id,title:'Synthetic fresh task',goal:'Freeze this goal'});
+ assert.equal(p.status,200,JSON.stringify(p.body));
+ const input={preview_id:p.body.preview_id,preview_version:p.body.preview_version,confirmed:true},original=x.ids.console.reauthenticate;let proofs=0;
+ x.ids.console.reauthenticate=function(...args){proofs++;return original.apply(this,args);};
+ assert.equal((await x.act('tasks.bootstrap_confirm',{...input,preview_version:'1'})).status,400);
+ assert.equal((await x.act('tasks.bootstrap_confirm',{...input,preview_version:2})).body.error_code,'PREVIEW_CHANGED');
+ const workflows=seed.store.consoleService.taskWorkflows,clock=workflows.clock;workflows.clock=()=>Date.parse(p.body.expires_at)+1;
+ assert.equal((await x.act('tasks.bootstrap_confirm',{...input,...await x.proof()})).body.error_code,'PREVIEW_EXPIRED');
+ workflows.clock=clock;assert.equal(proofs,0,'invalid and expired previews never consume an OTP or proof attempt');
+ const result=await x.act('tasks.bootstrap_confirm',{...input,confirmed:false,...await x.proof()});
+ assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.status,'cancelled');
+ assert.equal((await x.get(`task-workflow-preview?preview_id=${p.body.preview_id}`)).body.can_confirm,false);
+ assert.equal(seed.store.db.prepare('SELECT COUNT(*) n FROM tasks WHERE user_id=?').get(seed.user).n,1);
+});
+
+test('HTTP-WORKFLOW-03: resume confirms bind a real target; browser confirmation queues without pretending to deliver',async t=>{
+ const x=await setup(t),seed=taskWorkflowSeed(x),targets=await x.get('resume-targets?limit=1');
+ assert.equal(targets.status,200,JSON.stringify(targets.body));assert.equal(targets.body.targets[0].target_event_id,seed.event.event_id);
+ const p=await x.act('resume.preview',{task_id:seed.task.task_id,target_event_id:seed.event.event_id});assert.equal(p.status,200,JSON.stringify(p.body));
+ const input={resume_id:p.body.resume_id,preview_version:p.body.preview_version,confirmed:true};
+ assert.equal((await x.get(`resume-status?resume_id=${input.resume_id}`,x.b)).status,404);
+ assert.equal((await x.act('resume.confirm',input)).status,403);
+ const r=await x.act('resume.confirm',{...input,...await x.proof()});assert.equal(r.status,200,JSON.stringify(r.body));
+ assert.equal(r.body.status,'queued');assert.equal(r.body.resume_packet,undefined);assert.equal(r.body.delivery_recorded,false);
+ const history=await x.get('resume-history?limit=1');assert.equal(history.body.items[0].status,'queued');assert.equal(history.body.items[0].delivery.delivered,false);
+ assert.equal(seed.store.db.prepare('SELECT COUNT(*) n FROM resume_injection_events').get().n,0);
+ const packet=await x.core.request('POST','/v1/resume/pending',{session_id:seed.event.session_id,workstream_id:seed.event.workstream_id},seed.agent);
+ assert.equal(packet.status,200);assert.equal(packet.body.resume_packet.resume_id,input.resume_id);
+ assert.equal((await x.get(`resume-status?resume_id=${input.resume_id}`)).body.delivery.delivered,false,'pull alone is not delivery');
+ assert.equal((await x.get('resume-history?user_id=foreign')).status,400);
+});
+
+test('HTTP-WORKFLOW-04: stale resume previews do not consume factors, and revoked sessions cannot cross an awaited proof',async t=>{
+ const x=await setup(t),seed=taskWorkflowSeed(x),p=await x.act('resume.preview',{task_id:seed.task.task_id,target_event_id:seed.event.event_id});assert.equal(p.status,200);
+ const payload={resume_id:p.body.resume_id,preview_version:p.body.preview_version,confirmed:true};
+ seed.store.upsertTask(seed.admin.auth,{...seed.task,goal:'A new canonical goal'});
+ let proofs=0,original=x.ids.console.reauthenticate;x.ids.console.reauthenticate=function(...args){proofs++;return original.apply(this,args);};
+ const stale=await x.act('resume.confirm',{...payload,...await x.proof()});assert.equal(stale.body.error_code,'RESUME_CONTEXT_CHANGED');assert.equal(proofs,0);
+ const fresh=await x.act('resume.preview',{task_id:seed.task.task_id,target_event_id:seed.event.event_id});assert.equal(fresh.status,200);
+ const authenticate=x.ids.authenticate.bind(x.ids);x.ids.authenticate=async(...args)=>{const r=await authenticate(...args);x.ids.revokeSession(x.a.console.token);return r;};
+ const r=await x.act('resume.confirm',{resume_id:fresh.body.resume_id,preview_version:fresh.body.preview_version,confirmed:true,...await x.proof()});
+ assert.equal(r.status,401);assert.equal(seed.store.db.prepare('SELECT status FROM resumes WHERE resume_id=?').get(fresh.body.resume_id).status,'pending_confirmation');
+});
+
+test('HTTP-WORKFLOW-05: read-only credentials and basic-only policy do not gain workflow writes',async t=>{
+ for(const options of [{writable:false},{basic:{memory:true,security:true,oauth:true}}]){
+   const x=await setup(t,options),caps=(await x.get('capabilities')).body;
+   for(const action of ['projects.bootstrap_preview','tasks.bootstrap_preview','tasks.reconciliation_preview','resume.preview','resume.confirm'])assert.ok(!caps.allowed_actions.includes(action));
+   const r=await x.act('projects.bootstrap_preview',{project_name:'Denied workflow',task_title:'Must not create',task_goal:'No widening'});assert.equal(r.status,403);
+ }
+});
 test('HTTP-COMPLETION: new reads require login; system views require an operator and never widen account visibility',async t=>{
  const x=await setup(t),anonymous=new Browser(x.f.config.issuer);
  for(const view of ['attention','taxonomy','privacy-defaults','retention','capture-status','model-usage','login-history','system-health','system-version','backups']){

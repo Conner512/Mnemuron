@@ -10,7 +10,7 @@ import path from 'node:path';
 const ROOT=path.resolve(import.meta.dirname,'../..');
 export const LIFECYCLE_TABLES=['projects','tasks','memories','checkpoints','events','memory_revisions','memory_summaries','memory_summary_dependencies','memory_vector_documents',
   'task_reconciliation_proposals','task_canonical_revisions','task_bootstrap_previews','resumes','resolver_selections','console_project_state','project_lifecycle',
-  'memory_entities','memory_entity_names','memory_entity_members','memory_entity_proposals','memory_entity_tombstones','memory_entity_queue_cursor'];
+  'memory_entities','memory_entity_names','memory_entity_members','memory_entity_proposals','memory_entity_tombstones','memory_entity_queue_cursor','console_task_workflow_previews'];
 const DIRS=['server/lib','services/oauth/src','adapters','plugins/mnemuron/scripts','server/bin'];
 
 export function sqlSites(root=ROOT){

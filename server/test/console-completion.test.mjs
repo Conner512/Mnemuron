@@ -30,6 +30,16 @@ test('Console completion: new read views are owner scoped, strict and available 
   assert.equal((await f.get('backups')).body.status,'not_configured');
 });
 
+test('Console task branch selection resolves an explicit task ID independently of its human title',async t=>{
+  const f=await fixture(t),task_id='opaque-synthetic-42';
+  const task={...f.alpha,task_id,title:'准备交换机替换',goal:'Exact selected task branch, not a free text resolver search'};
+  f.store.upsertTask(f.a.auth,task);
+  const r=await f.get('task-branches',{task_id},f.reader);assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.preview.task.task_id,task_id);assert.ok(Array.isArray(r.body.preview.branches));
+  assert.deepEqual(r.body.preview.branches.map(b=>b.workstream_id).sort(),task.workstreams.map(w=>w.workstream_id).sort());
+  assert.equal((await f.get('task-branches',{task_id},f.other)).status,404,'exact selection does not widen owner visibility');
+});
+
 test('Console completion: bulk operations are bounded, revision checked, per item and idempotent',async t=>{
   const f=await fixture(t),a=await f.create(),b=await f.create(),foreign=await f.create(f.other),op=randomUUID();
   const payload={items:[{memory_id:b,revision:1},{memory_id:a,revision:99},{memory_id:foreign,revision:1}],reason:'Synthetic'};

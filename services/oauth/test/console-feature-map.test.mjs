@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import {pages,removedPages,movedPages,renderPage,slugOf,routeTitle} from '../../../web/console/render.mjs';
 import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
-import {CONSOLE_ACTIONS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_ACTIONS,CONSOLE_WORKFLOW_VIEWS} from '../../../shared/console-contract.mjs';
 import {consoleAllowedActions} from '../src/console-policy.mjs';
 
 const read=path=>fs.readFileSync(new URL(`../../../${path}`,import.meta.url),'utf8');
@@ -16,7 +16,8 @@ const t=key=>text(key,'zh-CN');
 const serverActions=new Set(consoleAllowedActions({identity:{console_operations:true,connection_management:{enabled:true}}},{writable:true,actions:[...CONSOLE_ACTIONS]},true));
 // Views the BFF answers: its own handlers plus the Core passthrough, as written in the route source.
 const bff=read('services/oauth/src/console.mjs');
-const servedViews=new Set([...bff.matchAll(/'\/console-api\/([a-z-]+)'/g)].map(m=>m[1]).concat(bff.match(/\/\^\\\/console-api\\\/\(([^)]+)\)\$\//)[1].split('|')));
+assert.ok(bff.includes('CONSOLE_WORKFLOW_VIEWS.some(view=>pathname===`/console-api/${view}`)'),'workflow routes use the exact shared allowlist');
+const servedViews=new Set([...bff.matchAll(/'\/console-api\/([a-z-]+)'/g)].map(m=>m[1]).concat(bff.match(/\/\^\\\/console-api\\\/\(([^)]+)\)\$\//)[1].split('|'),CONSOLE_WORKFLOW_VIEWS));
 const ingress=read('docs/console-ingress.example.yml');
 const ingressGroup=name=>new Set(ingress.match({app:/app\(\/\(([a-z|]+)\)\)/,'console-api':/console-api\/\(([a-z|-]+)\)/}[name])[1].split('|'));
 
@@ -96,7 +97,7 @@ test('Placeholders render every feature and never trigger a request',()=>{
   for(const f of featureMap[page].filter(f=>f.status==='planned'))assert.ok(html.includes(`console-feature-standard.md`)&&html.includes(`${f.id}</summary>`),`${page}: ${f.id} has developer notes`);
  }
  assert.equal(roadmapCard(t,'jobs'),'','a page with nothing planned shows no roadmap');
- assert.deepEqual(prototypePages.map(pageState),['partial'],'projects and tasks (with the moved handoff features) is the one prototype page');
+ assert.deepEqual(prototypePages.map(pageState),['live'],'the projects/tasks page now has real creation, reconciliation and handoff workflows');
 });
 
 test('Live cards on prototype pages escape data and degrade on their own',()=>{

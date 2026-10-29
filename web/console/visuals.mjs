@@ -1,6 +1,7 @@
 import {auditLocalValue} from './audit.mjs';
 import {pagePath} from './routes.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
+import {taskWorkflowCard} from './task-workflows.mjs';
 // Pure console views for the memory workbench. No API calls, account selection or
 // authorization here: controllers pass owner-scoped data in and get markup strings out.
 // The escaping template tag and the icon set live here too: browsers may load only the
@@ -487,18 +488,18 @@ export const featureMap = {
       ui: {form: ['select:project'], submit: 'generatePreview'}},
     {id: 'TSK-04', status: 'live', read: ['task-checkpoints'], core: ['GET /v1/tasks/{task_id}/checkpoints', 'GET /v1/tasks/{task_id}/canonical-revisions'],
       scope: ['memory:read', 'task:reconcile:read'], ui: {table: ['checkpoint', 'sources', 'created']}},
-    {id: 'TSK-05', status: 'planned', write: ['projects.bootstrap', 'tasks.bootstrap'], core: ['POST /v1/project-bootstrap/preview', 'POST /v1/task-bootstrap/preview'],
-      scope: ['project:bootstrap:preview', 'project:bootstrap:confirm', 'task:bootstrap:preview', 'task:bootstrap:confirm'], ui: {actions: ['newProject', 'newTask']}},
-    {id: 'TSK-06', status: 'planned', read: ['task-reconciliation'], write: ['tasks.reconcile'],
-      core: ['POST /v1/tasks/{task_id}/reconciliation/run', 'POST /v1/task-reconciliations/{id}/resolve'], scope: ['task:reconcile:read', 'task:reconcile:confirm'],
+    {id: 'TSK-05', status: 'live', read: ['task-workflow-preview'], write: ['projects.bootstrap_preview', 'projects.bootstrap_confirm', 'tasks.bootstrap_preview', 'tasks.bootstrap_confirm'], core: ['POST /v1/console/action', 'GET /v1/console/task-workflow-preview'], reauth: true,
+      scope: ['console:write'], ui: {actions: ['newProject', 'newTask']}},
+    {id: 'TSK-06', status: 'live', read: ['task-reconciliation', 'task-workflow-preview'], write: ['tasks.reconciliation_preview', 'tasks.reconciliation_resolve'], reauth: true,
+      core: ['POST /v1/console/action', 'GET /v1/console/task-workflow-preview'], scope: ['console:write'],
       ui: {table: ['taskTitle', 'proposal', 'state'], actions: ['runReconciliation']}},
-    {id: 'TSK-07', status: 'planned', read: ['resume-preview'], core: ['POST /v1/resume/preview'], scope: ['resume:read'],
+    {id: 'TSK-07', status: 'live', read: ['resume-targets', 'task-branches', 'resume-status'], write: ['resume.preview'], core: ['POST /v1/console/action', 'GET /v1/console/resume-targets'], scope: ['console:write'],
       ui: {form: ['select:project', 'select:task', 'select:sourceBranch'], submit: 'previewResume'}},
-    {id: 'TSK-08', status: 'planned', write: ['resume.confirm'], core: ['POST /v1/resume/{resume_id}/confirm'], scope: ['resume:confirm'],
+    {id: 'TSK-08', status: 'live', read: ['resume-status', 'resume-history'], write: ['resume.confirm'], core: ['POST /v1/console/action'], scope: ['console:write'], reauth: true,
       ui: {actions: ['confirmResume']}},
-    {id: 'TSK-09', status: 'planned', read: ['resume-deliveries'], core: ['GET /v1/resume/{resume_id}/injection-status', 'GET /v1/resume/{resume_id}/delivery-receipt-status'],
-      scope: ['resume:read'], ui: {table: ['resumeId', 'targetAgent', 'deliveryState', 'completionAck']}},
-    {id: 'TSK-10', status: 'planned', read: ['resume-history'], scope: ['resume:read'], ui: {table: ['created', 'taskTitle', 'state']}},
+    {id: 'TSK-09', status: 'live', read: ['resume-status', 'resume-history'], core: ['GET /v1/console/resume-status'],
+      scope: ['console:read', 'resume:read'], ui: {table: ['resumeId', 'targetAgent', 'deliveryState', 'completionAck']}},
+    {id: 'TSK-10', status: 'live', read: ['resume-history'], scope: ['console:read', 'resume:read'], ui: {table: ['created', 'taskTitle', 'state']}},
   ],
   models: [
     {id: 'MOD-01', status: 'live', read: ['models'], write: ['models.save', 'models.disable']},
@@ -706,6 +707,7 @@ export const completedViews={overview:['attention','system-health','model-usage'
 const completedIds=['TSK-02','TSK-04','AGT-02','MOD-04','SEC-05','AUD-02'];
 export function completedFeaturePanels(t,page,data,caps){return String(html`${(featureMap[page]||[]).filter(f=>completedIds.includes(f.id)).map(f=>featureCard(t,f,featureBody(t,f.id,data,caps),{plain:true}))}`);}
 function featureBody(t,id,data,caps){
+  if(['TSK-05','TSK-06','TSK-07','TSK-08','TSK-09','TSK-10'].includes(id))return trusted(taskWorkflowCard(t,id,data,caps));
   const view={ 'OVW-03':'attention','TSK-02':'task-branches','AGT-02':'capture-status','MOD-04':'model-usage','SEC-05':'login-history','STO-06':'system-health','STO-07':'system-version','STO-08':'backups'}[id];
   const d=data.features?.[view];
   if(view&&!d)return sectionNote(t,'unavailable');

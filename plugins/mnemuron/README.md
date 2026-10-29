@@ -59,7 +59,15 @@ A global pending count is not proof that the current session has a pending deliv
 
 The protocol is specified in [ChatGPT MCP Delivery Receipt](../../docs/chatgpt-mcp-delivery-receipt-v0.1.4.md), [dynamic task scope](../../docs/dynamic-task-scope-v0.1.md), and the [core foundation](../../docs/chatgpt-core-foundation-v0.1.md).
 
-## Development
+## Console-confirmed task handoff
+
+The Projects & tasks page can preview a task and explicitly authorize delivery to an existing, observed Codex session. This path requires a server-issued **`agent_id: codex`** credential with `capture:write`, `resume:read` and `resume:confirm`, an enabled server handoff policy, and this plugin build. Do not relabel a legacy `chatgpt` credential locally; legacy identities retain their existing manual flow and are not Console queue destinations.
+
+On the next ordinary user turn, `mnemuron_take_pending_resume` first handles any existing local claim, then reads at most one server authorization for its attested session and actual capture workstream. A pending fetch is not delivery. The existing central delivery-receipt gate must accept the exact claim before the tool returns context or activates its task scope; a real matching Stop ACK is required for completion. Temporary network failures keep the original claim retryable. A server-proven stale Console authorization is cancelled locally without inventing a receipt, allowing a newly reviewed authorization to be consumed.
+
+Console history distinguishes queued, delivered and completed turns. It does not claim that an observed Agent is online or that the whole task is finished. Older servers without the pending endpoint retain manual-flow compatibility. Deploy the Core/BFF/static assets and compatible Agent code together; source tests do not certify a particular installed host.
+
+## Development and regression tests
 
 From the repository root:
 

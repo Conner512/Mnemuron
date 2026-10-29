@@ -596,11 +596,15 @@ export class PendingResumeStore {
     return path.join(this.directory, `${resumeId}-v${previewVersion}.json`);
   }
 
-  queue({ packet, text, context = {} }) {
+  queue({ packet, text, context = {}, workstreamId = this.workstreamId, preserveExisting = false, confirmedScope = null, authorizationSource = null }) {
+    assertIdentifier(workstreamId, "workstream_id");
     const target = this.target(packet.resume_id, packet.preview_version);
     if (existsSync(target)) {
       const existing = this.read(target);
-      if (existing.status === "delivered") return existing;
+      const expiredPending = existing.status === "pending" && Date.parse(existing.expires_at) <= Date.now();
+      // A fresh server response can renew an expired, never-handed-off local envelope. Active, cancelled and
+      // completed attempts keep their existing fence; merely polling again must never reset them.
+      if (existing.status === "delivered" || preserveExisting && !expiredPending) return existing;
     }
     const now = new Date().toISOString();
     const record = {
@@ -611,9 +615,10 @@ export class PendingResumeStore {
       attempt_id: randomUUID(),
       injection_event_id: randomUUID(),
       injection_method: this.injectionMethod,
-      workstream_id: this.workstreamId,
+      workstream_id: workstreamId,
       text,
       status: "pending",
+      ...(confirmedScope ? { confirmed_scope: confirmedScope, authorization_source: authorizationSource } : {}),
       ...contextFields(context),
       created_at: now,
       updated_at: now,
@@ -670,6 +675,7 @@ export class PendingResumeStore {
         claimed_session_id: null,
         claimed_turn_id: null,
         injected_at: null,
+        handed_off_at: null,
         claimed_at: null,
         updated_at: new Date().toISOString(),
       };
@@ -686,7 +692,8 @@ export class PendingResumeStore {
     const now = new Date().toISOString();
     for (const file of this.files()) {
       const record = this.read(file);
-      if (record.status !== "in_flight" || record.attempt_id !== attemptId) continue;
+      if (record.status !== "in_flight" || record.attempt_id !== attemptId
+          || record.authorization_source === "console" && record.handed_off_at) continue;
       const failed = {
         ...record,
         failed_event_id: record.failed_event_id || randomUUID(),
@@ -698,6 +705,27 @@ export class PendingResumeStore {
       return { phase: "failed", record: failed };
     }
     return null;
+  }
+
+  // Host hooks can overlap or repeat for the same run. The central injected event is idempotent, and this
+  // synchronous local fence makes only one callback in this host process return context to that run.
+  markHandedOff(attemptId) {
+    for (const file of this.files()) {
+      const record = this.read(file);
+      if (record.status !== "in_flight" || record.attempt_id !== attemptId || record.handed_off_at) continue;
+      const handed = { ...record, handed_off_at: new Date().toISOString() };
+      this.write(file, handed);
+      return handed;
+    }
+    return null;
+  }
+
+  cancelAuthorization(resumeId, previewVersion, code) {
+    const file = this.target(resumeId, previewVersion);
+    if (!existsSync(file)) return;
+    const record = this.read(file);
+    if (record.authorization_source !== "console" || record.status === "delivered" || record.handed_off_at) return;
+    this.write(file, { ...record, status: "cancelled", error_code: code, updated_at: new Date().toISOString() });
   }
 
   finish(context = {}, success = true) {
@@ -715,7 +743,8 @@ export class PendingResumeStore {
         && context.sessionId
         && record.claimed_host_session_id === context.sessionId;
       if (!sameRun && !(sameCanonicalSession && sameHostSession)) continue;
-      if (success) {
+      const handedOff = record.authorization_source !== "console" || Boolean(record.handed_off_at);
+      if (success && handedOff) {
         const delivered = {
           ...record,
           status: "delivered",
@@ -730,8 +759,10 @@ export class PendingResumeStore {
           ...record,
           failed_event_id: record.failed_event_id || randomUUID(),
           failed_at: now,
-          error_code: "agent_turn_failed",
-          error_message: "OpenClaw reported that the Agent turn did not complete successfully.",
+          error_code: handedOff ? "agent_turn_failed" : "context_not_handed_off",
+          error_message: handedOff
+            ? "OpenClaw reported that the Agent turn did not complete successfully."
+            : "The matching Agent turn ended before its authorized context was handed off.",
         };
         this.write(file, this.retryRecord(record, now));
         finished.push({ phase: "failed", record: failed });
@@ -773,6 +804,7 @@ export class PendingResumeStore {
       claimed_session_id: null,
       claimed_turn_id: null,
       injected_at: null,
+      handed_off_at: null,
       claimed_at: null,
       updated_at: now,
     };
@@ -1112,6 +1144,40 @@ export class MnemuronClient {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async pullPendingResume(context, { pendingStore, scopeStore, signal } = {}) {
+    // Internal runs, commands without a real host turn, and ambiguous channel contexts cannot pick a destination.
+    if (!isHostUserTurn(context)) return null;
+    const sessionId = canonicalSessionIdentifier(context);
+    if (!sessionId) return null;
+    const scopes = scopeStore || new TaskScopeStore(this.config.taskScopeDir);
+    const pending = pendingStore || new PendingResumeStore(this.config.pendingResumeDir, { workstreamId: this.config.workstreamId });
+    const workstreamId = scopes.resolve(context)?.workstream_id || this.config.workstreamId;
+    let result;
+    try {
+      result = await this.request("POST", "/v1/resume/pending", { session_id: sessionId, workstream_id: workstreamId }, signal);
+    } catch (error) {
+      // An older Core may not expose this route. Authentication, permission and service failures must still
+      // reach the host's existing logging/recovery path; they do not prove that the pending queue is empty.
+      if (error.statusCode === 404) return null;
+      throw error;
+    }
+    if (result.status === "empty" && result.resume_packet === null && result.delivery_recorded === false) return null;
+    const packet = result.resume_packet, target = result.target;
+    if (result.status !== "pending" || result.delivery_recorded !== false || !packet || !target
+      || target.session_id !== sessionId || target.workstream_id !== workstreamId
+      || target.device_id !== this.config.deviceId || target.agent_id !== this.config.agentId
+      || target.agent_instance_id !== this.config.agentInstanceId
+      || !Number.isInteger(packet.preview_version) || packet.preview_version < 1
+      || !Number.isFinite(Date.parse(packet.injection_authorized_at))) throw protocolError('RESUME_PENDING_MISMATCH');
+    for (const [value, label] of [[packet.resume_id, 'resume_id'], [packet.project?.project_id, 'project_id'], [packet.task?.task_id, 'task_id']]) assertIdentifier(value, label);
+    const confirmedScope = { resume_id: packet.resume_id, preview_version: packet.preview_version,
+      project: { project_id: packet.project.project_id }, task: { task_id: packet.task.task_id } };
+    // Keep the small frozen binding with retryable local context. It is staged/activated only after the actual
+    // injected declaration is accepted, including when a later turn recovers this queue after a failed request.
+    return pending.queue({ packet, text: buildResumeInjectionText(packet), context, workstreamId,
+      preserveExisting: true, confirmedScope, authorizationSource: 'console' });
   }
 
   async remember(body, signal = undefined) {
