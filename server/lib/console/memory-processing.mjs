@@ -41,8 +41,14 @@ export function processingEvidence(service,auth,p){
   if(configured){const config=JSON.parse(configured.config_json);if(config.enabled)configuredProfile=service.models.profile(user,'embedder',config).fingerprint;}
   const summary=summaryEvidence(store,user,row.memory_id,source);
   const jobs=db.prepare(`SELECT j.job_id,j.job_type,j.state,j.last_error_code,j.attempt_count,j.updated_at,
-    i.revision,i.state item_state FROM memory_job_items i JOIN memory_jobs j ON j.job_id=i.job_id AND j.user_id=i.user_id
-    WHERE i.user_id=? AND i.memory_id=? ORDER BY j.created_at DESC,j.rowid DESC LIMIT 21`).all(user,row.memory_id);
+    i.revision,i.state item_state,CASE WHEN i.state='partial' THEN i.result_json END checkpoint_json
+    FROM memory_job_items i JOIN memory_jobs j ON j.job_id=i.job_id AND j.user_id=i.user_id
+    WHERE i.user_id=? AND i.memory_id=? ORDER BY j.created_at DESC,j.rowid DESC LIMIT 21`).all(user,row.memory_id).map(({checkpoint_json,...job})=>{
+      let value;try{value=JSON.parse(checkpoint_json);}catch{}
+      if(value?.schema==='summary-segments-v1'&&Array.isArray(value.segments)&&value.segments.length>=2&&value.segments.length<=64&&Array.isArray(value.completed)&&value.completed.length<=value.segments.length)
+        return {...job,segment_processed:value.completed.length,segment_total:value.segments.length,segment_results_published:false};
+      return job;
+    });
   const runs=service.owner.user===user?db.prepare(`SELECT r.run_id,r.kind,r.state,r.used,r.budget,r.error_code,r.created_at,i.revision
     FROM owner_processing_items i JOIN owner_processing_runs r ON r.run_id=i.run_id
     WHERE r.user_id=? AND i.memory_id=? ORDER BY r.created_at DESC,r.rowid DESC LIMIT 21`).all(user,row.memory_id):[];

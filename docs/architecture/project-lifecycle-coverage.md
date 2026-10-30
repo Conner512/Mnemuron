@@ -20,6 +20,10 @@ and retraction otherwise reuse `saveMemory`, `supersedeMemory` and `retractMemor
 Replacement inherits explicit Web denials from **both** compared records. Raw event
 expiry is never extended and no candidate duplicates raw text in its table.
 
+## Long-source summary checkpoints
+
+Long summary sources use private `memory_job_items` partial checkpoints, not new material tables. `saveSummaryProgress` repeats owner/run, exact item scope/revision/hash, live source and lease checks; `publish` still requires every original item to be done. `memory-first-jobs-segments.test.mjs` covers cancellation and source mutation during a segment, and deleted projects before resume. The processing evidence view strips checkpoint bodies and exposes only bounded, explicitly unpublished counts.
+
 ## Selected processing evidence and repair
 
 `console/memory-processing.mjs` reads an owned memory through `ConsoleService.memory`, binds its revision and uses `DerivedMemory.currentSource` for live-source validity. Summary evidence validates every dependency; vector document/chunk lookups are owner + serving generation + memory bound. Job/run histories are bounded and contain no other manifest source bodies. `OwnerControls.checkSelection` and `checkPreview` recheck explicit selections, frozen state hashes and lifecycle generation before idempotent receipt replay. `previewItems` only reads titles from validated frozen sources; unavailable rows return metadata-only stale markers. Selected repair in `vector-stores/index.mjs` only processes pinned owned revisions under the active generation lease and revalidates the generation and all sources after asynchronous boundaries. It never walks global catch-up work or changes a serving pointer. Coverage: `memory-processing-workbench.test.mjs` and the real BFF processing-evidence test.

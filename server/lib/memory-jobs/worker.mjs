@@ -4,6 +4,7 @@ import {fail,digest} from '../model-providers/contracts.mjs';
 import {calendarWindow} from './windows.mjs';
 import {SUMMARY_ALL} from '../memory-derived/store.mjs';
 import {TRAITS_INSTRUCTION,traitsOutputSchema,MEMORY_KINDS,MemoryTraits} from '../memory/traits.mjs';
+import {SUMMARY_SEGMENTS,summarySegmentRanges,mergeSummarySegments} from './summary-segments.mjs';
 
 const string=maxLength=>({type:'string',minLength:1,maxLength});
 const object=properties=>({type:'object',properties,required:Object.keys(properties),additionalProperties:false});
@@ -62,6 +63,53 @@ export class MemoryWorker {
     try{const result=await operation(check);check();return result;}
     finally{clearInterval(timer);}
   }
+  async segmentSummary(job,item,source,inputFor,schemaFor,multiSpan){
+    // Tiny atomic memories must still be processed whole. Segmentation does not evade an impossible prompt budget.
+    if(source.content.length<=WHOLE_ATOM_LIMIT)fail('INPUT_TOO_LARGE');
+    let saved=null;
+    if(item.state==='partial'){
+      try{saved=JSON.parse(item.result_json);}catch{fail('INVALID_SOURCE_SET');}
+      if(saved?.schema!==SUMMARY_SEGMENTS||!Array.isArray(saved.completed))fail('INVALID_SOURCE_SET');
+    }
+    // Classification annotations can change without changing source text/revision. Freeze this non-authoritative
+    // hint once, so an unrelated classification job cannot invalidate confirmed summary progress.
+    const context=saved?saved.context:{current_category:inputFor([source]).sources[0].current_category};
+    if(!context||Object.keys(context).join(',')!=='current_category'||typeof context.current_category!=='string'||!context.current_category||context.current_category.length>64)fail('INVALID_SOURCE_SET');
+    const requestFor=(start,end)=>{
+      const segment={...source,content:source.content.slice(start,end)},input=inputFor([segment]),schema=schemaFor([segment]);
+      input.sources[0].current_category=context.current_category;
+      input.sources[0].segment={schema:SUMMARY_SEGMENTS,source_start:start,source_end:end,source_length:source.content.length};
+      input.instruction+=' This is a contiguous part of one original source, not an independent fact. Quote only the supplied segment; start/end offsets are local to this segment. Retain warnings, qualifications and decisions present here even if another segment may repeat them. Return at least one faithful quote; the whole segment is allowed. Do not infer missing context or summarize unseen segments.';
+      schema.properties.results.minItems=1;
+      return {segment,input,schema};
+    };
+    const spans=summarySegmentRanges(source.content,(start,end)=>{const r=requestFor(start,end);return this.organizer.measureRequest(r.input,r.schema).fits;},saved?saved.segments:null);
+    const requests=spans.map(span=>({...span,...requestFor(span.start,span.end)}));
+    const layout=digest([SUMMARY_SEGMENTS,job.profile,job.input_hash,item.memory_id,item.revision,item.state_hash,item.scope_key,requests.map(r=>[r.start,r.end,r.input,r.schema])]);
+    if(saved&&(saved.layout!==layout||saved.completed.length>spans.length))fail('INVALID_SOURCE_SET');
+    const validate=(index,results)=>{
+      const r=requests[index];
+      if(!Array.isArray(results)||!results.length)fail('INVALID_SOURCE_SET');
+      return validateSummary([r.segment],results,multiSpan).map(claim=>({...claim,start:claim.start+r.start,end:claim.end+r.start,
+        source_span:{unit:'utf16_code_units',start:claim.start+r.start,end:claim.end+r.start}}));
+    };
+    const completed=(saved?.completed||[]).map((entry,index)=>{
+      if(entry?.segment!==index||!Array.isArray(entry.results))fail('INVALID_SOURCE_SET');
+      if(entry.results.some(claim=>!claim||!Number.isInteger(claim.start)||!Number.isInteger(claim.end)||claim.start<spans[index].start||claim.end>spans[index].end||claim.end<=claim.start||source.content.slice(claim.start,claim.end)!==claim.quote))fail('INVALID_SOURCE_SET');
+      return {segment:index,results:validate(index,entry.results.map(claim=>({...claim,start:claim.start-spans[index].start,end:claim.end-spans[index].start})))};
+    });
+    const checkpoint=()=>this.jobs.saveSummaryProgress(job,item,{schema:SUMMARY_SEGMENTS,layout,context,segments:spans,completed});
+    if(!saved)checkpoint();
+    for(let index=completed.length;index<requests.length;index++){
+      const r=requests[index];this.jobs.renew(job);
+      const reply=await this.withLease(job,check=>this.organizer.generateStructured(r.input,r.schema,{
+        reserve:()=>this.store.memoryTransaction(()=>{check();return this.jobs.reserve(job,this.organizer.profile.limits.daily_requests,this.quota,[item]);})}));
+      completed.push({segment:index,results:validate(index,reply.data.results)});checkpoint();
+    }
+    const claims=validateSummary([source],mergeSummarySegments(source,completed.flatMap(entry=>entry.results),multiSpan?MAX_SOURCE_SPANS:1),multiSpan);
+    for(const claim of claims){claim.span_resolution='validated_segment_offsets';claim.source_segmentation={schema:SUMMARY_SEGMENTS,segments:spans.length};}
+    this.jobs.saveChunk(job,[item],claims);
+  }
   async runOne(){
     const profile=this.organizer?.profile,retry=profile?.retry || {max_attempts:1,base_ms:1000,max_ms:1000};
     const job=this.jobs.claim(this.workerId,{userId:this.userId,profile:this.profileFilter,runId:this.runId,maxAttempts:retry.max_attempts});if(!job)return null;
@@ -90,6 +138,14 @@ export class MemoryWorker {
             ...(['entities','traits'].includes(job.job_type)?{}:{current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})})),
           instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='traits'?TRAITS_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction});
         const schemaFor=selected=>job.job_type==='entities'?entityOutputSchema(selected):job.job_type==='traits'?traitsOutputSchema(selected):outputSchema(job.job_type,selected,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null});
+        // Resume a frozen segmentation even if a larger budget could now fit the whole source, so confirmed
+        // segments are not billed again. Never mix a partial checkpoint into a whole-source request.
+        const partial=items.findIndex(item=>item.state==='partial');
+        if(partial===0){
+          if(job.job_type!=='summary')fail('INVALID_SOURCE_SET');
+          await this.segmentSummary(job,items[0],sources[0],inputFor,schemaFor,multiSpan);pending=pending.slice(1);continue;
+        }
+        if(partial>0){items=items.slice(0,partial);sources=sources.slice(0,partial);}
         let input=inputFor(sources),schema=schemaFor(sources);
         if(!this.organizer.measureRequest(input,schema).fits){
           // Find a fitting prefix of whole sources before reserving a call. Never truncate a long source or move
@@ -97,7 +153,10 @@ export class MemoryWorker {
           let lower=1,upper=sources.length-1,count=0;
           while(lower<=upper){const middle=Math.floor((lower+upper)/2),selected=sources.slice(0,middle);
             if(this.organizer.measureRequest(inputFor(selected),schemaFor(selected)).fits){count=middle;lower=middle+1;}else upper=middle-1;}
-          if(!count)fail('INPUT_TOO_LARGE');
+          if(!count){
+            if(job.job_type!=='summary')fail('INPUT_TOO_LARGE');
+            await this.segmentSummary(job,items[0],sources[0],inputFor,schemaFor,multiSpan);pending=pending.slice(1);continue;
+          }
           items=items.slice(0,count);sources=sources.slice(0,count);input=inputFor(sources);schema=schemaFor(sources);
         }
         // Keep the same fenced lease through the entire provider call, including its optional repair request.

@@ -21,8 +21,8 @@ test('whole-source batches shrink to the complete request budget without losing 
   assert.equal(f.s.db.prepare('SELECT reserved_calls FROM memory_model_budget').get().reserved_calls,2);
 });
 
-test('a genuinely oversized single source remains explicit and unmodified, while committed earlier chunks survive a larger-budget retry',async t=>{
-  const f=fixture(t),saved=[f.save('Synthetic complete first statement.'),f.save('大型来源：'+'原始观察。'.repeat(760)+'最终决定：禁止部署。')],seen=[];
+test('an indivisible oversized fenced source remains explicit and unmodified, while committed earlier chunks survive a larger-budget retry',async t=>{
+  const f=fixture(t),saved=[f.save('Synthetic complete first statement.'),f.save('大型来源：\n```text\n'+'原始观察。'.repeat(760)+'\n```\n最终决定：禁止部署。')],seen=[];
   const model=organizer(input=>response(seen,input),{limits}),jobs=new MemoryJobs(f.s);plan(f,jobs,model);
   const worker=new MemoryWorker(f.s,jobs,model),first=await worker.runOne();assert.equal(first.state,'review_required');assert.equal(first.last_error_code,'INPUT_TOO_LARGE');assert.equal(first.processed,1);
   assert.equal(seen.length,1);assert.deepEqual(seen[0].map(source=>source.id),[saved[0].memory_id]);assert.equal(claims(f).length,0);

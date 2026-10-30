@@ -20,3 +20,9 @@ test('no vector repair is offered without a serving matching profile; explicit s
   const list=libraryView(text,{data:{results:[{memory_id:'synthetic-memory',content:'Synthetic',status:'active'}]},allowedActions:['processing.preview'],selected:['synthetic-memory']});
   assert.match(list,/data-batch-memory="synthetic-memory"/);assert.equal((list.match(/data-selection="true"/g)||[]).length,3);assert.doesNotMatch(list,/data-select-all>/);
 });
+test('partial summary segment counts remain explicitly unpublished in both languages',()=>{
+  for(const locale of ['zh-CN','en']){
+    const view=memoryProcessingView(k=>text(k,locale),{...data,jobs:{items:[{job_type:'summary',state:'blocked_budget',revision:3,segment_processed:1,segment_total:3}],truncated:false}});
+    assert.match(view,/1\/3/);assert.match(view,locale==='en'?/Summary not published yet/:/尚未发布摘要/);assert.doesNotMatch(view,/processingSegments/);
+  }
+});

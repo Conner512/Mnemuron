@@ -79,6 +79,8 @@ These are source integrations, not a universal installer. Host plugin loading, h
 - [Documentation index](docs/README.md) — concepts, protocol contracts, adapters, and operations.
 - [Account console preview](docs/integrated-console-v0.3.md) — invitation-based registration, local TOTP, account-bound reads, migration and deliberately blocked operations.
 - [Memory pipeline reliability](docs/memory-pipeline-reliability.md) — extraction fidelity, source-grounded compression, resumable vectorization and honest graph coverage (Chinese).
+- [Memory review workbench](docs/memory-review-workbench.md) — explicit candidate approval, source comparison, version-bound feedback and manual reconciliation.
+- [Selected processing](docs/memory-processing-workbench.md) and [long-source checkpoints](docs/memory-summary-checkpoints.md) — repair exact revisions and resume grounded compression without resending confirmed segments.
 - [Memory graph and search workbench](docs/memory-search-workbench.md) — project-scoped full-library keyword evidence, privacy-preserving result feedback and reproducible offline quality reports (Chinese).
 - [Memory operations evidence](docs/memory-operations-observability.md) — provider-reported usage, request-time cost estimates and operator-only backup / isolated-restore verification status.
 - [Core specification](docs/core-spec-v0.1.md) — the data model and continuity boundaries.
