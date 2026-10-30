@@ -10,6 +10,13 @@ export class ModelError extends Error {
 }
 export const fail = code => {throw new ModelError(code);};
 export const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+// Count the complete serialized request, including prefixes, instructions and both schema representations.
+// UTF-8 bytes remain the conservative token upper bound when no model-specific tokenizer is configured.
+export function measureModelRequest(profile,body) {
+  const bytes=Buffer.byteLength(JSON.stringify(body));
+  return {input_bytes:bytes,input_tokens:bytes,fits:bytes<=profile.limits.input_bytes&&bytes<=profile.limits.input_tokens};
+}
+export function assertModelRequestBudget(profile,body) {const cost=measureModelRequest(profile,body);if(!cost.fits)fail('INPUT_TOO_LARGE');return cost;}
 export function strictObject(value, keys) {
   if (!value || typeof value!=='object' || Array.isArray(value) || Object.keys(value).some(k=>!keys.includes(k))) fail('INVALID_SCHEMA');
 }

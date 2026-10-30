@@ -153,11 +153,12 @@ test('Overview pipeline, memory map and connection pages show the last 7 days of
   assert.doesNotMatch(html,/data-memory-map/,'no map without graph data');
   const graph={memories:[{id:'m1',kind:'fact',concepts:['<b>Server</b>']},{id:'m2',kind:'preference',concepts:['<b>server</b>','PVE']},{id:'m3',kind:null,concepts:[]}],entities:[],links:[],truncated:false};
   const mapped=overviewStatus({insights:{statuses:[{value:'active',count:3}]},features:{'system-health':{owner:o,services:{core:'ready',search:'ready'}},attention:{counts:{},activity_7d:activity,graph}}});
-  assert.match(mapped,/<div class="overview-hero"><section class="card map-card" data-memory-map data-indexed="[^"]*"><div class="map-zoom" role="group" aria-label="缩放">[\s\S]*?<aside class="map-panel" data-map-panel hidden><\/aside><canvas data-map-canvas role="img"/);
-  assert.match(mapped,/<b>2<\/b><span>关键词<\/span>/,'distinct keywords, case-insensitive');assert.match(mapped,/data-live-stream/);
-  assert.deepEqual([...mapped.matchAll(/class="node-key(?: map-kind)?" data-group="([a-z]+)"[^>]*>([^<]+)/g)].map(m=>[m[1],m[2].trim()]),[['fact','事实'],['pref','偏好'],['none','未标注类型'],['entity','关键词']]);
+  assert.match(mapped,/<div class="overview-hero"><section class="card map-card map-card--browse" data-memory-map>[\s\S]*?<aside class="map-panel" data-map-panel hidden><\/aside><canvas data-map-canvas role="img"/);
+  assert.match(mapped,/<b>2<\/b><span><span data-i18n="mapKeywords">关键词<\/span><\/span>/,'distinct keywords, case-insensitive');assert.match(mapped,/data-live-stream/);
+  const legend=mapped.match(/<ul class="map-legend" data-map-legend>([\s\S]*?)<\/ul>/)[1];
+  assert.deepEqual([...legend.matchAll(/class="node-key map-kind" data-group="([a-z]+)"[^>]*>([^<]+)/g)].map(m=>[m[1],m[2].trim()]),[['fact','事实'],['pref','偏好'],['none','未标注类型']]);
   assert.match(mapped,/data-map-kind="fact" aria-pressed="true"/,'each type in the legend is a toggle');assert.match(mapped,/data-map-days="30" aria-pressed="true">近 30 天/,'the window defaults to 30 days');
-  assert.doesNotMatch(mapped,/<b>Server<\/b>/,'keywords are drawn on the canvas, never inserted as markup');
+  assert.doesNotMatch(mapped,/<b>Server<\/b>/,'keywords remain escaped in the accessible node list');assert.match(mapped,/data-map-node-key="concept:&lt;b&gt;server&lt;\/b&gt;"/);
   const data={connections:[],core_connections:[],legacy_connections:[],features:{'system-health':{owner:o},attention:{activity_7d:activity}}};
   assert.match(actionPage('connections',data,caps),/data-activity="chatgpt">最近 7 天：搜索 <strong>30<\/strong> 次 · 读取 <strong>13<\/strong> 次 · 写入 <strong>4<\/strong> 条/);
   selectAgent('codex','plugin');

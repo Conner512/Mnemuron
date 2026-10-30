@@ -3,6 +3,7 @@ import {readFileSync} from 'node:fs';
 import {object,id,number} from './state.mjs';
 import {ValidationError,ConflictError,NotFoundError,AuthorizationError} from '../errors.mjs';
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
+import {graphFold,memoryGraph} from './memory-graph.mjs';
 
 export {FEATURE_VIEWS};
 // An explicit Codex plugin grant, separate from ordinary memory/capture credentials.
@@ -20,19 +21,9 @@ function activity(db,user,liveSql){const since=new Date(Date.now()-7*86400000).t
   // Write-time scrubbing (server/lib/redaction.mjs) records one privacy.redacted event per scrubbed write.
   const redacted=db.prepare("SELECT count(*) n FROM audit_events WHERE user_id=? AND created_at>=? AND action='privacy.redacted'").get(user,since).n;
   return {window_days:7,sources,uses,redacted};}
-// Overview memory map: the newest active memories (coloured by kind) with their keywords and topics. The browser links
-// memories through shared keywords (agentmemory-style concepts); there is no separate entity layer. Bounded; keywords
-// and topics are the owner's own labels; no memory content is returned. entities/links stay empty for older clients.
-// day: the latest of written and traits-updated (YYYY-MM-DD), so the browser can show a recent window (7/30/90 days…).
-const GRAPH_MEMORIES=1000;
-function memoryGraph(service,auth){const db=service.db,user=auth.user_id,live=service.store.lifecycle.live(user).sql('m.project_id');
-  const memories=db.prepare(`SELECT m.memory_id id,t.kind,t.concepts_json,m.topic,substr(max(m.created_at,COALESCE(t.updated_at,'')),1,10) day FROM memories m
-    LEFT JOIN memory_traits t ON t.user_id=m.user_id AND t.memory_id=m.memory_id
-    WHERE m.user_id=? AND m.status='active' AND ${live.sql} ORDER BY m.created_at DESC,m.memory_id LIMIT ?`).all(user,...live.params,GRAPH_MEMORIES+1);
-  const concepts=raw=>{try{const v=JSON.parse(raw||'[]');return Array.isArray(v)?v.filter(c=>typeof c==='string').slice(0,8):[];}catch{return [];}};
-  return {memories:memories.slice(0,GRAPH_MEMORIES).map(m=>({id:m.id,kind:m.kind||null,concepts:concepts(m.concepts_json),topic:m.topic||null,day:m.day||null})),entities:[],links:[],truncated:memories.length>GRAPH_MEMORIES};}
 export const FEATURE_ACTIONS=['memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate'];
 export const featureParams={
+  attention:['graph_days','graph_kinds','graph_query'],
   'task-branches':['task_id','project_id','offset','limit'],'project-context':['project_id'],
   'task-checkpoints':['task_id','offset','limit'],'task-reconciliation':['task_id'],
   'memory-versions':['memory_id','offset','limit','revision','content_offset','content_limit','chain'],
@@ -48,6 +39,7 @@ const packageVersion=JSON.parse(readFileSync(new URL('../../../package.json',imp
 export class ConsoleFeatures {
   constructor(service){this.service=service;this.store=service.store;this.db=service.db;
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_preferences(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,value_json TEXT NOT NULL,PRIMARY KEY(user_id,kind));`);
+    this.db.function('memory_graph_fold',{deterministic:true},graphFold);
   }
   initializeNewAccountTaxonomy(user){
     // Called before the first credential is inserted, under the issuance transaction.
@@ -82,7 +74,7 @@ export class ConsoleFeatures {
     if(view==='attention')return result({counts:{memories:db.prepare(`SELECT count(*) n FROM memories WHERE user_id=? AND ${liveSql.sql}`).get(user,...liveSql.params).n,
       failed_jobs:count(db,"SELECT count(*) n FROM memory_jobs WHERE user_id=? AND state IN ('dead_letter','blocked_auth','blocked_budget','blocked_config','review_required')",user),
       stale_summaries:count(db,"SELECT count(*) n FROM memory_summaries WHERE user_id=? AND status='stale'",user),
-      pending_reconciliation:count(db,"SELECT count(*) n FROM task_reconciliation_proposals WHERE user_id=? AND status='awaiting_confirmation'",user)},activity_7d:activity(db,user,liveSql),graph:memoryGraph(service,auth)});
+      pending_reconciliation:count(db,"SELECT count(*) n FROM task_reconciliation_proposals WHERE user_id=? AND status='awaiting_confirmation'",user)},activity_7d:activity(db,user,liveSql),graph:memoryGraph(service,auth,p)});
     if(view==='capture-status')return result({
       agents:db.prepare(`SELECT agent_id,agent_instance_id,device_id,count(*) events,max(received_at) last_received_at,max(captured_at) last_captured_at FROM events WHERE user_id=? AND ${liveSql.sql} GROUP BY agent_id,agent_instance_id,device_id ORDER BY last_received_at DESC LIMIT 100`).all(user,...liveSql.params),
       local_hook_failures:'not_observable',local_queue:'not_observable',

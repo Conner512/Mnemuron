@@ -34,6 +34,8 @@
 
 `production_ready` 保持 false；恢复策略、管理员权限、MCP/handoff 安全约束不变。
 
+关于完整请求预算、动态组批、关键词来源校验、向量分块恢复及概览图谱范围，见[记忆流水线可靠性](memory-pipeline-reliability.md)。这里的摘要是抽取式压缩，不替换原文；模型调用成功也不自动证明遗漏风险、实际压缩质量或现网验收已通过。
+
 ## 本地验证入口
 
 - `server/test/console-model-pipeline.test.mjs`：真实 loopback HTTP 模型合同，归类、来源摘要、向量、预算、版本竞争、账户隔离；向量存储为测试专用 MockVectorStore。

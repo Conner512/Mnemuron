@@ -67,7 +67,7 @@ export async function evaluateVector(options={}){
     await check('collection_dimensions',async()=>{await backend.ensureCollection(contract,{dimensions:768,distance:'Cosine'});await backend.ensureCollection(contract,{dimensions:768,distance:'Cosine'});
       await assert.rejects(backend.ensureCollection(contract,{dimensions:3,distance:'Cosine'}),error=>error.code==='VECTOR_PROFILE_MISMATCH');});
     await check('rest_upsert_query_scroll_delete',async()=>{
-      const points=Array.from({length:205},(_,i)=>({id:randomUUID(),vector:basis(i%3),payload:{ordinal:i}}));
+      const points=Array.from({length:205},(_,i)=>({id:randomUUID(),vector:basis(i%3),payload:{ordinal:i,document:surrogate(['synthetic-contract-document',i])}}));
       for(let n=0;n<points.length;n+=64)await backend.upsert(contract,points.slice(n,n+64));
       await backend.upsert(contract,points.slice(0,3));const rows=await scroll(contract);assert.equal(rows.length,205);assert.equal(new Set(rows.map(p=>p.id)).size,205);
       const hits=await backend.search(contract,basis(0),{must:[{key:'ordinal',match:{value:3}}]},10);assert.deepEqual(hits.map(p=>p.id),[points[3].id]);
@@ -78,7 +78,7 @@ export async function evaluateVector(options={}){
       s.ensureProject(auth,bindings.project_id,'Synthetic A');s.ensureProject(auth,'synthetic-project-b','Synthetic B');
       memories.router=save('Synthetic router version 8.4.1 is approved.');memories.near=save('Synthetic router version 8.4.10 is rejected.');
       memories.disk=save('Synthetic disk storage has 200 GB.');
-      memories.long=save('Synthetic network unicode body: '+('字段🙂 payload only belongs in SQLite. '.repeat(75)));
+      memories.long=save('Synthetic network unicode body: '+('字段🙂'.repeat(1000)));
       memories.project=save('Synthetic network project A',{scope:'project',project_id:bindings.project_id});
       memories.wrongProject=save('Synthetic network project B',{scope:'project',project_id:'synthetic-project-b'});
       memories.session=save('Synthetic network session A',{scope:'session',project_id:bindings.project_id,session_id:bindings.session_id});
@@ -86,7 +86,8 @@ export async function evaluateVector(options={}){
       memories.foreign=s.saveMemory(other,{scope:'user',content:'Synthetic network other owner'}).memory;
       generation=index.begin(e.profile.fingerprint);await index.sync(generation);index.activate(generation);result.collections.push(index.snapshot().collection_name);
       const points=await scroll(index.snapshot().collection_name);assert.ok(points.length>9);
-      for(const point of points){assert.deepEqual(Object.keys(point.payload).sort(),['content_hash','document','lifecycle','owner','profile','revision','scope']);
+      for(const point of points){assert.deepEqual(Object.keys(point.payload).sort(),['build','content_hash','document','lifecycle','owner','profile','revision','scope']);
+        assert.match(point.payload.build,/^[a-f0-9]{64}$/);assert.equal(point.payload.lifecycle,'active');
         assert.doesNotMatch(JSON.stringify(point.payload),/Synthetic|字段|router|synthetic-owner|synthetic-project/);assert.equal(Object.hasOwn(point,'vector'),false);}
       assert.equal((await index.sync(generation)).processed,0);assert.equal((await scroll(index.snapshot().collection_name)).length,points.length);
       return {memories:9,points:points.length,repeat_processed:0,payload_body_fields:0};

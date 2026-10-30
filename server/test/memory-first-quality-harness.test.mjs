@@ -51,6 +51,16 @@ function vectorFixture(root){
     else if(parts.length===3 && options.method==='PUT'){await backend.ensureCollection(name,{dimensions:body.vectors.size,distance:body.vectors.distance});result=true;}
     else if(parts.length===3)result={config:{params:{vectors:{size:collection.config.dimensions,distance:collection.config.distance}}}};
     else if(parts[3]?.startsWith('points?')){await backend.upsert(name,body.points);result=true;}
+    else if(parts[4]?.startsWith('payload?')){
+      assert.deepEqual(body.payload,{lifecycle:'active'});
+      assert.deepEqual(body.filter.must.map(c=>c.key).sort(),['build','document','owner']);
+      await backend.publishBuild(name,Object.fromEntries(body.filter.must.map(c=>[c.key,c.match.value])));result=true;
+    }
+    else if(parts[4]==='query'&&parts[5]==='groups'){
+      assert.equal(body.group_by,'document');assert.equal(body.group_size,1);
+      result={groups:(await backend.search(name,body.query,body.filter,body.limit))
+        .map(({vector,...hit})=>({id:hit.payload.document,hits:[hit]}))};
+    }
     else if(parts[4]==='query')result={points:(await backend.search(name,body.query,body.filter,body.limit)).map(({vector,...rest})=>rest)};
     else if(parts[4]==='scroll'){const page=await backend.scroll(name,body.offset);result={...page,points:page.points.map(({vector,...rest})=>rest)};}
     else if(parts[4]?.startsWith('delete?')){await backend.deleteByDocumentRevision(name,body.filter);result=true;}

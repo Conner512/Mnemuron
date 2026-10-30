@@ -72,8 +72,8 @@ export class MemoryWorker {
       let pending=this.jobs.items(job).filter(i=>i.state!=='done');
       while(pending.length){
         taxonomyFence();this.jobs.renew(job);
-        const items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size,['entities','traits'].includes(job.job_type)?ENTITY_LIMITS.batch:128));
-        const sources=items.map(item=>{const row=this.store.derivedMemory.validateItem(item);if(!row)fail('STALE_INPUT');return row;});
+        let items=pending.slice(0,Math.min(this.jobs.batchSize,profile.limits.batch_size,['entities','traits'].includes(job.job_type)?ENTITY_LIMITS.batch:128));
+        let sources=items.map(item=>{const row=this.store.derivedMemory.validateItem(item);if(!row)fail('STALE_INPUT');return row;});
         const entityFence=()=>{if(job.job_type==='entities'&&job.metadata.lifecycle_stamp!==this.store.entities.lifecycleStamp(job.user_id,sources[0].project_id))fail('STALE_INPUT');};entityFence();
         const multiSpan=['grounded-extractive-v4','grounded-extractive-v5'].includes(job.metadata.prompt_version);
         let summaryInstruction=multiSpan?
@@ -85,19 +85,33 @@ export class MemoryWorker {
         if(job.metadata.prompt_version==='grounded-classification-v4')classificationInstruction='Classify only the supported subject without changing source facts. '+classificationGuidance();
         else if(job.metadata.prompt_version==='grounded-classification-v3')classificationInstruction+=' '+classificationGuidance();
         if(job.metadata.prompt_version==='grounded-extractive-v5')summaryInstruction+=' Repeated observations may contain an important warning or limitation absent from the opening and final decision. Before dropping repetitive background, retain at least one complete occurrence of each such warning. Include enough surrounding wording to make that occurrence uniquely locatable. Repetition does not make a qualification dispensable.';
-        const input={operation:job.job_type,...(job.job_type==='traits'?{kinds:MEMORY_KINDS}:{taxonomy:job.metadata.taxonomy}),...(job.job_type==='classification'?{category_definitions:job.metadata.classification_context.entries}:{}),window:job.metadata.window,
-          sources:sources.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
+        const inputFor=selected=>({operation:job.job_type,...(job.job_type==='traits'?{kinds:MEMORY_KINDS}:{taxonomy:job.metadata.taxonomy}),...(job.job_type==='classification'?{category_definitions:job.metadata.classification_context.entries}:{}),window:job.metadata.window,
+          sources:selected.map(s=>({memory_id:s.memory_id,revision:s.revision,content:s.content,content_length:s.content.length,span_unit:'utf16_code_units',evidence_kind:s.evidence_kind,source_role:s.source,
             ...(['entities','traits'].includes(job.job_type)?{}:{current_category:this.store.derivedMemory.category(s,job.metadata.taxonomy.version)})})),
-          instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='traits'?TRAITS_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction};
+          instruction:job.job_type==='entities'?ENTITY_INSTRUCTION:job.job_type==='traits'?TRAITS_INSTRUCTION:job.job_type==='summary'?summaryInstruction:classificationInstruction});
+        const schemaFor=selected=>job.job_type==='entities'?entityOutputSchema(selected):job.job_type==='traits'?traitsOutputSchema(selected):outputSchema(job.job_type,selected,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null});
+        let input=inputFor(sources),schema=schemaFor(sources);
+        if(!this.organizer.measureRequest(input,schema).fits){
+          // Find a fitting prefix of whole sources before reserving a call. Never truncate a long source or move
+          // outside the frozen manifest; committed prefixes keep their existing exact retry/publication semantics.
+          let lower=1,upper=sources.length-1,count=0;
+          while(lower<=upper){const middle=Math.floor((lower+upper)/2),selected=sources.slice(0,middle);
+            if(this.organizer.measureRequest(inputFor(selected),schemaFor(selected)).fits){count=middle;lower=middle+1;}else upper=middle-1;}
+          if(!count)fail('INPUT_TOO_LARGE');
+          items=items.slice(0,count);sources=sources.slice(0,count);input=inputFor(sources);schema=schemaFor(sources);
+        }
         // Keep the same fenced lease through the entire provider call, including its optional repair request.
-        const reply=await this.withLease(job,check=>this.organizer.generateStructured(input,job.job_type==='entities'?entityOutputSchema(sources):job.job_type==='traits'?traitsOutputSchema(sources):outputSchema(job.job_type,sources,{multiSpan,bounded:job.metadata.schema_version==='memory-derived-spans-v2',categories:job.job_type==='classification'?job.metadata.taxonomy.categories:null}),{
+        const reply=await this.withLease(job,check=>this.organizer.generateStructured(input,schema,{
           reserve:()=>this.store.memoryTransaction(()=>{check();taxonomyFence();entityFence();return this.jobs.reserve(job,profile.limits.daily_requests,this.quota,items);})}));
         taxonomyFence();entityFence();let results=reply.data.results;
         if(job.job_type==='summary')results=validateSummary(sources,results,multiSpan);
-        else if(new Set(results.map(r=>r.memory_id)).size!==results.length)fail('INVALID_SOURCE_SET');
+        else {
+          if(job.job_type==='traits')this.store.traits.validate(job.user_id,sources,results);
+          if(new Set(results.map(r=>r.memory_id)).size!==results.length)fail('INVALID_SOURCE_SET');
+        }
         this.jobs.saveChunk(job,items,results);pending=pending.slice(items.length);
       }
-      this.jobs.publish(job,(items,outputs)=>{taxonomyFence();return job.job_type==='traits'?String(this.store.traits.fill(job.user_id,items,outputs,new Date(this.jobs.clock()).toISOString())):job.job_type==='entities'?this.store.entities.publish(job,items,outputs):job.job_type==='classification'?this.store.derivedMemory.publishAnnotations(job,items,outputs):this.store.derivedMemory.publishSummary(job,items,outputs,this.jobs.clock());});
+      this.jobs.publish(job,(items,outputs)=>{taxonomyFence();return job.job_type==='traits'?String(this.store.traits.fill(job.user_id,items.map(item=>this.store.derivedMemory.validateItem(item)),outputs,new Date(this.jobs.clock()).toISOString())):job.job_type==='entities'?this.store.entities.publish(job,items,outputs):job.job_type==='classification'?this.store.derivedMemory.publishAnnotations(job,items,outputs):this.store.derivedMemory.publishSummary(job,items,outputs,this.jobs.clock());});
     }catch(error){this.jobs.failure(job,error,retry);}
     return this.jobs.get(job.job_id);
   }

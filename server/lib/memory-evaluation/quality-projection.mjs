@@ -26,7 +26,8 @@ export async function evaluateQualityProjection({store,auth,byMemoryId,fixture,c
     do{const page=await backend.scroll(collection,offset);points.push(...page.points);offset=page.next_page_offset ?? null;}while(offset!==null);
     assert.equal(points.length,fixture.documents.length+2);
     for(const point of points){
-      assert.deepEqual(Object.keys(point.payload).sort(),['content_hash','document','lifecycle','owner','profile','revision','scope']);
+      assert.deepEqual(Object.keys(point.payload).sort(),['build','content_hash','document','lifecycle','owner','profile','revision','scope']);
+      assert.match(point.payload.build,/^[a-f0-9]{64}$/);assert.equal(point.payload.lifecycle,'active');
       assert.equal(Object.hasOwn(point,'vector'),false);assert.doesNotMatch(JSON.stringify(point.payload),/FORBIDDEN|synthetic-quality-owner/);
     }
     result.indexed_sources=sync.processed;result.points=points.length;result.repeat_processed=0;

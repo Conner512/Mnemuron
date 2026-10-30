@@ -76,7 +76,7 @@ export class ConsoleOrganizer {
       LEFT JOIN projects p ON p.user_id=m.user_id AND p.project_id=m.project_id
       WHERE m.user_id=? AND (? IS NULL OR m.status=?) AND (? IS NULL OR c.category=?) AND (? IS NULL OR m.topic=?)
         AND (? IS NULL OR COALESCE(t.kind,'none')=?)
-        AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(COALESCE(t.concepts_json,'[]')) c WHERE lower(c.value)=lower(?)))
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM json_each(COALESCE(t.concepts_json,'[]')) c WHERE c.type='text' AND memory_concept_key(c.value)=memory_concept_key(?)))
         AND (? IS NULL OR (m.source LIKE 'user_import:%')=(?='imported'))
         ${stale?`AND ${stale.sql}`:''}
         AND (? IS NULL OR m.memory_id IN (SELECT value FROM json_each(?)))`;
@@ -94,8 +94,8 @@ export class ConsoleOrganizer {
   }
   /** Most used keywords of active memories (live projects only), for the library and the overview map. */
   concepts(user,limit=30){const live=this.live(user).sql('m.project_id');
-    return this.db.prepare(`SELECT c.value concept,COUNT(*) count FROM memory_traits t JOIN memories m ON m.user_id=t.user_id AND m.memory_id=t.memory_id, json_each(t.concepts_json) c
-      WHERE t.user_id=? AND m.status='active' AND ${live.sql} GROUP BY lower(c.value) ORDER BY count DESC,concept LIMIT ?`).all(user,...live.params,limit);}
+    return this.db.prepare(`SELECT MIN(c.value) concept,COUNT(DISTINCT m.memory_id) count FROM memory_traits t JOIN memories m ON m.user_id=t.user_id AND m.memory_id=t.memory_id, json_each(t.concepts_json) c
+      WHERE t.user_id=? AND m.status='active' AND ${live.sql} AND c.type='text' AND memory_concept_key(c.value)<>'' GROUP BY memory_concept_key(c.value) ORDER BY count DESC,concept LIMIT ?`).all(user,...live.params,limit);}
   /** Facets for browsing a large collection: active memories only, owner scoped, counts only. */
   facets(auth){
     const user=auth.user_id,live=this.live(user),filter=live.sql('project_id');

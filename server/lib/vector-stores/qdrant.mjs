@@ -52,8 +52,22 @@ export class QdrantStore {
     await this.call(base,{vectors:{size:dimensions,distance}},'PUT');
   }
   async upsert(name,points){return this.call(collection(name)+'/points?wait=true&ordering=strong',{points},'PUT');}
-  async search(name,vector,filter,limit){integer(limit,1,100);const result=await this.call(collection(name)+'/points/query',{query:vector,filter,limit,with_payload:true,with_vector:false});
-    if(!Array.isArray(result.points))fail('INVALID_VECTOR_RESPONSE');return result.points;}
+  async publishBuild(name,identity){
+    strictObject(identity,['owner','document','build']);
+    if(['owner','document','build'].some(key=>!/^[a-f0-9]{64}$/.test(identity[key]||'')))fail('INVALID_INPUT');
+    const filter={must:['owner','document','build'].map(key=>({key,match:{value:identity[key]}}))};
+    return this.call(collection(name)+'/points/payload?wait=true&ordering=strong',{payload:{lifecycle:'active'},filter});
+  }
+  async search(name,vector,filter,limit){integer(limit,1,100);
+    // Qdrant 1.19 groups before its result window. One document gets one best-scoring chunk, so a long memory
+    // cannot consume every candidate slot. The owner/scope/profile filters stay inside that grouped query.
+    const result=await this.call(collection(name)+'/points/query/groups',{query:vector,filter,group_by:'document',group_size:1,limit,with_payload:true,with_vector:false});
+    if(!Array.isArray(result.groups)||result.groups.length>limit)fail('INVALID_VECTOR_RESPONSE');
+    const seen=new Set();return result.groups.map(group=>{
+      if(typeof group?.id!=='string'||!group.id||seen.has(group.id)||!Array.isArray(group.hits)||group.hits.length!==1
+        ||group.hits[0]?.payload?.document!==group.id)fail('INVALID_VECTOR_RESPONSE');
+      seen.add(group.id);return group.hits[0];
+    });}
   async deleteByDocumentRevision(name,filter){return this.call(collection(name)+'/points/delete?wait=true&ordering=strong',{filter});}
   async scroll(name,offset=null){return this.call(collection(name)+'/points/scroll',{limit:100,with_payload:true,with_vector:false,...(offset===null?{}:{offset})});}
   async validateTarget(){return approvedTarget(this.config);}

@@ -7,7 +7,7 @@ import {memorySearchFilterSql} from './memory/search-context.mjs';
 // without keywords keeps its v3 document, and validate() rebuilds on open when any stored document differs.
 export const INDEX_VERSION = 'memory-search-v3';
 export {normalizeSearch,searchTokens,lexicalScore} from './search-query.mjs';
-import {normalizeSearch,searchTokens,lexicalScore,memorySearchText,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
+import {normalizeSearch,normalizeConcept,searchTokens,lexicalScore,memorySearchText,queryTokens,containsTerm,declaredAliases,makeQueryPlan,aliasSubjectMatches,wordVariants} from './search-query.mjs';
 const encode = token => 't' + Buffer.from(token).toString('hex');
 const indexText = text => searchTokens(text).map(encode).join(' ');
 // SQL for a memory's indexed text (see memorySearchText): body, topic and space-joined keywords.
@@ -28,6 +28,7 @@ export class MemorySearch {
     this.entities = entities;
     db.function('memory_search_tokens', {deterministic:true}, indexText);
     db.function('memory_search_normalize', {deterministic:true}, normalizeSearch);
+    db.function('memory_concept_key', {deterministic:true}, normalizeConcept);
     db.function('memory_search_contains', {deterministic:true}, (text,term)=>Number(containsTerm(text,term)));
     db.function('memory_search_alias_seed', {deterministic:true}, (text,query)=>Number(declaredAliases(text).some(group=>group.some(term=>containsTerm(query,term)))));
     let cachedJSON,cachedPlan;

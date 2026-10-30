@@ -145,21 +145,36 @@ test('LJ-06: vector builds hide a deleted project\'s documents and never embed a
 });
 
 test('LJ-07: a provider STALE_INPUT for a still-valid source (configuration changed mid-build) stops the build and never hides or skips live records',async t=>{
-  const w=world(t);let failing=false;
-  const e=embedder(texts=>{if(failing)throw new ModelError('STALE_INPUT');return texts.map(()=>[0,0,1]);}),backend=new MockVectorStore();
+  const w=world(t);let failing=false,calls=0;
+  const e=embedder(texts=>{calls++;if(failing)throw new ModelError('STALE_INPUT');return texts.map(()=>[0,0,1]);}),backend=new MockVectorStore();
   const index=new VectorIndex(w.s,backend,new Map([[e.profile.fingerprint,e]]),{ownerId:OWNER});
   const generation=index.begin(e.profile.fingerprint);await index.sync(generation);index.activate(generation);
   const indexed=()=>rows(w.s,'memory_vector_documents',"generation=? AND state='indexed'",generation).length,mapped=()=>rows(w.s,'memory_vector_points','generation=?',generation).length;
-  const before=[indexed(),mapped()];
+  const points=g=>[...backend.collections.get(w.s.db.prepare('SELECT collection_name FROM memory_vector_generations WHERE generation=?').get(g).collection_name).points.values()];
+  const before=[indexed(),mapped()],beforeRemote=structuredClone(points(generation)),beforeCalls=calls;
   // A new live record needs embedding; the provider now reports that its configuration changed.
-  const added=w.saveIn('proj-lj-live','Live addition needing embedding');
+  const added=w.saveIn('proj-lj-live','Live addition needing embedding'),later=w.saveIn('proj-lj-tgt','Later live addition');
   failing=true;
   await assert.rejects(index.sync(generation),{code:'STALE_INPUT'});
   assert.deepEqual([indexed(),mapped()],before,'no live document was hidden and no point mapping removed');
-  assert.equal(rows(w.s,'memory_vector_documents','generation=? AND memory_id=?',generation,added).length,0,'the live record is not recorded as hidden; it is retried');
+  assert.deepEqual(rows(w.s,'memory_vector_documents','generation=? AND memory_id=?',generation,added).map(row=>row.state),['building'],'the failed live source stays incomplete, never hidden or indexed');
+  assert.equal(rows(w.s,'memory_vector_points','generation=? AND memory_id=?',generation,added).length,0,'no unconfirmed chunk checkpoint is stored');
+  assert.deepEqual(points(generation),beforeRemote,'no new remote point is written or published');
+  assert.equal(calls,beforeCalls+1);assert.equal(rows(w.s,'memory_vector_documents','generation=? AND memory_id=?',generation,later).length,0,'provider STALE_INPUT stops before the next live record');
+  assert.deepEqual(new Set(index.catchUpPending(generation).map(row=>row.memory_id)),new Set([added,later]));
+  failing=false;
+  assert.deepEqual(await index.sync(generation),{processed:2,complete:true,generation});
+  assert.deepEqual([indexed(),mapped()],[before[0]+2,before[1]+2]);assert.equal(calls,beforeCalls+3,'the failed source and the later source are both retried');
+  assert.ok(points(generation).every(point=>point.payload.lifecycle==='active'));
   // First-run manifest build: the live items stay pending (retried later), never silently marked stale.
   const manifest=[w.m.src,w.m.neutral].map(id=>{const r=w.s.derivedMemory.currentSource(OWNER,id);return {memory_id:id,revision:r.revision,state_hash:r.state_hash};});
-  const g2=index.begin(e.profile.fingerprint,{manifest});
+  const g2=index.begin(e.profile.fingerprint,{manifest}),manifestCalls=calls;failing=true;
   await assert.rejects(index.sync(g2),{code:'STALE_INPUT'});
   assert.deepEqual(index.manifest(g2).map(m=>m.state),['pending','pending']);
+  assert.equal(calls,manifestCalls+1,'the manifest also stops on the first provider failure');
+  assert.deepEqual(rows(w.s,'memory_vector_documents','generation=?',g2).map(row=>({memory_id:row.memory_id,state:row.state})),[{memory_id:index.manifest(g2)[0].memory_id,state:'building'}]);
+  assert.equal(rows(w.s,'memory_vector_points','generation=?',g2).length,0);assert.deepEqual(points(g2),[]);
+  failing=false;assert.equal((await index.sync(g2)).complete,true);
+  assert.deepEqual(index.manifest(g2).map(m=>m.state),['indexed','indexed']);assert.equal(calls,manifestCalls+3);
+  assert.equal(points(g2).length,2);assert.ok(points(g2).every(point=>point.payload.lifecycle==='active'));
 });

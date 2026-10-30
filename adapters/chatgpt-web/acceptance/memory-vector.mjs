@@ -9,7 +9,7 @@ import {storageDoctor, realDestination} from '../../../server/lib/storage-policy
 import {vectorAcceptanceTarget} from '../../../server/lib/memory-evaluation/vector.mjs';
 import {QdrantStore} from '../../../server/lib/vector-stores/qdrant.mjs';
 import {digest, fail} from '../../../server/lib/model-providers/contracts.mjs';
-import {splitDocument} from '../../../server/lib/vector-stores/index.mjs';
+import {documentChunks} from '../../../server/lib/vector-stores/chunks.mjs';
 import {gatewayFixture} from '../test/fixture.mjs';
 import {close} from '../../../services/oauth/test/fixture.mjs';
 import {writePrivate} from '../../../shared/oauth-common.mjs';
@@ -19,7 +19,7 @@ const cases=['backend_health','memory_only_http_save','default_lexical_no_embedd
   'web_scope_and_write_denial','readonly_business_state','source_retraction_before_vector_cleanup',
   'dependency_failure_fallback','semantic_error_through_web','isolated_app_reopen','safe_logs_and_no_handoff'];
 const bodies={router:'Synthetic router release 8.4.1 is approved.',near:'Synthetic router release 8.4.10 is not the pinned release.',
-  disk:'Synthetic disk storage has 200 GB.',long:('Synthetic network Unicode source. '+('字段🙂 exact source stays in SQLite. '.repeat(90))).trim(),
+  disk:'Synthetic disk storage has 200 GB.',long:('Synthetic network Unicode source. '+('字段🙂'.repeat(1000))).trim(),
   project:'Synthetic network project A',wrongProject:'Synthetic network project B',session:'Synthetic network session A',
   wrongSession:'Synthetic network session B',foreign:'Synthetic network other owner'};
 const bindings={project_id:'project-synthetic-a',session_id:'synthetic-session-a'};
@@ -90,7 +90,7 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       return {status:'ok',result:await backend.call(req.url,data,req.method)};
     });
     t.after(()=>close(relay.server));
-    const allowed=new Set([...Object.values(bodies).flatMap(text=>splitDocument(text,1024)),...Object.values(bodies),'network','网络设备','8.4.1','disk']);
+    const allowed=new Set([...Object.values(bodies),'network','网络设备','8.4.1','disk']);
     embedding=await loopback(async req=>{
       if(req.method!=='POST' || req.url!=='/embeddings' || req.headers.authorization!==`Bearer ${modelKey}`)fail('SYNTHETIC_ROUTE_DENIED');
       const data=await body(req);
@@ -110,6 +110,9 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
         dimensions:768,distance:'Cosine',query_prefix:'',document_prefix:'',normalization:'l2',chunker_version:'utf8-chunks-v1'}},
       vector_store:{...target,base_url:relay.origin,collection_prefix:prefix,auth:{secret_file:proxyKeyFile},egress:{approved:true,origins:[relay.origin],addresses:['127.0.0.1'],allow_private:true}}};
     await start();t.after(async()=>{if(app?.server.listening){app.server.closeAllConnections();await app.close();}});
+    // Only exact chunks of the fixed synthetic corpus may leave this isolated app. The request-aware planner
+    // accounts for the configured model envelope; a hard-coded byte splitter no longer describes its requests.
+    for(const text of Object.values(bodies))for(const chunk of documentChunks(app.store.embedder,text).chunks)allowed.add(chunk.text);
     const issue=userId=>app.store.issueCredential({userId,label:'Synthetic application acceptance',deviceId:'synthetic-device',agentId:'synthetic',agentInstanceId:userId+'-agent',scopes:['memory:read','memory:write','admin:tasks']});
     credential=issue('synthetic-owner');otherCredential=issue('synthetic-other-owner');credentials.push(credential.api_key,otherCredential.api_key);auth=app.store.authenticate(credential.api_key);
     app.store.ensureProject(auth,bindings.project_id,'Synthetic A');app.store.ensureProject(auth,'project-synthetic-b','Synthetic B');
@@ -142,7 +145,8 @@ export async function evaluateApplication({config,output,allowNetwork=false,onPr
       await app.store.vectorIndex.sync(generation);app.store.vectorIndex.activate(generation);
       const before=embeddingCalls;assert.ok(before>0);assert.equal((await app.store.vectorIndex.sync(generation)).processed,0);assert.equal(embeddingCalls,before);
       let offset=null,points=[];do{const page=await backend.scroll(name,offset);points.push(...page.points);offset=page.next_page_offset ?? null;}while(offset!==null);
-      assert.ok(points.length>9);for(const point of points){assert.deepEqual(Object.keys(point.payload).sort(),['content_hash','document','lifecycle','owner','profile','revision','scope']);assert.doesNotMatch(JSON.stringify(point.payload),/Synthetic|字段|synthetic-owner|network/);}
+      assert.ok(points.length>9);for(const point of points){assert.deepEqual(Object.keys(point.payload).sort(),['build','content_hash','document','lifecycle','owner','profile','revision','scope']);
+        assert.match(point.payload.build,/^[a-f0-9]{64}$/);assert.equal(point.payload.lifecycle,'active');assert.doesNotMatch(JSON.stringify(point.payload),/Synthetic|字段|synthetic-owner|network/);}
       return {points:points.length,synthetic_embedding_http_calls:embeddingCalls,repeat_processed:0};
     });
     await check('hybrid_http_scope_and_identifiers',async()=>{

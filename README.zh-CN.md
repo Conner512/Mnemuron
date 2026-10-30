@@ -78,6 +78,7 @@ curl --fail http://127.0.0.1:47831/readyz
 - [快速开始](docs/getting-started.md)：带身份认证的本地 API 示例。
 - [文档索引](docs/README.md)：概念、协议、适配器与运维文档。
 - [账户控制台预览](docs/integrated-console-v0.3.md)：注册码注册、本地 TOTP、逐账户读取、迁移，以及仍关闭的高风险操作。
+- [记忆流水线可靠性](docs/memory-pipeline-reliability.md)：抽取保真、来源约束压缩、可续做的向量化，以及图谱筛选和展示范围。
 - [核心规格](docs/core-spec-v0.1.md)：数据模型与任务连续性边界。
 - [部署指南](docs/pve-lxc-deployment-v0.1.md)：可选的 Linux/LXC 部署示例；核心 API 不要求使用 Proxmox。
 - [核心优化说明](docs/core-optimization-v0.2/release-notes.md)与[检索及同步修订](docs/core-review-v0.3/README.md)：实现变更和兼容性说明。
