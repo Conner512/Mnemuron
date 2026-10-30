@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 import {pathToFileURL} from 'node:url';
 import path from 'node:path';
-import {DatabaseSync} from 'node:sqlite';
 import {MnemuronStore} from '../lib/store.mjs';
 import {loadMemoryRuntimeFile} from '../lib/memory-runtime.mjs';
 import {MemoryWorker,scheduleLibrary} from '../lib/memory-jobs/worker.mjs';
-import {createMemoryBackup,verifyMemoryBackup,restoreIsolatedBackup} from '../lib/memory/backup.mjs';
+import {runBackupMaintenance} from '../lib/memory/backup-status.mjs';
 import {readMemoryStatus,requireMemoryDatabase} from '../lib/memory/maintenance.mjs';
 import {storageDoctor,SOURCE_ROOT} from '../lib/storage-policy.mjs';
 import {fail,ModelError} from '../lib/model-providers/contracts.mjs';
@@ -19,8 +18,8 @@ export async function memoryCommand(args){
   const commands=['status','provider-validate','organize','worker-once','worker-loop','category-set','summaries','index-rebuild','index-sync','index-activate','index-reconcile','sources','source-read','pin','unpin','privacy-dry-run','backup','backup-verify','restore-isolated','migration-dry-run','jobs-resume-profile','jobs-cancel'];
   if(!commands.includes(command))fail('INVALID_COMMAND');
   if(command==='migration-dry-run')return {dry_run:true,source_paths:storageDoctor({database:config.storage?.sqlite_path},{sourceRoots:[SOURCE_ROOT]}),destination_paths:options['--destination']?storageDoctor({database:options['--destination']},{sourceRoots:[SOURCE_ROOT]}):null,copied:false,service_started:false};
-  if(command==='backup-verify')return verifyMemoryBackup(options['--backup']);
-  if(command==='restore-isolated')return restoreIsolatedBackup(options['--backup'],options['--destination']);
+  if(command==='backup-verify')return runBackupMaintenance(config,{operation:'verify',backupFile:options['--backup']});
+  if(command==='restore-isolated')return runBackupMaintenance(config,{operation:'restore_isolated',backupFile:options['--backup'],destination:options['--destination']});
   if(command==='provider-validate'){
     if(options['--allow-network']!=='true')return {config_valid:true,network_called:false,real_model_validation:'blocked_requires_explicit_allow_network',synthetic_inputs_only:true};
     const checks=[];
@@ -43,10 +42,7 @@ export async function memoryCommand(args){
   const database=config.storage?.sqlite_path;
   if(command==='status')return readMemoryStatus(database,{vectorEnabled:config.vector_store?.enabled===true});
   requireMemoryDatabase(database);
-  if(command==='backup'){
-    const db=new DatabaseSync(database,{readOnly:true});
-    try{return await createMemoryBackup({db},options['--destination']);}finally{db.close();}
-  }
+  if(command==='backup')return runBackupMaintenance(config,{operation:'backup',destination:options['--destination']});
   const store=new MnemuronStore(database,{memoryConfig:config,memoryConfigPath:options['--config']});
   // Local file access is the administrative boundary. No public/OAuth token grants these scopes.
   const auth={user_id:options['--user'],scopes:['memory:read','memory:sources:read','memory:retention','memory:organize'],credential_id:null,agent_instance_id:'local-maintenance'};

@@ -80,6 +80,7 @@ curl --fail http://127.0.0.1:47831/readyz
 - [账户控制台预览](docs/integrated-console-v0.3.md)：注册码注册、本地 TOTP、逐账户读取、迁移，以及仍关闭的高风险操作。
 - [记忆流水线可靠性](docs/memory-pipeline-reliability.md)：抽取保真、来源约束压缩、可续做的向量化，以及图谱筛选和展示范围。
 - [记忆图谱与搜索反馈](docs/memory-search-workbench.md)：项目范围内的全库一跳证据、默认不存问题正文的结果反馈，以及可复现的离线质量报告。
+- [记忆运维观测](docs/memory-operations-observability.md)：供应商返回的用量、请求当时单价估算，以及仅供运维人员读取的备份校验与隔离恢复演练状态。
 - [核心规格](docs/core-spec-v0.1.md)：数据模型与任务连续性边界。
 - [部署指南](docs/pve-lxc-deployment-v0.1.md)：可选的 Linux/LXC 部署示例；核心 API 不要求使用 Proxmox。
 - [核心优化说明](docs/core-optimization-v0.2/release-notes.md)与[检索及同步修订](docs/core-review-v0.3/README.md)：实现变更和兼容性说明。

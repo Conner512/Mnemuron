@@ -5,6 +5,7 @@ import {ValidationError,ConflictError,NotFoundError,AuthorizationError} from '..
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
 import {graphFold,memoryGraph} from './memory-graph.mjs';
 import {processingEvidence} from './memory-processing.mjs';
+import {backupDatabaseIdentity,readBackupStatus} from '../memory/backup-status.mjs';
 
 export {FEATURE_VIEWS};
 // An explicit Codex plugin grant, separate from ordinary memory/capture credentials.
@@ -25,6 +26,7 @@ function activity(db,user,liveSql){const since=new Date(Date.now()-7*86400000).t
 export const FEATURE_ACTIONS=['memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate'];
 export const featureParams={
   attention:['graph_days','graph_kinds','graph_query','graph_project_id','graph_task_id','graph_focus','graph_peer','graph_history','graph_offset','graph_limit'],
+  'model-usage':['days'],
   'task-branches':['task_id','project_id','offset','limit'],'project-context':['project_id'],
   'task-checkpoints':['task_id','offset','limit'],'task-reconciliation':['task_id'],
   'memory-versions':['memory_id','offset','limit','revision','content_offset','content_limit','chain'],
@@ -41,6 +43,7 @@ const packageVersion=JSON.parse(readFileSync(new URL('../../../package.json',imp
 // Console preferences are account-owned. Never write the global operator retention settings.
 export class ConsoleFeatures {
   constructor(service){this.service=service;this.store=service.store;this.db=service.db;
+    this.backupDatabaseIdentity=this.store.memoryConfig.storage?.backup_dir?backupDatabaseIdentity(this.store.databasePath):null;
     this.db.exec(`CREATE TABLE IF NOT EXISTS console_preferences(user_id TEXT NOT NULL,kind TEXT NOT NULL,revision INTEGER NOT NULL,value_json TEXT NOT NULL,PRIMARY KEY(user_id,kind));`);
     this.db.function('memory_graph_fold',{deterministic:true},graphFold);
   }
@@ -104,7 +107,8 @@ export class ConsoleFeatures {
       const daily=db.prepare("SELECT 1 FROM sqlite_master WHERE name='console_model_usage_daily'").get()?db.prepare('SELECT kind,day,used FROM console_model_usage_daily WHERE user_id=? AND day>=?').all(user,since):[];
       const history=days.map(d=>({day:d,...Object.fromEntries(['organizer','embedder'].map(kind=>[kind,daily.find(r=>r.day===d&&r.kind===kind)?.used||0]))}));
       const searches=db.prepare("SELECT count(*) n FROM audit_events WHERE user_id=? AND action='memory.query' AND created_at>=?").get(user,new Date(Date.now()-7*86400000).toISOString()).n;
-      return result({day,unit:'reserved_requests',cost:null,cost_status:'not_metered',models,history,searches_7d:searches});
+      return result({day,unit:'reserved_requests',cost:null,cost_status:'not_metered',models,history,searches_7d:searches,
+        observed_usage:service.models.usage.report(user,{days:p.days===undefined?14:Number(p.days)})});
     }
     if(view==='task-branches'){
       if(p.task_id){this.task(auth,p.task_id);return result({preview:store.previewTaskBranches(auth,{query:p.task_id,signals:{task_id:p.task_id}})});}
@@ -152,7 +156,12 @@ export class ConsoleFeatures {
     if(view==='system-health')return result({...(service.owner.user?{owner:service.owner.view(user)}:{}),services:{core:db.prepare('SELECT 1 n').get().n===1?'ready':'unavailable',search:store.memorySearch.status().state,
       worker:service.owner.user?(service.owner.allowed('processing')?'enabled_not_probed':'paused'):(store.memoryConfig.console?.worker_enabled?'enabled_not_probed':'disabled'),vector:store.memoryConfig.vector_store?.enabled?'enabled_not_probed':'disabled',mcp:'not_probed'},observed_at:new Date().toISOString()});
     if(view==='system-version')return result({release:packageVersion,node:process.version,schema_version:db.prepare('PRAGMA user_version').get().user_version,migrations:'initialization_completed',production_ready:false});
-    if(view==='backups')return result({status:'not_configured',entries:[],verified:false,automatic_backup_changed:false});
+    if(view==='backups'){
+      // The OAuth BFF gates this global operational view to platform operators. In single-owner mode Core
+      // also rejects another owner's Console credential before looking at operator execution evidence.
+      if(service.owner.user)service.owner.require(user);
+      return result(readBackupStatus(store.memoryConfig,store.databasePath,{expectedIdentity:this.backupDatabaseIdentity}));
+    }
     throw new NotFoundError('Console feature not found.');
   }
   apply(auth,action,p){

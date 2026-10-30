@@ -264,6 +264,11 @@ The owner-control, handoff and lifecycle behavior tests remain required alongsid
 - retention pruning (`pruneExpired`, account-wide raw-event retention, unchanged);
 - migration repair (`store.migrate`);
 - backups and restore checks (`server/bin/mnemuron-scheduled-backup.mjs`, `mnemuron-restore-check.mjs`);
+- trusted backup evidence (`server/lib/memory/backup-status.mjs`) is a separate private operator SQLite, not a
+  Core material table. It stores hashes/timing/result/size, never account content or lifecycle authority. Console
+  status reads only its configured sidecar; backups and isolated restores continue through the reviewed snapshot
+  helper. `memory_model_attempts` is owner-scoped, non-material provider-attempt telemetry with no source/project
+  IDs; recording or reading it cannot authorize a lifecycle change;
 - operator harnesses in `server/bin/*harness*` and `*reconcile*`, which run against disposable or operator-selected databases.
 
 ## Write entry points (reviewed by hand; transaction boundary → check enforcement adds)

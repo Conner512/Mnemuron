@@ -40,18 +40,18 @@ export async function createMemoryBackup(store,destination){
   try{
     await backup(store.db,destination);
     const db=new DatabaseSync(destination,{readOnly:true});let manifest;try{manifest=databaseManifest(db);}finally{db.close();}
-    manifest.file_sha256=createHash('sha256').update(readFileSync(destination)).digest('hex');
-    writeFileSync(handles[1],JSON.stringify(manifest,null,2));return {created:true,table_count:manifest.tables.length,integrity:manifest.integrity};
+    const bytes=readFileSync(destination);manifest.file_sha256=createHash('sha256').update(bytes).digest('hex');
+    writeFileSync(handles[1],JSON.stringify(manifest,null,2));return {created:true,table_count:manifest.tables.length,integrity:manifest.integrity,artifact_sha256:manifest.file_sha256,size_bytes:bytes.length};
   }finally{for(const fd of handles)closeSync(fd);}
 }
 export function verifyMemoryBackup(filename){
   guardPaths(filename);
-  const manifest=JSON.parse(readFileSync(filename+'.manifest.json','utf8')),fileHash=createHash('sha256').update(readFileSync(filename)).digest('hex');
+  const manifest=JSON.parse(readFileSync(filename+'.manifest.json','utf8')),bytes=readFileSync(filename),fileHash=createHash('sha256').update(bytes).digest('hex');
   if(fileHash!==manifest.file_sha256)fail('BACKUP_HASH_MISMATCH');
-  const db=new DatabaseSync(filename,{readOnly:true});try{const actual=databaseManifest(db);if(digest(actual.tables)!==digest(manifest.tables))fail('BACKUP_MANIFEST_MISMATCH');return {verified:true,table_count:actual.tables.length,vector_requires_rebuild:true};}finally{db.close();}
+  const db=new DatabaseSync(filename,{readOnly:true});try{const actual=databaseManifest(db);if(digest(actual.tables)!==digest(manifest.tables))fail('BACKUP_MANIFEST_MISMATCH');return {verified:true,table_count:actual.tables.length,vector_requires_rebuild:true,artifact_sha256:fileHash,size_bytes:bytes.length};}finally{db.close();}
 }
 export async function restoreIsolatedBackup(filename,destination){
-  verifyMemoryBackup(filename);const handles=reserveTarget(destination,'RESTORE_TARGET_EXISTS');
+  const verified=verifyMemoryBackup(filename);const handles=reserveTarget(destination,'RESTORE_TARGET_EXISTS');
   try{
     const source=new DatabaseSync(filename,{readOnly:true});try{await backup(source,destination);}finally{source.close();}
   }finally{for(const fd of handles)closeSync(fd);}
@@ -62,6 +62,6 @@ export async function restoreIsolatedBackup(filename,destination){
       db.exec("BEGIN IMMEDIATE;DELETE FROM memory_vector_active;UPDATE memory_vector_generations SET state='restore_invalidated',lease_owner=NULL,lease_expires=NULL,fence=fence+1;COMMIT;");
     }
     const search=new MemorySearch(db);if(search.status().state!=='ready')fail('RESTORE_SEARCH_UNAVAILABLE');
-    return {verified:true,isolated:true,source_manifest_matched:true,lexical_index:'ready',vector_index:'requires_rebuild',service_started:false};
+    return {verified:true,isolated:true,source_manifest_matched:true,lexical_index:'ready',vector_index:'requires_rebuild',service_started:false,artifact_sha256:verified.artifact_sha256,size_bytes:verified.size_bytes};
   }finally{db.close();}
 }

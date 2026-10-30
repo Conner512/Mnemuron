@@ -708,7 +708,7 @@ export function prototypeView(t, page, {data = {}, caps = {}} = {}) {
 // policy, background tasks); the health page (storage slug) combines service, model, version and backup reads.
 export const completedViews={overview:['attention','system-health','model-usage','models'],memories:[],summaries:[],tasks:['task-branches'],
   jobs:['system-health','models'],connections:['system-health','attention','capture-status','tunnel'],models:['model-usage'],security:['login-history'],audit:[],
-  storage:['system-health','system-version','models','attention','tunnel']};
+  storage:['system-health','system-version','models','attention','tunnel','backups']};
 // OVW-03 (attention counts) is shown inside the overview status (actions.mjs overviewStatus), not as its own card.
 // Panels that show data or an action; text-only feature descriptions (batch retract, version compare, inline project
 // context) are not repeated as cards, and the panels carry no feature status or ID.
@@ -739,8 +739,18 @@ function featureBody(t,id,data,caps){
   if(id==='AUD-02')return html`<button type="button" data-audit-export>${i18n(t,'exportAudit')}</button><p>${i18n(t,'auditExportNote')}</p><p data-audit-result role="status"></p>`;
   if(id==='STO-06')return html`<dl class="metadata-grid">${Object.entries(d.services).map(([k,v])=>html`<dt>${k}</dt><dd>${t(v)}</dd>`)}</dl>${sectionNote(t,'healthObservationNote')}`;
   if(id==='STO-07')return html`<dl class="metadata-grid">${[['releaseVersion',d.release],['schemaVersion',d.schema_version],['runtimeVersion',d.node]].map(([k,v])=>html`<dt>${i18n(t,k)}</dt><dd>${v}</dd>`)}</dl>${sectionNote(t,'migrationVersionNote')}`;
-  if(id==='STO-08')return sectionNote(t,'backupUnknownNote');
+  if(id==='STO-08')return trusted(backupStatusView(t,d));
   return '';
+}
+
+/** A read-only operational receipt view: the three checks are independent, never inferred from a file listing. */
+export function backupStatusView(t,d){
+  if(!d)return String(sectionNote(t,'backupReadUnavailable'));
+  const rows=[['backupCreatedStage',d.backup],['backupVerifiedStage',d.verification],['backupRestoredStage',d.restore]];
+  return String(html`<p class="policy-box">${i18n(t,'backupEvidenceNote')}</p><p role="status" data-backup-state="${d.status}">${i18n(t,'backupOverall')}: <strong>${i18n(t,'backupState_'+d.status)}</strong></p>
+    <div class="table-scroll"><table data-backup-evidence><thead><tr>${['backupStage','state','backupTime','backupSize','backupArtifact'].map(k=>html`<th>${i18n(t,k)}</th>`)}</tr></thead><tbody>
+    ${rows.map(([label,row])=>html`<tr><th scope="row">${i18n(t,label)}</th><td>${i18n(t,'backupState_'+(row?.status||'missing'))}${row?.error_code?html`<small><code>${row.error_code}</code></small>`:''}</td><td>${row?.observed_at?formatDate(row.observed_at):'—'}${row?.freshness_limit_days?html`<small>${i18n(t,'backupFreshness')}: ${row.freshness_limit_days} ${i18n(t,'backupDays')}</small>`:''}</td><td>${row?.size_bytes==null?'—':`${Number(row.size_bytes).toLocaleString()} B`}</td><td>${row?.artifact_sha256?html`<code class="digest" title="${row.artifact_sha256}">${row.artifact_sha256.slice(0,12)}…</code>`:'—'}${label==='backupRestoredStage'&&row?.artifact_sha256?html`<small>${i18n(t,row.matches_latest_backup?'backupRestoreLatest':'backupRestoreEarlier')}</small>`:''}</td></tr>`)}</tbody></table></div>
+    ${d.error_code?html`<p role="alert"><code>${d.error_code}</code></p>`:''}<p class="muted">${i18n(t,'backupOperatorCommands')}</p>`);
 }
 
 /** Existing pages: their planned and policy features as one compact list under the live content. */

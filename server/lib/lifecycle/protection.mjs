@@ -118,7 +118,8 @@ export const LIFECYCLE_ENFORCEMENT_TABLES = `
 //   memory_fingerprints, memory_index_outbox, memory_search_* (derived from memories, counted at source),
 //   memory_derived_outbox, handoff_module_state, memory_vector_active, memory_vector_calls (global),
 //   memory_model_budget, memory_profile_state, memory_owner_model_usage, memory_owner_vector_usage,
-//   memory_owner_vector_build_usage, console_model_usage(_daily) (usage telemetry),
+//   memory_owner_vector_build_usage, console_model_usage(_daily), memory_model_attempts (usage telemetry;
+//   no memory text, source/project identifiers, lifecycle authority or destructive action permissions),
 //   console_models, console_model_tests, console_model_quotas, console_hosts(_apply), console_vector_budget, console_vector_profiles,
 //   console_vector_requests, console_settings, console_preferences, console_imports, console_import_records
 //   (configuration and import receipts; their effects on memories, categories and summaries are counted there),
