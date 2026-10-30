@@ -68,3 +68,12 @@ test('the palette keeps small body, navigation and action text at 4.5:1 contrast
   assert.ok(ratio>=4.5,`${foreground}/${background}: ${ratio}`);
  }
 });
+test('summary review entry labels wrap without clipping inside narrow detail panes',()=>{
+ const css=fs.readFileSync(new URL('../../../web/console/controls.css',import.meta.url),'utf8');
+ const rule=declarations(css,'[data-review-open]');
+ assert.equal(rule['max-width'],'100%');
+ assert.equal(rule['min-width'],'0');
+ assert.equal(rule['white-space'],'normal');
+ assert.equal(rule['overflow-wrap'],'anywhere');
+ assert.equal(rule.overflow,undefined,'long labels must wrap, not be clipped');
+});
