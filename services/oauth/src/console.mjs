@@ -7,7 +7,7 @@ import {icon} from '../../../web/console/visuals.mjs';
 import {text} from '../../../web/console/catalog.mjs';
 import {clientSnapshot} from './session-client.mjs';
 import {consoleManagement,consoleActionAllowed,consoleAllowedActions} from './console-policy.mjs';
-import {CONSOLE_LIFECYCLE_CONFIRMS,CONSOLE_TUNNEL_FIELDS,CONSOLE_WORKFLOW_CONFIRMS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_LIFECYCLE_CONFIRMS,CONSOLE_TUNNEL_FIELDS,CONSOLE_WORKFLOW_CONFIRMS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS,CONSOLE_REVIEW_VIEWS,CONSOLE_REVIEW_FIELDS} from '../../../shared/console-contract.mjs';
 import {fingerprint} from '../../../server/lib/console/state.mjs';
 
 // A one-time-code field stays one submitted input; data-otp lets the shared asset draw six boxes over it.
@@ -192,6 +192,33 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       await ids.console.reauthenticate(account.account_id,session,payload,{otp:true});
       result=await coreFor(account.subject).action({action,operation_id,payload:Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]))});
     }
+    else if(Object.hasOwn(CONSOLE_REVIEW_FIELDS,action)){
+      const fields=CONSOLE_REVIEW_FIELDS[action];
+      if(Object.keys(payload).some(key=>![...fields,'current_password','otp'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const validId=value=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,160}$/.test(value),validRevision=value=>Number.isSafeInteger(value)&&value>0&&value<=2147483647;
+      if(action==='review.candidate'){
+        if(!validId(payload.candidate_id)||!validRevision(payload.revision)||!['accept','dismiss'].includes(payload.decision)
+          ||payload.decision==='accept'&&payload.confirmed!==true
+          ||payload.decision==='dismiss'&&['content','memory_type','topic','confirmed'].some(k=>Object.hasOwn(payload,k)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      }else if(!validId(payload.memory_id)||!validId(payload.counterpart_id)||!validRevision(payload.revision)||!validRevision(payload.counterpart_revision)
+        ||!['keep_both','replace','retract_duplicate','undecided'].includes(payload.decision)
+        ||['replace','retract_duplicate'].includes(payload.decision)&&payload.confirmed!==true)throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      const core=coreFor(account.subject),safe=Object.fromEntries(fields.filter(k=>Object.hasOwn(payload,k)).map(k=>[k,payload[k]]));let completed=false;
+      try{const operation=await core.view('operation',{operation_id,action,request_hash:fingerprint(safe)});completed=operation.state==='completed';}catch(error){if(error.status!==404)throw error;}
+      if(!completed){
+        if(action==='review.candidate'){
+          const check=await core.view('review-candidates',{candidate_id:String(payload.candidate_id||'')});const candidate=check.candidates.find(c=>c.candidate_id===payload.candidate_id);
+          if(!candidate||candidate.revision!==payload.revision||candidate.state!=='pending')throw new BoundaryError(409,'PREVIEW_CHANGED');
+        }else{
+          const check=await core.view('memory-review',{memory_id:String(payload.memory_id||''),counterpart_id:String(payload.counterpart_id||'')});
+          if(check.left.revision!==payload.revision||check.right?.revision!==payload.counterpart_revision||check.left.source_version!==payload.source_version||check.right?.source_version!==payload.counterpart_source_version)throw new BoundaryError(409,'MEMORY_VERSION_CHANGED');
+          if(['replace','retract_duplicate'].includes(payload.decision)&&check.same_scope!==true)throw new BoundaryError(409,'RECONCILIATION_CONFLICT');
+        }
+      }
+      ids.session(token,'console');
+      await ids.console.reauthenticate(account.account_id,session,payload,{otp:true});
+      result=await core.action({action,operation_id,payload:safe});
+    }
     else if(Object.hasOwn(CONSOLE_WORKFLOW_CONFIRMS,action)){
       const fields=CONSOLE_WORKFLOW_CONFIRMS[action],resume=action==='resume.confirm',key=resume?'resume_id':'preview_id';
       if(Object.keys(payload).some(k=>![...fields,'current_password','otp'].includes(k))
@@ -322,7 +349,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
   }
   if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
-  if(coreFor && request.method==='GET' && (CONSOLE_WORKFLOW_VIEWS.some(view=>pathname===`/console-api/${view}`)||/^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname))) {
+  if(coreFor && request.method==='GET' && ([...CONSOLE_WORKFLOW_VIEWS,...CONSOLE_REVIEW_VIEWS].some(view=>pathname===`/console-api/${view}`)||/^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname))) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     let result=await core.view(view,Object.fromEntries(url.searchParams));
     // Configuration lives in Core (settings, models, agent keys, tunnels) and here (connections): one combined view.

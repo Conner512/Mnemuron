@@ -6,7 +6,7 @@ import {similarMemories} from './memory/similar.mjs';
 import {projectProfile} from './memory/profile.mjs';
 import {sessionContext} from './memory/session-context.mjs';
 import {isRetrievalDegradation} from '../../shared/retrieval-diagnostics.mjs';
-import {CONSOLE_WORKFLOW_VIEWS} from '../../shared/console-contract.mjs';
+import {CONSOLE_WORKFLOW_VIEWS,CONSOLE_REVIEW_VIEWS} from '../../shared/console-contract.mjs';
 import {
   AuthenticationError,
   MnemuronStore,
@@ -105,7 +105,7 @@ export function createMnemuronApp({
 
       const auth = store.authenticate(bearerToken(request));
       if(isConsoleReader(auth) && !(
-        request.method==='GET' && (pathname==='/v1/identity' || CONSOLE_WORKFLOW_VIEWS.some(view=>pathname===`/v1/console/${view}`) || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
+        request.method==='GET' && (pathname==='/v1/identity' || [...CONSOLE_WORKFLOW_VIEWS,...CONSOLE_REVIEW_VIEWS].some(view=>pathname===`/v1/console/${view}`) || /^\/v1\/console\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|entities|memories|summaries|summary|jobs|job|storage|connections|audit|capabilities|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|operation|lifecycle-preview-check)$/.test(pathname) || /^\/v1\/memories\/[A-Za-z0-9_.:-]+$/.test(pathname))
         || request.method==='POST' && ['/v1/console/action','/v1/memories/query','/v1/memory-summaries/query','/v1/memory-source-manifests/query'].includes(pathname)))
         throw new NotFoundError('Endpoint not available to this destination.');
       if(request.method==='POST'&&pathname==='/v1/console/action'&&isConsoleReader(auth)){

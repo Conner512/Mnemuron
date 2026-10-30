@@ -8,6 +8,7 @@ import {credentialView} from './credentials.mjs';
 import {consoleActionWritable,CONSOLE_ACTIONS,CONSOLE_LIFECYCLE_CONFIRMS,TASK_WORKFLOW_ACTIONS,RESUME_WORKFLOW_ACTIONS} from '../../../shared/console-contract.mjs';
 import {ConsoleTaskWorkflows} from './task-workflows.mjs';
 import {ConsoleResumeWorkflows} from './resume-workflows.mjs';
+import {ConsoleMemoryReview} from './memory-review.mjs';
 import {ProjectLifecycleMutations} from '../lifecycle/mutations.mjs';
 import {AuthorizationError,ValidationError,ConflictError,NotFoundError} from '../errors.mjs';
 import {MemoryWorker,scheduleLibrary,scheduleTraits} from '../memory-jobs/worker.mjs';
@@ -32,7 +33,7 @@ const receipt=result=>({status:result.status,memory_id:result.replacement_memory
 // Console actions whose effects the config center logs (source 'web').
 const CONFIG_ACTIONS=['features.save','schedule.save','models.save','models.disable','models.quota','hosts.set','hosts.remove','devices.register','devices.rotate','devices.revoke','connections.create','connections.rotate','connections.revoke'];
 export class ConsoleService {
-  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);this.taskWorkflows=new ConsoleTaskWorkflows(this);this.resumeWorkflows=new ConsoleResumeWorkflows(this);}
+  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);this.taskWorkflows=new ConsoleTaskWorkflows(this);this.resumeWorkflows=new ConsoleResumeWorkflows(this);this.review=new ConsoleMemoryReview(this);}
   require(auth,action){if(this.owner.user)this.owner.require(auth.user_id);else if(OWNER_ACTIONS.includes(action))throw new AuthorizationError('owner mode');if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||(user?this.features.preference(user,'taxonomy-default',taxonomyDefault):taxonomyDefault);return user?this.features.taxonomy(user,fallback):fallback;}
   capabilities(auth){if(this.owner.user)this.owner.require(auth.user_id);const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action)&&(this.owner.user?!['jobs.schedule','jobs.retry','vector.prepare','vector.schedule'].includes(action):!OWNER_ACTIONS.includes(action)));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),category_descriptions:this.features.descriptions(auth.user_id),
@@ -107,6 +108,7 @@ export class ConsoleService {
   async execute(auth,input){object(input,['action','operation_id','payload']);const {action,operation_id:operation,payload:p}=input;this.require(auth,action);id(operation);if(!CONSOLE_ACTIONS.includes(action))throw new NotFoundError('Action not found.');
     if(Buffer.byteLength(JSON.stringify(input))>56*1024)throw new ValidationError('Request too large.','CONSOLE_INPUT_TOO_LARGE');
     object(p,Object.keys(p||{}));
+    if(action.startsWith('review.'))return this.review.execute(auth,action,p,operation);
     if(TASK_WORKFLOW_ACTIONS.includes(action))return this.taskWorkflows.execute(auth,action,p,operation);
     if(action==='models.test')return this.probe(auth,p,operation);
     if(action==='models.discover')return this.discover(auth,p,operation);
@@ -129,6 +131,7 @@ export class ConsoleService {
     throw new NotFoundError('Action not found.');
   }
   apply(auth,action,p){const store=this.store;
+    if(action.startsWith('review.'))return this.review.apply(auth,action,p);
     if(RESUME_WORKFLOW_ACTIONS.includes(action))return this.resumeWorkflows.apply(auth,action,p);
     if(OWNER_ACTIONS.includes(action))return this.owner.apply(auth,action,p);
     if(action.startsWith('connections.')&&!this.owner.allowed('connections'))throw new ConflictError('Connection management disabled.','FEATURE_DISABLED');

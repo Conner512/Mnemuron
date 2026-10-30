@@ -24,9 +24,22 @@
   "memory_entity_proposals",
   "memory_entity_tombstones",
   "memory_entity_queue_cursor",
-  "console_task_workflow_previews"
+  "console_task_workflow_previews",
+  "memory_review_candidates",
+  "memory_summary_reviews",
+  "memory_manual_reviews"
  ],
  "sites": {
+  "server/lib/console/memory-review.mjs": {
+   "projects": {"read": 1, "write": 0},
+   "memories": {"read": 3, "write": 1},
+   "events": {"read": 4, "write": 0},
+   "memory_summaries": {"read": 1, "write": 0},
+   "memory_summary_dependencies": {"read": 1, "write": 0},
+   "memory_review_candidates": {"read": 2, "write": 2},
+   "memory_summary_reviews": {"read": 2, "write": 1},
+   "memory_manual_reviews": {"read": 1, "write": 1}
+  },
   "server/bin/mnemuron-capacity-harness.mjs": {
    "events": {
     "read": 10,

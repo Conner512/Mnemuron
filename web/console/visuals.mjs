@@ -455,11 +455,14 @@ export const featureMap = {
     {id: 'MEM-06', status: 'live', read: ['memories'], write: ['memory.batch_retract']},
     {id: 'MEM-07', status: 'live', read: ['memory-versions']},
     {id: 'MEM-08', status: 'live', read: ['memories']},
+    {id: 'MEM-09', status: 'live', read: ['review-candidates'], write: ['review.extract', 'review.candidate'], reauth: true},
+    {id: 'MEM-10', status: 'live', read: ['memory-review'], write: ['review.verify', 'review.resolve'], reauth: true},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},
     {id: 'SUM-02', status: 'live', write: ['jobs.schedule']},
     {id: 'SUM-03', status: 'live', read: ['summaries']},
+    {id: 'SUM-04', status: 'live', read: ['summary-quality'], write: ['review.summary']},
   ],
   jobs: [
     {id: 'JOB-01', status: 'live', read: ['jobs', 'job']},

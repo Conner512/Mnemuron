@@ -11,9 +11,9 @@ import { webMemorySql } from './web-visibility.mjs';
 export const SIMILAR_SCORE = 0.9, DUPLICATE_SCORE = 0.95, MAX_SIMILAR = 3;
 
 /** [{memory_id, similarity, relation: 'duplicate'|'similar'}], best first; [] when nothing qualifies or on any failure. */
-export async function similarMemories(store, auth, memory) {
+export async function similarMemories(store, auth, memory, {semantic=true}={}) {
   if (!memory?.memory_id || !auth?.scopes?.includes('memory:read')) return [];
-  try {
+  if(semantic)try {
     const result = await store.searchMemories(auth, { query: memory.content.slice(0, 2000), mode: 'semantic', limit: MAX_SIMILAR + 1,
       [MEMORY_SEARCH_CONTEXT]: { documentSimilarity: true } });
     const retrieval = result.retrieval || {};

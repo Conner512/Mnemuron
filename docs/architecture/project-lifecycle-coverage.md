@@ -1,5 +1,25 @@
 # Project lifecycle: read/write coverage inventory
 
+## Memory review workbench additions
+
+`console/memory-review.mjs` owns three additive, owner-keyed review metadata tables:
+`memory_review_candidates`, `memory_summary_reviews` and `memory_manual_reviews`. The
+`memory_review` material-table group installs owner mutation epoch guards on every write.
+All rich reads go through the existing Console owner/read gates; captured-event preview
+also requires a full Console writer. Event references, retained-source hashes, exact
+memory revisions, current summary dependencies and live project membership are checked
+again before a write. Candidate versions and summary feedback additionally bind the
+owner's lifecycle generation. Manual comparison source versions combine provenance,
+memory state, exact scope and lifecycle generation; delete/restore cannot revive old
+confirmation authority. Completed operation checks revalidate the same post-write
+memory bindings before replaying metadata receipts. They never replay source text.
+
+The only direct memory update attaches the reviewed event ID to a newly created,
+same-owner memory inside the existing atomic save transaction. Promotion, correction
+and retraction otherwise reuse `saveMemory`, `supersedeMemory` and `retractMemory`.
+Replacement inherits explicit Web denials from **both** compared records. Raw event
+expiry is never extended and no candidate duplicates raw text in its table.
+
 Operator note: a database whose lifecycle metadata is inconsistent, including lifecycle rows whose projects table is damaged or missing, is refused at open before any write or self-repair; recover it from a verified backup (isolated restore) rather than editing rows by hand.
 
 Status: schema v11 adds the owner-scoped entity evidence graph to the v10 lifecycle enforcement boundary. Phases 5B (reads), 5C (writes) and 5D (jobs and derived outputs) remain enforced. The v10 build first opened databases with deleted or merged projects (v8/v9 refused them); inconsistent lifecycle metadata is still refused before any write or repair (`assertLifecycleConsistent`). Older readers, including v10, refuse v11 before mutation. Lifecycle state is created only by the 5E Console actions behind the 5F BFF re-authentication gate (below); the Console UI is 5G.

@@ -8,13 +8,14 @@ import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 import {mountAgents} from './agents.mjs';
 import {mountTaskWorkflows} from './task-workflows.mjs';
+import {mountMemoryReview,reviewButton} from './memory-review.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections,featureReads,taskWorkflows,overview,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
+let capabilities={enabled:false,writable:false},actions,connections,featureReads,taskWorkflows,memoryReview,overview,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let detailMeta=null,query='',searchMode='hybrid',kind='',concept='',status='active',topic='',origin='',review='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
@@ -35,6 +36,7 @@ function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('
 readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
+ memoryReview?.clear();
  actions?.clear();connections?.clear();featureReads?.clear();taskWorkflows?.clear();overview?.dispose();overview=null;state.clear();requestSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
  currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';kind='';concept='';status='active';topic='';origin='';review='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
@@ -79,7 +81,7 @@ function heading() {
  // whether a button can be used shows on the button itself.
  const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):'';
  const create=page==='memories'&&canAct(capabilities,'memory.create')?actionButton('memory.create','newMemory'):'';
- return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create});
+ return pageHeading(t,{title:page,note:`pageNote_${page}`,actions:badge+create+(page==='memories'&&canAct(capabilities,'review.extract')?reviewButton():'' )});
 }
 
 function render(data) {
@@ -198,6 +200,7 @@ async function openMemory(params,first=false,back=false) {
    if(!back)detailStack.push({kind:'memory',params:{...params,revision:data.revision,source_version:data.source_manifest?.source_version}});
    setPaneTitle('detail',meta?.title);detailKind='memory';
    detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1,meta,labels:capabilities.category_labels||{}});
+   if(data.memory.status==='active')detail.insertAdjacentHTML('afterbegin',reviewButton('memory',data.memory.memory_id));
    if(data.memory.lifecycle?.supersedes_memory_id||data.memory.lifecycle?.superseded_by_memory_id)void loadVersionChain(data.memory.memory_id,sequence);
    markSelected();}
  catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
@@ -248,7 +251,7 @@ async function openSummary(params,first=false,back=false) {
  if(first)beginDetail('summary','summaries');
  try{const data=await api('summary',params);if(!state.account||sequence!==detailSequence)return;detailData=data;if(!back)detailStack.push({kind:'summary',params});
    setPaneTitle('summaries');detailKind='summary';
-   detail.innerHTML=summaryDetailView(t,data,{canGoBack:detailStack.length>1});markSelected();}
+   detail.innerHTML=reviewButton('summary',data.results?.[0]?.summary_id||params.summary_id)+summaryDetailView(t,data,{canGoBack:detailStack.length>1});markSelected();}
  catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
 }
 
@@ -325,6 +328,7 @@ WIDE_PANE.addEventListener('change',()=>{if(pane.open){const modal=pane.matches(
 window.addEventListener('pagehide',clear);
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
 document.addEventListener('appearancechange',()=>{
+ memoryReview?.appearance();
  // Language changes translate chrome only; do not replace a form, drawer, user content or a pending request.
  document.title=`Mnemuron · ${t(page)}`;
 });
@@ -350,6 +354,7 @@ connections=mountConnections({api,mutate,getCaps:()=>capabilities,reload:load,is
 taskWorkflows=mountTaskWorkflows({api,mutate,getCaps:()=>capabilities,getData:()=>currentData||{},getAccount:()=>state.account,
  isActive:()=>!!state.account&&page==='tasks',reload:()=>load({retainOnError:true}),syncAppearance});
 mountAgents({api,mutate,reload:()=>load({retainOnError:true})});
+memoryReview=mountMemoryReview({api,mutate,getCaps:()=>capabilities,getAccount:()=>state.account,reload:()=>load({retainOnError:true}),translate:t});
 
 try {
  const me=await api('me');if(me.account_id!==state.account){clear();location.replace('/login');}
