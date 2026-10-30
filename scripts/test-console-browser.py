@@ -60,11 +60,13 @@ try:
   goto('memories');check('New-memory action is enabled by real capabilities',page.locator('[data-console-action="memory.create"]').is_enabled())
   begin('memory.create');page.locator('[name=content]').fill('Synthetic browser created memory：型号 C9800-CL。');created=submit();check('UI creates persistent memory',created['status']=='saved');mid=created['memory_id'];close()
   # Categories were retired: the detail offers correct/retract only, and the row shows the writer-chosen type.
-  page.locator('[data-memory="'+mid+'"]').click();page.locator('#memory-dialog .detail-facts').wait_for()
+  # The processing evidence section has its own facts list; wait for this
+  # memory's top-level metadata, not an arbitrary nested facts list.
+  page.locator('[data-memory="'+mid+'"]').click();page.locator('#memory-content > .detail-facts').wait_for()
   check('No category filing in the detail',page.locator('#memory-dialog [data-console-action="memory.organize"],#memory-dialog [data-console-action="memory.classify"]').count()==0)
   meta=page.evaluate("async id=>(await fetch('/console-api/memory-meta?memory_id='+encodeURIComponent(id),{credentials:'same-origin'})).json()",mid)
   check('Metadata reports type fields, not a category','category' not in meta and 'kind' in meta)
-  page.locator('[data-memory="'+mid+'"]').click();page.locator('#memory-dialog .detail-facts').wait_for()
+  page.locator('[data-memory="'+mid+'"]').click();page.locator('#memory-content > .detail-facts').wait_for()
   check('Detail has no per-memory ChatGPT visibility control',page.locator('#memory-dialog [data-console-action="memory.visibility"]').count()==0)
   check('Detail heading is the memory title, not a generic label',page.locator('#detail-title').inner_text()!=page.evaluate("()=>document.documentElement.lang.startsWith('zh')?'记忆详情':'Memory detail'"))
   page.locator('[data-memory="'+mid+'"]').click();begin('memory.correct');page.locator('#operation-dialog [name=content]').fill('Synthetic browser corrected memory：型号 C9300。');r=submit();newmid=r['memory_id'];check('Correction creates replacement without overwriting history',newmid!=mid);close()
