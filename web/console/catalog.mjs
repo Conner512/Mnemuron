@@ -746,6 +746,7 @@ Object.assign(catalog['zh-CN'],{
  featMEM05:'分类',featMEM05Note:'逐条调整记忆的分类。',
  featMEM06:'批量整理',featMEM06Note:'选中多条记忆后一次分类或撤回；逐条核对版本，并返回每一条的结果。',
  featMEM07:'版本对比',featMEM07Note:'并排比较同一条记忆的两个版本，标出新增和删除的内容。',
+ featMEM11:'处理证据与选中补处理',featMEM11Note:'按当前版本查看来源、抽取、摘要和本地索引证据；预览并确认后，只补处理选中的记忆。',
  featSUM01:'分类索引与派生摘要',featSUM01Note:'浏览分类和摘要；每一句摘要都链接到来源记忆的具体版本。',
  featSUM02:'生成分类与摘要',featSUM02Note:'提交分类或摘要整理任务，原文不会被覆盖。',
  featSUM03:'自定义分类体系',featSUM03Note:'新增、重命名和停用分类；调整后由整理任务重新归类。',
@@ -853,6 +854,7 @@ Object.assign(catalog.en,{
  featMEM05:'Category',featMEM05Note:'Adjust the category per memory.',
  featMEM06:'Bulk organize',featMEM06Note:'Classify or retract several memories at once. Each item is version-checked and reported.',
  featMEM07:'Compare revisions',featMEM07Note:'Compare two revisions of a memory side by side with additions and removals marked.',
+ featMEM11:'Processing evidence and selected repair',featMEM11Note:'Inspect source, extraction, summary and local index evidence for the current revision; preview and confirm repair of only the selected memories.',
  featSUM01:'Category index and summaries',featSUM01Note:'Browse categories and summaries; every claim links to the source memory revision.',
  featSUM02:'Generate categories and summaries',featSUM02Note:'Queue classification or summary jobs. Originals are never overwritten.',
  featSUM03:'Custom taxonomy',featSUM03Note:'Add, rename and retire categories; organizer jobs re-file memories after a change.',
@@ -1847,4 +1849,23 @@ Object.assign(catalog.en,{
  mapBrowseNodes:'Browse map nodes',mapKeyboardHint:'Use Tab to choose a node, Enter to open its memories, and Esc to close details.',mapKeyword:'Keyword',mapTopic:'Topic',mapType:'Type',mapUnmapped:'Other memories',mapOtherKind:'Other {0}',
  mapUnmappedNote:'These memories do not belong to a displayed popular keyword or topic. They remain reachable in the map.',mapOnGraph:'{0} memories on this map',mapMemoryCount:'{0} memories',mapTogether:'Often occur together',mapKeywordsInType:'Keywords in this type',mapTopicsInType:'Topics in this type',
  mapSourceMemories:'Related memories in this map',mapMemoryId:'Memory {0}',mapOpenMemory:'Open this memory',mapOpenLibrary:'View in the memory library',mapLibraryScope:'The library link shows all active memories with this keyword, topic or type, beyond the map’s time window.',
+});
+
+Object.assign(catalog['zh-CN'],{
+ processingEvidenceTitle:'这条记忆的处理履历',processingEvidenceNote:'按当前版本核对本地证据；不调用模型，也不探测远端向量库。',processingEvidenceUnavailable:'处理履历暂时无法读取，记忆正文仍可查看。',
+ processingSource:'原文与来源',processingTraits:'类型与关键词',processingSummary:'摘要引用',processingVector:'当前语义索引',processingConfirmedChunks:'已确认分片',processingHistory:'最近处理记录',processingNoRuns:'暂无授权批次记录。',processingHistoryBound:'每类最多展示最近 20 条记录。',processingSummaryBound:'仅核对最近 20 份摘要；更早的结果未在此汇总。',
+ processingPreviewStale:'原冻结来源已变化或不可用，请重新选择并预览。',
+ processingRepairTraits:'补全这条记忆',processingRepairSummary:'补这条摘要',processingRepairVector:'补这条向量',processingRepair_traits:'补全所选记忆',processingRepair_summary:'补所选摘要',processingRepair_vector:'补所选向量',processingSelectedTitle:'确认所选记忆的精准补处理',processingNothingMissing:'所选记忆在这一步没有需要补处理的记录。',processingSelectedNote:'仅处理清单里固定版本的记忆；已完成的步骤跳过，不覆盖手工填写的字段。',processingSkipped:'已跳过完成项：',processingVectorRepairNote:'只补当前使用中的语义索引，不新建或切换索引，不处理未选中的记录。确认后可能发送所选原文给向量模型。',processingRepairSendNote:'确认后只将清单里的记忆发送给上述模型，使用现有外发授权和调用上限。',
+ processingState_available:'来源可用',processingState_unavailable:'来源已不可用',processingState_inactive:'非活动记录',processingState_complete:'已完整',processingState_missing:'尚缺结果',processingState_covered:'已被当前摘要引用',processingState_omitted:'已处理但未被摘要引用',processingState_stale:'结果已过期',processingState_not_ready:'尚无正在使用的索引',processingState_indexed:'当前版本已索引',processingState_partial:'仅部分分片已确认',
+ processingChannel_traits:'补全关键词',processingChannel_summary:'摘要',processingChannel_vector:'向量',processingChannel_classification:'历史分类',processingChannel_entities:'历史实体',VECTOR_GENERATION_CHANGED:'当前使用的索引已变化，请重新选择记忆并预览补处理。',
+ processingResult_preview:'预览已生成，尚未发送内容。请检查清单并明确确认开始。',processingResult_saved:'配置已保存，本次保存没有启动处理。',processingResult_queued:'批次已获授权，等待后台处理。',processingResult_paused:'批次已暂停，不再领取或发布结果。',processingResult_cancelled:'批次已取消，已经发送的请求无法撤回。',processingResult_deleted:'已删除所选的已结束运行记录；记忆、摘要和索引保留。',processingResult_unknown:'操作返回了未识别的状态，请刷新检查实际结果。',
+});
+Object.assign(catalog.en,{
+ processingEvidenceTitle:'Processing evidence for this memory',processingEvidenceNote:'Checks local evidence for this revision. No model call or remote vector health probe.',processingEvidenceUnavailable:'Processing evidence is temporarily unavailable. The memory text remains readable.',
+ processingSource:'Original and sources',processingTraits:'Kind and keywords',processingSummary:'Summary evidence',processingVector:'Serving semantic index',processingConfirmedChunks:'confirmed chunks',processingHistory:'Recent processing records',processingNoRuns:'No authorized runs recorded.',processingHistoryBound:'Showing at most 20 recent records of each kind.',processingSummaryBound:'Only the latest 20 summaries were checked; older results are not included here.',
+ processingPreviewStale:'The frozen source changed or is unavailable. Select it again and create a new preview.',
+ processingRepairTraits:'Fill this memory',processingRepairSummary:'Summarize this memory',processingRepairVector:'Index this memory',processingRepair_traits:'Fill selected memories',processingRepair_summary:'Summarize selected',processingRepair_vector:'Index selected',processingSelectedTitle:'Confirm targeted processing',processingNothingMissing:'No missing work for this step in the selected memories.',processingSelectedNote:'Only the pinned revisions in this manifest are authorized. Completed steps are skipped and manual fields are preserved.',processingSkipped:'Already complete and skipped:',processingVectorRepairNote:'Repairs only the serving index. Does not create or switch an index or include unselected memories. Confirmation may send the selected text to the embedding model.',processingRepairSendNote:'Confirmation sends only the listed memories to the model under existing egress permission and call limits.',
+ processingState_available:'Sources available',processingState_unavailable:'Sources unavailable',processingState_inactive:'Inactive record',processingState_complete:'Complete',processingState_missing:'Missing result',processingState_covered:'Cited by a current summary',processingState_omitted:'Processed but not cited',processingState_stale:'Stale result',processingState_not_ready:'No serving index',processingState_indexed:'Current revision indexed',processingState_partial:'Some chunks confirmed',
+ processingChannel_traits:'Keyword fill',processingChannel_summary:'Summary',processingChannel_vector:'Vectors',processingChannel_classification:'Legacy classification',processingChannel_entities:'Legacy entities',VECTOR_GENERATION_CHANGED:'The serving index changed. Select memories again and create a new preview.',
+ processingResult_preview:'Preview created; no content sent. Review the manifest and explicitly confirm to start.',processingResult_saved:'Settings saved. This save did not start processing.',processingResult_queued:'The batch is authorized and waiting for background processing.',processingResult_paused:'The batch is paused and cannot claim work or publish results.',processingResult_cancelled:'The batch is cancelled. Requests already sent cannot be recalled.',processingResult_deleted:'Selected finished run records were deleted. Memories, summaries and indices are retained.',processingResult_unknown:'The operation returned an unrecognized status. Refresh to verify the actual result.',
 });

@@ -30,3 +30,14 @@ test("PROFILE-02: the HTTP route needs read scope and refuses an unknown or fore
   const missing = await f.request("POST", "/v1/projects/profile", {});
   assert.equal(missing.status, 400);
 });
+
+test("PROFILE-03: keyword normalization and per-memory counts agree with the library", async t => {
+  const f = await memoryFixture(t);
+  for (const [content, concepts] of [["Synthetic node one", ["ＰＶＥ", "pve", "PVE"]], ["Synthetic node two", ["PVE"]], ["Synthetic separate identifier", ["PVE-2"]]]) {
+    f.store.saveMemory(f.a.auth, { content, scope: "project", project_id: "project-alpha", kind: "architecture", concepts });
+  }
+  const p = projectProfile(f.store, f.a.auth, "project-alpha");
+  assert.equal(p.concepts.length, 2);
+  assert.equal(p.concepts[0].count, 2, "equivalent labels from the same memory count once");
+  assert.deepEqual(p.concepts[1], { concept: "PVE-2", count: 1 });
+});

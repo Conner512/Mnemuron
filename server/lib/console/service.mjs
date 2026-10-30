@@ -109,6 +109,12 @@ export class ConsoleService {
     if(Buffer.byteLength(JSON.stringify(input))>56*1024)throw new ValidationError('Request too large.','CONSOLE_INPUT_TOO_LARGE');
     object(p,Object.keys(p||{}));
     if(action.startsWith('review.'))return this.review.execute(auth,action,p,operation);
+    // Exact selections and their receipt titles stay bound to the original state hashes and lifecycle generation.
+    if(action==='processing.preview'&&p.items!==undefined)return this.store.memoryTransaction(()=>{
+      this.owner.checkSelection(auth.user_id,p.items);const previous=this.state.existing(auth.user_id,operation,action,p);
+      if(previous){this.owner.checkPreview(auth.user_id,previous.run_id);return previous;}
+      return this.state.sync(auth,action,p,operation,()=>this.apply(auth,action,p));
+    });
     if(TASK_WORKFLOW_ACTIONS.includes(action))return this.taskWorkflows.execute(auth,action,p,operation);
     if(action==='models.test')return this.probe(auth,p,operation);
     if(action==='models.discover')return this.discover(auth,p,operation);

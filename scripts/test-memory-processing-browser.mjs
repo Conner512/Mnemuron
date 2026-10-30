@@ -1,0 +1,66 @@
+// Real browser + authenticated BFF + Core; disposable synthetic loopback data only.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {createInterface} from 'node:readline';
+import {pathToFileURL} from 'node:url';
+
+const root=path.resolve(import.meta.dirname,'..'),base=path.resolve(process.env.MNEMURON_UI_EVIDENCE||os.tmpdir());
+assert.ok(base!==root&&!base.startsWith(root+path.sep),'Evidence stays outside the source tree');
+const evidence=fs.mkdtempSync(path.join(base,'memory-processing-browser-'));fs.chmodSync(evidence,0o700);
+assert.ok(process.env.PLAYWRIGHT_MODULE&&path.isAbsolute(process.env.PLAYWRIGHT_MODULE));
+const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE));
+const stderr=fs.openSync(path.join(evidence,'fixture.stderr'),'wx',0o600),child=spawn(process.execPath,['services/oauth/test/helpers/console-functional-preview.mjs'],{cwd:root,stdio:['pipe','pipe',stderr]});
+const queue=[],waiters=[],checks=[],errors=[];let browser,page,cfg;
+createInterface({input:child.stdout}).on('line',line=>{if(!line.startsWith('{'))return;const data=JSON.parse(line);if(waiters.length)waiters.shift()(data);else queue.push(data);});
+const bounded=async(promise,name)=>{let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(name+' timed out')),30000);})]);}finally{clearTimeout(timer);}};
+const read=()=>bounded(queue.length?Promise.resolve(queue.shift()):new Promise(resolve=>waiters.push(resolve)),'Fixture');
+const command=async(command,extra={})=>{child.stdin.write(JSON.stringify({command,...extra})+'\n');const r=await read();assert.ok(!r.fixture_error&&!r.error,r.fixture_error||r.error);return r;};
+const check=(name,value=true)=>{assert.ok(value,name);checks.push(name);console.log('PASS '+name);};
+try{
+ cfg=await read();assert.equal(new URL(cfg.url).hostname,'127.0.0.1');await command('owner-mode');
+ browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE,headless:true,args:['--no-sandbox']});
+ const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
+ await context.addInitScript(({account,origin})=>{if(location.origin===origin)localStorage.setItem('mnemuron.appearance.v1.'+account,JSON.stringify({locale:'en'}));},{account:cfg.accounts[0].account_id,origin:cfg.url});
+ page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(cfg.url+'/app/memories');
+ const api=async(view,params={})=>{const r=await page.evaluate(async({view,params})=>{const response=await fetch('/console-api/'+view+'?'+new URLSearchParams(params));return {status:response.status,body:await response.json()};},{view,params});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
+ const act=async(action,payload)=>{const r=await page.evaluate(async({action,payload})=>{const me=await (await fetch('/console-api/me')).json(),body=new URLSearchParams({action,operation_id:crypto.randomUUID(),account_id:me.account_id,csrf:me.csrf,payload:JSON.stringify(payload)});
+   const response=await fetch('/console-api/action',{method:'POST',body});return {status:response.status,body:await response.json()};},{action,payload});assert.equal(r.status,200,JSON.stringify(r.body));return r.body;};
+ const owner=await command('owner-state'),proof=await command('otp',{fresh:true});
+ await act('features.save',{expected_revision:owner.revision,flags:{processing:true,summary:true,traits:true},current_password:cfg.password,otp:proof.otp});
+ const one=await act('memory.create',{scope:'user',memory_type:'fact',content:'Synthetic Mnemuron selected browser evidence. Keep version 17.9.8; do not deploy 17.12.3.',topic:'Synthetic selected processing'});
+ const two=await act('memory.create',{scope:'user',memory_type:'fact',content:'Synthetic Mnemuron unselected browser evidence.',topic:'Synthetic unselected processing'});
+ await page.reload();await page.locator(`[data-batch-memory="${one.memory_id}"]`).waitFor();
+ await page.locator(`[data-memory="${one.memory_id}"]`).click();await page.locator('[data-memory-processing] [data-processing-refresh]').waitFor();
+ check('Memory detail reads current evidence through the real BFF',(await page.locator('[data-memory-processing]').innerText()).includes('Sources available'));
+ check('Reading evidence sends no model requests',(await command('owner-state')).inference_calls===0);
+ await page.locator('#memory-dialog [data-close]').first().click();await page.locator('#memory-dialog').waitFor({state:'hidden'});
+ await page.locator(`[data-batch-memory="${one.memory_id}"]`).check();
+ await page.locator('[data-memory-selection] [data-kind="summary"]').click();await page.locator('#operation-dialog form [name=current_password]').waitFor();
+ let state=await command('owner-state'),preview=state.runs.find(r=>r.state==='preview');
+ check('Selection freezes only one exact revision without sending content',preview.count===1&&preview.items[0].memory_id===one.memory_id&&preview.items[0].revision===1&&preview.selection==='explicit'&&state.inference_calls===0);
+ check('Confirmation discloses targeted scope and skipped steps',(await page.locator('#operation-dialog').innerText()).includes('Only the pinned revisions'));
+ await page.locator('#operation-dialog [name=current_password]').fill(cfg.password);const confirm=await command('otp',{fresh:true});
+ const otp=page.locator('#operation-dialog [name=otp]');if(await otp.count())await otp.fill(confirm.otp);
+ await page.locator('#operation-dialog button[type=submit]').click();await page.locator('#operation-dialog [data-processing-status="queued"]').waitFor();
+ check('Explicit confirmation queues work; it does not pretend execution already completed',(await command('owner-state')).runs.find(r=>r.run_id===preview.run_id).state==='queued');
+ await command('owner-tick');state=await command('owner-state');check('Background work makes one authorized synthetic model request',state.inference_calls===1&&state.runs.find(r=>r.run_id===preview.run_id).state==='completed');
+ await page.locator('#operation-dialog [data-operation-close]').first().click();
+ const first=await api('memory-processing',{memory_id:one.memory_id,revision:1}),outside=await api('memory-processing',{memory_id:two.memory_id,revision:1});
+ check('The selected memory is covered and the unselected memory is untouched',first.summary.status==='covered'&&outside.summary.status==='missing'&&outside.runs.items.length===0);
+ await page.reload();await page.locator(`[data-memory="${one.memory_id}"]`).click();await page.locator('[data-memory-processing] [data-processing-refresh]').waitFor();
+ check('Fresh detail reflects the completed result without offering duplicate summary work',(await page.locator('[data-memory-processing]').innerText()).includes('Cited by a current summary')&&await page.locator('[data-memory-processing] [data-kind="summary"]').count()===0);
+ await page.screenshot({path:path.join(evidence,'desktop.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.reload();await page.locator(`[data-memory="${one.memory_id}"]`).click();await page.locator('[data-memory-processing] [data-processing-refresh]').waitFor();
+ check('Processing evidence remains usable at a mobile viewport',await page.locator('#memory-dialog').isVisible()&&await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+2));
+ await page.screenshot({path:path.join(evidence,'mobile.png'),fullPage:true});
+ await command('basic-memory-only');await page.reload();await page.locator(`[data-memory="${one.memory_id}"]`).click();await page.locator('[data-memory-processing] [data-processing-refresh]').waitFor();
+ check('Basic memory access cannot acquire processing actions',await page.locator('[data-console-action="processing.preview"]').count()===0);
+ check('No browser runtime errors',errors.length===0);
+ fs.writeFileSync(path.join(evidence,'result.json'),JSON.stringify({status:'passed',checks,real_model_calls:0,synthetic_loopback:true},null,2),{mode:0o600});
+ console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
+}catch(error){if(page)await page.screenshot({path:path.join(evidence,'failed.png'),fullPage:true}).catch(()=>{});console.error(JSON.stringify({status:'failed',message:error.message,evidence,errors}));process.exitCode=1;}
+finally{await browser?.close();child.stdin.write(JSON.stringify({command:'stop'})+'\n');await bounded(new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve)),'Fixture cleanup');fs.closeSync(stderr);}

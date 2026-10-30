@@ -254,6 +254,20 @@
     "write": 0
    }
   },
+  "server/lib/console/memory-processing.mjs": {
+   "memory_summaries": {
+    "read": 1,
+    "write": 0
+   },
+   "memory_summary_dependencies": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_vector_documents": {
+    "read": 2,
+    "write": 0
+   }
+  },
   "server/lib/console/organize.mjs": {
    "projects": {
     "read": 1,
@@ -270,7 +284,7 @@
   },
   "server/lib/console/owner.mjs": {
    "memories": {
-    "read": 6,
+    "read": 5,
     "write": 0
    },
    "project_lifecycle": {
@@ -698,7 +712,7 @@
     "write": 0
    },
    "memory_vector_documents": {
-    "read": 8,
+    "read": 9,
     "write": 3
    }
   }

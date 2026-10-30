@@ -212,13 +212,14 @@ export function libraryView(t, {data, query = '', searchMode = 'lexical', kind =
   const option = (value, key, current) => html`<option value="${value}"${value === current ? trusted(' selected') : ''} data-i18n="${key}">${t(key)}</option>`;
   const rows = failure ? [] : data.results || [];
   const chosen = new Set(selected);
-  // Kinds are chosen by the writer, so the only batch action left is retraction.
+  // Explicit selection never expands to a filter-wide model grant; completed steps are skipped by the preview.
   const batchActions = [['memory.batch_retract', 'batchRetract']].filter(([action]) => allowedActions.includes(action));
-  const selectable = batchActions.length > 0 && rows.some(m => m.status === 'active');
+  const repair=allowedActions.includes('processing.preview');
+  const selectable = (batchActions.length > 0||repair) && rows.some(m => m.status === 'active');
   const count = selectAll ? null : chosen.size;
   const selection = !failure && (selectable || selectAll) ? html`<div class="memory-selection" data-memory-selection${selectAll ? trusted(' data-select-all-active') : ''}>
     <p role="status" aria-live="polite">${selectAll ? i18n(t, 'allMatchingSelected') : html`${i18n(t, 'selectedMemories')} <strong data-selection-count>${count}</strong> / 50`}</p>
-    <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${selectAll || !count ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
+    <div class="actions">${batchActions.map(([action, label]) => html`<button type="button" data-console-action="${action}"${selectAll || !count ? trusted(' disabled') : ''}>${i18n(t, label)}</button>`)}${repair?['traits','summary','vector'].map(kind=>html`<button type="button" data-console-action="processing.preview" data-selection="true" data-kind="${kind}"${selectAll||!count?trusted(' disabled'):''}>${i18n(t,'processingRepair_'+kind)}</button>`):''}<button type="button" class="quiet" data-clear-selection${!count && !selectAll ? trusted(' disabled') : ''}>${i18n(t, 'clearSelection')}</button></div></div>` : '';
   // A topic already shown as the title is not repeated; an imported namespace topic is a labelled tag.
   const topicChip = m => m.title_source === 'topic' ? '' : m.tag ? tagChip(t, m.tag) : m.topic && !m.title ? html`<button type="button" class="topic-chip" data-facet="topic" data-value="${m.topic}">${m.topic}</button>` : '';
   // Tag row: the project, then the writer's concepts, then the task hand-off type when it is not the default fact.
@@ -403,6 +404,7 @@ export function memoryDetailView(t, data, {actions = '', canGoBack = false, meta
   <div class="body-content">${content}</div>
   <p class="detail-range">${i18n(t, 'contentRange')} ${data.content_offset + 1}–${data.content_offset + length} / ${data.content_length} ${data.content_complete ? i18n(t, 'endOfContent') : ''}</p>
   <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : ''}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>
+  <section class="policy-box" data-memory-processing>${i18n(t,'processingEvidenceTitle','h3')}${i18n(t,'loading','p')}</section>
   <section class="version-chain" data-version-chain="${m.memory_id}">${i18n(t, 'versionChain', 'h3')}${links.length ? html`<p class="muted" role="status">${i18n(t, 'versionChainLoading')}</p>` : html`<p class="muted">${i18n(t, 'versionChainSingle')}</p>`}</section>
   ${links.length ? html`<div class="lifecycle-links">${links.map(([id, key]) => html`<button type="button" class="quiet" data-memory="${id}">${i18n(t, key)}</button>`)}</div>` : ''}
   <section class="detail-sources">${i18n(t, 'sources', 'h3')}${sources.length ? html`<ol class="source-list">${sources.map(s => html`<li class="detail-source"><strong>${s.source_kind || s.source_id}</strong><code>${s.source_id}</code>
@@ -457,6 +459,7 @@ export const featureMap = {
     {id: 'MEM-08', status: 'live', read: ['memories']},
     {id: 'MEM-09', status: 'live', read: ['review-candidates'], write: ['review.extract', 'review.candidate'], reauth: true},
     {id: 'MEM-10', status: 'live', read: ['memory-review'], write: ['review.verify', 'review.resolve'], reauth: true},
+    {id: 'MEM-11', status: 'live', read: ['memory-processing'], write: ['processing.preview', 'processing.start']},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},

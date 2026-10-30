@@ -10,6 +10,7 @@ import {MemoryTraits} from '../memory/traits.mjs';
 import {calendarWindow} from '../memory-jobs/windows.mjs';
 import {MemoryWorker} from '../memory-jobs/worker.mjs';
 import {VectorIndex} from '../vector-stores/index.mjs';
+import {indexedDocument,summaryEvidence} from './memory-processing.mjs';
 
 export const OWNER_ACTIONS=['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel','processing.delete','processing.clear'];
 // 'classification' was retired (memories are filed by their writer-chosen type); a stored flag is kept but ignored.
@@ -72,7 +73,7 @@ export class OwnerControls{
    effective[key]={requested:p.flags[key],effective:!blockers.length,blockers};
   }
   return {...p,preferences:this.preferences(),read_policy_options:(this.store.memoryConfig.memory?.agent_read_policy==='active_uniform_v1'?['chatgpt_per_memory_v1','active_uniform_v1']:['chatgpt_per_memory_v1']).map(value=>({value,active_readable:this.readImpact(value)})),effective,vector_catch_up:this.catchUpStatus(user),vector_index:this.indexStatus(user),mode:'single_owner',configured:true,model_calls_on_save:0,historical_replay:false,
-   runs:this.db.prepare('SELECT run_id,kind,state,budget,used,created_at,expires_at,generation,error_code,manifest_digest,metadata_json FROM owner_processing_runs WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 30').all(user).map(({metadata_json,...r})=>{const m=JSON.parse(metadata_json);return {...r,count:m.limits.items,model:m.model,excluded:m.excluded,truncated:m.truncated,...this.runTimes(r),
+   runs:this.db.prepare('SELECT run_id,kind,state,budget,used,created_at,expires_at,generation,error_code,manifest_digest,metadata_json FROM owner_processing_runs WHERE user_id=? ORDER BY created_at DESC,rowid DESC LIMIT 30').all(user).map(({metadata_json,...r})=>{const m=JSON.parse(metadata_json);return {...r,count:m.limits.items,model:m.model,excluded:m.excluded,truncated:m.truncated,selection:m.selection||'range',already_complete:m.already_complete||0,...this.runTimes(r),
      // A preview can only be started before it expires; the page shows it as expired instead of offering a start that fails.
      expired:r.state==='preview'&&r.expires_at<now(),
      // A preview that can still start shows what it holds: the first 100 memories of its frozen manifest, by title only.
@@ -117,34 +118,54 @@ export class OwnerControls{
  fenceAll(user){for(const r of this.db.prepare("SELECT run_id FROM owner_processing_runs WHERE user_id=? AND state IN ('queued','running')").all(user))this.change(user,r.run_id,'paused');}
  run(user,id){this.require(user);const r=this.db.prepare('SELECT * FROM owner_processing_runs WHERE user_id=? AND run_id=?').get(user,id);if(!r)error('RUN_NOT_FOUND');return {...r,metadata:JSON.parse(r.metadata_json)};}
  items(id){return this.db.prepare('SELECT memory_id,revision,state_hash FROM owner_processing_items WHERE run_id=? ORDER BY ordinal').all(id);}
- previewItems(user,id){return this.db.prepare('SELECT i.memory_id,m.content,m.topic FROM owner_processing_items i JOIN memories m ON m.user_id=? AND m.memory_id=i.memory_id WHERE i.run_id=? ORDER BY i.ordinal LIMIT 100').all(user,id)
-  .map(r=>({memory_id:r.memory_id,title:[...memoryPresentation(r).title].slice(0,120).join('')}));}
- preview(user,p,{automatic=false,after=0,credentialId=null}={}){this.require(user);object(p,['kind','limit','budget','from','to']);if(!channels.includes(p.kind))throw new ValidationError('Unknown processing kind');// A keyword fill covers every memory still missing traits in one batch (one confirmation), so it allows larger runs.
+ previewItems(user,id){const run=this.run(user,id),sameGeneration=run.metadata.lifecycle_generation===this.store.lifecycle.generation(user);
+  return this.items(id).slice(0,100).map(item=>{const source=sameGeneration?this.validate(item,user):null;
+   return {memory_id:item.memory_id,revision:item.revision,...(source?{title:[...memoryPresentation(source).title].slice(0,120).join(''),stale:false}:{stale:true,content_withheld:true})};});}
+ checkPreview(user,id){const run=this.run(user,id);if(run.metadata.lifecycle_generation!==this.store.lifecycle.generation(user))error('STALE_INPUT');
+  for(const item of this.items(id))if(!this.validate(item,user))error('STALE_INPUT');}
+ checkSelection(user,items){this.require(user);
+  if(!Array.isArray(items)||!items.length||items.length>50)throw new ValidationError('Select 1–50 exact memory revisions.');
+  const seen=new Set();for(const item of items){object(item,['memory_id','revision']);number(item.revision,1,2147483647);this.service.memory({user_id:user},item.memory_id,item.revision);
+   if(seen.has(item.memory_id))throw new ValidationError('Duplicate memory selection.');seen.add(item.memory_id);
+   if(!this.store.derivedMemory.currentSource(user,item.memory_id))error('STALE_INPUT');}
+ }
+ preview(user,p,{automatic=false,after=0,credentialId=null}={}){this.require(user);object(p,['kind','limit','budget','from','to','items']);if(!channels.includes(p.kind))throw new ValidationError('Unknown processing kind');// A keyword fill covers every memory still missing traits in one batch (one confirmation), so it allows larger runs.
   number(p.limit,1,p.kind==='vector'?5000:p.kind==='traits'?2000:100);number(p.budget,1,p.kind==='vector'?20000:1000);
   const dates={};for(const key of ['from','to'])if(p[key]){if(typeof p[key]!=='string'||!Number.isFinite(Date.parse(p[key])))throw new ValidationError('Invalid date');dates[key]=new Date(p[key]).toISOString();}
   if(dates.from&&dates.to&&dates.from>dates.to)throw new ValidationError('Invalid date range');
   const model=this.service.models.raw(user,modelKind(p.kind));if(!model)error('NOT_CONFIGURED');const c=JSON.parse(model.config_json);if(!c.enabled)error('NOT_CONFIGURED');if(!c.egress_approved)error('EGRESS_DENIED');
   const provider=this.service.models.provider(user,modelKind(p.kind)),policy=this.policy();
   const where=['user_id=?','rowid>?',"status='active'",...(p.kind==='traits'?[MemoryTraits.missingSql('memories')]:[])];const values=[user,after];if(dates.from){where.push('created_at>=?');values.push(dates.from);}if(dates.to){where.push('created_at<=?');values.push(dates.to);}
-  const rows=this.db.prepare(`SELECT rowid n,memory_id FROM memories WHERE ${where.join(' AND ')} ORDER BY rowid LIMIT ?`).all(...values,p.limit+1),chosen=rows.slice(0,p.limit),items=[];let excluded=0;
-  for(const row of chosen){const s=this.store.derivedMemory.currentSource(user,row.memory_id);if(!s){excluded++;continue;}items.push({memory_id:s.memory_id,revision:s.revision,state_hash:s.state_hash});}
-  if(!items.length){if(automatic)return {status:'no_work',after_rowid:chosen.at(-1)?.n||after};error('MANIFEST_EMPTY');}const id=randomUUID(),digest=fingerprint(items),metadata={credential_id:credentialId,model:c.model,model_kind:modelKind(p.kind),model_revision:model.revision,profile:provider.profile.fingerprint,limits:{budget:p.budget,items:items.length},excluded,truncated:rows.length>p.limit,range:dates,automatic,lifecycle_generation:this.store.lifecycle.generation(user),after_rowid:chosen.at(-1)?.n||after,taxonomy:this.service.taxonomy(user)};
+  const selected=p.items!==undefined;let serving=null;
+  if(selected){
+   if(automatic||p.from!==undefined||p.to!==undefined||!Array.isArray(p.items)||!p.items.length||p.items.length>50||p.limit!==p.items.length)throw new ValidationError('Select 1–50 exact memory revisions.');
+   this.checkSelection(user,p.items);
+   if(p.kind==='vector'){serving=this.db.prepare('SELECT generation,profile FROM memory_vector_owner_active WHERE user_id=?').get(user);if(!serving)error('VECTOR_NOT_READY');if(serving.profile!==provider.profile.fingerprint)error('VECTOR_PROFILE_MISMATCH');}
+  }
+  const rows=selected?p.items:this.db.prepare(`SELECT rowid n,memory_id FROM memories WHERE ${where.join(' AND ')} ORDER BY rowid LIMIT ?`).all(...values,p.limit+1),chosen=rows.slice(0,p.limit),items=[];let excluded=0,alreadyComplete=0;
+  for(const row of chosen){const s=this.store.derivedMemory.currentSource(user,row.memory_id);if(!s){if(selected)error('STALE_INPUT');excluded++;continue;}
+   if(selected){const traits=p.kind==='traits'?this.store.traits.get(user,row.memory_id):null;
+    if(p.kind==='traits'&&traits.kind&&traits.strength!=null||p.kind==='summary'&&summaryEvidence(this.store,user,row.memory_id,s).status==='covered'||p.kind==='vector'&&indexedDocument(this.store,user,serving.generation,s)){alreadyComplete++;continue;}}
+   items.push({memory_id:s.memory_id,revision:s.revision,state_hash:s.state_hash});}
+  if(!items.length){if(automatic)return {status:'no_work',after_rowid:chosen.at(-1)?.n||after};error('MANIFEST_EMPTY');}const id=randomUUID(),digest=fingerprint(items),metadata={credential_id:credentialId,model:c.model,model_kind:modelKind(p.kind),model_revision:model.revision,profile:provider.profile.fingerprint,limits:{budget:p.budget,items:items.length},excluded,already_complete:alreadyComplete,selection:selected?'explicit':'range',serving_generation:serving?.generation||null,truncated:rows.length>p.limit,range:dates,automatic,lifecycle_generation:this.store.lifecycle.generation(user),after_rowid:chosen.at(-1)?.n||after,taxonomy:this.service.taxonomy(user)};
   this.db.prepare("INSERT INTO owner_processing_runs VALUES(?,?,?,'preview',?,?,?,?,?,0,?,?,?,NULL,NULL)").run(id,user,p.kind,policy.revision,model.revision,provider.profile.fingerprint,digest,p.budget,JSON.stringify(metadata),now(),now()+15*60000);
   const insert=this.db.prepare('INSERT INTO owner_processing_items VALUES(?,?,?,?,?)');for(const [i,item] of items.entries())insert.run(id,i,item.memory_id,item.revision,item.state_hash);
-  return {status:'preview',run_id:id,kind:p.kind,count:items.length,items:this.previewItems(user,id),digest,budget:p.budget,model:c.model,model_revision:model.revision,excluded,truncated:rows.length>p.limit,range:dates,expires_at:now()+15*60000,production_content_sent:false};
+  return {status:'preview',run_id:id,kind:p.kind,count:items.length,items:this.previewItems(user,id),digest,budget:p.budget,model:c.model,model_revision:model.revision,excluded,already_complete:alreadyComplete,selection:metadata.selection,serving_generation:metadata.serving_generation,truncated:rows.length>p.limit,range:dates,expires_at:now()+15*60000,production_content_sent:false};
  }
  validate(item,user){const s=this.store.derivedMemory.currentSource(user,item.memory_id);return s&&s.revision===item.revision&&s.state_hash===item.state_hash?s:null;}
  ready(run){if(run.metadata.lifecycle_generation!==this.store.lifecycle.generation(run.user_id))error('STALE_INPUT');const credential=this.db.prepare("SELECT scopes_json FROM credentials WHERE credential_id=? AND user_id=? AND agent_id='mnemuron-console' AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>?)").get(run.metadata.credential_id,this.user,new Date().toISOString());if(!credential||!exactScopes(JSON.parse(credential.scopes_json),CONSOLE_WRITE_SCOPES))error('OWNER_CREDENTIAL_INACTIVE');const p=this.policy();if(!p.flags.processing||!p.flags[flag(run.kind)]||!p.flags.memory)error('PROCESSING_PAUSED');if(run.policy_revision!==p.revision)error('SETTINGS_VERSION_CHANGED');
   const row=this.service.models.raw(run.user_id,modelKind(run.kind));if(!row||row.revision!==run.model_revision)error('MODEL_VERSION_CHANGED');const c=JSON.parse(row.config_json);if(!c.enabled||!c.egress_approved)error('EGRESS_DENIED');
   if(run.kind==='vector'&&!this.store.memoryConfig.vector_store?.enabled)error('VECTOR_DISABLED');
   if(run.kind==='vector'&&!this.service.probeVerified(run.user_id,c.dimensions))error('PROBE_REQUIRED');
+  if(run.kind==='vector'&&run.metadata.selection==='explicit'){const active=this.db.prepare('SELECT generation,profile FROM memory_vector_owner_active WHERE user_id=?').get(run.user_id);
+   if(active?.generation!==run.metadata.serving_generation||active.profile!==run.profile)error('VECTOR_GENERATION_CHANGED');}
  }
  start(user,p){object(p,['run_id','digest']);const r=this.run(user,p.run_id);if(r.state!=='preview'||r.expires_at<now())error('PREVIEW_EXPIRED');if(p.digest!==r.manifest_digest)error('MANIFEST_CHANGED');this.ready(r);
   const items=this.items(r.run_id);for(const item of items)if(!this.validate(item,user))error('STALE_INPUT');
   if(r.kind==='vector'){
-   const index=this.vector(r),generation=index.begin(r.profile,{manifest:items});this.service.models.snapshot(user,generation);
+   const selected=r.metadata.selection==='explicit',index=this.vector(r),generation=selected?r.metadata.serving_generation:index.begin(r.profile,{manifest:items});if(!selected)this.service.models.snapshot(user,generation);
    this.db.prepare('UPDATE owner_processing_runs SET generation=? WHERE run_id=?').run(generation,r.run_id);
-   this.db.prepare("INSERT OR REPLACE INTO console_vector_requests VALUES(?,?,?,'pending',NULL,?)").run(user,generation,r.profile,now());
+   if(!selected)this.db.prepare("INSERT OR REPLACE INTO console_vector_requests VALUES(?,?,?,'pending',NULL,?)").run(user,generation,r.profile,now());
   }else{
    const groups=new Map(),taxonomy=this.service.taxonomy(user);
    for(const item of items){const s=this.store.derivedMemory.currentSource(user,item.memory_id),category=r.kind==='summary'?SUMMARY_ALL:'uncategorized',window=r.kind==='summary'?calendarWindow(Date.parse(s.created_at),{timezone:'UTC',period:'daily'}):null;
@@ -215,7 +236,7 @@ export class OwnerControls{
    ORDER BY r.created_at,r.rowid LIMIT 1`).all(this.user,at,at);
   for(const row of rows){const r=this.run(this.user,row.run_id);try{
    this.guard(r.run_id);this.db.prepare("UPDATE owner_processing_runs SET state='running' WHERE run_id=?").run(r.run_id);
-   if(r.kind==='vector'){const index=this.vector(r),result=await index.sync(r.generation,{maxDocuments:1});this.guard(r.run_id);if(result.complete){this.db.prepare("UPDATE owner_processing_runs SET state='completed' WHERE run_id=?").run(r.run_id);this.db.prepare("UPDATE console_vector_requests SET state='built',error_code=NULL,updated_at=? WHERE user_id=? AND generation=?").run(now(),r.user_id,r.generation);}}
+   if(r.kind==='vector'){const index=this.vector(r),selected=r.metadata.selection==='explicit',result=selected?await index.repairSelected(r.generation,{items:this.items(r.run_id),maxDocuments:1}):await index.sync(r.generation,{maxDocuments:1});this.guard(r.run_id);if(result.complete){this.db.prepare("UPDATE owner_processing_runs SET state='completed' WHERE run_id=?").run(r.run_id);if(!selected)this.db.prepare("UPDATE console_vector_requests SET state='built',error_code=NULL,updated_at=? WHERE user_id=? AND generation=?").run(now(),r.user_id,r.generation);}}
    else{
     const provider=this.service.models.provider(this.user,'organizer',{runId:r.run_id});await new MemoryWorker(this.store,this.store.memoryJobs,provider,{workerId:`owner-${process.pid}`,userId:this.user,profileFilter:r.profile,runId:r.run_id,quota:(job,day)=>this.service.models.quotas.reserve(this.user,'organizer',{day})}).drain({maxJobs:1});
     const states=this.db.prepare('SELECT j.state FROM memory_jobs j JOIN owner_processing_jobs g ON g.job_id=j.job_id WHERE g.run_id=?').all(r.run_id).map(x=>x.state);

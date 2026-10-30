@@ -66,6 +66,16 @@ test('HTTP-REVIEW-02: expired or stale review sources are rejected before spendi
  assert.equal(stale.status,409);assert.equal(calls,0);
 });
 
+test('Processing evidence crosses the authenticated BFF with revision and account fences, without granting processing writes',async t=>{
+ const x=await setup(t),created=await x.act('memory.create',{scope:'user',content:'Synthetic processing evidence',memory_type:'fact'});
+ assert.equal(created.status,200);const id=created.body.memory_id,meta=(await x.get('memory-meta?memory_id='+id)).body;
+ const own=await x.get(`memory-processing?memory_id=${id}&revision=${meta.revision}`);assert.equal(own.status,200);assert.equal(own.body.read_only,true);assert.equal(own.body.production_content_sent,false);
+ assert.equal((await x.get(`memory-processing?memory_id=${id}`,x.b)).status,404);
+ assert.equal((await x.get(`memory-processing?memory_id=${id}&revision=999`)).body.error_code,'MEMORY_VERSION_CHANGED');
+ assert.equal((await x.get(`memory-processing?memory_id=${id}&unknown=1`)).status,400);
+ assert.equal((await x.a.browser.request('/assets/memory-processing.mjs')).status,200);
+});
+
 function taskWorkflowSeed(x,owner=x.a){
  const store=x.core.store,user=owner.record.user_id,suffix=randomUUID(),project_id=`workflow-project-${suffix}`,task_id=`workflow-task-${suffix}`,workstream_id=`workflow-stream-${suffix}`;
  const issue=(agentId,scopes)=>{const key=store.issueCredential({userId:user,deviceId:`workflow-device-${agentId}`,agentId,agentInstanceId:`workflow-instance-${agentId}`,scopes});return {...key,auth:store.authenticate(key.api_key)};};

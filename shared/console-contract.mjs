@@ -54,4 +54,4 @@ export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,...TASK_WORKFLOW_
   ...CONSOLE_TUNNEL_ACTIONS_LIST]);
 // Confirms that change project lifecycle state: the BFF re-authenticates each one and forwards only these fields.
 export const CONSOLE_LIFECYCLE_CONFIRMS = Object.freeze({'projects.lifecycle_delete':['preview_id','confirm_name'],'projects.lifecycle_restore':['preview_id'],'projects.merge':['preview_id']});
-export const CONSOLE_FEATURE_VIEWS = Object.freeze(['attention','capture-status','model-usage','taxonomy','privacy-defaults','retention','task-branches','project-context','task-checkpoints','task-reconciliation','system-health','system-version','backups','memory-versions']);
+export const CONSOLE_FEATURE_VIEWS = Object.freeze(['attention','capture-status','model-usage','taxonomy','privacy-defaults','retention','task-branches','project-context','task-checkpoints','task-reconciliation','system-health','system-version','backups','memory-versions','memory-processing']);

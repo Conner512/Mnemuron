@@ -52,7 +52,7 @@ const switchRows=(o,keys,purpose={})=>`<ul class="flag-list">${keys.map(key=>{co
 const RUN_KINDS={summary:'摘要',traits:'补全关键词',vector:'语义索引',entities:'实体提取（已停用）',classification:'自动分类（已停用）'};
 const runKind=k=>RUN_KINDS[k]||ownerLabels[k]||k;
 // What a startable preview holds: its memories by title (first 100), folded so the run list stays short.
-const runItems=(r,open=false)=>r.items?.length?`<details class="run-items"${open?' open':''}><summary>查看清单（${esc(r.count)} 条）</summary><ol>${r.items.map(i=>`<li>${esc(i.title)}</li>`).join('')}</ol>${r.count>r.items.length?`<p class="muted">只列出前 ${esc(r.items.length)} 条。</p>`:''}</details>`:'';
+const runItems=(r,open=false)=>r.items?.length?`<details class="run-items"${open?' open':''}><summary>查看清单（${esc(r.count)} 条）</summary><ol>${r.items.map(i=>`<li>${i.stale?l('processingPreviewStale'):esc(i.title)}${i.revision?` <small>${l('revisions')} ${esc(i.revision)}</small>`:''}</li>`).join('')}</ol>${r.count>r.items.length?`<p class="muted">只列出前 ${esc(r.items.length)} 条。</p>`:''}</details>`:'';
 const clock=ms=>{const d=new Date(ms);return Number.isFinite(d.getTime())?d.toLocaleString(document.documentElement.lang||'zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—';};
 const RUN_STATES={expired:'已过期',preview:'待确认',queued:'排队中',running:'运行中',paused:'已暂停',blocked:'受阻',completed:'已完成',cancelled:'已取消'};
 // Processing capabilities. Each card: one switch (with the flags it owns), what it needs (checked against the owner
@@ -144,7 +144,7 @@ const runFinished=r=>r.expired||['completed','cancelled'].includes(r.state);
 function runsCard(o){if(!o)return '';
   // Previews are an internal step of the one-step confirmation, and entity/classification runs belong to retired features.
   const shown=(o.runs||[]).filter(r=>r.state!=='preview'&&['summary','traits','vector'].includes(r.kind));
-  const runs=shown.length?shown.map(r=>`<article class="policy-box run-row" data-run-state="${r.expired?'expired':esc(r.state)}"><strong>${esc(runKind(r.kind))}</strong> · ${esc(RUN_STATES[r.expired?'expired':r.state]||r.state)}${runFacts(r)}${r.error_code?`<p role="status">${esc(t(r.error_code))}</p>`:''}${runItems(r)}<details class="tech-details"><summary>技术信息</summary><code class="owner-digest">${esc(r.manifest_digest)}</code></details>${r.expired?'<p class="muted">预览只在 15 分钟内有效，过期后需要重新预览。</p>':''}<div class="actions">${r.state==='preview'&&!r.expired?ownerButton('processing.start','确认并开始',{id:r.run_id}):''}${r.expired&&['summary','traits','vector'].includes(r.kind)?ownerButton('processing.preview','重新预览',{kind:r.kind}):''}${['running','queued'].includes(r.state)?ownerButton('processing.pause','暂停',{id:r.run_id}):''}${['paused','blocked'].includes(r.state)?ownerButton('processing.resume','确认恢复',{id:r.run_id}):''}${!['completed','cancelled'].includes(r.state)&&!r.expired?ownerButton('processing.cancel','取消',{id:r.run_id}):''}${runFinished(r)?ownerButton('processing.delete','删除',{id:r.run_id}):''}</div></article>`).join(''):'<p class="muted">还没有运行记录。</p>';
+  const runs=shown.length?shown.map(r=>`<article class="policy-box run-row" data-run-state="${r.expired?'expired':esc(r.state)}"><strong>${esc(runKind(r.kind))}</strong> · ${esc(RUN_STATES[r.expired?'expired':r.state]||r.state)}${runFacts(r)}${r.error_code?`<p role="status">${esc(t(r.error_code))}</p>`:''}${runItems(r)}<details class="tech-details"><summary>技术信息</summary><code class="owner-digest">${esc(r.manifest_digest)}</code></details>${r.expired?'<p class="muted">预览只在 15 分钟内有效，过期后需要重新预览。</p>':''}<div class="actions">${r.state==='preview'&&!r.expired&&!r.items?.some(i=>i.stale)?ownerButton('processing.start','确认并开始',{id:r.run_id}):''}${r.expired&&r.selection!=='explicit'&&['summary','traits','vector'].includes(r.kind)?ownerButton('processing.preview','重新预览',{kind:r.kind}):''}${['running','queued'].includes(r.state)?ownerButton('processing.pause','暂停',{id:r.run_id}):''}${['paused','blocked'].includes(r.state)?ownerButton('processing.resume','确认恢复',{id:r.run_id}):''}${!['completed','cancelled'].includes(r.state)&&!r.expired?ownerButton('processing.cancel','取消',{id:r.run_id}):''}${runFinished(r)?ownerButton('processing.delete','删除',{id:r.run_id}):''}</div></article>`).join(''):'<p class="muted">还没有运行记录。</p>';
   return `<section class="card" id="processing-runs"><header class="section-head"><h2>运行记录</h2>${shown.some(runFinished)?ownerButton('processing.clear','清空已结束的记录'):''}</header>${runs}</section>`;
 }
 function processingPage(o,models){if(!o)return ownerUnavailable;
@@ -502,7 +502,7 @@ export function mountActions({api,mutate,getData,getCaps,getFacets=()=>null,getS
   const MEMORY_RESULTS={'memory.create':'resultCreated','memory.correct':'resultCorrected','memory.retract':'resultRetracted','memory.batch_retract':'resultBatchRetract'};
   function result(data){content.replaceChildren();
     if(ownerActions.includes(intent?.action)){
-      const message=document.createElement('p');message.setAttribute('role','status');message.textContent=data.status==='preview'?`预览已生成：${data.count} 条，模型 ${data.model}，最多 ${data.budget} 次调用。未发送内容。关闭此窗口后可检查批次并确认开始。`:data.status==='saved'?'配置已保存。本次保存没有启动处理。':data.status==='queued'?'批次已获授权，等待后台处理。':data.status==='paused'?'批次已暂停，不再领取或发布结果。':'批次已取消，已经发送的请求无法撤回。';content.append(message);intent=null;const close=document.createElement('button');close.type='button';close.dataset.operationClose='';close.textContent=t('close');content.append(close);close.focus();return;
+      const message=document.createElement('p');message.setAttribute('role','status');const status=['preview','saved','queued','paused','cancelled','deleted'].includes(data.status)?data.status:'unknown';message.dataset.processingStatus=status;message.textContent=t('processingResult_'+status);content.append(message);intent=null;const close=document.createElement('button');close.type='button';close.dataset.operationClose='';close.textContent=t('close');content.append(close);close.focus();return;
     }
 const pre=document.createElement('pre');pre.className='operation-result';const {qr_svg,...display}=data;pre.textContent=JSON.stringify(display,null,2);
     const summary=MEMORY_RESULTS[intent?.action];
@@ -682,6 +682,7 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     if(event.target.closest('[data-lifecycle-back]')){flow.previews++;void targetStep(seq).catch(e=>fail(e,seq));}
   });
   async function begin(action,button){if(working)return;if(Object.hasOwn(LIFECYCLE_FLOW,action))return lifecycleBegin(action,button);open(action);const seq=sequence;opId=crypto.randomUUID();lastPayload=null;intent={action,id:button.dataset.id,kind:button.dataset.kind,operator:button.dataset.operator,section:button.dataset.section,flags:button.dataset.flags?button.dataset.flags.split(',').filter(k=>Object.hasOwn(ownerLabels,k)):null,target:['on','off'].includes(button.dataset.target)?button.dataset.target:null};
+    intent.selected=button.dataset.selection==='true';intent.selectedRevision=Number(button.dataset.revision)||null;intent.picked=intent.selected?getSelection():null;
     try{
       let fields='',data=getData();
       if(ownerActions.includes(action)){
@@ -700,32 +701,39 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
         else if(action==='schedule.save')fields='<p>开启了哪些能力，由各能力卡片上的开关决定；这里只设置自动处理新记忆的节奏。</p>'+field('interval_minutes','间隔（分钟）',{type:'number',value:o.schedule.interval_minutes,min:5,upper:10080})+field('max_items','每轮最多记录数',{type:'number',value:o.schedule.max_items,min:1,upper:100})+field('budget','每轮最多模型调用数',{type:'number',value:o.schedule.budget,min:1,upper:1000})+reauth();
         // One step: the button freezes the batch right away (nothing is sent yet) and this dialog shows what it holds; one
         // password confirmation starts it. There is no separate preview to come back to, so nothing can expire in between.
-        else if(action==='processing.preview'){const kind=['summary','traits','vector'].includes(intent.kind)?intent.kind:'summary',rebuild=kind==='vector';
+        else if(action==='processing.preview'){const kind=['summary','traits','vector'].includes(intent.kind)?intent.kind:'summary',selected=intent.selected,rebuild=kind==='vector'&&!selected;
           const limits={summary:[100,100],traits:[2000,300],vector:[5000,6000]}[kind];let run;
+          let items;
+          if(selected){const ids=intent.id?[intent.id]:intent.picked.memory_ids;if(!ids?.length||ids.length>50)throw new Error('BATCH_SELECTION_REQUIRED');
+            items=intent.id&&intent.selectedRevision?[{memory_id:intent.id,revision:intent.selectedRevision}]
+              :(await Promise.all(ids.map(memory_id=>api('memory-meta',{memory_id})))).map(m=>({memory_id:m.memory_id,revision:m.revision}));
+            if(seq!==sequence||!isActive())return;
+            limits[0]=items.length;limits[1]=Math.max(10,items.length*(kind==='vector'?8:4));}
           // A batch can only start with the master switch and its own switch on: say which one is off before freezing anything.
           const off=[...(!o.flags.processing?['processing']:[]),...(!o.flags[kind==='vector'?'vector_build':kind]?[kind==='vector'?'vector_build':kind]:[])];
-          if(!off.length){try{run=await mutate('processing.preview',{kind,limit:limits[0],budget:limits[1]},crypto.randomUUID());}
+          if(!off.length){try{run=await mutate('processing.preview',{kind,limit:limits[0],budget:limits[1],...(selected?{items}:{})},crypto.randomUUID());}
             catch(e){if(e.message!=='MANIFEST_EMPTY')throw e;}}
           if(seq!==sequence||!isActive())return;
-          modal.querySelector('h2').textContent=rebuild?'重建语义索引':kind==='traits'?'补全历史记忆':'补处理历史记忆';
+          modal.querySelector('h2').textContent=selected?t('processingSelectedTitle'):rebuild?'重建语义索引':kind==='traits'?'补全历史记忆':'补处理历史记忆';
           if(off.length){intent.empty=true;fields=`<p class="policy-box" role="status">要先在这一页打开${off.map(k=>`“${esc(ownerLabels[k])}”`).join('和')}，才能开始。打开后再点一次即可。</p>`;}
-          else if(!run){intent.empty=true;fields=`<p class="policy-box" role="status">${kind==='traits'?'没有需要补全的记忆：所有有效记忆都已经有类型和重要度。':'没有需要处理的历史记忆。'}</p>`;}
+          else if(!run){intent.empty=true;fields=`<p class="policy-box" role="status">${selected?l('processingNothingMissing'):kind==='traits'?'没有需要补全的记忆：所有有效记忆都已经有类型和重要度。':'没有需要处理的历史记忆。'}</p>`;}
           else{intent.action='processing.start';intent.id=run.run_id;intent.run={...run,manifest_digest:run.digest};
             fields=`<dl class="run-facts"><div><dt>处理类型</dt><dd>${esc(runKind(kind))}</dd></div><div><dt>记忆</dt><dd>${esc(run.count)} 条${run.excluded?`（排除 ${esc(run.excluded)} 条）`:''}</dd></div><div><dt>模型</dt><dd>${esc(run.model||'—')}</dd></div><div><dt>最多调用</dt><dd>${esc(run.budget)} 次</dd></div></dl>`
               +(run.truncated?`<p class="muted">还有更多记忆，这一批先处理前 ${esc(run.count)} 条，跑完可以再点一次。</p>`:'')+runItems(run)
-              +`<p>${rebuild?'会把全部活动记忆重新嵌入到一个新的语义索引，完成后点“启用新索引”才会切换；旧索引保留，可随时切回。':kind==='traits'?'确认后在后台跑完，结果直接写入，不用逐条确认；写入方已经填的不会被覆盖。':'确认后在后台跑完，会把这些记忆发送给上面的模型。'}</p>`+reauth();}
+              +(selected?`<p class="policy-box">${l('processingSelectedNote')} ${l('processingSkipped')} ${esc(run.already_complete||0)}</p>`:'')
+              +`<p>${selected?l(kind==='vector'?'processingVectorRepairNote':'processingRepairSendNote'):rebuild?'会把全部活动记忆重新嵌入到一个新的语义索引，完成后点“启用新索引”才会切换；旧索引保留，可随时切回。':kind==='traits'?'确认后在后台跑完，结果直接写入，不用逐条确认；写入方已经填的不会被覆盖。':'确认后在后台跑完，会把这些记忆发送给上面的模型。'}</p>`+reauth();}
         }
         else if(action==='processing.clear'){const n=o.runs.filter(r=>r.state!=='preview'?['completed','cancelled'].includes(r.state):r.expires_at<Date.now()).length;
           fields=`<p>删除 ${esc(n)} 条已结束的运行记录（已完成、已取消、已过期）。运行中、已暂停和受阻的批次保留。</p><p class="muted">只删除记录，已经写入的摘要、关键词和索引不受影响。</p>`;}
         else {const run=o.runs.find(r=>r.run_id===intent.id);if(!run)throw new Error('RUN_NOT_FOUND');intent.run=run;
-          const starting=['processing.start','processing.resume'].includes(action),expired=action==='processing.start'&&(run.expired||run.expires_at<Date.now());
+          const starting=['processing.start','processing.resume'].includes(action),expired=action==='processing.start'&&(run.expired||run.expires_at<Date.now()),stale=action==='processing.start'&&run.items?.some(i=>i.stale);
           const facts=`<dl class="run-facts"><div><dt>处理类型</dt><dd>${esc(runKind(run.kind))}</dd></div><div><dt>记忆</dt><dd>${esc(run.count)} 条${run.excluded?`（排除 ${esc(run.excluded)} 条）`:''}</dd></div><div><dt>模型</dt><dd>${esc(run.model||'—')}</dd></div><div><dt>调用上限</dt><dd>已用 ${esc(run.used)} / ${esc(run.budget)}</dd></div></dl>`
             +(run.truncated?'<p class="muted">范围内还有未选入的记忆，处理完可以再补一批。</p>':'')+runItems(run)
             +`<details class="tech-details"><summary>技术信息</summary><p class="muted">清单校验码（确认时用来核对清单没有变化）</p><code class="owner-digest">${esc(run.manifest_digest)}</code></details>`;
           // An expired preview cannot start: say so and offer a fresh preview of the same kind instead of a password form that fails.
-          fields=expired?facts+`<p class="policy-box" role="alert">这份预览已过期（预览只在 15 分钟内有效）。请重新预览，生成新的清单后再确认。</p><div class="actions">${['summary','traits','vector'].includes(run.kind)?ownerButton('processing.preview','重新预览',{kind:run.kind}):''}</div>`
+          fields=stale?facts+`<p class="policy-box" role="alert">${l('processingPreviewStale')}</p>`:expired?facts+`<p class="policy-box" role="alert">这份预览已过期（预览只在 15 分钟内有效）。请重新预览，生成新的清单后再确认。</p><div class="actions">${run.selection!=='explicit'&&['summary','traits','vector'].includes(run.kind)?ownerButton('processing.preview','重新预览',{kind:run.kind}):''}</div>`
             :facts+`<p>${starting?'确认后只处理这份冻结清单，会把清单里的记忆发送给上面的模型。':action==='processing.delete'?'只删除这条记录，已经写入的结果不受影响。':'停止后不会自动恢复；已发送的请求无法撤回。'}</p>`+(starting?reauth():'');
-          if(expired)intent.expired=true;}
+          if(expired||stale)intent.expired=true;}
       }
       else if(action==='memory.create'){
         fields=area('content','content')+traitFields({})+select('memory_type','taskTypeField',['fact','goal','constraint','decision','completed','blocker','remaining','next_step'],'fact')+field('topic','topic',{required:false,max:120})+select('scope','scope',['user','project','task','workstream','session'],'user')+field('target_id','scopeTarget',{required:false,max:128});
