@@ -779,12 +779,15 @@ async function lifecycleSection() {
   const {context,page,errors}=await newPage({width:1440,height:1000},{account:0});
   const posts=[];page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/console-api/action'))posts.push(new URLSearchParams(r.postData()||'').get('action'));});
   const confirms=()=>posts.filter(a=>a!=='projects.lifecycle_preview').length;
+  // Tasks retain their old rows during a reload. Even an already-selected view reloads page zero,
+  // so its old aria-pressed state (or an absent loading card) is not a completion signal.
+  const reloadList=async(p,button)=>{const previous=await p.locator('.view-switch').elementHandle();assert.ok(previous);
+    try{await button.click();await p.waitForFunction(node=>!node.isConnected,previous);await settle(p);}finally{await previous.dispose();}};
   // The project list holds 26+ projects; find a row by switching pages until it appears.
-  // A view switch is done when that view's button is the pressed one (the previous list can still be on screen before).
-  const switchView=async(p,view)=>{await p.locator(`[data-project-view="${view}"]`).click();await p.locator(`[data-project-view="${view}"][aria-pressed="true"]`).waitFor();await settle(p);};
+  const switchView=async(p,view)=>{await reloadList(p,p.locator(`[data-project-view="${view}"]`));await p.locator(`[data-project-view="${view}"][aria-pressed="true"]`).waitFor();};
   const showRow=async(p,id,view='false')=>{await switchView(p,view);
     // Page forward with the project pager's Next button (its data offset is past the current one) until the row shows.
-    for(let i=0;i<4&&!(await row(p,id).count());i++){const next=p.locator('[data-project-offset]').filter({hasText:/下一页|Next/});if(!(await next.count()))break;await next.first().click();await settle(p);}
+    for(let i=0;i<4&&!(await row(p,id).count());i++){const next=p.locator('[data-project-offset]').filter({hasText:/下一页|Next/});if(!(await next.count()))break;await reloadList(p,next.first());}
     await row(p,id).waitFor();};
   await page.goto(cfg.url+'/app/tasks');await settle(page);
   check(S,'Three project views (active, archived, deleted) with server counts',await page.locator('[data-project-view]').count()===3&&(await page.locator('[data-project-view="deleted"] .figure').innerText()).trim()==='0');
