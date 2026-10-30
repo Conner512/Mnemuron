@@ -450,7 +450,14 @@ function confirmationIntentSessionId(dataDir, resumeId, previewVersion) {
   return sessionIds.size === 1 ? [...sessionIds][0] : null;
 }
 
-function createTaskScope(dataDir, packet, targetSessionId, env = process.env) {
+function unclaimedConsoleResume(record) {
+  return record.console_confirmed === true && record.status === "pending" && record.armed === true
+    && !record.claimed_session_id && !record.delivery_declared_at && !record.context_returned_at && !record.delivered_at;
+}
+
+function createTaskScope(dataDir, packet, targetSessionId, env = process.env, {
+  refreshExpiredPending = false,
+} = {}) {
   const resumeId = packet?.resume_id || null;
   const bootstrapId = packet?.bootstrap_id || null;
   const bindingKind = bootstrapId ? "task_bootstrap" : "resume";
@@ -478,6 +485,30 @@ function createTaskScope(dataDir, packet, targetSessionId, env = process.env) {
     const existing = JSON.parse(readFileSync(target, "utf8"));
     if (existing.target_session_id !== targetSessionId) {
       throw new Error("Task binding is already staged for a different ChatGPT session.");
+    }
+    if (refreshExpiredPending) {
+      if (existing.binding_id !== bindingId || existing.preview_version !== previewVersion
+          || existing.project_id !== projectId || existing.task_id !== taskId
+          || existing.workstream_id !== workstreamId) {
+        throw Object.assign(new Error("The revalidated Resume does not match its pending Task Scope."), {errorCode:"RESUME_TARGET_MISMATCH"});
+      }
+      const now = new Date().toISOString();
+      if (existing.status === "pending" && !existing.active_session_id && !existing.activated_at
+          && existing.expires_at <= now) {
+        const deliveryFile = path.join(pendingResumeDir(dataDir), `${resumeId}-v${previewVersion}.json`);
+        const delivery = existsSync(deliveryFile) ? JSON.parse(readFileSync(deliveryFile, "utf8")) : null;
+        // Renew the scope before the queue can become claimable. A crash between the two writes then leaves
+        // an expired queue, never a live queue whose only scope has expired. Delivery fences block both renewals.
+        if (delivery && !unclaimedConsoleResume(delivery)) return existing;
+        if (delivery && (delivery.resume_id !== resumeId || delivery.preview_version !== previewVersion
+            || delivery.target_session_id !== targetSessionId || delivery.workstream_id !== workstreamId
+            || delivery.injection_method !== "codex-mcp-delivery-receipt" || delivery.text !== buildResumeInjectionText(packet))) {
+          throw Object.assign(new Error("The revalidated Resume does not match its pending delivery."), {errorCode:"RESUME_TARGET_MISMATCH"});
+        }
+        const renewed = {...existing,updated_at:now,expires_at:new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()};
+        writeTaskScope(target, renewed);
+        return renewed;
+      }
     }
     return existing;
   }
@@ -517,8 +548,9 @@ export function stageTaskScopeForSession(
   packet,
   targetSessionId,
   env = process.env,
+  options = {},
 ) {
-  return createTaskScope(dataDir, packet, targetSessionId, loadRuntimeEnv(env));
+  return createTaskScope(dataDir, packet, targetSessionId, loadRuntimeEnv(env), options);
 }
 
 function pendingResumeFiles(dataDir) {
@@ -550,6 +582,8 @@ export function queueResumeInjection(
     injectionMethod = "codex-hook-additional-context",
     confirmationTurnId = null,
     armed = true,
+    consoleConfirmed = false,
+    refreshExpiredPending = false,
   } = {},
 ) {
   assertSafeId(packet?.resume_id);
@@ -565,6 +599,21 @@ export function queueResumeInjection(
   const target = path.join(directory, `${packet.resume_id}-v${previewVersion}.json`);
   if (existsSync(target)) {
     const existing = JSON.parse(readFileSync(target, "utf8"));
+    // Only the locked caller that has just obtained this same packet from Core may renew an unclaimed
+    // Console queue entry. Keep the original receipt/attempt and never reopen a delivery fence.
+    if (consoleConfirmed && refreshExpiredPending) {
+      if (existing.resume_id !== packet.resume_id || existing.preview_version !== previewVersion
+          || existing.target_session_id !== targetSessionId || existing.workstream_id !== workstreamId
+          || existing.injection_method !== injectionMethod || existing.text !== buildResumeInjectionText(packet)) {
+        throw Object.assign(new Error("The revalidated Resume does not match its pending delivery."), {errorCode:"RESUME_TARGET_MISMATCH"});
+      }
+      const now = new Date().toISOString();
+      if (unclaimedConsoleResume(existing) && existing.expires_at <= now) {
+        const renewed = {...existing,updated_at:now,expires_at:new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()};
+        writeTaskScope(target, renewed);
+        return renewed;
+      }
+    }
     if (existing.status === "pending"
         && confirmationTurnId
         && !existing.confirmation_turn_id) {
@@ -592,6 +641,7 @@ export function queueResumeInjection(
     target_session_id: targetSessionId,
     confirmation_turn_id: confirmationTurnId,
     armed,
+    ...(consoleConfirmed ? {console_confirmed:true} : {}),
     armed_at: armed ? now : null,
     workstream_id: workstreamId,
     status: "pending",
@@ -678,6 +728,27 @@ export function claimMcpResumeDelivery(dataDir, sessionId) {
     return claimed;
   }
   return null;
+}
+
+// These replies prove that this exact Console authorization can no longer deliver. A timeout, auth denial, or
+// arbitrary conflict is not such proof: retain that claim and its original receipt for a later exact retry.
+export const STALE_CONSOLE_RESUME_CODES=Object.freeze(['RESUME_CONTEXT_CHANGED','RESUME_TARGET_UNAVAILABLE','RESUME_VERSION_CHANGED','LIFECYCLE_AUTHORITY_STALE','PROJECT_DELETED']);
+export function cancelStaleConsoleResumeDelivery(dataDir,claimed,errorCode){
+  if(!STALE_CONSOLE_RESUME_CODES.includes(errorCode))return false;
+  const entry=pendingResumeFiles(dataDir).map(filePath=>({filePath,record:JSON.parse(readFileSync(filePath,'utf8'))}))
+    .find(({record})=>record.receipt_id===claimed.receipt_id&&record.resume_id===claimed.resume_id&&record.preview_version===claimed.preview_version);
+  if(!entry||entry.record.console_confirmed!==true||entry.record.status!=='in_flight'||entry.record.context_returned_at
+      ||entry.record.claimed_session_id!==claimed.claimed_session_id)return false;
+  const now=new Date().toISOString();
+  // Invalidate the unactivated scope first. If interrupted between these local writes, the unchanged receipt still
+  // fails closed at Core on retry; no pending scope can later become authority after the claim is retired.
+  for(const filePath of taskScopeFiles(dataDir)){
+    const scope=JSON.parse(readFileSync(filePath,'utf8'));
+    if(scope.status==='pending'&&scope.resume_id===claimed.resume_id&&scope.preview_version===claimed.preview_version
+        &&scope.target_session_id===claimed.claimed_session_id)writeTaskScope(filePath,{...scope,status:'cancelled',cancelled_at:now,error_code:errorCode,updated_at:now});
+  }
+  writeTaskScope(entry.filePath,{...entry.record,status:'cancelled',cancelled_at:now,error_code:errorCode,updated_at:now});
+  return true;
 }
 
 export function hasUnreturnedMcpResumeDelivery(dataDir, sessionId) {

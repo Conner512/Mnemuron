@@ -1,4 +1,4 @@
-import {consoleActionWritable} from '../../shared/console-contract.mjs';
+import {consoleActionWritable,TASK_WORKFLOW_VIEWS,RESUME_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_CONFIRMS} from '../../shared/console-contract.mjs';
 import {ValidationError,NotFoundError,ConflictError} from './errors.mjs';
 import {credentialView} from './console/credentials.mjs';
 import {FEATURE_VIEWS,featureParams} from './console/features.mjs';
@@ -91,10 +91,13 @@ function summaryPreview(store,auth,user,row){
 export async function consoleRead(store,auth,view,params={}) {
   store.requireScope(auth,'console:read');if(store.consoleService.owner.user)store.consoleService.owner.require(auth.user_id);
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
-  const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','kind','concept','topic','origin','review','part'],summaries:['offset','limit'],jobs:['offset','limit','job_id','group','batch_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id'],audit:['offset','limit'],
-    projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'project-profile':['project_id'],tunnel:[],config:['after','limit'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id']}[view]||[];
+  const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','kind','concept','topic','origin','review','part'],summaries:['offset','limit'],jobs:['offset','limit','job_id','group','batch_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id','action','request_hash'],audit:['offset','limit'],
+    projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'project-profile':['project_id'],tunnel:[],config:['after','limit'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id'],
+    'task-workflow-preview':['preview_id'],'resume-targets':['offset','limit'],'resume-status':['resume_id'],'resume-history':['task_id','offset','limit']}[view]||[];
   if(Object.keys(params).some(key=>!(view==='audit'?['offset','limit','action','outcome','from','to','group']:featureParams[view]||allowed).includes(key)))throw new ValidationError('Unknown console query parameter.');
   if(FEATURE_VIEWS.includes(view))return store.consoleService.features.read(auth,view,params);
+  if(TASK_WORKFLOW_VIEWS.includes(view))return store.consoleService.taskWorkflows.read(auth,view,params);
+  if(RESUME_WORKFLOW_VIEWS.includes(view))return store.consoleService.resumeWorkflows.read(auth,view,params);
   const db=store.db,user=auth.user_id;
   const count=table=>db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE user_id=?`).get(user).n;
   switch(view) {
@@ -103,7 +106,23 @@ export async function consoleRead(store,auth,view,params={}) {
     case 'models':return {models:store.consoleService.models.list(user),...(({records,system,apply})=>({hosts:records,system_hosts:system,hosts_apply:apply}))(store.consoleService.models.hosts.view(user)),processing:store.consoleService.processing(user),...store.consoleService.capabilities(auth)};
     case 'memory-meta':return store.consoleService.meta(auth,params);
     case 'export':return store.consoleService.export(auth,params);
-    case 'operation':return store.consoleService.state.inspect(user,params.operation_id);
+    case 'operation':{
+      if(params.action===undefined&&params.request_hash===undefined)return store.consoleService.state.inspect(user,params.operation_id);
+      // The BFF checks a retry's exact business intent before consuming fresh factors. Neither the saved hash nor
+      // the operation result/content leaves this view; no ordinary read credential gains confirmation authority.
+      if(!Object.hasOwn(CONSOLE_WORKFLOW_CONFIRMS,params.action)||!/^[a-f0-9]{64}$/.test(params.request_hash||''))throw new ValidationError('Invalid operation check.','INVALID_CONSOLE_INPUT');
+      store.consoleService.require(auth,params.action);
+      return store.memoryTransaction(()=>{
+        const result=store.consoleService.state.inspect(user,params.operation_id,{action:params.action,requestHash:params.request_hash});
+        if(result.state==='completed'&&params.action!=='resume.confirm'){
+          // Task workflow receipts remain bound to their original Console credential and current live references,
+          // even after expiry. Do not return the stored receipt or revive its frozen content for this precheck.
+          const receipt=JSON.parse(db.prepare('SELECT result_json FROM console_operations WHERE user_id=? AND operation_id=?').get(user,params.operation_id).result_json);
+          const workflow=store.consoleService.taskWorkflows;workflow.require(auth);workflow.references(auth,workflow.row(auth,receipt.preview_id));
+        }
+        return result;
+      });
+    }
     // Lifecycle confirm pre-check (read-only; full Console write credentials only, like the confirm itself).
     case 'lifecycle-preview-check':store.consoleService.require(auth,'projects.lifecycle_preview');return store.consoleService.lifecycleMutations.check(auth,params);
     case 'job':return {read_only:true,job:jobView(store.consoleService.job(auth,params.job_id))};

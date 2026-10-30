@@ -270,8 +270,8 @@ test('LF-08: lifecycle history is append-only, including INSERT OR REPLACE',asyn
 });
 
 test('LF-09: lifecycle mutations exist only behind the four Console actions; the resolver, the store and other modules never change lifecycle state',()=>{
-  // Project actions: the phase 3 edits, Console-only archive (projects.restore is unarchive), and the 5E lifecycle actions.
-  assert.deepEqual(CONSOLE_ACTIONS.filter(a=>a.startsWith('projects.')).sort(),['projects.archive','projects.lifecycle_delete','projects.lifecycle_preview','projects.lifecycle_restore','projects.merge','projects.restore','projects.update']);
+  // Project actions: reviewed bootstrap, phase 3 edits, Console-only archive (restore is unarchive), and 5E lifecycle.
+  assert.deepEqual(CONSOLE_ACTIONS.filter(a=>a.startsWith('projects.')).sort(),['projects.archive','projects.bootstrap_confirm','projects.bootstrap_preview','projects.lifecycle_delete','projects.lifecycle_preview','projects.lifecycle_restore','projects.merge','projects.restore','projects.update']);
   assert.equal(CONSOLE_ACTIONS.some(a=>/purge|projects\.delete\b/.test(a)),false,'nothing purges');
   // Every confirm is in the BFF re-authentication list, with exactly its forwarded fields.
   assert.deepEqual(CONSOLE_LIFECYCLE_CONFIRMS,{'projects.lifecycle_delete':['preview_id','confirm_name'],'projects.lifecycle_restore':['preview_id'],'projects.merge':['preview_id']});
@@ -286,7 +286,7 @@ test('LF-09: lifecycle mutations exist only behind the four Console actions; the
   assert.deepEqual(lifecycle,['bumpGeneration','constructor','epoch','generation','live','liveProject','logRoute','members','operation','owned','projectState','resolve','row','scope','view','writeProject'],'the resolver only reads, guards writes, records operations and bumps the generation for a caller');
   assert.equal(/INSERT[^;]*project_lifecycle\b|UPDATE\s+project_lifecycle\b/i.test(readFileSync(path.join(ROOT,'server/lib/lifecycle/resolver.mjs'),'utf8')),false,'the resolver never writes lifecycle state');
   // Only the mutations module writes lifecycle rows and bumps the generation.
-  for(const file of ['server/lib/store.mjs','server/lib/console/service.mjs','server/lib/console/projects.mjs','server/lib/app.mjs'])
+  for(const file of ['server/lib/store.mjs','server/lib/console/service.mjs','server/lib/console/projects.mjs','server/lib/console/task-workflows.mjs','server/lib/console/resume-workflows.mjs','server/lib/app.mjs'])
     assert.equal(/bumpGeneration|INSERT[^;]*project_lifecycle\b|UPDATE\s+project_lifecycle\b/i.test(readFileSync(path.join(ROOT,file),'utf8')),false,`${file} never changes lifecycle state`);
   assert.match(readFileSync(path.join(ROOT,'server/lib/lifecycle/mutations.mjs'),'utf8'),/bumpGeneration/);
   const store=Object.getOwnPropertyNames(MnemuronStore.prototype).filter(n=>/delete|merge|restore|lifecycle/i.test(n));

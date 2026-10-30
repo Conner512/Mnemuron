@@ -191,10 +191,43 @@ class PluginRuntime:
             LOGGER.warning("Mnemuron injection-event synchronization unavailable: %s", error)
             return None
         pending = pending_store.claim(candidates, session_id, kwargs.get("turn_id"))
-        if pending:
+        if pending is None and session_id and kwargs.get("user_message"):
             try:
-                client.submit_injection_record(pending, "injected")
+                remote = client.pending_resume(session_id, (task_scope or {}).get("workstream_id"))
+                if remote:
+                    # A Console confirmation is bound to this existing host session, never to a broader gateway
+                    # sender/chat token. The scope is activated only after central injection acceptance below.
+                    target = scope_tokens(session_id=session_id)
+                    pending_store.queue(remote["resume_packet"], target,
+                                        workstream_id=remote["target"]["workstream_id"], console_confirmed=True)
+                    pending = pending_store.claim(candidates, session_id, kwargs.get("turn_id"))
             except Exception as error:
+                LOGGER.warning("Mnemuron Console Resume retrieval deferred: %s", error)
+                return None
+        if pending:
+            if pending.get("context_returned_at"):
+                return None
+            try:
+                result = {"context": pending["text"]}
+                client.submit_injection_record(pending, "injected")
+                prepare = None
+                if pending.get("console_confirmed_scope"):
+                    def prepare(commit):
+                        return self.task_scopes().stage(pending["console_confirmed_scope"], scope_tokens(session_id=session_id),
+                                                       pending["workstream_id"], handoff_commit=commit)
+                if not pending_store.mark_context_returned(str(pending.get("attempt_id") or ""), prepare):
+                    return None
+            except Exception as error:
+                permanent = {"RESUME_TARGET_UNAVAILABLE", "RESUME_TARGET_MISMATCH", "RESUME_CONTEXT_CHANGED",
+                             "RESUME_VERSION_CHANGED", "RESUME_ALREADY_DELIVERED",
+                             "LIFECYCLE_AUTHORITY_STALE", "PROJECT_DELETED"}
+                code = getattr(error, "error_code", None)
+                # Authentication/proxy failures may be temporary. Only an authoritative stale-claim
+                # conflict can discard this local Console authorization; all other errors stay retryable.
+                if pending.get("console_confirmed_scope") and getattr(error, "status_code", None) == 409 and code in permanent:
+                    if pending_store.cancel_console_authorization(str(pending.get("attempt_id") or ""), code):
+                        LOGGER.warning("Mnemuron Console Resume authorization is no longer usable: %s", code)
+                    return None
                 failed = pending_store.fail(
                     str(pending.get("attempt_id") or ""),
                     error_message=f"The Mnemuron server did not confirm the injection declaration: {error}",
@@ -203,11 +236,9 @@ class PluginRuntime:
                     client.queue_injection_event(failed["record"], failed["phase"])
                 LOGGER.warning("Mnemuron Resume injection deferred: %s", error)
                 return None
-            LOGGER.info(
-                "Mnemuron injecting confirmed Resume Packet %s v%s",
-                pending.get("resume_id"), pending.get("preview_version"),
-            )
-            return {"context": pending["text"]}
+            # The marker is committed. Do not run fallible logging or storage before
+            # handing this already constructed result to the host.
+            return result
         return None
 
     def post_llm_call(self, **kwargs):

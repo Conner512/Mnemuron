@@ -37,7 +37,15 @@ workstream_id: workstream-hermes
 
 Preview never injects. Confirm/cancel must use the exact `resume_id` and `preview_version` shown to the user. A confirmed Packet is injected once into the next ordinary Hermes turn in the same scope. The Mnemuron server records `injected` before context handoff and accepts `acknowledged` only after that turn completes; failures and restart recovery are recorded as retryable `failed` attempts.
 
-## Hermes settings
+## Console-confirmed handoff
+
+With handoff enabled, an active `agent_id: hermes` credential containing `capture:write`, `resume:read` and `resume:confirm` can be selected in the Console after a real session capture. The Console authorizes one frozen task/source selection for that exact existing session. It does not deliver a packet or claim the Agent is online.
+
+On a normal user `pre_llm_call`, the adapter checks its local queue first and otherwise reads `/v1/resume/pending` using the same canonical session identifier used by capture. It validates the returned destination, queues only the exact session scope, and waits for central injection acceptance before returning context or activating the task binding. Repeated callbacks do not return the same context twice. Only the real session-end result creates a terminal ACK; a completion arriving before context handoff is recorded as a failed attempt instead.
+
+Network failures retain a retryable queue. A permanently invalid Console authorization is cancelled locally with its cached context removed, so a new reviewed authorization can proceed; this cancellation is not a server delivery. If a local pending copy expires, only a new successful Core authorization read may renew it. Existing in-flight/completed fences are preserved. An old server's missing endpoint retains manual confirmation compatibility; authentication or service failures remain warnings, never false success.
+
+## Hermes runtime settings
 
 Settings live under `plugins.entries.mnemuron.settings` in `~/.hermes/config.yaml`. The API key itself stays in a separate `0600` file referenced by `api_key_file`.
 

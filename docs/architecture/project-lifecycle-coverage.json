@@ -23,7 +23,8 @@
   "memory_entity_members",
   "memory_entity_proposals",
   "memory_entity_tombstones",
-  "memory_entity_queue_cursor"
+  "memory_entity_queue_cursor",
+  "console_task_workflow_previews"
  ],
  "sites": {
   "server/bin/mnemuron-capacity-harness.mjs": {
@@ -276,6 +277,24 @@
     "write": 0
    }
   },
+  "server/lib/console/resume-workflows.mjs": {
+   "tasks": {
+    "read": 4,
+    "write": 0
+   },
+   "memories": {
+    "read": 1,
+    "write": 0
+   },
+   "events": {
+    "read": 7,
+    "write": 0
+   },
+   "resumes": {
+    "read": 5,
+    "write": 1
+   }
+  },
   "server/lib/console/service.mjs": {
    "memories": {
     "read": 4,
@@ -290,6 +309,20 @@
    "memories": {
     "read": 1,
     "write": 0
+   }
+  },
+  "server/lib/console/task-workflows.mjs": {
+   "task_reconciliation_proposals": {
+    "read": 1,
+    "write": 0
+   },
+   "task_bootstrap_previews": {
+    "read": 1,
+    "write": 0
+   },
+   "console_task_workflow_previews": {
+    "read": 1,
+    "write": 2
    }
   },
   "server/lib/handoff-policy.mjs": {

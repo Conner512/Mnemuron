@@ -6,6 +6,7 @@ import {
   acquireMcpResumeDeliveryLock,
   activateTaskScopeForResume,
   claimMcpResumeDelivery,
+  cancelStaleConsoleResumeDelivery,
   deliveryReceiptPayload,
   enqueueDeliveryReceipt,
   listDeliveryReceiptOutbox,
@@ -1107,7 +1108,57 @@ async function takePendingResume(args, runtimeEnv) {
     };
   }
   try {
-    const claimed = claimMcpResumeDelivery(dataDir, sessionId);
+    let claimed = claimMcpResumeDelivery(dataDir, sessionId);
+    // A Console confirmation authorizes one real Codex destination. Pull only when this host has no claim;
+    // legacy chatgpt credentials keep their existing local/manual confirmation workflow and gain no new scope.
+    if (!claimed && runtimeMode(runtimeEnv) === "remote" && runtimeEnv.MNEMURON_AGENT_ID === "codex") {
+      const workstreamId = resolveTaskScope(dataDir, sessionId, runtimeEnv)?.workstream_id
+        || runtimeEnv.MNEMURON_DEFAULT_WORKSTREAM_ID;
+      try {
+        if (typeof workstreamId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(workstreamId)) {
+          throw Object.assign(new Error("The current Codex workstream is unavailable."), {errorCode:"RESUME_TARGET_UNAVAILABLE"});
+        }
+        let pending;
+        try {
+          pending = await remoteRequest(runtimeEnv, "POST", "/v1/resume/pending", {session_id:sessionId,workstream_id:workstreamId});
+        } catch (error) {
+          // Older Core versions have no Console delivery queue. Authentication and service failures stay visible.
+          if (error.statusCode !== 404) throw error;
+          pending = {status:"empty",resume_packet:null,target:null,delivery_recorded:false};
+        }
+        if(pending.delivery_recorded!==false || (pending.status==="empty" && (pending.resume_packet!==null || pending.target!==null))) {
+          throw Object.assign(new Error("Invalid pending Resume response."), {errorCode:"RESUME_TARGET_MISMATCH"});
+        }
+        if (pending.status !== "empty" || pending.resume_packet !== null) {
+          const target=pending.target,packet=pending.resume_packet;
+          const identity={agent_id:runtimeEnv.MNEMURON_AGENT_ID,device_id:runtimeEnv.MNEMURON_DEVICE_ID,agent_instance_id:runtimeEnv.MNEMURON_AGENT_INSTANCE_ID};
+          if (pending.status !== "pending" || !packet || !target || pending.delivery_recorded !== false
+              || target.session_id !== sessionId || target.workstream_id !== workstreamId
+              || typeof target.credential_id!=="string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(target.credential_id)
+              || Object.entries(identity).some(([key,value])=>typeof value!=="string" || !value || target[key]!==value)) {
+            throw Object.assign(new Error("The pending Resume does not match this Codex destination."), {errorCode:"RESUME_TARGET_MISMATCH"});
+          }
+          if (!ownsMcpResumeDeliveryLock(deliveryLock)) {
+            return {status:"delivery_in_progress",resume_packet_returned:false,retryable:true,compatibility_mode:RESUME_INJECTION_MODE};
+          }
+          requireCurrentMcpSessionAuthorization(dataDir, sessionId, runtimeEnv);
+          // The destination workstream is the same one capture uses (active scope before runtime default), never
+          // the packet's source branch. Stage under the existing host lock, then use the normal receipt gate below.
+          const scopeEnv={...runtimeEnv,MNEMURON_DEFAULT_WORKSTREAM_ID:workstreamId};
+          const scope=stageTaskScopeForSession(dataDir,packet,sessionId,scopeEnv,{refreshExpiredPending:true});
+          if(scope.resume_id!==packet.resume_id||scope.preview_version!==packet.preview_version
+              ||scope.project_id!==packet.project?.project_id||scope.task_id!==packet.task?.task_id||scope.workstream_id!==workstreamId) {
+            throw Object.assign(new Error("The staged Resume destination changed."),{errorCode:"RESUME_TARGET_MISMATCH"});
+          }
+          const queued=queueResumeInjection(dataDir,packet,sessionId,workstreamId,{injectionMethod:"codex-mcp-delivery-receipt",armed:true,consoleConfirmed:true,refreshExpiredPending:true});
+          claimed=claimMcpResumeDelivery(dataDir,sessionId);
+          if(!claimed)return deliveryReconciliationResult(queued,null,"local_delivery_state_not_claimable");
+        }
+      } catch (error) {
+        return {status:"delivery_deferred",resume_packet_returned:false,retryable:![400,401,403,409].includes(error.statusCode)&&!["RESUME_TARGET_MISMATCH","RESUME_TARGET_UNAVAILABLE"].includes(error.errorCode),
+          error_code:error.errorCode||"PENDING_RESUME_UNAVAILABLE",error:error.message,compatibility_mode:RESUME_INJECTION_MODE};
+      }
+    }
     if (!claimed) {
       return {
         status: "no_pending_resume",
@@ -1133,6 +1184,11 @@ async function takePendingResume(args, runtimeEnv) {
       try {
         centralReceipt = await submitDeliveryReceipt(claimed.resume_id, receipt, runtimeEnv);
       } catch (error) {
+        if(error.statusCode===409&&ownsMcpResumeDeliveryLock(deliveryLock)
+          &&cancelStaleConsoleResumeDelivery(dataDir,claimed,error.errorCode)){
+          return {status:"delivery_cancelled",resume_id:claimed.resume_id,preview_version:claimed.preview_version,receipt_id:claimed.receipt_id,
+            resume_packet_returned:false,retryable:false,fresh_preview_required:true,error_code:error.errorCode,compatibility_mode:RESUME_INJECTION_MODE};
+        }
         return {
           status: "delivery_deferred",
           resume_id: claimed.resume_id,

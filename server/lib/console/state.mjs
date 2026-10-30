@@ -71,8 +71,10 @@ export class ConsoleState {
       this.store.audit({auth,action:`console.${action}`,targetType:'console_operation',targetId:operation});return {...result,operation_id:operation,replayed:false};
     });
   }
-  inspect(user,operation) {
-    id(operation);const row=this.db.prepare('SELECT operation_id,action,state,error_code,created_at FROM console_operations WHERE user_id=? AND operation_id=?').get(user,operation);
-    if(!row)throw new NotFoundError('Operation not found.');return row;
+  inspect(user,operation,{action,requestHash}={}) {
+    id(operation);const row=this.db.prepare('SELECT operation_id,action,state,error_code,created_at,request_hash FROM console_operations WHERE user_id=? AND operation_id=?').get(user,operation);
+    if(!row)throw new NotFoundError('Operation not found.');
+    if(action!==undefined&&(row.action!==action||row.request_hash!==requestHash))throw new ConflictError('The operation belongs to a different request.','IDEMPOTENCY_CONFLICT');
+    const {request_hash,...metadata}=row;return metadata;
   }
 }

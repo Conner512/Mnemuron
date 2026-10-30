@@ -8,6 +8,7 @@ on:
       - 'shared/**'
       - 'scripts/test-console-browser.py'
       - 'scripts/test-console-*.mjs'
+      - 'scripts/helpers/task-workflow-browser-fixture.mjs'
       - 'scripts/console_select_checks.py'
       - '.github/workflows/console-browser.yml'
   workflow_dispatch:
@@ -76,6 +77,7 @@ jobs:
           node scripts/test-console-audit.mjs
           node scripts/test-console-responsive.mjs
           node scripts/test-console-workflow-continuity.mjs
+          node scripts/test-console-task-workflows.mjs
       - name: Synthetic non-secret preview screenshots
         if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -92,5 +94,6 @@ jobs:
             ${{ runner.temp }}/entities-browser-*/*.png
             ${{ runner.temp }}/responsive-browser-*/*.png
             ${{ runner.temp }}/workflow-continuity-browser-*/*.png
+            ${{ runner.temp }}/task-workflows-browser-*/*.png
           retention-days: 3
           if-no-files-found: error

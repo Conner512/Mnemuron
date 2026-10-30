@@ -12,6 +12,13 @@ are SQLite internals, not additional application access paths.
 
 - Direct `user_id` tables are filtered using the authenticated credential or
   verified account mapping. User-supplied IDs do not select the principal.
+- `console_task_workflow_previews` is direct owner-scoped state, additionally
+  bound to its creating Console credential, expiry and lifecycle generation.
+  Rich reads and confirmations revalidate the original sources and any created
+  targets; metadata operation receipts cannot replay frozen content. The opt-in
+  Console task workflow delegates only named bootstrap/reconciliation actions
+  and authorizes Resume delivery only to an exact observed Agent destination;
+  it does not expand Web/MCP scopes. See the [workflow contract](../console-feature-standard.md).
 - Summary claims and derived outboxes inherit their summary's `user_id`.
   Summary cursors bind owner, scope, source manifest and revision. A foreign
   summary is indistinguishable from a missing summary.

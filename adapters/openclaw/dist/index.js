@@ -268,22 +268,45 @@ export default definePluginEntry({
       let pending = null;
       try {
         const currentClient = client();
+        const scopes = taskScopes();
         await currentClient.flushInjectionEventOutbox();
         pending = store.claim(context);
         if (!pending) {
-          taskScopes().activate(context);
+          await currentClient.pullPendingResume(context, { pendingStore: store, scopeStore: scopes });
+          pending = store.claim(context);
+        }
+        if (!pending) {
+          scopes.activate(context);
           return undefined;
         }
+        if (pending.handed_off_at) return undefined;
         await currentClient.submitInjectionRecord(pending, "injected");
-        taskScopes().activate(context);
-        api.logger.info(`Mnemuron injecting confirmed Resume Packet ${pending.resume_id} v${pending.preview_version}.`);
-        return { prependContext: pending.text };
+        const result = { prependContext: pending.text };
+        if (!store.markHandedOff(pending.attempt_id, (current, handoff) => {
+          const prepared = current.confirmed_scope
+            ? scopes.stage({ packet: current.confirmed_scope, context, workstreamId: current.workstream_id, handoff })
+            : null;
+          // Console activation is derived from the atomic handoff receipt. Manual conversation bindings retain
+          // their existing activation path; a failed Console preparation must not supersede those bindings.
+          if (!handoff) scopes.activate(context);
+          try { api.logger.info(`Mnemuron injecting confirmed Resume Packet ${pending.resume_id} v${pending.preview_version}.`); } catch {}
+          return prepared;
+        }, context)) return undefined;
+        // All fallible work is complete. Nothing after the durable marker may discard the prepared context.
+        return result;
       } catch (error) {
         if (pending) {
           const failed = store.fail(pending.attempt_id, {
             errorMessage: `The Mnemuron server did not confirm the injection declaration: ${error.message}`,
           });
           if (failed) client().queueInjectionRecord(failed.record, failed.phase);
+          const permanent = ['RESUME_CONTEXT_CHANGED', 'RESUME_TARGET_UNAVAILABLE', 'RESUME_VERSION_CHANGED',
+            'LIFECYCLE_AUTHORITY_STALE', 'PROJECT_DELETED'];
+          // Only a precise stale-authority conflict can retire an unreturned Console claim. Gateway/auth failures
+          // remain retryable, and a late duplicate callback cannot cancel context already handed to the host.
+          if (failed && pending.authorization_source === 'console' && error.statusCode === 409 && permanent.includes(error.errorCode)) {
+            store.cancelAuthorization(pending.resume_id, pending.preview_version, error.errorCode);
+          }
         }
         api.logger.warn(`Mnemuron pending Resume injection unavailable: ${error.message}`);
         return undefined;

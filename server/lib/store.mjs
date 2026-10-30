@@ -1180,8 +1180,7 @@ export class MnemuronStore {
     }
     if (Date.parse(row.expires_at) <= Date.now()) {
       const expiredAt = nowIso();
-      this.db.exec("BEGIN IMMEDIATE");
-      try {
+      this.memoryTransaction(() => {
         const update = this.db.prepare(`
           UPDATE task_bootstrap_previews SET status = 'expired'
           WHERE bootstrap_id = ? AND user_id = ? AND requested_by_credential_id = ?
@@ -1204,17 +1203,12 @@ export class MnemuronStore {
           targetType: "project_bootstrap",
           targetId: bootstrapId,
         });
-        this.db.exec("COMMIT");
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
-      }
+      });
       throw new ConflictError("Project Bootstrap Preview expired; create and show a fresh preview.");
     }
     if (!confirmed) {
       const cancelledAt = nowIso();
-      this.db.exec("BEGIN IMMEDIATE");
-      try {
+      this.memoryTransaction(() => {
         const update = this.db.prepare(`
           UPDATE task_bootstrap_previews
           SET status = 'cancelled', cancelled_at = ?
@@ -1240,11 +1234,7 @@ export class MnemuronStore {
           targetId: bootstrapId,
           metadata: { preview_version: previewVersion },
         });
-        this.db.exec("COMMIT");
-      } catch (error) {
-        this.db.exec("ROLLBACK");
-        throw error;
-      }
+      });
       return { status: "cancelled", bootstrap_id: bootstrapId, idempotent: false };
     }
 
@@ -1283,8 +1273,7 @@ export class MnemuronStore {
       binding_authorized_at: confirmedAt,
       provenance: this.publicIdentity(auth),
     };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.memoryTransaction(() => {
       // Under the write lock: lifecycle binding current; a deleted (reserved) project ID is never recreated.
       this.assertBootstrapAuthority(auth, row);
       const projectCollision = projectBootstrapCandidates(
@@ -1394,11 +1383,7 @@ export class MnemuronStore {
           resume_created: false,
         },
       });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
     return { status: "confirmed", idempotent: false, binding_packet: bindingPacket };
   }
 
@@ -1730,8 +1715,7 @@ export class MnemuronStore {
       binding_authorized_at: confirmedAt,
       provenance: this.publicIdentity(auth),
     };
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.memoryTransaction(() => {
       // Under the write lock: lifecycle binding current and the resolved project not deleted.
       this.assertBootstrapAuthority(auth, row);
       const projectRow = this.db.prepare(`
@@ -1824,11 +1808,7 @@ export class MnemuronStore {
           resume_created: false,
         },
       });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
     return {
       status: "confirmed",
       idempotent: false,
@@ -2132,7 +2112,7 @@ export class MnemuronStore {
       .filter((checkpointId) => !sourceCheckpointIds.has(checkpointId));
   }
 
-  runReconciliation(auth, taskId, payload = {}, { internal = false } = {}) {
+  runReconciliation(auth, taskId, payload = {}, { internal = false, allowAutomatic = true } = {}) {
     this.handoffPolicy.requireNew();
     // Authority binds the lifecycle generation observed before any of the reads this record is built from (a change
     // between those reads and the insert must leave it stale, not freshly bound).
@@ -2344,7 +2324,7 @@ export class MnemuronStore {
     let proposal = this.reconciliationProposalFromRow(this.db.prepare(
       "SELECT * FROM task_reconciliation_proposals WHERE proposal_id = ?",
     ).get(proposalId));
-    if (allSafe) {
+    if (allSafe && allowAutomatic) {
       const applied = this.applyReconciliationProposal(auth, proposal, {
         decision: "automatic",
         automatic: true,
@@ -2405,8 +2385,7 @@ export class MnemuronStore {
       resolvedAt,
     );
     let revisionId;
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    this.memoryTransaction(() => {
       // Re-checked under the write lock: Task live and the proposal's lifecycle binding current.
       this.assertProposalAuthority(auth, proposal);
       const result = this.db.prepare(`
@@ -2483,11 +2462,7 @@ export class MnemuronStore {
           canonical_version_after: nextVersion,
         },
       });
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
     return {
       status: automatic ? "auto_applied" : "applied",
       proposal: this.reconciliationProposalFromRow(this.db.prepare(
@@ -4509,6 +4484,7 @@ export class MnemuronStore {
     const row = this.db.prepare("SELECT * FROM resumes WHERE resume_id = ? AND user_id = ?")
       .get(resumeId, auth.user_id);
     if (!row) throw new NotFoundError("Resume Preview not found.");
+    this.consoleService.resumeWorkflows.assertConfirmation(auth,resumeId);
     if (row.preview_version !== previewVersion) {
       throw new ConflictError("Resume Preview version changed; create and show a fresh preview.");
     }
@@ -4652,6 +4628,7 @@ export class MnemuronStore {
   }
 
   recordInjectionEvent(auth, resumeId, payload) {
+    return this.memoryTransaction(() => {
     this.requireScope(auth, "resume:confirm");
     this.handoffPolicy.allowReceipt(auth,resumeId,payload,"injection");
     assertIdentifier(resumeId, "resume_id");
@@ -4692,6 +4669,7 @@ export class MnemuronStore {
     if (resume.status !== "confirmed") {
       throw new ConflictError("Resume must be confirmed before injection can be acknowledged.");
     }
+    this.consoleService.resumeWorkflows.assertReceipt(auth,resumeId,payload,'injection');
 
     const existingAttempt = this.db.prepare(`
       SELECT preview_version, credential_id, device_id, agent_id, agent_instance_id,
@@ -4808,6 +4786,7 @@ export class MnemuronStore {
       event_id: payload.event_id,
       delivery: this.injectionStatus(auth, resumeId),
     };
+    });
   }
 
   deliveryReceiptStatus(auth, resumeId) {
@@ -4903,6 +4882,7 @@ export class MnemuronStore {
   }
 
   recordDeliveryReceipt(auth, resumeId, payload) {
+    return this.memoryTransaction(() => {
     this.requireScope(auth, "resume:confirm");
     this.handoffPolicy.allowReceipt(auth,resumeId,payload,"receipt");
     assertIdentifier(resumeId, "resume_id");
@@ -4951,6 +4931,7 @@ export class MnemuronStore {
     if (resume.status !== "confirmed") {
       throw new ConflictError("Resume must be confirmed before delivery can be receipted.");
     }
+    this.consoleService.resumeWorkflows.assertReceipt(auth,resumeId,payload,'receipt');
 
     const existingReceipt = this.db.prepare(`
       SELECT preview_version, credential_id, device_id, agent_id, agent_instance_id,
@@ -5083,6 +5064,7 @@ export class MnemuronStore {
       receipt_event_id: payload.receipt_event_id,
       delivery: this.deliveryReceiptStatus(auth, resumeId),
     };
+    });
   }
 
   deliveryReceiptSummary(auth) {

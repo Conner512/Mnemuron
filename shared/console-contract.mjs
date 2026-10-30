@@ -19,7 +19,22 @@ export const consoleActionWritable = (auth,action) => consoleWritable(auth)||(co
 const CONSOLE_TUNNEL_ACTIONS_LIST=['tunnel.add','tunnel.token','tunnel.reapply','tunnel.remove'];
 export const CONSOLE_TUNNEL_FIELDS=Object.freeze({'tunnel.add':['name','token'],'tunnel.token':['id','token'],'tunnel.reapply':['id'],'tunnel.remove':['id']});
 export const OWNER_ACTIONS=Object.freeze(['features.save','schedule.save','processing.preview','processing.start','processing.pause','processing.resume','processing.cancel','processing.delete','processing.clear']);
-export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,'memory.create','memory.correct','memory.retract',...CONSOLE_ORGANIZE_ACTIONS,
+export const TASK_WORKFLOW_ACTIONS=Object.freeze(['projects.bootstrap_preview','projects.bootstrap_confirm','tasks.bootstrap_preview','tasks.bootstrap_confirm','tasks.reconciliation_preview','tasks.reconciliation_resolve']);
+export const RESUME_WORKFLOW_ACTIONS=Object.freeze(['resume.preview','resume.confirm']);
+export const TASK_WORKFLOW_VIEWS=Object.freeze(['task-workflow-preview']);
+export const RESUME_WORKFLOW_VIEWS=Object.freeze(['resume-targets','resume-status','resume-history']);
+export const CONSOLE_WORKFLOW_VIEWS=Object.freeze([...TASK_WORKFLOW_VIEWS,...RESUME_WORKFLOW_VIEWS]);
+export const CONSOLE_WORKFLOW_ERRORS=Object.freeze(['LIFECYCLE_AUTHORITY_STALE','TASK_WORKFLOW_PREVIEW_TOO_LARGE','RECONCILIATION_CONFLICT',
+  'RESUME_ALREADY_DELIVERED','RESUME_CONTEXT_CHANGED','RESUME_NOT_FOUND','RESUME_PREVIEW_EXPIRED','RESUME_TARGET_MISMATCH',
+  'RESUME_TARGET_REQUIRED','RESUME_TARGET_UNAVAILABLE','RESUME_TASK_UNRESOLVED','RESUME_VERSION_CHANGED','RESUME_CONFIRMATION_REQUIRED']);
+// Fresh factors stay at the BFF. Only the frozen preview identity and explicit decision reach Core.
+export const CONSOLE_WORKFLOW_CONFIRMS=Object.freeze({
+  'projects.bootstrap_confirm':['preview_id','preview_version','confirmed'],
+  'tasks.bootstrap_confirm':['preview_id','preview_version','confirmed'],
+  'tasks.reconciliation_resolve':['preview_id','preview_version','decision'],
+  'resume.confirm':['resume_id','preview_version','confirmed'],
+});
+export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,...TASK_WORKFLOW_ACTIONS,...RESUME_WORKFLOW_ACTIONS,'memory.create','memory.correct','memory.retract',...CONSOLE_ORGANIZE_ACTIONS,
   'jobs.schedule','jobs.cancel','jobs.cancel_batch','jobs.retry','models.save','models.test','models.discover','models.disable','models.quota','hosts.set','hosts.remove','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
   'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
   'memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate',
