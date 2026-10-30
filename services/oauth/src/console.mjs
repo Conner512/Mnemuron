@@ -180,6 +180,12 @@ export async function consoleRequest(request,response,{config,accounts,store,url
       result=await ids.connections.track(account.account_id,'web','console',()=>ids.connections.execute(account.account_id,session,action,payload,operation_id));}
     else if(/^(security|oauth|invitations|accounts)\./.test(action))result=await ids.console.execute(account.account_id,session,action,payload,operation_id,
       {lifecycle:identityMaintenance?.enabled()?(id,action)=>identityMaintenance.setState(id,action):undefined});
+    else if(action==='search.feedback'){
+      // Non-authoritative user telemetry: full Console write policy + account-bound CSRF, no password/OTP.
+      // A feedback vote never grants model egress, edits source memories or enables ranking changes.
+      if(Object.keys(payload).some(key=>!['search_token','memory_id','revision','feedback'].includes(key)))throw new BoundaryError(400,'INVALID_CONSOLE_INPUT');
+      result=await coreFor(account.subject).action({action,operation_id,payload});
+    }
     else if(['features.save','schedule.save','processing.start','processing.resume','hosts.set','hosts.remove'].includes(action)){
       await ids.console.reauthenticate(account.account_id,session,payload);
       const {current_password,otp,...safe}=payload;
@@ -349,7 +355,7 @@ export async function consoleRequest(request,response,{config,accounts,store,url
     sendJson(response,200,{read_only:true,includes_reauthentication:true,entries:rows.slice(0,q.limit),offset:q.offset,limit:q.limit,next_offset:rows.length>q.limit?q.offset+q.limit:null});return true;
   }
   if(['/console-api/system-health','/console-api/system-version','/console-api/backups'].includes(pathname)&&!config.identity.owner_account_id)ids.console.requireOperator(account.account_id);
-  if(coreFor && request.method==='GET' && ([...CONSOLE_WORKFLOW_VIEWS,...CONSOLE_REVIEW_VIEWS].some(view=>pathname===`/console-api/${view}`)||/^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memory-processing|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname))) {
+  if(coreFor && request.method==='GET' && ([...CONSOLE_WORKFLOW_VIEWS,...CONSOLE_REVIEW_VIEWS].some(view=>pathname===`/console-api/${view}`)||/^\/console-api\/(overview|attention|capture-status|model-usage|taxonomy|privacy-defaults|retention|task-branches|project-context|task-checkpoints|task-reconciliation|system-health|system-version|backups|memory-versions|memory-processing|search-feedback|memories|summaries|summary|jobs|job|storage|memory|models|memory-meta|export|projects|metadata-values|task-detail|project-profile|tunnel|config|entities|operation)$/.test(pathname))) {
     const core=coreFor(account.subject),view=pathname.slice('/console-api/'.length);
     let result=await core.view(view,Object.fromEntries(url.searchParams));
     // Configuration lives in Core (settings, models, agent keys, tunnels) and here (connections): one combined view.

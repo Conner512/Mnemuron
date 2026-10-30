@@ -24,11 +24,12 @@ function activity(db,user,liveSql){const since=new Date(Date.now()-7*86400000).t
   return {window_days:7,sources,uses,redacted};}
 export const FEATURE_ACTIONS=['memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate'];
 export const featureParams={
-  attention:['graph_days','graph_kinds','graph_query'],
+  attention:['graph_days','graph_kinds','graph_query','graph_project_id','graph_task_id','graph_focus','graph_peer','graph_history','graph_offset','graph_limit'],
   'task-branches':['task_id','project_id','offset','limit'],'project-context':['project_id'],
   'task-checkpoints':['task_id','offset','limit'],'task-reconciliation':['task_id'],
   'memory-versions':['memory_id','offset','limit','revision','content_offset','content_limit','chain'],
   'memory-processing':['memory_id','revision'],
+  'search-feedback':['query_fingerprint','filter_fingerprint','offset','limit'],
 };
 const page=p=>{
   const offset=Number(p.offset??0),limit=Number(p.limit??25);number(offset,0,1000000);number(limit,1,100);return {offset,limit};
@@ -69,6 +70,7 @@ export class ConsoleFeatures {
     object(p,featureParams[view]||[]);const {db,store,service}=this,user=auth.user_id;
     const result=value=>({read_only:true,production_ready:false,...value});
     if(view==='memory-processing')return result(processingEvidence(service,auth,p));
+    if(view==='search-feedback')return service.searchFeedback.read(auth,p);
     if(view==='taxonomy'){const current=this.preference(user,'taxonomy',service.taxonomy(user)),labels=this.labels(user);return result({...current,...service.taxonomy(user),labels,descriptions:this.descriptions(user),definitions:categoryDefinitions(service.taxonomy(user),labels,this.descriptions(user)),default_adoption:adoptionPreview(service.taxonomy(user),current.revision,labels)});}
     if(view==='privacy-defaults')return result({...this.privacy(user),applies_to:'new_console_memories',cloud_grant_requires_explicit_revision:true});
     if(view==='retention')return result(this.retention(user));

@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {auditDateRange,auditLocalToUTC,auditLocalValue} from '../../../web/console/audit.mjs';
 import {auditGroup,auditKind,auditUnclassified,auditQuery} from '../../../shared/console-queries.mjs';
+import {CONSOLE_REVIEW_ACTIONS,CONSOLE_REVIEW_VIEWS} from '../../../shared/console-contract.mjs';
+
+test('memory workbench reads stay in system; explicit review and search feedback writes stay in memory',()=>{
+ for(const view of [...CONSOLE_REVIEW_VIEWS,'memory-processing','search-feedback']){const action='console.read.'+view;
+  assert.equal(auditGroup(action),'system');assert.equal(auditKind(action),'read');assert.equal(auditUnclassified(action),false);}
+ for(const name of [...CONSOLE_REVIEW_ACTIONS,'search.feedback']){const action='console.'+name;
+  assert.equal(auditGroup(action),'memory');assert.equal(auditKind(action),'write');assert.equal(auditUnclassified(action),false);}
+});
 test('Audit local times round-trip, reject impossible dates/ranges, and handle timezone/DST explicitly',()=>{
  const prior=process.env.TZ;
  try{

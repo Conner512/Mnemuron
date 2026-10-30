@@ -1,5 +1,6 @@
 import {translate as t} from './appearance.mjs';
 import {kindGroup,KIND_OF_GROUP} from './visuals.mjs';
+import {neighborhoodCard,mountNeighborhood} from './graph-neighborhood.mjs';
 
 // A bounded, owner-only view of keyword co-occurrence. Nodes are not entity identities.
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -67,15 +68,15 @@ export function anchorPanel(graph,plan,index,{offset=0}={}){
   ${near.length?`<h4>${esc(t(isKind?(plan.mode==='concepts'?'mapKeywordsInType':'mapTopicsInType'):'mapTogether'))}</h4><ul class="entity-picks">${near.map(([node,count])=>`<li><button type="button" class="quiet" data-map-node-key="${esc(plan.anchors[node].key)}"><span>${esc(plan.anchors[node].label)}</span><span>${esc(message('mapMemoryCount',num(count)))}</span></button></li>`).join('')}</ul>`:''}
   <h4>${label('mapSourceMemories')}</h4><ul class="map-memories">${page.map(i=>{const memory=graph.memories[i];return `<li><button type="button" class="quiet" data-map-memory="${esc(memory.id)}"><span>${esc(memory.topic||message('mapMemoryId',memory.id))}</span><small>${esc([memory.day,groupName(kindGroup(memory.kind))].filter(Boolean).join(' · '))}</small></button></li>`;}).join('')}</ul>
   ${mine.length>MEMORY_PAGE?`<div class="map-memory-pages"><span>${num(start+1)}–${num(Math.min(start+MEMORY_PAGE,mine.length))} / ${num(mine.length)}</span>${start?`<button type="button" data-map-memory-offset="${start-MEMORY_PAGE}">${label('previous')}</button>`:''}${start+MEMORY_PAGE<mine.length?`<button type="button" data-map-memory-offset="${start+MEMORY_PAGE}">${label('next')}</button>`:''}</div>`:''}
-  <div class="actions"><a class="button" href="${href}">${label('mapOpenLibrary')}</a></div><p class="muted">${label('mapLibraryScope')}</p>`;
+  <div class="actions">${anchor.kind==='concept'?`<button type="button" data-map-explore="${esc(anchor.label)}">${label('mapExploreLibrary')}</button>`:''}<a class="button" href="${href}">${label('mapOpenLibrary')}</a></div><p class="muted">${label('mapLibraryScope')}</p>`;
 }
 
-const scopeOf=graph=>({days:graph.scope?.days??30,kinds:graph.scope?.kinds||MAP_KINDS,query:graph.scope?.query||''});
+const scopeOf=graph=>({days:graph.scope?.days??30,kinds:graph.scope?.kinds||MAP_KINDS,query:graph.scope?.query||'',project_id:graph.scope?.project_id||'',task_id:graph.scope?.task_id||''});
 const unavailableGraph=()=>({memories:[],entities:[],links:[],unavailable:true});
 const renderedGraph=graph=>graph.scope?graph:mapWindow(graph,{days:30});
 const kindCounts=graph=>graph.kind_counts||Object.fromEntries(MAP_KINDS.map(kind=>[kind,graph.memories.filter(memory=>kindOf(memory)===kind).length]));
 const coverage=graph=>graph.unavailable?t('mapUnavailable'):`${message('mapCoverage',num(graph.returned??graph.memories.length),num(graph.filtered_total??(graph.truncated?null:graph.memories.length)))}${graph.truncated?` · ${t(graph.truncation_reason==='response_budget'?'mapByteLimit':'mapRecordLimit')}`:''}`;
-const scopeText=scope=>[daysLabel(scope.days),scope.kinds.map(kind=>groupName(kindGroup(kind))).join(' / '),scope.query?message('mapQueryValue',scope.query):''].filter(Boolean).join(' · ');
+const scopeText=scope=>[daysLabel(scope.days),scope.kinds.map(kind=>groupName(kindGroup(kind))).join(' / '),scope.query?message('mapQueryValue',scope.query):'',scope.project_id,scope.task_id].filter(Boolean).join(' · ');
 const figures=graph=>{const keywords=new Set(graph.memories.flatMap(memory=>(memory.concepts||[]).map(conceptKey))).size;return `<div class="map-figure"><b>${num(graph.unavailable?null:graph.returned??graph.memories.length)}</b><span>${label('mapShownMemories')}</span></div><div class="map-figure"><b>${num(graph.unavailable?null:keywords)}</b><span>${label(keywords?'mapKeywords':'mapNoKeywords')}</span></div>`;};
 const legend=(graph,wanted)=>Object.entries(kindCounts(graph)).filter(([,count])=>count>0).map(([kind,count])=>`<li><button type="button" class="node-key map-kind" data-group="${kindGroup(kind)}" data-map-kind="${kind}" aria-pressed="${wanted.kinds.includes(kind)}">${esc(groupName(kindGroup(kind)))} <span>${num(count)}</span></button></li>`).join('');
 const directory=(plan,selected)=>plan.anchors.map(anchor=>`<li><button type="button" data-map-node-key="${esc(anchor.key)}" aria-pressed="${anchor.key===selected}"><span class="node-key" data-group="${anchor.group||'entity'}">${esc(anchor.label)}</span><span>${num(anchor.count)}</span></button></li>`).join('');
@@ -86,9 +87,10 @@ export function mapCard(features){
  const graph=renderedGraph(source),scope=scopeOf(graph),plan=mapAnchors(graph);
  return `<section class="card map-card map-card--browse" data-memory-map><header class="section-head"><h2>${label('mapTitle')}</h2><button type="button" class="quiet" data-map-refresh>${label('refresh')}</button></header>
   <div class="map-figures" data-map-figures>${figures(graph)}</div><div class="map-toolbar">${range(scope.days)}<form class="map-search" data-map-search role="search"><label><span class="sr-only">${label('mapSearch')}</span><input type="search" data-map-query name="graph_query" maxlength="400" value="${esc(scope.query)}" data-i18n-placeholder="mapSearch" placeholder="${esc(t('mapSearch'))}" autocomplete="off"></label><button type="submit">${label('search')}</button><button type="button" class="quiet" data-map-reset>${label('resetFilters')}</button></form></div>
+  <form class="map-scope-filters" data-map-scope-filter><label>${label('mapProjectScope')}<select data-map-project><option value="">${esc(t('mapAllProjects'))}</option></select></label><button type="button" data-map-project-more hidden>${label('mapMoreProjects')}</button><label>${label('mapTaskScope')}<input data-map-task maxlength="128" value="${esc(scope.task_id)}" autocomplete="off"></label><button type="submit">${label('applyFilters')}</button><span data-map-project-status role="status"></span></form><p class="muted">${label('mapProjectNote')}</p>
   <ul class="map-legend" data-map-legend>${legend(graph,scope)}</ul><p class="map-coverage" data-map-coverage>${esc(coverage(graph))}</p><p class="map-scope muted" data-map-scope>${esc(message('mapAppliedScope',scopeText(scope)))}</p><div data-map-status role="status" aria-live="polite"></div>
   <div class="map-board"><div class="map-zoom" role="group" data-i18n-aria-label="mapZoom" aria-label="${esc(t('mapZoom'))}"><button type="button" data-map-zoom="in" data-i18n-aria-label="mapZoomIn" aria-label="${esc(t('mapZoomIn'))}">+</button><button type="button" data-map-zoom="out" data-i18n-aria-label="mapZoomOut" aria-label="${esc(t('mapZoomOut'))}">−</button><button type="button" data-map-zoom="reset">${label('mapResetView')}</button></div><div class="map-tip" data-map-tip hidden></div><aside class="map-panel" data-map-panel hidden></aside><canvas data-map-canvas role="img" data-i18n-aria-label="mapDescription" aria-label="${esc(t('mapDescription'))}"></canvas><div data-map-empty>${empty(graph)}</div></div>
-  <p class="map-hint" data-map-hint>${label('mapCooccurrence')} ${label(plan.aggregate?'mapAggregateHint':'mapDotsHint')}</p><details class="map-directory" open><summary>${label('mapBrowseNodes')}</summary><p class="muted">${label('mapKeyboardHint')}</p><ul data-map-nodes>${directory(plan,null)}</ul></details></section>`;
+  <p class="map-hint" data-map-hint>${label('mapCooccurrence')} ${label(plan.aggregate?'mapAggregateHint':'mapDotsHint')}</p><details class="map-directory" open><summary>${label('mapBrowseNodes')}</summary><p class="muted">${label('mapKeyboardHint')}</p><ul data-map-nodes>${directory(plan,null)}</ul></details>${neighborhoodCard()}</section>`;
 }
 
 // Only the newest request for the still-mounted account may replace a graph. A failed filter read
@@ -99,6 +101,13 @@ export function mountMemoryMap({api,root,data,isActive,openMemory}){
  let graph=renderedGraph(data.features?.attention?.graph||unavailableGraph()),wanted=scopeOf(graph),selected=null,memoryOffset=0,sequence=0,disposed=false,loading=false,error=graph.unavailable===true,map,lastPanelHtml=null,lastDirectoryHtml=null;
  const panel=card.querySelector('[data-map-panel]'),query=card.querySelector('[data-map-query]'),status=card.querySelector('[data-map-status]'),nodeList=card.querySelector('[data-map-nodes]');
  const alive=()=>!disposed&&card.isConnected&&isActive();
+ const explorer=mountNeighborhood({root:card,api,isActive,readScope:()=>scopeOf(graph),openMemory});
+ let projectOffset=0,projectBusy=false;
+ async function projects(){if(projectBusy)return;projectBusy=true;const target=card.querySelector('[data-map-project]'),more=card.querySelector('[data-map-project-more]'),notice=card.querySelector('[data-map-project-status]');
+  try{const reply=await api('projects',{offset:projectOffset,limit:50,archived:'any'});if(!alive())return;
+   for(const row of reply.projects||[]){if([...target.options].some(option=>option.value===row.project_id))continue;const option=document.createElement('option');option.value=row.project_id;option.textContent=row.name||row.project_id;target.append(option);}
+   projectOffset=reply.next_offset;more.hidden=projectOffset===null;notice.textContent='';
+  }catch{if(alive()){notice.textContent=t('mapProjectsFailed');more.hidden=false;}}finally{projectBusy=false;}}
  const select=key=>{selected=key;memoryOffset=0;show();};
  function show(){
   const focused=document.activeElement,restore=panel.contains(focused)?Object.entries(focused.dataset):null;
@@ -128,9 +137,9 @@ export function mountMemoryMap({api,root,data,isActive,openMemory}){
  }
  map=memoryMap(canvas,graph,{onSelect:select,onMemory:openMemory,tip:card.querySelector('[data-map-tip]'),top:30,insets:()=>({top:30,bottom:50}),panelWidth:316,onLayout:()=>{if(map){selected=map.selectedKey;repaintNodes();show();}}});
  async function request(){
-  const mine=++sequence,requested={days:wanted.days,kinds:[...wanted.kinds],query:wanted.query};loading=true;error=false;map.selectKey(null);paint();
+  const mine=++sequence,requested={...wanted,kinds:[...wanted.kinds]};explorer?.reset();loading=true;error=false;map.selectKey(null);paint();
   try{
-   const params={graph_days:requested.days,...(!requested.kinds.length||requested.kinds.length===MAP_KINDS.length?{}:{graph_kinds:requested.kinds.join(',')}),...(requested.query?{graph_query:requested.query}:{})};
+   const params={graph_days:requested.days,...(!requested.kinds.length||requested.kinds.length===MAP_KINDS.length?{}:{graph_kinds:requested.kinds.join(',')}),...(requested.query?{graph_query:requested.query}:{}),...(requested.project_id?{graph_project_id:requested.project_id}:{}),...(requested.task_id?{graph_task_id:requested.task_id}:{})};
    const result=await api('attention',params);if(mine!==sequence||!alive())return;
    if(!result.graph||!Array.isArray(result.graph.memories)||!result.graph.scope)throw new Error('MAP_INVALID_REPLY');
    const matchingKinds=Object.entries(kindCounts(result.graph)).filter(([,count])=>count>0).map(([kind])=>kind);
@@ -139,6 +148,8 @@ export function mountMemoryMap({api,root,data,isActive,openMemory}){
   }catch{if(mine!==sequence||!alive())return;loading=false;error=true;paint();}
  }
  const click=event=>{
+  const explore=event.target.closest('[data-map-explore]');if(explore){if(!loading)explorer?.explore(explore.dataset.mapExplore);return;}
+  if(event.target.closest('[data-map-project-more]')){void projects();return;}
   const node=event.target.closest('[data-map-node-key]');if(node){map.selectKey(node.dataset.mapNodeKey);if(!panel.hidden)panel.querySelector('[data-map-close]')?.focus();return;}
   const memory=event.target.closest('[data-map-memory]');if(memory){if(graph.memories.some(item=>item.id===memory.dataset.mapMemory))openMemory(memory.dataset.mapMemory);return;}
   const page=event.target.closest('[data-map-memory-offset]');if(page){memoryOffset=Number(page.dataset.mapMemoryOffset);show();panel.querySelector('[data-map-memory]')?.focus({preventScroll:true});return;}
@@ -146,17 +157,18 @@ export function mountMemoryMap({api,root,data,isActive,openMemory}){
   const zoom=event.target.closest('[data-map-zoom]');if(zoom){zoom.dataset.mapZoom==='reset'?map.reset():map.zoom(zoom.dataset.mapZoom==='in'?1.4:1/1.4);return;}
   const day=event.target.closest('[data-map-days]');if(day){wanted={...wanted,days:Number(day.dataset.mapDays)};void request();return;}
   const kind=event.target.closest('[data-map-kind]');if(kind){const value=kind.dataset.mapKind;wanted={...wanted,kinds:MAP_KINDS.filter(item=>item===value?!wanted.kinds.includes(item):wanted.kinds.includes(item))};void request();return;}
-  if(event.target.closest('[data-map-reset]')){wanted={days:30,kinds:[...MAP_KINDS],query:''};query.value='';query.setCustomValidity('');void request();return;}
+  if(event.target.closest('[data-map-reset]')){wanted={days:30,kinds:[...MAP_KINDS],query:'',project_id:'',task_id:''};card.querySelector('[data-map-project]').value='';card.querySelector('[data-map-task]').value='';query.value='';query.setCustomValidity('');void request();return;}
   if(event.target.closest('[data-map-retry],[data-map-refresh]'))void request();
  };
- const submit=event=>{if(!event.target.matches('[data-map-search]'))return;event.preventDefault();const value=query.value.trim().replace(/\s+/gu,' ');if([...value].length>200){query.setCustomValidity(t('mapQueryTooLong'));query.reportValidity();return;}query.setCustomValidity('');wanted={...wanted,query:value};void request();};
+ const submit=event=>{if(event.target.matches('[data-map-scope-filter]')){event.preventDefault();wanted={...wanted,project_id:card.querySelector('[data-map-project]').value,task_id:card.querySelector('[data-map-task]').value.trim()};void request();return;}
+  if(!event.target.matches('[data-map-search]'))return;event.preventDefault();const value=query.value.trim().replace(/\s+/gu,' ');if([...value].length>200){query.setCustomValidity(t('mapQueryTooLong'));query.reportValidity();return;}query.setCustomValidity('');wanted={...wanted,query:value};void request();};
  const change=event=>{if(!event.target.matches('[data-map-custom]'))return;const value=Number(event.target.value);if(!Number.isInteger(value)||value<1||value>3650){event.target.reportValidity();return;}wanted={...wanted,days:value};void request();};
  const keydown=event=>{if(event.key==='Escape'&&!panel.hidden){event.preventDefault();closePanel();}};
  const input=()=>query.setCustomValidity('');
  const appearance=()=>{if(!alive())return;const key=selected;map.setGraph(graph,{selectedKey:key});paint();};
  card.addEventListener('click',click);card.addEventListener('submit',submit);card.addEventListener('change',change);card.addEventListener('keydown',keydown);query.addEventListener('input',input);document.addEventListener('appearancechange',appearance);
- paint();const preferred=savedDays();if(preferred!==null&&preferred!==wanted.days){wanted={...wanted,days:preferred};void request();}
- return {replay:items=>map.replay(items),dispose(){disposed=true;sequence++;map.dispose();card.removeEventListener('click',click);card.removeEventListener('submit',submit);card.removeEventListener('change',change);card.removeEventListener('keydown',keydown);query.removeEventListener('input',input);document.removeEventListener('appearancechange',appearance);panel.replaceChildren();panel.hidden=true;}};
+ paint();void projects();const preferred=savedDays();if(preferred!==null&&preferred!==wanted.days){wanted={...wanted,days:preferred};void request();}
+ return {replay:items=>map.replay(items),dispose(){disposed=true;sequence++;explorer?.dispose();map.dispose();card.removeEventListener('click',click);card.removeEventListener('submit',submit);card.removeEventListener('change',change);card.removeEventListener('keydown',keydown);query.removeEventListener('input',input);document.removeEventListener('appearancechange',appearance);panel.replaceChildren();panel.hidden=true;}};
 }
 
 // Canvas renderer follows below. Selection is keyed independently from the viewport's anchor count.

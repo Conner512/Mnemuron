@@ -17,6 +17,7 @@ import {QdrantStore} from '../vector-stores/qdrant.mjs';
 import {ConsoleFeatures,FEATURE_ACTIONS} from './features.mjs';
 import {ConsoleOrganizer} from './organize.mjs';
 import {ConsoleProjects} from './projects.mjs';
+import {ConsoleSearchFeedback} from './search-feedback.mjs';
 const PROJECT_ACTIONS=['projects.update','projects.archive','projects.restore','tasks.update'];
 import {ModelError} from '../model-providers/contracts.mjs';
 import {AGENT_READ_POLICIES} from '../memory/web-visibility.mjs';
@@ -33,7 +34,7 @@ const receipt=result=>({status:result.status,memory_id:result.replacement_memory
 // Console actions whose effects the config center logs (source 'web').
 const CONFIG_ACTIONS=['features.save','schedule.save','models.save','models.disable','models.quota','hosts.set','hosts.remove','devices.register','devices.rotate','devices.revoke','connections.create','connections.rotate','connections.revoke'];
 export class ConsoleService {
-  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);this.taskWorkflows=new ConsoleTaskWorkflows(this);this.resumeWorkflows=new ConsoleResumeWorkflows(this);this.review=new ConsoleMemoryReview(this);}
+  constructor(store){this.store=store;this.db=store.db;this.state=new ConsoleState(store);this.models=new ConsoleModels(store,this.state);this.features=new ConsoleFeatures(this);this.organizer=new ConsoleOrganizer(this);this.entities=new ConsoleEntities(this);this.projects=new ConsoleProjects(this);this.lifecycleMutations=new ProjectLifecycleMutations(store);this.busy=false;this.owner=new OwnerControls(this);this.taskWorkflows=new ConsoleTaskWorkflows(this);this.resumeWorkflows=new ConsoleResumeWorkflows(this);this.review=new ConsoleMemoryReview(this);this.searchFeedback=new ConsoleSearchFeedback(this);}
   require(auth,action){if(this.owner.user)this.owner.require(auth.user_id);else if(OWNER_ACTIONS.includes(action))throw new AuthorizationError('owner mode');if(!consoleActionWritable(auth,action))throw new AuthorizationError('console:write');}
   taxonomy(user){const fallback=this.store.memoryConfig.memory?.taxonomy||(user?this.features.preference(user,'taxonomy-default',taxonomyDefault):taxonomyDefault);return user?this.features.taxonomy(user,fallback):fallback;}
   capabilities(auth){if(this.owner.user)this.owner.require(auth.user_id);const actions=CONSOLE_ACTIONS.filter(action=>consoleActionWritable(auth,action)&&(this.owner.user?!['jobs.schedule','jobs.retry','vector.prepare','vector.schedule'].includes(action):!OWNER_ACTIONS.includes(action)));return {version:'console-actions-v1',writable:actions.length>0,actions,taxonomy:this.taxonomy(auth.user_id),category_labels:this.features.labels(auth.user_id),category_descriptions:this.features.descriptions(auth.user_id),
@@ -138,6 +139,7 @@ export class ConsoleService {
   }
   apply(auth,action,p){const store=this.store;
     if(action.startsWith('review.'))return this.review.apply(auth,action,p);
+    if(action==='search.feedback')return this.searchFeedback.apply(auth,p);
     if(RESUME_WORKFLOW_ACTIONS.includes(action))return this.resumeWorkflows.apply(auth,action,p);
     if(OWNER_ACTIONS.includes(action))return this.owner.apply(auth,action,p);
     if(action.startsWith('connections.')&&!this.owner.allowed('connections'))throw new ConflictError('Connection management disabled.','FEATURE_DISABLED');

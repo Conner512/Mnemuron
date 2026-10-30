@@ -113,6 +113,13 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 - 实体相关的控制台操作（`entity.create/alias/alias_correct/alias_remove/link/unlink/resolve`）和实体提取任务的调度已移除；实体库与别名检索仍保留在服务端（现有数据保留，`entities` 读取视图仍按 owner 授权），审计里的历史实体操作仍归在记忆组。
 - 回归入口：`server/test/memory-traits.test.mjs`、`server/test/console-memory-graph.test.mjs`、`services/oauth/test/console-library-ui.test.mjs`、`services/oauth/test/console-version-entity-ui.test.mjs`。
 
+### 8.2 全库局部图谱与搜索反馈（OVW-04、MEM-12）
+
+- 图谱按项目／任务、时间、类型与关键词条件先过滤再统计；局部一跳和共现证据分页读取完整授权范围，不以概览 1000 条样本代替全库。当前、被替代记录数量与首次／最近记录时间分别显示；共现、版本替代及来源关系不得混淆。
+- 搜索反馈绑定签名展示上下文和当前记忆 revision，提供相关、无关、过时及遗漏四种显式评价。仅保存 owner 加盐的问题指纹，不保存问题正文，不自动调整排序或开启新模型外发。人工计数不得标为准确率或召回率。
+- 新模块 `graph-neighborhood.mjs`、`search-feedback.mjs` 及 `search-feedback` 视图须同时出现在静态模块、Core/BFF 和 ingress 白名单中；写 action `search.feedback` 仅允许完整 Console 账户绑定授权。
+- 合同、隐私和可复现验收入口见 [memory-search-workbench.md](memory-search-workbench.md)。
+
 ## 9. 安全与隐私红线
 
 - 数据按账户隔离。平台管理员只能管理账户，不能读取他人的记忆，也不能代替他人操作。
@@ -205,6 +212,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | OVW-01 | 概览 | 记忆分布与计数 | live | overview | — |
 | OVW-02 | 概览 | 最近写入与 30 天活动 | live | overview | — |
 | OVW-03 | 概览 | 待处理事项 | live | attention | — |
+| OVW-04 | 概览 | 全库局部图谱与证据 | live | attention, projects | — |
 | MEM-01 | 记忆库 | 检索与筛选 | live | memories | — |
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |
@@ -215,8 +223,8 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-08 | 记忆库 | 关键词筛选与地图 | live | memories | — |
 | MEM-09 | 记忆库 | 候选审核工作台 | live | review-candidates | review.extract, review.candidate |
 | MEM-10 | 记忆库 | 记忆对照与人工复查 | live | memory-review | review.verify, review.resolve |
-
 | MEM-11 | 记忆库 | 处理证据与选中补处理 | live | memory-processing | processing.preview, processing.start |
+| MEM-12 | 记忆库 | 搜索反馈与验收 | live | search-feedback | search.feedback |
 | SUM-01 | 摘要 | 摘要列表 | live | summaries, summary | — |
 | SUM-02 | 摘要 | 生成摘要 | live | — | jobs.schedule |
 | SUM-03 | 摘要 | 按项目和会话分组 | live | summaries | — |

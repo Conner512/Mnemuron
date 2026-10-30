@@ -153,26 +153,29 @@ export async function consoleRead(store,auth,view,params={}) {
       const {offset,limit}=pagination(params);
       if(params.mode!==undefined&&!['lexical','hybrid','semantic'].includes(params.mode))throw new ValidationError('Invalid retrieval mode.');
       const f=organizer.filter(user,params);
+      const feedback=response=>store.consoleService.searchFeedback.context(auth,f,response);
+      // Preserve the revision read in the very same SELECT as the displayed body, not a later revision lookup.
+      const preview=row=>({...snippet(row),...(f.query?{revision:row.revision}:{})});
       if(f.query&&params.mode!=='lexical'){
         const statuses=f.status?[f.status]:['active','superseded','retracted'];
         const found=await store.searchMemories(auth,{query:f.query,limit:20,...(params.mode?{mode:params.mode}:{}),statuses,personal_model_only:true,[MEMORY_SEARCH_CONTEXT]:{filter:f}});
         if(found.retrieval.effective_mode==='lexical'){
           const {rows,truncated,aliases,plan,total}=organizer.rows(auth,f,{limit:limit+1,offset,count:true});
-          return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,
-            retrieval:{...found.retrieval,candidate_limit:500,aliases,alias_expanded:plan?.expanded,alias_ambiguous:plan?.ambiguous,alias_source_truncated:plan?.source_truncated}};
+          return feedback({read_only:true,results:rows.slice(0,limit).map(preview),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,
+            retrieval:{...found.retrieval,candidate_limit:500,aliases,alias_expanded:plan?.expanded,alias_ambiguous:plan?.ambiguous,alias_source_truncated:plan?.source_truncated}});
         }
         // Body, topic and keywords already share the same relevance checks. Keep the ranked,
         // pre-filtered window; do not append unvalidated keyword substring matches.
         const ranked=found.results.map(r=>r.memory_id);
         const {query,...rest}=f,{rows,total}=organizer.rows(auth,rest,{ranked,limit:limit+1,offset,count:true});
         const truncated=found.truncated===true||found.retrieval.result_truncated===true||found.retrieval.candidate_truncated===true;
-        return {read_only:true,results:rows.slice(0,limit).map(r=>snippet({...r,ranking:found.results.find(x=>x.memory_id===r.memory_id)?.ranking})),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,retrieval:{...found.retrieval,window_limited:true,candidate_limit:20}};
+        return feedback({read_only:true,results:rows.slice(0,limit).map(r=>preview({...r,ranking:found.results.find(x=>x.memory_id===r.memory_id)?.ranking})),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,truncated,retrieval:{...found.retrieval,window_limited:true,candidate_limit:20}});
       }
       // Filters apply inside the owner-scoped (and, for a search, bounded) candidate set before paging.
       // total: matching records across all pages, so the library can show the page count and jump to a page.
       const {rows,truncated,aliases,plan,total}=organizer.rows(auth,f,{limit:limit+1,offset,count:true});
-      return {read_only:true,results:rows.slice(0,limit).map(snippet),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,
-        ...(f.query?{truncated,retrieval:{mode:'lexical',requested_mode:'lexical',effective_mode:'lexical',candidate_limit:500,degraded:false,aliases,alias_expanded:plan?.expanded,alias_ambiguous:plan?.ambiguous,alias_source_truncated:plan?.source_truncated}}:{})};
+      return feedback({read_only:true,results:rows.slice(0,limit).map(preview),offset,limit,total,next_offset:rows.length>limit?offset+limit:null,
+        ...(f.query?{truncated,retrieval:{mode:'lexical',requested_mode:'lexical',effective_mode:'lexical',candidate_limit:500,degraded:false,aliases,alias_expanded:plan?.expanded,alias_ambiguous:plan?.ambiguous,alias_source_truncated:plan?.source_truncated}}:{})});
     }
     case 'summaries':{const {offset,limit}=pagination(params),live=store.lifecycle.live(user),deps=live.sql('m.project_id');
       // A summary that depends on any record of a deleted project (also user-wide or mixed summaries, whose own scope
