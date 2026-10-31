@@ -18,7 +18,7 @@ export function memorySearchFilterSql(filter = {}, {memoryTypes} = {}) {
     params.push(filter.kind);
   }
   if (filter.concept) {
-    clauses.push('EXISTS (SELECT 1 FROM memory_traits t, json_each(t.concepts_json) c WHERE t.user_id=m.user_id AND t.memory_id=m.memory_id AND lower(c.value)=lower(?))');
+    clauses.push("EXISTS (SELECT 1 FROM memory_traits t, json_each(t.concepts_json) c WHERE t.user_id=m.user_id AND t.memory_id=m.memory_id AND c.type='text' AND memory_concept_key(c.value)=memory_concept_key(?))");
     params.push(filter.concept);
   }
   if (filter.origin) { clauses.push("(m.source LIKE 'user_import:%')=(?='imported')"); params.push(filter.origin); }

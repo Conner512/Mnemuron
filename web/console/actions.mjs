@@ -2,7 +2,9 @@ import {collectAuditExport} from './audit.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
 import {agentsView} from './agents.mjs';
-import {icon,revisionDifference,kindGroup,KIND_OF_GROUP} from './visuals.mjs';
+import {icon,revisionDifference} from './visuals.mjs';
+import {mapCard,mountMemoryMap} from './memory-map.mjs';
+export {mapAnchors,anchorPanel,mapWindow} from './memory-map.mjs';
 
 // Settings and operations pages. Views are markup only; every write goes through
 // mountActions below (explicit dialog, fresh operation ID, server-side authorization).
@@ -285,34 +287,11 @@ export function overviewStatus(data){const f=data.features||{},o=f['system-healt
   const extra=[[attention.stale_summaries,'份摘要已过期','/app/summaries'],[attention.pending_reconciliation,'项任务对账待确认','/app/projects']].filter(([n])=>n>0);
   const items=[...problems.map(x=>`<li data-health="${esc(x.level)}"><span class="health-dot" data-level="${esc(x.level)}" aria-hidden="true"></span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p>${x.fix?`<p class="muted">${esc(x.fix)}</p>`:''}</div><a href="${esc(x.href||'/app/health')}">${x.href?'去处理':'查看'}</a></li>`),
     ...extra.map(([n,text,href])=>`<li data-health="warn"><span class="health-dot" data-level="warn" aria-hidden="true"></span><div><strong>${esc(n)} ${esc(text)}</strong></div><a href="${href}">处理</a></li>`)];
-  return `${mapCard(f,active)?`<div class="overview-hero">${mapCard(f,active)}${streamCard()}</div>`:''}<div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/processing',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/models')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/health',worst)}</div>
+  const map=mapCard(f);
+  return `${map?`<div class="overview-hero">${map}${streamCard()}</div>`:''}<div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/processing',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/models')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/health',worst)}</div>
     ${pipelineCard(data,f,active)}
     <section class="card attention-card"><header class="section-head"><h2>需要注意</h2></header>${items.length?`<ul class="health-list">${items.join('')}</ul>`:'<p class="muted">目前没有需要处理的事。</p>'}</section>`;
 }
-// Memory map (overview hero): each writer-chosen kind has its own colour; records without a kind are grey.
-const GROUP_NAMES={fact:'事实',pref:'偏好',flow:'工作流程',proj:'架构',bug:'问题',pat:'模式',none:'未标注类型'};
-// The parts of the map card that follow the chosen window and hidden types: figures, legend (type toggles), hint.
-function mapParts(graph,{days,hidden,indexed}){
-  const base=mapWindow(graph,{days}),shown=mapWindow(graph,{days,hidden}),plan=mapAnchors(shown),keywords=new Set(shown.memories.flatMap(m=>(m.concepts||[]).map(conceptKey))).size;
-  const groups=Object.keys(GROUP_NAMES).map(k=>[k,base.memories.filter(m=>kindGroup(m.kind)===k).length]).filter(([,n])=>n);
-  const big=(value,label)=>`<div class="map-figure"><b>${esc(value)}</b><span>${esc(label)}</span></div>`;
-  const figures=`${big(num(shown.memories.length),days?`近 ${days} 天的记忆`:'活动记忆')}${big(num(keywords),keywords?'关键词':'关键词（尚未补全）')}${big(indexed,'语义已索引')}`;
-  const legend=`${groups.map(([k,n])=>`<li><button type="button" class="node-key map-kind" data-group="${k}" data-map-kind="${k}" aria-pressed="${hidden.has(k)?'false':'true'}" title="${hidden.has(k)?'点击显示':'点击隐藏'}这一类">${esc(GROUP_NAMES[k])} <span>${num(n)}</span></button></li>`).join('')}${plan.mode==='concepts'?'<li class="node-key" data-group="entity">关键词</li>':plan.mode==='topics'?'<li class="node-key" data-group="entity">主题</li>':''}`;
-  const how=plan.aggregate?'记忆较多，只画关键词：圆越大记忆越多，线越粗越常一起出现':plan.mode==='concepts'?'紫色节点是共同的关键词，彩色节点是类型':plan.mode==='topics'?'还没有共同的关键词：紫色节点是主题':'还没有共同的关键词，记忆按类型聚在一起';
-  const hint=`${esc(daysLabel(days))}${graph.truncated&&!days?` · 只取最近 ${num(graph.memories.length)} 条`:''} · ${esc(how)} · 光点：最近的读写`;
-  const empty=shown.memories.length?'':graph.memories.length?`<p class="map-empty">${days?`近 ${days} 天没有记忆，换个时间范围看看。`:'所有类型都被隐藏了，点下面的类型重新显示。'}</p>`:'<p class="map-empty">还没有活动记忆。ChatGPT、编程助手或控制台写入后，会出现在这张图上。</p>';
-  return {figures,legend,hint,empty,graph:shown};}
-const mapRange=days=>`<div class="map-range" role="group" aria-label="时间范围">${MAP_DAY_CHOICES.map(d=>`<button type="button" data-map-days="${d}" aria-pressed="${d===days}">${esc(daysLabel(d))}</button>`).join('')}
-  <label class="map-custom${MAP_DAY_CHOICES.includes(days)?'':' is-active'}"><span class="sr-only">自定义天数</span><input type="number" min="1" max="3650" step="1" inputmode="numeric" placeholder="自定义天数" data-map-custom value="${MAP_DAY_CHOICES.includes(days)?'':esc(days)}"></label></div>`;
-function mapCard(f,active){const g=f.attention?.graph,o=f['system-health']?.owner,c=o?.vector_catch_up;
-  if(!g)return '';const days=mapDays();
-  const indexed=!o||!o.flags?.vector_catch_up||c?.error_code?'—':`${Math.round(100*Math.max(0,(active||0)-(c?.pending||0))/Math.max(1,active||0))}%`;
-  const parts=mapParts(g,{days,hidden:new Set(),indexed});
-  return `<section class="card map-card" data-memory-map data-indexed="${esc(indexed)}">${mapControls()}<canvas data-map-canvas role="img" aria-label="记忆网络：大圆点是关键词或主题，小圆点是记忆，颜色表示类型"></canvas>
-    <div class="map-figures" data-map-figures>${parts.figures}</div>${mapRange(days)}
-    <div data-map-empty>${parts.empty}</div>
-    <ul class="map-legend" data-map-legend>${parts.legend}</ul>
-    <p class="map-hint" data-map-hint>${parts.hint}</p></section>`;}
 function streamCard(){return `<section class="card live-stream" data-live-stream><header class="section-head"><h2>实时动态</h2><div><button type="button" class="quiet" data-stream-refresh>刷新</button><a href="/app/audit">全部审计</a></div></header>
   <ol class="stream-events" data-stream-list><li class="muted">正在读取最近的记忆读写…</li></ol><p class="muted stream-note">打开概览、点刷新或切回这个页面时更新。</p></section>`;}
 // Memory pipeline for the last 7 days: written → scrubbed → typed → keywords → semantic index → used.
@@ -321,13 +300,13 @@ function pipelineCard(data,f,active){const a=f.attention?.activity_7d,o=f['syste
   const unmarked=(data.insights?.kinds||[]).find(r=>r.value==='none')?.count||0,c=o?.vector_catch_up;
   const days=(data.insights?.activity||[]).slice(-14),max=Math.max(1,...days.map(d=>d.count));
   const spark=days.length?`<svg class="stage-spark" viewBox="0 0 ${days.length*6} 24" preserveAspectRatio="none" aria-hidden="true">${days.map((d,i)=>`<rect x="${i*6}" y="${24-Math.max(1,Math.round(22*d.count/max))}" width="4" height="${Math.max(1,Math.round(22*d.count/max))}" rx="1"/>`).join('')}</svg>`:'';
-  const withConcepts=(g?.memories||[]).filter(m=>m.concepts?.length).length,reads=u.chatgpt.search+u.chatgpt.read+u.agents.search+u.agents.read+u.console.search+u.console.read;
+  const withConcepts=g?.active_with_concepts??(g?.truncated?null:(g?.memories||[]).filter(m=>m.concepts?.length).length),conceptTotal=g?.active_total??(g?.truncated?null:g?.memories.length||0),reads=u.chatgpt.search+u.chatgpt.read+u.agents.search+u.agents.read+u.console.search+u.console.read;
   const stage=(group,label,value,note,href,extra='')=>`<a class="pipe-stage" data-group="${group}" href="${href}"><span class="pipe-label">${esc(label)}</span><strong>${esc(value)}</strong>${extra}<span class="pipe-note">${esc(note)}</span></a>`;
   return `<section class="card pipeline-card"><header class="section-head"><h2>记忆流水线 <small>最近 7 天，从写入到被读取</small></h2><a href="/app/processing">整理能力</a></header><div class="pipe">
     ${stage('proj','写入',num(written),`ChatGPT ${num(s.chatgpt)} · 编程助手 ${num(s.agents)} · 控制台和导入 ${num(s.console+s.import)}`,'/app/memories',spark)}
     ${stage('fact','脱敏',num(a.redacted??0),a.redacted?'写入前替换了密钥或令牌':'没有发现密钥','/app/audit?group=system')}
     ${stage('flow','类型',`${num(Math.max(0,(active||0)-unmarked))}/${num(active)}`,'写入的 Agent 标注类型','/app/memories?kind=none')}
-    ${stage('entity','关键词',`${num(withConcepts)}/${num(g?.memories.length||0)}`,on('traits')?'新记忆自动补全关键词':'补全关键词已关闭','/app/processing#cap-traits')}
+    ${stage('entity','关键词',`${num(withConcepts)}/${num(conceptTotal)}`,on('traits')?'新记忆自动补全关键词':'补全关键词已关闭','/app/processing#cap-traits')}
     ${stage('proj','语义索引',c?.error_code?'失败':on('vector_catch_up')?`${num(Math.max(0,(active||0)-(c?.pending||0)))}/${num(active)}`:'未开启',c?.pending?`待索引 ${num(c.pending)} 条`:on('vector_catch_up')?'新记忆自动加入':'新记忆不会进入语义索引','/app/processing')}
     ${stage('pref','被读取',num(reads),`搜索 ${num(u.chatgpt.search+u.agents.search+u.console.search)} · 读取 ${num(u.chatgpt.read+u.agents.read+u.console.read)}`,'/app/audit?group=memory')}
   </div></section>`;}
@@ -342,176 +321,16 @@ function streamItems(d){const creds=d.credentials||{},mems=d.memories||{};
     return {memory_id:e.target_type==='memory'?e.target_id:null,kind:e.kind,refs:e.query?.result_refs||[],
       html:`<li class="stream-event" data-kind="${esc(e.kind)}"><time>${Number.isFinite(date.getTime())?date.toLocaleTimeString(document.documentElement.lang,{hour:'2-digit',minute:'2-digit'}):''}</time><div><p><strong>${esc(who)}</strong> ${esc(verb)}${title?` <span class="stream-title">「${esc(title)}」</span>`:e.action==='memory.query'?`，命中 ${num(e.query?.result_refs?.length||0)} 条`:''}</p><span class="node-key" data-group="${e.kind==='write'?'proj':'pref'}">${e.kind==='write'?'写入':'读取'}</span></div></li>`};});}
 export function mountOverview({api,root,data,isActive,openMemory}){
-  const canvas=root.querySelector('[data-memory-map] [data-map-canvas]'),list=root.querySelector('[data-stream-list]'),graph=data.features?.attention?.graph,card=canvas?.closest('[data-memory-map]'),panel=card?.querySelector('[data-map-panel]');
-  // Window (days, remembered in this browser) and hidden types drive what the map draws; both redraw in place.
-  let days=mapDays();const hidden=new Set();
-  const show=i=>{if(!panel)return;panel.hidden=i<0;panel.innerHTML=i<0?'':anchorPanel(map.graph,map.plan,i);};
-  const insets=()=>{const c=card.getBoundingClientRect(),f=card.querySelector('[data-map-figures]')?.getBoundingClientRect(),l=card.querySelector('[data-map-legend]')?.getBoundingClientRect();
-    const r=card.querySelector('.map-range')?.getBoundingClientRect();
-    return {top:f?Math.round(Math.max(f.bottom,r&&r.left<c.left+c.width/2?r.bottom:0)-c.top+16):undefined,bottom:l&&l.height?Math.round(c.bottom-l.top+14):undefined};};
-  const map=canvas&&graph?memoryMap(canvas,mapWindow(graph,{days,hidden}),{onSelect:show,onMemory:openMemory,tip:card.querySelector('[data-map-tip]'),insets,panelWidth:316}):null;let last=0;
-  const refresh=()=>{if(!map)return;const parts=mapParts(graph,{days,hidden,indexed:card.dataset.indexed||'—'});
-    card.querySelector('[data-map-figures]').innerHTML=parts.figures;card.querySelector('[data-map-legend]').innerHTML=parts.legend;card.querySelector('[data-map-hint]').innerHTML=parts.hint;card.querySelector('[data-map-empty]').innerHTML=parts.empty;
-    for(const b of card.querySelectorAll('[data-map-days]'))b.setAttribute('aria-pressed',String(Number(b.dataset.mapDays)===days));
-    card.querySelector('.map-custom')?.classList.toggle('is-active',!MAP_DAY_CHOICES.includes(days));map.setGraph(parts.graph);};
-  if(map){wireControls(card,map);panel?.addEventListener('click',event=>{if(event.target.closest('[data-map-close]')){map.select(-1);show(-1);return;}const b=event.target.closest('[data-map-pick]');if(b){const i=Number(b.dataset.mapPick);map.select(i);show(i);}});
-    card.addEventListener('click',event=>{const d=event.target.closest('[data-map-days]');if(d){days=Number(d.dataset.mapDays);saveMapDays(days);const input=card.querySelector('[data-map-custom]');if(input)input.value='';refresh();return;}
-      const k=event.target.closest('[data-map-kind]');if(k){hidden.has(k.dataset.mapKind)?hidden.delete(k.dataset.mapKind):hidden.add(k.dataset.mapKind);refresh();}});
-    card.querySelector('[data-map-custom]')?.addEventListener('change',event=>{const v=Number(event.target.value);if(!Number.isInteger(v)||v<1||v>3650){event.target.value='';return;}days=v;saveMapDays(days);refresh();});}
-  const load=async(force=false)=>{if(!list||!isActive()||(!force&&Date.now()-last<60000))return;last=Date.now();
-    try{const items=streamItems(await api('audit',{group:'memory',limit:20}));if(!list.isConnected)return;
-      list.innerHTML=items.length?items.map(i=>i.html).join(''):'<li class="muted">最近没有记忆读写。</li>';map?.replay(items);}
-    catch{if(list.isConnected)list.innerHTML='<li class="muted">暂时读不到审计记录，稍后点刷新。</li>';}};
-  root.querySelector('[data-stream-refresh]')?.addEventListener('click',()=>load(true));
-  const visible=()=>{if(!list?.isConnected){document.removeEventListener('visibilitychange',visible);return;}if(!document.hidden)load();};
-  document.addEventListener('visibilitychange',visible);void load(true);
+  const map=mountMemoryMap({api,root,data,isActive,openMemory}),list=root.querySelector('[data-stream-list]');let last=0,sequence=0,disposed=false;
+  const alive=()=>!disposed&&isActive()&&list?.isConnected;
+  const load=async(force=false)=>{if(!alive()||(!force&&Date.now()-last<60000))return;last=Date.now();const mine=++sequence;
+    try{const items=streamItems(await api('audit',{group:'memory',limit:20}));if(mine!==sequence||!alive())return;
+      list.innerHTML=items.length?items.map(i=>i.html).join(''):'<li class="muted">最近没有记忆读写。</li>';map?.replay(items);
+    }catch{if(mine===sequence&&alive())list.innerHTML='<li class="muted">暂时读不到审计记录，稍后点刷新。</li>';}};
+  const refresh=()=>void load(true),visible=()=>{if(!document.hidden)void load();},button=root.querySelector('[data-stream-refresh]');
+  button?.addEventListener('click',refresh);document.addEventListener('visibilitychange',visible);void load(true);
+  return {dispose(){disposed=true;sequence++;map?.dispose();button?.removeEventListener('click',refresh);document.removeEventListener('visibilitychange',visible);}};
 }
-// Connection points of the memory map. Shared keywords first: a keyword used by at least two memories becomes a
-// connection point and every memory links to each of its keywords and loosely to its type hub. Without shared keywords,
-// shared topics play that role; without either, memories gather around their type hubs.
-// When many memories are shown (more than MAP_AGGREGATE_AT), memory dots are left out: only keywords are drawn, sized by
-// how many memories carry them and linked by how often two keywords appear together (edges), so the map never fills up.
-// The number of connection points follows the canvas size (max).
-const TOPIC_ANCHORS=14,MAP_AGGREGATE_AT=150;
-const topicLabel=(topic,all)=>{const parts=String(topic).split('/').filter(Boolean),last=parts.at(-1)||String(topic);
-  return all.filter(x=>String(x).split('/').filter(Boolean).at(-1)===last).length>1&&parts.length>1?parts.slice(-2).join('/'):last;};
-const conceptKey=c=>String(c).trim().toLowerCase();
-export function mapAnchors(graph,{max=TOPIC_ANCHORS,aggregate=graph.memories.length>MAP_AGGREGATE_AT}={}){
-  const groups=[...new Set(graph.memories.map(m=>kindGroup(m.kind)))],counts=new Map(),spelled=new Map();
-  for(const m of graph.memories)for(const c of new Set((m.concepts||[]).map(conceptKey)))counts.set(c,(counts.get(c)||0)+1);
-  for(const m of graph.memories)for(const c of m.concepts||[])if(!spelled.has(conceptKey(c)))spelled.set(conceptKey(c),String(c).trim());
-  const concepts=[...counts].filter(([,n])=>n>1).sort((a,b)=>b[1]-a[1]||(a[0]<b[0]?-1:1)).slice(0,max).map(([c])=>c);
-  const hubs=()=>groups.map(k=>({kind:'hub',group:k,label:GROUP_NAMES[k],count:graph.memories.filter(m=>kindGroup(m.kind)===k).length}));
-  // Co-occurrence of connection points across memories: [a,b,count] with a<b.
-  const edgesOf=links=>{const pairs=new Map();for(const ls of links){const ids=ls.filter(([,w])=>w===1).map(([e])=>e);
-      for(let i=0;i<ids.length;i++)for(let j=i+1;j<ids.length;j++){const key=Math.min(ids[i],ids[j])+','+Math.max(ids[i],ids[j]);pairs.set(key,(pairs.get(key)||0)+1);}}
-    return [...pairs].map(([key,n])=>[...key.split(',').map(Number),n]);};
-  if(concepts.length){
-    const anchors=concepts.map(c=>({kind:'concept',label:spelled.get(c),title:spelled.get(c),count:counts.get(c)}));
-    const mine=m=>[...new Set((m.concepts||[]).map(conceptKey))].map(c=>concepts.indexOf(c)).filter(i=>i>=0);
-    if(aggregate){const links=graph.memories.map(m=>mine(m).map(i=>[i,1]));return {mode:'concepts',aggregate:true,anchors,links,edges:edgesOf(links)};}
-    const hub=k=>concepts.length+groups.indexOf(k);
-    return {mode:'concepts',anchors:[...anchors,...hubs()],
-      links:graph.memories.map(m=>{const ids=mine(m);return ids.length?[...ids.map(i=>[i,1]),[hub(kindGroup(m.kind)),.3]]:[[hub(kindGroup(m.kind)),1]];})};
-  }
-  const sizes=new Map();
-  for(const m of graph.memories)if(m.topic)sizes.set(m.topic,(sizes.get(m.topic)||0)+1);
-  const topics=[...sizes].filter(([,n])=>n>1).sort((a,b)=>b[1]-a[1]||(a[0]<b[0]?-1:1)).slice(0,max).map(([topic])=>topic);
-  const names=topics.map(x=>topicLabel(x,topics)),topicAnchors=topics.map((topic,i)=>({kind:'topic',label:names[i],title:topic,count:sizes.get(topic)}));
-  if(aggregate){const links=graph.memories.map(m=>{const t=topics.indexOf(m.topic);return t>=0?[[t,1]]:[];});
-    return topics.length?{mode:'topics',aggregate:true,anchors:topicAnchors,links,edges:[]}:{mode:'kinds',aggregate:true,anchors:hubs(),links:graph.memories.map(m=>[[groups.indexOf(kindGroup(m.kind)),1]]),edges:[]};}
-  const hub=k=>topics.length+groups.indexOf(k);
-  return {mode:topics.length?'topics':'kinds',anchors:[...topicAnchors,...hubs()],links:graph.memories.map(m=>{const t=topics.indexOf(m.topic);return t>=0?[[t,1],[hub(kindGroup(m.kind)),.3]]:[[hub(kindGroup(m.kind)),1]];})};
-}
-// The memories a map shows: a recent window (days, 0 = all) by each memory's latest activity day, minus hidden types.
-export function mapWindow(graph,{days=30,hidden=new Set(),today=new Date()}={}){
-  const cutoff=days>0?new Date(today.getTime()-(days-1)*86400000).toISOString().slice(0,10):null;
-  return {...graph,memories:graph.memories.filter(m=>(!cutoff||!m.day||m.day>=cutoff)&&!hidden.has(kindGroup(m.kind))),entities:[],links:[]};
-}
-const MAP_DAYS_KEY='mnm.map.days',MAP_DAY_CHOICES=[7,30,90,0];
-const mapDays=()=>{try{const v=Number(localStorage.getItem(MAP_DAYS_KEY));return Number.isInteger(v)&&v>=0&&v<=3650&&localStorage.getItem(MAP_DAYS_KEY)!==null?v:30;}catch{return 30;}};
-const saveMapDays=v=>{try{localStorage.setItem(MAP_DAYS_KEY,String(v));}catch{}};
-const daysLabel=d=>d?`近 ${d} 天`:'全部';
-// What a chosen connection point holds: its memories by kind, the points it shares memories with, and where to
-// browse them in the library. Built from the map data only (no extra read).
-export function anchorPanel(graph,plan,i){const a=plan.anchors[i];if(!a)return '';
-  const mine=plan.links.map((ls,m)=>ls.some(([e,w])=>e===i&&(w===1||a.kind==='hub'))?m:-1).filter(m=>m>=0),groups={},shared={};
-  for(const m of mine){const k=kindGroup(graph.memories[m].kind);groups[k]=(groups[k]||0)+1;for(const [e] of plan.links[m])if(e!==i)shared[e]=(shared[e]||0)+1;}
-  // A keyword lists the keywords it appears with; a kind hub lists the keywords (or topics) inside it.
-  const near=a.kind==='topic'?[]:Object.entries(shared).filter(([e])=>a.kind!=='concept'||plan.anchors[e].kind==='concept').sort((x,y)=>y[1]-x[1]).slice(0,5),kind={entity:'实体',concept:'关键词',topic:'主题',hub:'类型'}[a.kind];
-  const href=a.kind==='topic'?`/app/memories?topic=${encodeURIComponent(a.title)}`:a.kind==='concept'?`/app/memories?concept=${encodeURIComponent(a.label)}`:a.kind==='hub'?`/app/memories?kind=${encodeURIComponent(KIND_OF_GROUP[a.group]||'none')}`:`/app/memories?query=${encodeURIComponent(a.label)}`;
-  return `<header><span class="node-key" data-group="${a.kind==='hub'?esc(a.group):'entity'}">${esc(kind)}</span><button type="button" class="quiet map-panel-close" data-map-close aria-label="关闭">×</button></header>
-    <h3 title="${esc(a.title||a.label)}">${esc(a.title||a.label)}</h3><p class="muted">图上 ${num(mine.length)} 条记忆</p>
-    ${a.kind==='hub'?'':`<div class="entity-groups">${Object.entries(groups).map(([k,n])=>`<span class="node-key" data-group="${k}">${esc(GROUP_NAMES[k])} <span>${num(n)}</span></span>`).join('')}</div>`}
-    ${near.length?`<h4>${a.kind==='hub'?(plan.mode==='concepts'?'这个类型里的关键词':'这个类型里的主题'):'常一起出现'}</h4><ul class="entity-picks">${near.map(([e,n])=>`<li><button type="button" class="quiet" data-map-pick="${e}"><span class="node-key" data-group="${plan.anchors[e].kind==='hub'?esc(plan.anchors[e].group):'entity'}">${esc(plan.anchors[e].label)}</span><span>${num(n)} 条</span></button></li>`).join('')}</ul>`:''}
-    <div class="actions"><a class="button" href="${href}">在记忆库里查看</a></div>`;}
-// Canvas drawing: connection points are glowing somas sized by how many memories they hold (entities and topics in
-// violet, kind hubs in their kind colour); memories are small dots in their kind colour; links curve.
-// Hover names a node; a click on a connection point highlights what it holds, a click on a memory opens it; drag
-// pans, pinch / ctrl+wheel or the zoom buttons zoom.
-function memoryMap(canvas,initialGraph,{onSelect=null,onMemory=null,tip=null,top:topInset=null,insets=null,panelWidth=0}={}){const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches,token=n=>getComputedStyle(canvas).getPropertyValue(n).trim();
-  const colour={pref:'--c-pref',proj:'--c-proj',flow:'--c-flow',fact:'--c-fact',bug:'--c-bug',pat:'--c-pat',none:'--c-none'};let graph=initialGraph,plan=mapAnchors(graph);
-  let nodes=[],links=[],W=0,H=0,dpr=1,pulses=[],frame=0,events=[],cursor=0,timer=0,selected=-1,hover=-1,view={s:1,x:0,y:0},drag=null,lit=null;
-  function layout(){const r=canvas.getBoundingClientRect();W=r.width;H=r.height;dpr=devicePixelRatio||1;canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);
-    // More room, more connection points (8–30); fewer on a phone so labels do not collide.
-    plan=mapAnchors(graph,{max:Math.max(8,Math.min(30,Math.round(W*H/36000)))});
-    let seed=7;const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
-    // insets(): the space the card's overlays (figures, legend) take, measured; otherwise a fixed estimate.
-    const measured=insets?.()||{},top=measured.top??topInset??Math.min(110,H*.24),bottom=measured.bottom??(W<560?100:56),cy=top+(H-top-bottom)/2,ry=(H-top-bottom)/2,inner=plan.anchors.filter(a=>a.kind!=='hub'),outer=plan.anchors.filter(a=>a.kind==='hub');
-    const place=(list,i,rx,rr)=>list.length>1?[W/2+Math.cos(i/list.length*6.283+.4)*rx,cy+Math.sin(i/list.length*6.283+.4)*rr]:[W/2,cy];
-    nodes=plan.anchors.map(a=>{const ring=a.kind==='hub'&&inner.length?outer:inner.length?inner:outer,far=a.kind==='hub'&&inner.length;
-      const [x,y]=place(ring,ring.indexOf(a),W*(far?.4:.26),ry*(far?.85:.6));return {...a,anchor:true,x:x+(rnd()-.5)*30,y:y+(rnd()-.5)*20,r:Math.min(far?9:15,3.5+Math.sqrt(a.count)*.9)};});
-    const n0=nodes.length;
-    // Aggregated: keywords only, linked by co-occurrence (w = shared memories); otherwise every memory is a dot.
-    if(plan.aggregate){const most=Math.max(1,...plan.edges.map(([,,n])=>n));links=plan.edges.map(([a,b,n])=>[a,b,n/most]);for(const p of nodes)p.r=Math.min(22,4+Math.sqrt(p.count)*1.1);}
-    else{graph.memories.forEach((m,i)=>{const a=nodes[plan.links[i][0]?.[0]];nodes.push({anchor:false,id:m.id,group:kindGroup(m.kind),topic:m.topic,x:(a?a.x:W/2)+(rnd()-.5)*90,y:(a?a.y:cy)+(rnd()-.5)*90,r:2.6});});
-      links=plan.links.flatMap((es,i)=>es.map(([e,w])=>[n0+i,e,w]));}
-    const n=nodes.length,steps=n>250?110:170,span=Math.min(W,(H-top-bottom)*1.7);
-    for(let it=0;it<steps;it++){for(let a=0;a<n;a++)for(let b=a+1;b<n;b++){const A=nodes[a],B=nodes[b],dx=A.x-B.x,dy=A.y-B.y,d=Math.hypot(dx,dy)||1,want=A.anchor&&B.anchor?span*(A.kind==='hub'||B.kind==='hub'?.34:.3):A.anchor||B.anchor?A.r+B.r+16:15;
-        if(d<want){const k=(want-d)/d*.08;A.x+=dx*k;A.y+=dy*k;B.x-=dx*k;B.y-=dy*k;}}
-      for(const [a,b,w] of links){const A=nodes[a],B=nodes[b],dx=B.x-A.x,dy=B.y-A.y,d=Math.hypot(dx,dy)||1,rest=plan.aggregate?span*(.34-.14*w):w<1?span*.22:(plan.mode==='kinds'?40:52),k=(d-rest)/d*.04*(plan.aggregate?.3+w*.7:w);
-        A.x+=dx*k;A.y+=dy*k;B.x-=dx*k*(plan.aggregate?1:.12);B.y-=dy*k*(plan.aggregate?1:.12);}
-      for(const p of nodes){p.x+=(W/2-p.x)*.0012;p.y+=(cy-p.y)*.0012;p.x=Math.max(24,Math.min(W-24,p.x));p.y=Math.max(top,Math.min(H-bottom,p.y));}}
-    fit(top,bottom);}
-  // Stretch the finished layout over the whole free area (labels of connection points kept inside on the right).
-  function fit(top,bottom){if(nodes.length<2)return;const pad=28,label=p=>p.anchor?Math.min(18,p.label.length)*6.6+p.r+12:p.r;
-    const minX=Math.min(...nodes.map(p=>p.x-p.r)),maxX=Math.max(...nodes.map(p=>p.x+label(p))),minY=Math.min(...nodes.map(p=>p.y-p.r)),maxY=Math.max(...nodes.map(p=>p.y+p.r));
-    const sx=(W-2*pad)/Math.max(1,maxX-minX),sy=(H-top-bottom)/Math.max(1,maxY-minY),k=Math.min(sx,sy),kx=Math.min(sx,k*1.8),ky=Math.min(sy,k*1.8);
-    const ox=pad+((W-2*pad)-(maxX-minX)*kx)/2,oy=top+((H-top-bottom)-(maxY-minY)*ky)/2;
-    for(const p of nodes){p.x=ox+(p.x-minX)*kx;p.y=oy+(p.y-minY)*ky;}}
-  const bend=(A,B,i)=>{const s=(i%2?1:-1)*.16;return [(A.x+B.x)/2-(B.y-A.y)*s,(A.y+B.y)/2+(B.x-A.x)*s];};
-  const highlight=()=>{lit=selected<0?null:new Set([selected,...links.filter(([a,b])=>b===selected||plan.aggregate&&a===selected).map(([a,b])=>a===selected?b:a)]);};
-  function draw(){const g=canvas.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);g.setTransform(dpr*view.s,0,0,dpr*view.s,dpr*view.x,dpr*view.y);
-    // Sticky board (--map-style: outline): pastel fills with ink outlines, no glow; otherwise glowing nodes.
-    const ink=token('--text'),line=token('--line-strong'),ent=token('--c-ent'),bg=token('--surface'),flat=token('--map-style')==='outline',blur=n=>{g.shadowBlur=flat?0:n;};
-    links.forEach(([a,b,w],i)=>{const A=nodes[a],B=nodes[b],[qx,qy]=bend(A,B,i),on=lit&&(b===selected||plan.aggregate&&a===selected);g.strokeStyle=on?(flat?ink:B.kind==='hub'?token(colour[B.group]):ent):line;g.globalAlpha=on?.8:lit?.07:plan.aggregate?.18+.4*w:(w<1?.13:.32)*(flat?.7:1);g.lineWidth=(plan.aggregate?1+3*w:on?1.4:1)/view.s;g.beginPath();g.moveTo(A.x,A.y);g.quadraticCurveTo(qx,qy,B.x,B.y);g.stroke();});g.globalAlpha=1;
-    pulses=pulses.filter(p=>p.k<1);for(const p of pulses){const A=nodes[p.a],B=nodes[p.b],[qx,qy]=bend(A,B,p.i),k=p.k,u=1-k,x=u*u*A.x+2*u*k*qx+k*k*B.x,y=u*u*A.y+2*u*k*qy+k*k*B.y;
-      g.fillStyle=p.colour;g.shadowColor=p.colour;blur(14);g.beginPath();g.arc(x,y,flat?3.6:2.8,0,7);g.fill();g.shadowBlur=0;if(flat){g.strokeStyle=ink;g.lineWidth=1.4/view.s;g.stroke();}p.k+=.016;}
-    nodes.forEach((p,i)=>{if(p.anchor)return;const c=token(colour[p.group]);g.globalAlpha=lit&&!lit.has(i)?.2:1;g.fillStyle=c;g.shadowColor=c;blur(7);g.beginPath();g.arc(p.x,p.y,(i===hover?p.r+1.6:p.r)+(flat?.6:0),0,7);g.fill();g.shadowBlur=0;if(flat){g.strokeStyle=ink;g.lineWidth=1/view.s;g.stroke();}
-      if(i===hover){g.strokeStyle=ink;g.lineWidth=1.2/view.s;g.beginPath();g.arc(p.x,p.y,p.r+4,0,7);g.stroke();}g.globalAlpha=1;});
-    g.font=`${flat?600:500} ${10/Math.sqrt(view.s)}px "Martian Mono",ui-monospace,monospace`;g.lineJoin='round';
-    nodes.forEach((p,i)=>{if(!p.anchor)return;const c=p.kind==='hub'?token(colour[p.group]):ent,r=p.r,chosen=i===selected,dim=lit&&!chosen&&(plan.aggregate?!lit.has(i):!links.some(([a,b])=>b===i&&lit.has(a)));g.globalAlpha=dim?.35:1;
-      if(!flat){const halo=g.createRadialGradient(p.x,p.y,0,p.x,p.y,r*3.2);halo.addColorStop(0,c+'55');halo.addColorStop(1,c+'00');g.fillStyle=halo;g.beginPath();g.arc(p.x,p.y,r*3.2,0,7);g.fill();}
-      g.strokeStyle=chosen||i===hover||flat?ink:c;g.globalAlpha=chosen||i===hover?1:dim?.2:.5;g.lineWidth=(chosen?2:1.2)/view.s;g.beginPath();g.arc(p.x,p.y,r+(chosen?6:i===hover?5:3.5),0,7);g.stroke();g.globalAlpha=dim?.35:1;
-      if(flat){g.fillStyle=ink;g.beginPath();g.arc(p.x+2/view.s,p.y+2/view.s,r+1,0,7);g.fill();g.globalAlpha=dim?.35:1;g.fillStyle=c;g.beginPath();g.arc(p.x,p.y,r+1,0,7);g.fill();g.strokeStyle=ink;g.lineWidth=2/view.s;g.stroke();}
-      else{const core=g.createRadialGradient(p.x-r*.3,p.y-r*.3,0,p.x,p.y,r);core.addColorStop(0,'#FFFFFF');core.addColorStop(.45,c);core.addColorStop(1,c);g.fillStyle=core;g.beginPath();g.arc(p.x,p.y,r,0,7);g.fill();}
-      const label=p.label.length>18?p.label.slice(0,17)+'…':p.label,width=g.measureText(label).width,right=(p.x+r+8+width)*view.s+view.x>W-8,lx=right?p.x-r-8-width:p.x+r+8,ly=p.y+3.5;
-      g.strokeStyle=bg;g.lineWidth=4/view.s;g.globalAlpha=dim?.3:.9;g.strokeText(label,lx,ly);g.globalAlpha=dim?.3:flat?1:p.kind==='hub'?.65:.85;g.fillStyle=ink;g.fillText(label,lx,ly);g.globalAlpha=1;});}
-  function loop(){if(!canvas.isConnected){clearInterval(timer);return;}draw();frame=pulses.length&&!document.hidden?requestAnimationFrame(loop):0;}
-  const start=()=>{if(!frame&&!reduce)frame=requestAnimationFrame(loop);};
-  function pulse(item){const i=item.memory_id?nodes.findIndex(n=>n.id===item.memory_id):-1,targets=i>=0?[i]:item.refs.map(id=>nodes.findIndex(n=>n.id===id)).filter(x=>x>=0).slice(0,3);
-    const col=token(item.kind==='write'?'--c-proj':'--c-pref');for(const target of targets)links.forEach(([a,b],li)=>{if(a===target)pulses.push({a,b,i:li,k:0,colour:col});});start();}
-  // Pointer handling in screen space; nodes live in map space (view: scale s, offset x/y).
-  const point=event=>{const b=canvas.getBoundingClientRect();return [event.clientX-b.left,event.clientY-b.top];};
-  const hitAt=(px,py)=>{const x=(px-view.x)/view.s,y=(py-view.y)/view.s,reach=r=>r+8/view.s,nearest=keep=>{let best=-1,bd=Infinity;
-      nodes.forEach((p,i)=>{if(!keep(p))return;const d=Math.hypot(p.x-x,p.y-y);if(d<reach(p.r)&&d<bd){best=i;bd=d;}});return best;};
-    const anchor=nearest(p=>p.anchor);return anchor>=0?anchor:nearest(p=>!p.anchor);};
-  const showTip=(i,px,py)=>{if(!tip)return;if(i<0){tip.hidden=true;return;}const p=nodes[i];
-    tip.textContent=p.anchor?`${{entity:'实体',concept:'关键词',topic:'主题',hub:'类型'}[p.kind]}：${p.title||p.label} · ${num(p.count)} 条 · 点击查看`:`${GROUP_NAMES[p.group]}${p.topic?' · '+p.topic:''} · 点击打开这条记忆`;
-    tip.hidden=false;tip.style.transform=`translate(${Math.round(Math.min(px+14,W-tip.offsetWidth-8))}px,${Math.round(Math.max(8,py-tip.offsetHeight-10))}px)`;};
-  // A panel on the right covers part of the map: a chosen point under it slides into view on the left.
-  const reveal=i=>{if(i<0||!panelWidth||W<panelWidth*2)return;const sx=nodes[i].x*view.s+view.x;if(sx>W-panelWidth-24)view={...view,x:view.x-(sx-(W-panelWidth)/2)};};
-  const choose=i=>{selected=i;highlight();reveal(i);draw();onSelect?.(i);};
-  const zoomAt=(f,px=W/2,py=H/2)=>{const s=Math.min(6,Math.max(.6,view.s*f));view={s,x:px-(px-view.x)*s/view.s,y:py-(py-view.y)*s/view.s};draw();};
-  canvas.addEventListener('pointerdown',event=>{if(event.button)return;const [px,py]=point(event);drag={px,py,x:view.x,y:view.y,moved:false};canvas.setPointerCapture(event.pointerId);});
-  canvas.addEventListener('pointermove',event=>{const [px,py]=point(event);
-    if(drag){const dx=px-drag.px,dy=py-drag.py;if(!drag.moved&&Math.hypot(dx,dy)>4){drag.moved=true;showTip(-1);canvas.dataset.dragging='';}if(drag.moved){view={...view,x:drag.x+dx,y:drag.y+dy};draw();return;}}
-    const i=hitAt(px,py);if(i!==hover){hover=i;draw();}canvas.dataset.hover=i>=0?'node':'';showTip(i,px,py);});
-  canvas.addEventListener('pointerup',event=>{const d=drag;drag=null;delete canvas.dataset.dragging;if(!d||d.moved)return;const [px,py]=point(event),i=hitAt(px,py);
-    if(i<0){if(selected>=0)choose(-1);return;}if(nodes[i].anchor)choose(i);else onMemory?.(nodes[i].id);});
-  canvas.addEventListener('pointerleave',()=>{if(drag)return;hover=-1;showTip(-1);draw();});
-  canvas.addEventListener('wheel',event=>{if(!event.ctrlKey&&!event.metaKey)return;event.preventDefault();const [px,py]=point(event);zoomAt(Math.exp(-event.deltaY*.01),px,py);},{passive:false});
-  canvas.addEventListener('dblclick',event=>{const [px,py]=point(event);zoomAt(1.6,px,py);});
-  layout();draw();
-  new ResizeObserver(()=>{if(!canvas.isConnected)return;layout();draw();}).observe(canvas);
-  return {get plan(){return plan;},get graph(){return graph;},setGraph(next){graph=next;selected=-1;hover=-1;lit=null;view={s:1,x:0,y:0};pulses=[];layout();draw();onSelect?.(-1);},
-    select(i){selected=i;highlight();reveal(i);draw();},zoom(f){zoomAt(f);},reset(){view={s:1,x:0,y:0};draw();},
-    replay(items){events=items.filter(x=>x.memory_id||x.refs.length);cursor=0;clearInterval(timer);if(reduce||!events.length)return;
-    timer=setInterval(()=>{if(!canvas.isConnected){clearInterval(timer);return;}if(!document.hidden)pulse(events[cursor++%events.length]);},2400);}};
-}
-// Map controls shared by the overview and entity maps: zoom buttons, the hover tip and (overview) the info panel.
-const mapControls=(panel=true)=>`<div class="map-zoom" role="group" aria-label="缩放"><button type="button" data-map-zoom="in" aria-label="放大">+</button><button type="button" data-map-zoom="out" aria-label="缩小">−</button><button type="button" data-map-zoom="reset">复位</button></div><div class="map-tip" data-map-tip hidden></div>${panel?'<aside class="map-panel" data-map-panel hidden></aside>':''}`;
-function wireControls(card,map){card.addEventListener('click',event=>{const z=event.target.closest('[data-map-zoom]');if(!z)return;z.dataset.mapZoom==='reset'?map.reset():map.zoom(z.dataset.mapZoom==='in'?1.4:1/1.4);});}
 const activityLine=(a,key,writeLabel)=>a?`<p class="activity-line" data-activity="${esc(key)}">最近 7 天：搜索 <strong>${num(a.uses[key].search)}</strong> 次 · 读取 <strong>${num(a.uses[key].read)}</strong> 次 · ${esc(writeLabel)} <strong>${num(a.sources[key])}</strong> 条</p>`:'';
 // Entities: names that recur across memories (people, devices, projects, vendors) with their aliases.
 // Usage: calls per model kind for the last 14 days, today's and total limits, and recent search volume.

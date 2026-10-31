@@ -26,7 +26,7 @@ async function indexed(t){const f=fixture(t),e=embedder(),backend=new MockVector
   const generation=index.begin(e.profile.fingerprint);await index.sync(generation);index.activate(generation);return {...f,e,backend,index,generation,a,b};}
 test('V-01 V-02 V-03: authoritative outbox survives failure, points contain no source body; retries idempotent',async t=>{
   const f=await indexed(t),snapshot=f.index.snapshot(),points=f.backend.collections.get(snapshot.collection_name).points;
-  assert.equal(points.size,2);for(const p of points.values()){assert.deepEqual(Object.keys(p.payload).sort(),['content_hash','document','lifecycle','owner','profile','revision','scope']);assert.ok(!JSON.stringify(p.payload).includes('router'));}
+  assert.equal(points.size,2);for(const p of points.values()){assert.deepEqual(Object.keys(p.payload).sort(),['build','content_hash','document','lifecycle','owner','profile','revision','scope']);assert.equal(p.payload.lifecycle,'active');assert.match(p.payload.build,/^[a-f0-9]{64}$/);assert.ok(!JSON.stringify(p.payload).includes('router'));}
   await f.index.sync(f.generation);assert.equal(points.size,2);
   f.backend.down=true;const c=f.save('New synthetic memory');await assert.rejects(f.index.sync(f.generation));
   assert.equal(f.s.queryMemories(f.auth,{query:'synthetic'}).results[0].memory_id,c.memory_id);
@@ -68,13 +68,14 @@ test('R-02 R-04 R-05 R-06 R-07: scope prefilter + hydration, exact version, sema
 });
 test('V-09 L-03: Qdrant REST contract uses private explicit authenticated target and fixed protocol',async t=>{
   const calls=[],server=http.createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;calls.push({url:req.url,method:req.method,body:raw?JSON.parse(raw):null,key:!!req.headers['api-key']});
-    res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',result:req.url.endsWith('/exists')?{exists:false}:req.url.endsWith('/query')?{points:[]}:{status:'completed'}}));});
+    res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',result:req.url.endsWith('/exists')?{exists:false}:req.url.endsWith('/query/groups')?{groups:[]}:{status:'completed'}}));});
   await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
   const origin='http://127.0.0.1:'+server.address().port,config={enabled:true,protocol:QDRANT_PROTOCOL,base_url:origin,collection_prefix:'synthetic',auth:{env:'SYNTHETIC_VECTOR_KEY'},
     egress:{approved:true,origins:[origin],addresses:['127.0.0.1'],allow_private:true},timeouts:{request_ms:1000},limits:{input_bytes:1000000,output_bytes:1000000}};
   const backend=new QdrantStore(config,{env:{SYNTHETIC_VECTOR_KEY:'synthetic-only-credential'}});
   await backend.ensureCollection('synthetic_one',{dimensions:3,distance:'Cosine'});await backend.upsert('synthetic_one',[]);assert.deepEqual(await backend.search('synthetic_one',[1,0,0],{must:[]},10),[]);
   assert.ok(calls.every(c=>c.key));assert.equal(calls[1].method,'PUT');assert.equal(calls[1].body.vectors.size,3);assert.match(calls[2].url,/ordering=strong/);
+  assert.ok(calls.at(-1).url.endsWith('/points/query/groups'));assert.equal(calls.at(-1).body.group_by,'document');assert.equal(calls.at(-1).body.group_size,1);assert.equal(calls.at(-1).body.limit,10);
   assert.throws(()=>vectorConfig({...config,auth:{none:true}}));assert.throws(()=>vectorConfig({...config,egress:{...config.egress,addresses:['8.8.8.8']}}));
 });
 test('C-03: Unicode document chunks preserve the exact full body without truncation',()=>{

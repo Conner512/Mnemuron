@@ -1780,3 +1780,33 @@ Object.assign(catalog.en,{
  taskFlowErrorDelivered:'This resume already has delivery evidence. Refresh to inspect its actual receipts.',taskFlowErrorContext:'The source context or task baseline changed. Generate a new resume preview.',taskFlowErrorMissing:'This preview is missing or unavailable to the current session. Generate a new preview.',taskFlowErrorExpired:'The preview expired. Generate a new one before confirming.',
  taskFlowErrorTarget:'The target is no longer available or differs from the preview. Choose a currently listed target.',taskFlowErrorTask:'The task is unresolved. Select an existing task before resuming.',taskFlowErrorVersion:'The preview version changed. Review it again; the old version will not be confirmed.',taskFlowErrorConfirmation:'The resume is not confirmed and cannot be reported as delivered.',taskFlowErrorDisabled:'The handoff module is disabled. New task workflows cannot be created or confirmed.',
 });
+
+// The overview graph is a bounded keyword/topic co-occurrence view, not an entity registry.
+Object.assign(catalog['zh-CN'],{
+ mapTitle:'记忆关系图',mapKindFact:'事实',mapKindPreference:'偏好',mapKindWorkflow:'工作流程',mapKindArchitecture:'架构',mapKindBug:'问题',mapKindPattern:'模式',mapKindNone:'未标注类型',
+ mapRecentDays:'近 {0} 天',mapAllDays:'全部时间',mapTimeRange:'时间范围',mapCustomDays:'自定义天数',mapSearch:'筛选关键词或主题',mapQueryTooLong:'筛选文字最多 200 个字符。',mapQueryValue:'关键词或主题：{0}',
+ mapShownMemories:'图中记忆',mapKeywords:'关键词',mapNoKeywords:'关键词（尚未补全）',mapCoverage:'显示 {0} / {1} 条符合条件的记忆',mapAppliedScope:'当前图的范围：{0}',
+ mapRecordLimit:'已达到记录数量上限，请缩小时间或筛选范围。',mapByteLimit:'已达到安全展示大小，请缩小时间或筛选范围。',
+ mapNoMemories:'还没有活动记忆。写入记忆后，会出现在这里。',mapNoMatches:'当前范围没有匹配的活动记忆。可以更改筛选条件。',mapHiddenAll:'所有类型都已隐藏。点击上方的类型按钮重新显示。',
+ mapLoading:'正在读取新范围；下方仍显示上一次成功读取的图。',mapReadFailed:'新范围未能读取，下方保留上一次成功结果；筛选尚未应用。请重试。',
+ mapInitialLoading:'正在读取记忆关系图…',mapUnavailable:'记忆关系图暂时无法读取，请重试；这不代表没有记忆。',
+ mapZoom:'缩放',mapZoomIn:'放大',mapZoomOut:'缩小',mapResetView:'复位',mapDescription:'记忆关系图。也可使用下方节点列表选择节点、查看关联记忆。',
+ mapCooccurrence:'连线表示关键词在记忆中共现，不代表同一实体或因果关系。',mapAggregateHint:'记录较多，按关键词、主题或类型聚合；未归入热门节点的记忆也保留在其他类型组中。',mapDotsHint:'大节点是关键词、主题或类型；小节点是记忆。拖动可平移，使用按钮缩放。',
+ mapBrowseNodes:'浏览图中节点',mapKeyboardHint:'用 Tab 选择节点，按 Enter 打开关联记忆；Esc 关闭详情。',mapKeyword:'关键词',mapTopic:'主题',mapType:'类型',mapUnmapped:'其他记忆',mapOtherKind:'其他{0}',
+ mapUnmappedNote:'这些记忆没有归入当前展示的热门关键词或主题，仍保留在图中。',mapOnGraph:'图上 {0} 条记忆',mapMemoryCount:'{0} 条',mapTogether:'常一起出现',mapKeywordsInType:'这个类型里的关键词',mapTopicsInType:'这个类型里的主题',
+ mapSourceMemories:'当前图中的关联记忆',mapMemoryId:'记忆 {0}',mapOpenMemory:'打开这条记忆',mapOpenLibrary:'在记忆库里查看',mapLibraryScope:'记忆库链接展示此关键词、主题或类型的全部活动记忆，不限制为图中的时间窗口。',
+});
+Object.assign(catalog.en,{
+ mapTitle:'Memory relationship map',mapKindFact:'Facts',mapKindPreference:'Preferences',mapKindWorkflow:'Workflows',mapKindArchitecture:'Architecture',mapKindBug:'Issues',mapKindPattern:'Patterns',mapKindNone:'Untyped',
+ mapRecentDays:'Last {0} days',mapAllDays:'All time',mapTimeRange:'Time window',mapCustomDays:'Custom days',mapSearch:'Filter keywords or topics',mapQueryTooLong:'Use at most 200 characters for this filter.',mapQueryValue:'Keyword or topic: {0}',
+ mapShownMemories:'Memories shown',mapKeywords:'Keywords',mapNoKeywords:'Keywords (not filled yet)',mapCoverage:'Showing {0} / {1} matching memories',mapAppliedScope:'Current map scope: {0}',
+ mapRecordLimit:'The record limit was reached. Narrow the time window or filters.',mapByteLimit:'The safe display-size limit was reached. Narrow the time window or filters.',
+ mapNoMemories:'There are no active memories yet. Saved memories will appear here.',mapNoMatches:'No active memories match this scope. Try changing the filters.',mapHiddenAll:'All types are hidden. Choose a type above to show it again.',
+ mapLoading:'Loading the new scope. The map below still shows the last successful result.',mapReadFailed:'The new scope could not be loaded. The last successful result is retained; the new filters have not been applied. Retry the read.',
+ mapInitialLoading:'Loading the memory relationship map…',mapUnavailable:'The memory relationship map is unavailable. Retry the read; this does not mean the account has no memories.',
+ mapZoom:'Zoom',mapZoomIn:'Zoom in',mapZoomOut:'Zoom out',mapResetView:'Reset view',mapDescription:'Memory relationship map. The node list below also lets you select nodes and open related memories.',
+ mapCooccurrence:'Links show keywords occurring in the same memories. They do not establish entity identity or causation.',mapAggregateHint:'Larger sets are grouped by keywords, topics or types. Memories outside popular nodes remain in other-type groups.',mapDotsHint:'Large nodes are keywords, topics or types; small nodes are memories. Drag to pan and use the buttons to zoom.',
+ mapBrowseNodes:'Browse map nodes',mapKeyboardHint:'Use Tab to choose a node, Enter to open its memories, and Esc to close details.',mapKeyword:'Keyword',mapTopic:'Topic',mapType:'Type',mapUnmapped:'Other memories',mapOtherKind:'Other {0}',
+ mapUnmappedNote:'These memories do not belong to a displayed popular keyword or topic. They remain reachable in the map.',mapOnGraph:'{0} memories on this map',mapMemoryCount:'{0} memories',mapTogether:'Often occur together',mapKeywordsInType:'Keywords in this type',mapTopicsInType:'Topics in this type',
+ mapSourceMemories:'Related memories in this map',mapMemoryId:'Memory {0}',mapOpenMemory:'Open this memory',mapOpenLibrary:'View in the memory library',mapLibraryScope:'The library link shows all active memories with this keyword, topic or type, beyond the map’s time window.',
+});

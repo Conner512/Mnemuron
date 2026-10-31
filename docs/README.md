@@ -38,6 +38,7 @@ Start with the local API, then choose an adapter. A deployment guide or versione
 ## Implementation notes
 
 - [Memory-first modules](memory-first-v0.1/README.md): independent memory, private storage, revisions, provider contracts, leased workers, source-grounded summaries and optional vector search. Model/vector services remain opt-in; synthetic tests are not production acceptance.
+- [Memory pipeline reliability](memory-pipeline-reliability.md) (Chinese): faithful extraction, grounded keywords, request-budgeted compression, resumable vector chunks and bounded, filterable memory maps.
 - [ChatGPT core foundation](chatgpt-core-foundation-v0.1.md) and [core correctness](core-correctness-v0.2.md).
 - [Core optimization release notes](core-optimization-v0.2/release-notes.md), [retrieval design](core-optimization-v0.2/retrieval-decision.md), and [acceptance cases](core-optimization-v0.2/ACCEPTANCE_TESTS.md).
 - [Console feature standard](console-feature-standard.md) (Chinese): the console feature map, feature statuses and the checklist for turning a planned console feature into a live one.

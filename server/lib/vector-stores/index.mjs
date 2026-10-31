@@ -11,18 +11,16 @@ import {protectTables,assertProtection} from '../lifecycle/protection.mjs';
 import {isDeterministicReadError} from '../errors.mjs';
 import {MEMORY_TYPES} from '../memory-validation.mjs';
 import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
+import {documentChunks,documentBatches} from './chunks.mjs';
+export {splitDocument} from './chunks.mjs';
 
 export const surrogate=value=>digest(['vector-private-v1',value]);
 // A bounded document allowlist lets the current SQLite traits filter the vector backend
 // before its top-k window, without relying on stale metadata copied into vector payloads.
 export const VECTOR_FILTER_DOCUMENT_LIMIT=2000;
+export const VECTOR_GROUP_QUERY_ATTEMPTS=3;
 const pointId=(...values)=>{const h=digest(values);return `${h.slice(0,8)}-${h.slice(8,12)}-5${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;};
 const condition=(key,value)=>({key,match:{value}});
-export function splitDocument(content,maxBytes){
-  integer(maxBytes,16,1000000);const parts=[];let text='',bytes=0;
-  for(const char of content){const n=Buffer.byteLength(char);if(bytes+n>maxBytes){parts.push(text);text='';bytes=0;}text+=char;bytes+=n;}
-  if(text)parts.push(text);return parts;
-}
 export class VectorIndex {
   constructor(store,backend,embedders,{clock=()=>Date.now(),leaseMs=120000,prefix='memory',ownerId=null,collections=backend?.precreated??null,budget=null,guard=null}={}){this.executionGuard=guard;
     this.store=store;this.db=store.db;this.backend=backend;this.embedders=embedders;this.clock=clock;this.leaseMs=leaseMs;this.prefix=prefix;this.ownerId=ownerId;
@@ -86,8 +84,8 @@ export class VectorIndex {
   snapshot(){const active=this.ownerId?this.db.prepare('SELECT * FROM memory_vector_owner_active WHERE user_id=?').get(this.ownerId):this.db.prepare('SELECT * FROM memory_vector_active WHERE id=1').get();if(!active)fail('VECTOR_NOT_READY');return Object.freeze({...active});}
   state(){if(this.ownerId)return {generations:this.db.prepare('SELECT g.state,COUNT(*) AS count FROM memory_vector_generations g JOIN memory_vector_owners o ON o.generation=g.generation WHERE o.user_id=? GROUP BY g.state').all(this.ownerId),active:!!this.db.prepare('SELECT 1 FROM memory_vector_owner_active WHERE user_id=?').get(this.ownerId)};return {generations:this.db.prepare('SELECT state,COUNT(*) AS count FROM memory_vector_generations GROUP BY state').all(),active:!!this.db.prepare('SELECT 1 FROM memory_vector_active').get()};}
   assertOwner(id){const owner=this.db.prepare('SELECT user_id FROM memory_vector_owners WHERE generation=?').get(id)?.user_id||null;if(owner!==this.ownerId)fail('VECTOR_NOT_READY');}
-  acquire(id){this.assertOwner(id);return this.store.memoryTransaction(()=>{const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id),now=this.clock();
-    if(!row || !['building','ready','active'].includes(row.state) || row.lease_expires>now)fail('VECTOR_LEASE_BUSY');
+  acquire(id,{maintenance=false}={}){this.assertOwner(id);return this.store.memoryTransaction(()=>{const row=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id),now=this.clock();
+    if(!row || !maintenance&&!['building','ready','active'].includes(row.state) || row.lease_expires>now)fail('VECTOR_LEASE_BUSY');
     const owner=randomUUID();this.db.prepare('UPDATE memory_vector_generations SET lease_owner=?,lease_expires=?,fence=fence+1 WHERE generation=?').run(owner,now+this.leaseMs,id);
     return {...row,fence:row.fence+1,lease_owner:owner};
   });}
@@ -118,9 +116,61 @@ export class VectorIndex {
       return {processed,complete,generation:id};
     }finally{this.db.prepare('UPDATE memory_vector_generations SET lease_owner=NULL,lease_expires=NULL WHERE generation=? AND fence=? AND lease_owner=?').run(id,g.fence,g.lease_owner);}
   }
+  /** Checkpoint only backend-confirmed chunks. A building document is never a searchable/activatable document.
+   * Model limits are outside the profile fingerprint, so the deterministic IDs also bind the exact chunk layout. */
+  async indexSource(g,e,source,{purpose='document'}={}){
+    const id=g.generation,{layout,chunks}=documentChunks(e,source.content),contentHash=digest(source.content);
+    const current=()=>{if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');};
+    const filter={must:[condition('owner',surrogate(source.user_id)),condition('document',surrogate([source.user_id,source.memory_id]))]};
+    const build=digest(['vector-build-v2',id,g.profile,source.user_id,source.memory_id,source.revision,source.state_hash,source.scope_key,layout]);
+    const expected=chunks.map(chunk=>({...chunk,id:pointId('vector-point-v2',build,chunk.chunk)}));
+    const expectedIds=new Set(expected.map(chunk=>chunk.id));
+    const old=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,source.user_id,source.memory_id);
+    const reusable=old&&['building','indexed'].includes(old.state)&&old.revision===source.revision&&old.state_hash===source.state_hash
+      &&old.scope_key===source.scope_key&&old.content_hash===contentHash;
+    const previous=this.db.prepare('SELECT point_id,revision,chunk FROM memory_vector_points WHERE generation=? AND user_id=? AND memory_id=?').all(id,source.user_id,source.memory_id);
+    const obsolete=previous.filter(point=>!reusable||point.revision!==source.revision||expected[point.chunk]?.id!==point.point_id);
+    this.store.memoryTransaction(()=>{current();
+      this.db.prepare('INSERT OR REPLACE INTO memory_vector_documents VALUES (?,?,?,?,?,?,?,?)').run(id,source.user_id,source.memory_id,source.revision,source.state_hash,source.scope_key,contentHash,'building');});
+    // Remove prior revision or layout points without spending a model call. Keep their local mappings until the
+    // backend confirms deletion, so a failed cleanup remains retryable rather than losing the cleanup checkpoint.
+    this.renew(g);current();
+    await this.backend.deleteByDocumentRevision(g.collection_name,{...filter,must_not:[condition('revision',source.revision)]});
+    for(let start=0;start<obsolete.length;start+=64){
+      this.renew(g);current();const part=obsolete.slice(start,start+64);
+      await this.backend.deleteByDocumentRevision(g.collection_name,{must:[...filter.must,{has_id:part.map(point=>point.point_id)}]});
+      this.store.memoryTransaction(()=>{current();for(const point of part)this.db.prepare('DELETE FROM memory_vector_points WHERE point_id=? AND generation=? AND user_id=? AND memory_id=?')
+        .run(point.point_id,id,source.user_id,source.memory_id);});
+    }
+    current();
+    const completed=new Set(this.db.prepare('SELECT point_id FROM memory_vector_points WHERE generation=? AND user_id=? AND memory_id=? AND revision=?')
+      .all(id,source.user_id,source.memory_id,source.revision).filter(point=>expectedIds.has(point.point_id)).map(point=>point.point_id));
+    for(const part of documentBatches(e,expected.filter(chunk=>!completed.has(chunk.id)))){
+      this.renew(g);current();
+      const result=await this.embed(e,part.map(chunk=>chunk.text),'document',{userId:source.user_id,purpose,current:()=>{current();return true;}});
+      current();
+      const points=part.map((chunk,i)=>({id:chunk.id,vector:result.vectors[i],payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),
+        document:surrogate([source.user_id,source.memory_id]),revision:source.revision,profile:g.profile,content_hash:contentHash,build,lifecycle:'building'}}));
+      for(let start=0;start<points.length;start+=64){
+        this.renew(g);current();const batch=points.slice(start,start+64);
+        await this.backend.upsert(g.collection_name,batch);
+        this.store.memoryTransaction(()=>{current();for(const [i,point] of batch.entries()){
+          this.db.prepare('INSERT OR REPLACE INTO memory_vector_points VALUES (?,?,?,?,?,?)').run(point.id,id,source.user_id,source.memory_id,source.revision,part[start+i].chunk);
+          completed.add(point.id);
+        }});
+      }
+    }
+    this.renew(g);current();if(completed.size!==expected.length)fail('STALE_INPUT');
+    // Remote publication is idempotent and contains no source body. A lost acknowledgement keeps all confirmed
+    // checkpoints: a retry repeats only this publication, never the successful embedding requests.
+    await this.backend.publishBuild(g.collection_name,{owner:surrogate(source.user_id),document:surrogate([source.user_id,source.memory_id]),build});
+    this.store.memoryTransaction(()=>{current();
+      this.db.prepare("UPDATE memory_vector_documents SET state='indexed' WHERE generation=? AND user_id=? AND memory_id=?")
+        .run(id,source.user_id,source.memory_id);});
+  }
   /** Embed one record into generation `g` under its lease, or hide it when it is no longer a current source.
    * Shared by the full backfill (`sync`) and the owner's incremental catch-up. Returns 'indexed', 'hidden' or 'missing'. */
-  async indexRecord(g,e,id,raw,source,old){
+  async indexRecord(g,e,id,raw,source,old,{purpose='document'}={}){
     this.renew(g);
     const filter={must:[condition('owner',surrogate(raw.user_id)),condition('document',surrogate([raw.user_id,raw.memory_id]))]};
     const hide=async()=>{
@@ -132,23 +182,9 @@ export class VectorIndex {
     // A source that became stale during its own embedding (deleted project, retraction, new revision) is hidden like
     // any other non-source, and the build continues; only a lost lease or a provider failure stops it.
     try{
-      const chunks=splitDocument(source.content,Math.min(8192,Math.floor(e.profile.limits.input_tokens/4))),points=[];
-      for(let start=0;start<chunks.length;start+=e.profile.limits.batch_size){
-        this.renew(g);const part=chunks.slice(start,start+e.profile.limits.batch_size);
-        const result=await this.embed(e,part,'document',{userId:source.user_id,current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
+      await this.indexSource(g,e,source,{purpose});
+      if(purpose!=='manifest')this.store.memoryTransaction(()=>{
         if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
-        for(const [i,vector] of result.vectors.entries())points.push({id:pointId(id,source.user_id,source.memory_id,source.revision,g.profile,start+i),vector,
-          payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),document:surrogate([source.user_id,source.memory_id]),revision:source.revision,
-            profile:g.profile,content_hash:digest(source.content),lifecycle:'active'}});
-      }
-      // Delete only older revisions. Repeating the same upsert is idempotent.
-      await this.backend.deleteByDocumentRevision(g.collection_name,{...filter,must_not:[condition('revision',source.revision)]});
-      for(let start=0;start<points.length;start+=64){this.renew(g);await this.backend.upsert(g.collection_name,points.slice(start,start+64));}
-      this.store.memoryTransaction(()=>{
-        if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
-        this.db.prepare('INSERT OR REPLACE INTO memory_vector_documents VALUES (?,?,?,?,?,?,?,?)').run(id,source.user_id,source.memory_id,source.revision,source.state_hash,source.scope_key,digest(source.content),'indexed');
-        this.db.prepare('DELETE FROM memory_vector_points WHERE generation=? AND user_id=? AND memory_id=?').run(id,source.user_id,source.memory_id);
-        for(const [chunk,point] of points.entries())this.db.prepare('INSERT OR REPLACE INTO memory_vector_points VALUES (?,?,?,?,?,?)').run(point.id,id,source.user_id,source.memory_id,source.revision,chunk);
         this.db.prepare("UPDATE memory_index_outbox SET state='indexed' WHERE user_id=? AND memory_id=? AND revision=?").run(source.user_id,source.memory_id,source.revision);
       });
     }catch(error){
@@ -167,7 +203,7 @@ export class VectorIndex {
       if(!source || old && old.state==='indexed' && old.revision===source.revision && old.state_hash===source.state_hash && old.scope_key===source.scope_key)continue;
       out.push({user_id:raw.user_id,memory_id:raw.memory_id});
     }
-    for(const old of docs.values())if(old.state==='indexed'&&!this.store.derivedMemory.currentSource(old.user_id,old.memory_id))out.push({user_id:old.user_id,memory_id:old.memory_id});
+    for(const old of docs.values())if(['indexed','building'].includes(old.state)&&!this.store.derivedMemory.currentSource(old.user_id,old.memory_id))out.push({user_id:old.user_id,memory_id:old.memory_id});
     return out;
   }
   /** Owner-approved incremental catch-up of an existing generation (normally the serving one): at most `maxDocuments`
@@ -202,32 +238,12 @@ export class VectorIndex {
         const user=this.ownerId||this.db.prepare('SELECT user_id FROM memory_vector_owners WHERE generation=?').get(id)?.user_id;
         const source=this.store.derivedMemory.currentSource(user,item.memory_id);
         const mark=state=>this.store.memoryTransaction(()=>{if(!this.owns(g))fail('LEASE_LOST');this.db.prepare('UPDATE memory_vector_manifest SET state=? WHERE generation=? AND memory_id=?').run(state,id,item.memory_id);});
-        // Points of an earlier interrupted attempt are removed whenever the item is marked stale.
-        const dropPoints=()=>this.backend.deleteByDocumentRevision(g.collection_name,{must:[condition('owner',surrogate(user)),condition('document',surrogate([user,item.memory_id]))]});
-        if(!source || source.revision!==item.revision || source.state_hash!==item.state_hash){await dropPoints();mark('stale');processed++;continue;}
-        this.renew(g);
-        // As documented above: a record that went stale during its own embedding is marked stale and skipped, with any
-        // points already written for it removed; the build continues.
-        try{
-        const chunks=splitDocument(source.content,Math.min(8192,Math.floor(e.profile.limits.input_tokens/4))),points=[];
-        for(let start=0;start<chunks.length;start+=e.profile.limits.batch_size){
-          this.renew(g);const part=chunks.slice(start,start+e.profile.limits.batch_size);
-          const result=await this.embed(e,part,'document',{userId:source.user_id,purpose:'manifest',current:()=>{if(!this.owns(g))fail('LEASE_LOST');return !!this.store.derivedMemory.validateItem(source);}});
-          if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
-          for(const [i,vector] of result.vectors.entries())points.push({id:pointId(id,source.user_id,source.memory_id,source.revision,g.profile,start+i),vector,
-            payload:{owner:surrogate(source.user_id),scope:surrogate(source.scope_key),document:surrogate([source.user_id,source.memory_id]),revision:source.revision,
-              profile:g.profile,content_hash:digest(source.content),lifecycle:'active'}});
-        }
-        for(let start=0;start<points.length;start+=64){this.renew(g);await this.backend.upsert(g.collection_name,points.slice(start,start+64));}
-        this.store.memoryTransaction(()=>{
-          if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');
-          this.db.prepare('INSERT OR REPLACE INTO memory_vector_documents VALUES (?,?,?,?,?,?,?,?)').run(id,source.user_id,source.memory_id,source.revision,source.state_hash,source.scope_key,digest(source.content),'indexed');
-          this.db.prepare('DELETE FROM memory_vector_points WHERE generation=? AND user_id=? AND memory_id=?').run(id,source.user_id,source.memory_id);
-          for(const [chunk,point] of points.entries())this.db.prepare('INSERT OR REPLACE INTO memory_vector_points VALUES (?,?,?,?,?,?)').run(point.id,id,source.user_id,source.memory_id,source.revision,chunk);
-          this.db.prepare("UPDATE memory_vector_manifest SET state='indexed' WHERE generation=? AND memory_id=?").run(id,item.memory_id);
-        });
-        }catch(error){if(error?.code!=='STALE_INPUT' || !this.owns(g) || this.store.derivedMemory.validateItem(source))throw error;
-          await dropPoints();mark('stale');}
+        const raw={user_id:user,memory_id:item.memory_id},old=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,user,item.memory_id);
+        // Only the frozen source may resume. Stale items clean up every partial checkpoint without embedding the
+        // newer revision; full and manifest builds share the same request budgets and durable publication fence.
+        const frozen=source&&source.revision===item.revision&&source.state_hash===item.state_hash;
+        const result=await this.indexRecord(g,e,id,raw,frozen?source:null,old,{purpose:'manifest'});
+        mark(result==='indexed'?'indexed':'stale');
         processed++;
       }
       if(complete)this.db.prepare("UPDATE memory_vector_generations SET state=CASE WHEN state IN ('active','retired') THEN state ELSE 'ready' END WHERE generation=? AND fence=?").run(id,g.fence);
@@ -252,7 +268,7 @@ export class VectorIndex {
     else for(let after=0;;){const rows=this.db.prepare('SELECT rowid AS cursor_id,user_id,memory_id FROM memories WHERE rowid>? AND (? IS NULL OR user_id=?) ORDER BY rowid LIMIT 100').all(after,this.ownerId,this.ownerId);if(!rows.length)break;
       for(const raw of rows){const s=this.store.derivedMemory.currentSource(raw.user_id,raw.memory_id);if(!s)continue;
         const indexed=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,s.user_id,s.memory_id);
-        if(!indexed || indexed.revision!==s.revision || indexed.state_hash!==s.state_hash || indexed.scope_key!==s.scope_key)fail('VECTOR_CATCHUP_REQUIRED');}
+        if(!indexed || indexed.state!=='indexed' || indexed.revision!==s.revision || indexed.state_hash!==s.state_hash || indexed.scope_key!==s.scope_key)fail('VECTOR_CATCHUP_REQUIRED');}
       after=rows.at(-1).cursor_id;
     }
     this.db.prepare("UPDATE memory_vector_generations SET state='retired' WHERE state='active' AND generation IN (SELECT generation FROM memory_vector_owners WHERE user_id=?)").run(this.ownerId);
@@ -262,13 +278,16 @@ export class VectorIndex {
     else this.db.prepare('INSERT OR REPLACE INTO memory_vector_active VALUES (1,?,?,?)').run(id,g.profile,g.collection_name);
     return this.snapshot();
   });}
-  async reconcile(id){this.assertOwner(id);
-    const g=this.db.prepare('SELECT * FROM memory_vector_generations WHERE generation=?').get(id);if(!g)fail('VECTOR_NOT_READY');let offset=null,removed=0;
-    do{const page=await this.backend.scroll(g.collection_name,offset);
+  async reconcile(id){
+    // Maintenance shares the writer's atomic lease, including retired generations. It must never remove a point
+    // in the interval between a successful upsert and the writer's local checkpoint commit.
+    const g=this.acquire(id,{maintenance:true});let offset=null,removed=0;
+    try{do{this.renew(g);const page=await this.backend.scroll(g.collection_name,offset);if(!this.owns(g))fail('LEASE_LOST');
       for(const point of page.points){const mapping=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=?').get(String(point.id),id),source=mapping && this.store.derivedMemory.currentSource(mapping.user_id,mapping.memory_id);
-        if(!source || source.revision!==mapping.revision){await this.backend.deleteByDocumentRevision(g.collection_name,{must:[{has_id:[point.id]}]});removed++;}}
+        if(!source || source.revision!==mapping.revision){this.renew(g);await this.backend.deleteByDocumentRevision(g.collection_name,{must:[{has_id:[point.id]}]});if(!this.owns(g))fail('LEASE_LOST');removed++;}}
       offset=page.next_page_offset ?? null;
     }while(offset!==null);return {removed};
+    }finally{this.db.prepare('UPDATE memory_vector_generations SET lease_owner=NULL,lease_expires=NULL WHERE generation=? AND fence=? AND lease_owner=?').run(id,g.fence,g.lease_owner);}
   }
   async search(auth,payload){if(this.ownerId&&this.ownerId!==auth.user_id)fail('INVALID_OWNER');
     this.store.requireScope(auth,'memory:read');
@@ -306,14 +325,42 @@ export class VectorIndex {
         filter.must.push({key:'document',match:{any:documents.map(row=>surrogate([auth.user_id,row.memory_id]))}});
       }
       const {vectors}=await this.embed(e,[payload.query],'query',{userId:auth.user_id});
-      const hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],filter,100):[],semantic=[],semanticScores=new Map();let rejected=0;
-      // The requested scope is resolved again after the network waits, before anything else: a project deleted meanwhile
-      // is the deterministic answer (PROJECT_DELETED, re-thrown below), never a stale-index degradation. The fresh
-      // lifecycle filter then backs the web freshness check and hit hydration; the narrow grant checks are unchanged.
-      scope=resolveMemoryScope(this.db,auth.user_id,payload);
-      scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false});
-      library=memorySearchFilterSql(searchContext?.filter,{memoryTypes});
-      assertWebIndexFresh();
+      const semantic=[],semanticScores=new Map(),excludedIds=new Set(),excludedDocs=new Set(),allowedScopes=new Set(scopes.map(row=>surrogate(scopeKey(row))));
+      let hits=[],currentHits=new Map(),rejected=0,candidateWindowFull=false;
+      // A late/uncertain remote write can leave an unmapped active point ahead of its document's current build.
+      // Retry the grouped lookup with exact exclusions, reusing this query vector and every private filter. A
+      // backend that keeps returning excluded/stale candidates fails explicitly instead of producing false emptiness.
+      for(let attempt=0;attempt<VECTOR_GROUP_QUERY_ATTEMPTS;attempt++){
+        const exclusions=[...(filter.must_not||[]),...(excludedIds.size?[{has_id:[...excludedIds]}]:[]),
+          ...(excludedDocs.size?[{key:'document',match:{any:[...excludedDocs]}}]:[])];
+        hits=scopes.length?await this.backend.search(snapshot.collection_name,vectors[0],{...filter,...(exclusions.length?{must_not:exclusions}:{})},100):[];
+        candidateWindowFull ||= hits.length>=100;
+        // Re-resolve after every network wait. Lifecycle/permission changes are authoritative, not a reason to
+        // serve an earlier cached candidate or to widen the backend's original owner/scope/document filters.
+        scope=resolveMemoryScope(this.db,auth.user_id,payload);
+        scopeSql=memoryScopeSql(scope,{workstreamIds:payload.source_workstream_ids || (payload.workstream_id?[payload.workstream_id]:null),includeShared:payload.include_shared!==false});
+        library=memorySearchFilterSql(searchContext?.filter,{memoryTypes});assertWebIndexFresh();currentHits=new Map();
+        const before=excludedIds.size+excludedDocs.size;let stale=false;
+        for(const hit of hits){
+          // Foreign/out-of-scope injected backend responses do not contribute to diagnostics or retries.
+          if(hit.payload?.owner!==surrogate(auth.user_id)||hit.payload?.profile!==snapshot.profile||hit.payload?.lifecycle!=='active'||!allowedScopes.has(hit.payload?.scope))continue;
+          const point=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=? AND user_id=?').get(String(hit.id),snapshot.generation,auth.user_id);
+          if(!point){excludedIds.add(String(hit.id));stale=true;continue;}
+          const indexed=this.db.prepare("SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=? AND state='indexed'").get(snapshot.generation,auth.user_id,point.memory_id);
+          const row=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=? AND m.status='active' AND ${scopeSql.sql} AND ${library.sql}`).get(auth.user_id,point.memory_id,...scopeSql.params,...library.params);
+          const source=row&&this.store.derivedMemory.currentSource(auth.user_id,point.memory_id);
+          if(!indexed||indexed.revision!==point.revision||!row||!this.store.webVisibility.visible(auth,row.memory_id)
+            ||payload.statuses&&!payload.statuses.includes(row.status)||payload.memory_types&&!payload.memory_types.includes(row.memory_type)
+            ||!source||source.revision!==point.revision||indexed.state_hash!==source.state_hash||indexed.scope_key!==source.scope_key||indexed.content_hash!==digest(source.content)){
+            excludedDocs.add(surrogate([auth.user_id,point.memory_id]));stale=true;continue;
+          }
+          if(hit.payload?.content_hash!==indexed.content_hash
+            ||hit.payload.build!==undefined&&pointId('vector-point-v2',hit.payload.build,point.chunk)!==point.point_id){excludedIds.add(String(hit.id));stale=true;continue;}
+          currentHits.set(String(hit.id),{row,source});
+        }
+        if(!stale)break;
+        if(attempt===VECTOR_GROUP_QUERY_ATTEMPTS-1||excludedIds.size+excludedDocs.size===before)fail('VECTOR_STALE');
+      }
       // Network waits may outlive a privacy change; rebuild lexical results and conflicts now.
       lexical=this.store.queryMemories(auth,{...payload,limit});
       const plan=searchContext?.documentSimilarity?makeQueryPlan(payload.query):this.store.memorySearch.plan(auth.user_id,payload.query,scope,{auth,searchContext,
@@ -324,12 +371,7 @@ export class VectorIndex {
       const scoreOrder=hit=>Number.isFinite(hit.score)?(relevance.direction==='maximum'?-hit.score:hit.score):-Infinity;
       const qualified=[...hits].sort((a,b)=>scoreOrder(b)-scoreOrder(a));
       for(const hit of qualified){
-        const point=this.db.prepare('SELECT * FROM memory_vector_points WHERE point_id=? AND generation=? AND user_id=?').get(String(hit.id),snapshot.generation,auth.user_id);if(!point)continue;
-        const row=this.db.prepare(`SELECT m.* FROM memories m WHERE m.user_id=? AND m.memory_id=? AND m.status='active' AND ${scopeSql.sql} AND ${library.sql}`).get(auth.user_id,point.memory_id,...scopeSql.params,...library.params);
-        if(!row || !this.store.webVisibility.visible(auth,row.memory_id) || payload.statuses && !payload.statuses.includes(row.status)
-          || payload.memory_types && !payload.memory_types.includes(row.memory_type))continue;
-        const source=this.store.derivedMemory.currentSource(auth.user_id,point.memory_id);
-        if(!source || source.revision!==point.revision || hit.payload?.content_hash!==digest(source.content) || hit.payload?.profile!==snapshot.profile)continue;
+        const current=currentHits.get(String(hit.id));if(!current)continue;const {row,source}=current;
         // Counts, too, are scoped: hidden/foreign/stale hits never affect returned diagnostics.
         const searchable=memorySearchText({...source,concepts:this.store.traits.get(auth.user_id,source.memory_id).concepts});
         if(!acceptsSemanticScore(hit.score,relevance)||!querySubjectsMatch(plan,searchable)||(plan.authority_ids&&!plan.authority_ids.includes(source.memory_id))){rejected++;continue;}
@@ -359,7 +401,11 @@ export class VectorIndex {
       const result=[...ranked.values()].sort((a,b)=>compare(a,b)||a.item.memory_id.localeCompare(b.item.memory_id)).slice(0,limit)
         .map(r=>({...r.item,ranking:{...r.item.ranking,method:similarity?'semantic-score-v1':'rrf-salience-v2',score:similarity?semanticScores.get(r.item.memory_id):r.score,rrf_score:r.rrf,strength_score:r.salience.strength_term,read_score:r.salience.read_term,match_kind:r.kind,matched_by:r.methods,...(semanticScores.has(r.item.memory_id)?{semantic_score:semanticScores.get(r.item.memory_id)}:{})}}));
       lexical.results=result;lexical.result_count=result.length;lexical.retrieval={...lexical.retrieval,engine:'memory-hybrid-v1',mode,requested_mode:mode,effective_mode:mode,degraded:false,profile:snapshot.profile,generation:snapshot.generation,semantic_candidates:semantic.length,semantic_rejected:rejected,semantic_threshold:relevance.threshold,semantic_threshold_direction:relevance.direction,semantic_distance:relevance.distance,semantic_normalization:e.profile.normalization,relevance_policy:'query-relevance-v1',alias_expanded:plan.expanded,alias_ambiguous:plan.ambiguous,alias_source_truncated:plan.source_truncated};
-      lexical.retrieval.result_truncated ||= ranked.size>limit;
+      // A full backend document window is a bound, not proof that there are no further current candidates. Keep
+      // this visible even when hydration rejected stale points and the final result contains fewer than `limit`.
+      lexical.retrieval.semantic_candidate_limit=100;
+      lexical.retrieval.semantic_candidates_truncated=candidateWindowFull;
+      lexical.retrieval.result_truncated ||= ranked.size>limit||candidateWindowFull;
       boundMemoryResponse(lexical);return lexical;
     }catch(error){
       // A lifecycle/validation/authorization outcome during or after the wait (e.g. the requested project was deleted

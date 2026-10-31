@@ -33,7 +33,14 @@ test('R-02/04/07 C-03: Core HTTP and OAuth MCP acceptance crosses an authenticat
       else if(req.method==='PUT' && segments.length===3){await mock.ensureCollection(name,{dimensions:data.vectors.size,distance:data.vectors.distance});result=true;}
       else if(req.method==='GET' && segments.length===3){const c=mock.collections.get(name).config;result={config:{params:{vectors:{size:c.dimensions,distance:c.distance}}}};}
       else if(req.method==='PUT' && route.endsWith('/points')){await mock.upsert(name,data.points);result={status:'completed'};}
-      else if(route.endsWith('/points/query'))result={points:(await mock.search(name,data.query,data.filter,data.limit)).map(({vector,...point})=>point)};
+      else if(route.endsWith('/points/payload')){
+        assert.deepEqual(data.payload,{lifecycle:'active'});assert.equal(data.filter.must.length,3);
+        await mock.publishBuild(name,Object.fromEntries(data.filter.must.map(term=>[term.key,term.match.value])));result={status:'completed'};
+      }
+      else if(route.endsWith('/points/query/groups')){
+        assert.equal(data.group_by,'document');assert.equal(data.group_size,1);
+        result={groups:(await mock.search(name,data.query,data.filter,data.limit)).map(({vector,...point})=>({id:point.payload.document,hits:[point]}))};
+      }
       else if(route.endsWith('/points/delete')){await mock.deleteByDocumentRevision(name,data.filter);result={status:'completed'};}
       else if(route.endsWith('/points/scroll')){result=await mock.scroll(name,data.offset);result.points=result.points.map(({vector,...point})=>point);}
       else throw new Error('Unexpected synthetic route');
@@ -47,7 +54,7 @@ test('R-02/04/07 C-03: Core HTTP and OAuth MCP acceptance crosses an authenticat
     egress:{approved:true,origins:[origin],addresses:['127.0.0.1'],allow_private:true},timeouts:{request_ms:1500},limits:{input_bytes:1000000,output_bytes:1000000}};
   const result=await evaluateApplication({config,output:root,allowNetwork:true});
   assert.equal(result.status,'passed',JSON.stringify(result));assert.equal(result.cases.length,15);assert.ok(result.cases.every(c=>c.status==='passed'));
-  assert.ok(calls.some(c=>c.route.endsWith('/points/query')));assert.equal(mock.collections.size,0);
+  assert.ok(calls.some(c=>c.route.endsWith('/points/query/groups')));assert.equal(mock.collections.size,0);
   assert.equal(result.real_model_calls,0);assert.equal(result.production_ready,false);assert.deepEqual(result.cleanup.errors,[]);
   assert.ok(!readdirSync(result.run).includes('model-key'));assert.ok(!readdirSync(result.run).includes('proxy-key'));
 });

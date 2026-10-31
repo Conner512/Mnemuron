@@ -121,7 +121,8 @@ export async function evaluateJoint(options={}){
       return {embedded_sources:8,secret_sources_excluded:1,dimensions:embedder.profile.dimensions};
     });
     await check('vector_payload_privacy',async()=>{for(const point of await scroll()){
-      assert.deepEqual(Object.keys(point.payload).sort(),['content_hash','document','lifecycle','owner','profile','revision','scope']);
+      assert.deepEqual(Object.keys(point.payload).sort(),['build','content_hash','document','lifecycle','owner','profile','revision','scope']);
+      assert.match(point.payload.build,/^[a-f0-9]{64}$/);assert.equal(point.payload.lifecycle,'active');
       assert.doesNotMatch(JSON.stringify(point.payload),/Synthetic|合成|synthetic-joint-owner|FORBIDDEN/);assert.equal(Object.hasOwn(point,'vector'),false);
     }});
     await check('vector_idempotence',async()=>{const before=calls.embedder;assert.equal((await index.sync(generation)).processed,0);assert.equal(calls.embedder,before);assert.equal((await scroll()).length,8);});

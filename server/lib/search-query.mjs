@@ -1,5 +1,8 @@
 // Query-time relevance only: the lossless v3 token projection and stored memories stay intact.
 export const normalizeSearch = value => String(value ?? '').normalize('NFKC').toLowerCase();
+// Exact concept identity across the graph, library facets, lexical filters and vector hydration. This only
+// folds presentation differences; it never stems a keyword or treats an identifier prefix as an equal label.
+export const normalizeConcept = value => normalizeSearch(value).replace(/\s+/gu,' ').trim();
 export function searchTokens(value) {
   const text=normalizeSearch(value),tokens=new Set();
   for(const segment of text.split(/(\p{Script=Han}+)/u)) {

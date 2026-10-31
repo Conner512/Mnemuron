@@ -211,7 +211,7 @@
     "write": 0
    },
    "memories": {
-    "read": 4,
+    "read": 3,
     "write": 0
    },
    "checkpoints": {
@@ -231,6 +231,12 @@
     "write": 0
    },
    "task_reconciliation_proposals": {
+    "read": 1,
+    "write": 0
+   }
+  },
+  "server/lib/console/memory-graph.mjs": {
+   "memories": {
     "read": 1,
     "write": 0
    }
@@ -679,7 +685,7 @@
     "write": 0
    },
    "memory_vector_documents": {
-    "read": 5,
+    "read": 8,
     "write": 3
    }
   }

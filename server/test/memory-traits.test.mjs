@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { memoryFixture } from "./helpers/core-memory-fixture.mjs";
 import { callTool, TOOLS } from "../../plugins/mnemuron/scripts/mcp-core.mjs";
-import { memoryTraits } from "../lib/memory/traits.mjs";
+import { memoryTraits,groundedConcept } from "../lib/memory/traits.mjs";
 
 test("TRAITS-01: a save stores kind, concepts and strength and reads them back", async t => {
   const { store, a } = await memoryFixture(t);
@@ -71,16 +71,75 @@ test('TRAITS-07: the keyword fill writes kind, concepts and strength for unmarke
   const { MemoryWorker, scheduleTraits } = await import('../lib/memory-jobs/worker.mjs');
   const f = fixture(t), plain = f.save('Mnemuron deploys through pct exec on PVE.'), partial = f.save('Gemini rejected the entity schema.', { kind: 'bug' }), done = f.save('Reply in Chinese.', { kind: 'preference', concepts: ['中文'], strength: 8 });
   const seen = [];
-  const model = organizer(input => { seen.push(input); return { results: input.sources.map(s => ({ memory_id: s.memory_id, revision: s.revision, kind: 'workflow', concepts: ['Mnemuron', ' PVE ', 'pve'], strength: 6 })) }; });
+  const model = organizer(input => { seen.push(input); return { results: input.sources.map(s => ({ memory_id: s.memory_id, revision: s.revision, kind: 'workflow', concepts: s.content.includes('Gemini')?['Gemini']:['Mnemuron', ' PVE ', 'pve'], strength: 6 })) }; });
   const jobs = new MemoryJobs(f.s), scheduled = scheduleTraits(f.s, jobs, { userId: f.auth.user_id, organizer: model });
   assert.equal(scheduled.scanned, 2, 'a memory that already has kind and strength is not sent');
   await new MemoryWorker(f.s, jobs, model).drain();
   assert.equal(seen.length, 1); assert.equal(seen[0].operation, 'traits'); assert.deepEqual(seen[0].kinds, ['fact', 'preference', 'workflow', 'architecture', 'bug', 'pattern']);
   const traits = id => f.s.traits.get(f.auth.user_id, id);
   assert.deepEqual(traits(plain.memory_id), { kind: 'workflow', concepts: ['Mnemuron', 'PVE'], strength: 6 });
-  assert.deepEqual(traits(partial.memory_id), { kind: 'bug', concepts: ['Mnemuron', 'PVE'], strength: 6 }, 'the writer kind is kept; only missing fields are filled');
+  assert.deepEqual(traits(partial.memory_id), { kind: 'bug', concepts: ['Gemini'], strength: 6 }, 'the writer kind is kept; only grounded missing fields are filled');
   assert.deepEqual(traits(done.memory_id), { kind: 'preference', concepts: ['中文'], strength: 8 });
   assert.equal(scheduleTraits(f.s, jobs, { userId: f.auth.user_id, organizer: model }).scanned, 0, 'filled memories are not offered again');
+});
+
+test('TRAITS-09: automatic keyword grounding preserves identifier boundaries and Chinese subject names',()=>{
+  const content='部署 CUCM 15 与 Nexus-9000，版本是 17.9.8，文档地址 192.0.2.10。使用 ＰＶＥ 与 Équipe，平台是思科。';
+  for(const concept of ['CUCM','Nexus-9000','17.9.8','192.0.2.10','PVE','équipe','思科'])assert.equal(groundedConcept(content,concept),true,concept);
+  for(const concept of ['Cuc','Nexus','17.9','192.0.2.1','阿里云','Proxmox','Cisco',''])assert.equal(groundedConcept(content,concept),false,concept);
+  assert.equal(groundedConcept('Synthetic\n  Server runs here.','synthetic server'),true,'format-only whitespace and case normalization is safe');
+});
+
+test('TRAITS-10: a borrowed or invented model keyword fails the whole batch without changing manual metadata',async t=>{
+  const {fixture,organizer}=await import('./helpers/memory-models.mjs');
+  const {MemoryJobs}=await import('../lib/memory-jobs/store.mjs');
+  const {MemoryWorker,scheduleTraits}=await import('../lib/memory-jobs/worker.mjs');
+  const f=fixture(t),one=f.save('Mnemuron runs on PVE.'),two=f.save('Gemini rejected a schema.',{kind:'bug'}),manual=f.save('Always answer in Chinese.',{kind:'preference',concepts:['中文'],strength:8});
+  const before=JSON.stringify(f.s.db.prepare('SELECT * FROM memory_traits ORDER BY memory_id').all());
+  const model=organizer(input=>({results:input.sources.map(s=>({memory_id:s.memory_id,revision:s.revision,kind:'fact',concepts:['PVE'],strength:6}))}));
+  const jobs=new MemoryJobs(f.s),scheduled=scheduleTraits(f.s,jobs,{userId:f.auth.user_id,organizer:model});
+  await new MemoryWorker(f.s,jobs,model).drain();
+  assert.equal(jobs.get(scheduled.jobs[0]).state,'review_required');assert.equal(jobs.get(scheduled.jobs[0]).last_error_code,'INVALID_SOURCE_SET');
+  assert.equal(jobs.get(scheduled.jobs[0]).processed,0,'invalid model output is never checkpointed as a completed chunk');
+  assert.equal(JSON.stringify(f.s.db.prepare('SELECT * FROM memory_traits ORDER BY memory_id').all()),before,'no valid prefix of an invalid batch is published');
+  assert.deepEqual(f.s.traits.get(f.auth.user_id,one.memory_id),{kind:null,concepts:[],strength:null});
+  assert.equal(f.s.traits.get(f.auth.user_id,two.memory_id).kind,'bug');
+  assert.deepEqual(f.s.traits.get(f.auth.user_id,manual.memory_id).concepts,['中文'],'manual multilingual labels are unaffected');
+});
+
+test('TRAITS-12: an explicit retry reuses valid chunks but asks the model again for the invalid remainder',async t=>{
+  const {fixture,organizer}=await import('./helpers/memory-models.mjs');
+  const {MemoryJobs}=await import('../lib/memory-jobs/store.mjs');
+  const {MemoryWorker,scheduleTraits}=await import('../lib/memory-jobs/worker.mjs');
+  const f=fixture(t),one=f.save('Mnemuron runs on PVE.'),two=f.save('Gemini rejected a schema.');
+  let repaired=false;const sent=[];
+  const model=organizer(input=>{sent.push(input.sources.map(s=>s.memory_id));return {results:input.sources.map(s=>({memory_id:s.memory_id,revision:s.revision,kind:'fact',concepts:s.memory_id===two.memory_id&&repaired?['Gemini']:['PVE'],strength:6}))};});
+  const jobs=new MemoryJobs(f.s,{batchSize:1}),scheduled=scheduleTraits(f.s,jobs,{userId:f.auth.user_id,organizer:model}),worker=new MemoryWorker(f.s,jobs,model);
+  await worker.runOne();const failed=jobs.get(scheduled.jobs[0]);
+  assert.equal(failed.state,'review_required');assert.equal(failed.processed,1);
+  assert.deepEqual(jobs.items(failed).map(i=>i.state),['done','pending']);
+  assert.equal(f.s.traits.get(f.auth.user_id,one.memory_id).kind,null,'successful chunks are not published independently');
+  repaired=true;
+  // Simulate an explicit, authorized retry; no automatic retry loop or budget reset is introduced.
+  f.s.db.prepare("UPDATE memory_jobs SET state='pending',run_after=? WHERE job_id=?").run(jobs.clock(),failed.job_id);
+  await worker.runOne();
+  assert.equal(jobs.get(failed.job_id).state,'succeeded');assert.equal(jobs.get(failed.job_id).attempt_count,2);
+  assert.deepEqual(sent,[[one.memory_id],[two.memory_id],[two.memory_id]],'a valid committed chunk is not paid for again');
+  assert.deepEqual(f.s.traits.get(f.auth.user_id,two.memory_id).concepts,['Gemini']);
+});
+
+test('TRAITS-11: direct fill validates the complete source set before writing and allows genuinely empty concepts',async t=>{
+  const {store,a}=await memoryFixture(t),first=store.saveMemory(a.auth,{scope:'user',content:'Synthetic source one.'}).memory,
+    second=store.saveMemory(a.auth,{scope:'user',content:'Synthetic source two.'}).memory;
+  const sources=[first,second].map(m=>store.derivedMemory.currentSource(a.auth.user_id,m.memory_id));
+  const output=sources.map(s=>({memory_id:s.memory_id,revision:s.revision,kind:'fact',concepts:[],strength:5}));
+  const wrong=[output[0],{...output[1],concepts:['Invented platform']}];
+  assert.throws(()=>store.traits.fill(a.auth.user_id,sources,wrong),e=>e.errorCode==='INVALID_SOURCE_SET');
+  assert.equal(store.traits.get(a.auth.user_id,first.memory_id).kind,null);
+  assert.throws(()=>store.traits.fill('another-user',sources,output),e=>e.errorCode==='STALE_INPUT');
+  assert.throws(()=>store.traits.fill(a.auth.user_id,[null,sources[1]],output),e=>e.errorCode==='STALE_INPUT');
+  assert.equal(store.traits.fill(a.auth.user_id,sources,output),2);
+  assert.deepEqual(store.traits.get(a.auth.user_id,first.memory_id),{kind:'fact',concepts:[],strength:5});
 });
 
 test('TRAITS-08: out-of-bounds model output fails the job without writing', async t => {

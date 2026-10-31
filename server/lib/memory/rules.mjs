@@ -19,10 +19,14 @@ export function labeledStatements(events) {
     const field = typeof decoded === 'string' ? null : ['text','content','message','summary','output'].find(key=>typeof decoded?.[key]==='string');
     const text = typeof decoded === 'string' ? decoded : decoded?.[field] || '';
     const selector = typeof decoded === 'string' ? '$' : '$.'+field;
-    let fenced = false;
+    let fence = null;
     for (const line of text.matchAll(/[^\r\n]+/g)) {
-      if (/^\s*```/.test(line[0])) { fenced=!fenced; continue; }
-      if (fenced) continue;
+      const marker=line[0].match(/^\s*(`{3,}|~{3,})(.*)$/);
+      if(fence){
+        if(marker&&marker[1][0]===fence.character&&marker[1].length>=fence.length&&!marker[2].trim())fence=null;
+        continue;
+      }
+      if(marker){fence={character:marker[1][0],length:marker[1].length};continue;}
       const match = line[0].match(/^\s*(?:[-*•]\s+|\d+[.)]\s+)?(?:\*\*|__)?(目标|goal|事实|fact|结论|约束|constraint|决定|决策|decision|已完成|完成|completed|阻塞|blocker|未完成|remaining|todo|下一步|next\s+steps?)(?:\s*[\[（(]([^\]）)]{1,120})[\]）)])?(?:\*\*|__)?\s*[:：](?:\*\*|__)?\s*(.+?)\s*$/iu);
       if (!match) continue;
       const memoryType=types.get(match[1].toLowerCase()),content=match[3];
@@ -48,7 +52,9 @@ export function conversationStatements(events, policy, userId) {
     if(!text || text.length>4000 || /```|~~~|[?？]|(?:^|\n)\s*[>"“{[]/u.test(text)
       || /(?:请|帮我|能否|可否|怎么|为何|为什么|是否|假如|假设|如果|例如|示例|不要记|别记|不记录|可能|也许|预计|打算|希望|将会|据说|\b(?:delete|forget|please|could you|can you|would you|what|why|how|might|perhaps|suppose)\b)/iu.test(text)
       || /(?:api[ _-]?key|token|secret|password|bearer|private[ _-]?key|密码|密钥|口令|验证码|身份证|银行卡)|[A-Za-z0-9_+\/-]{32,}/iu.test(text))continue;
-    for(const line of text.matchAll(/[^\r\n。！？.!?]+[。！？.!?]?/gu)) {
+    // A dot inside a version, decimal, host or filename is source data, not the end of a fact. Keep the
+    // original UTF-16 range so differently numbered statements cannot collapse onto the same partial prefix.
+    for(const line of text.matchAll(/(?:[^\r\n。！？.!?]|\.(?=[\p{L}\p{N}_]))+[。！？.!?]?/gu)) {
       const content=line[0].trim();
       if(content.length<8 || content.length>maxChars || found.filter(c=>c.event===event).length>=5)continue;
       // Only direct, affirmative observations. Questions, imperatives and quotations
