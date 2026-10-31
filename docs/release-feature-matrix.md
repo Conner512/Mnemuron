@@ -53,6 +53,7 @@ layout separately from the action coverage shown here.
 | MEM-06 | 批量撤回 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-07 | 版本对比 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-08 | 关键词筛选与地图 | live | `server/test/memory-traits.test.mjs`; `server/test/console-memory-graph.test.mjs`; `services/oauth/test/console-library-ui.test.mjs` | functional |
+| MEM-11 | 处理证据与选中补处理 | live | `server/test/memory-processing-workbench.test.mjs`; `services/oauth/test/console-actions.test.mjs`; `services/oauth/test/console-memory-processing.test.mjs` | `scripts/test-memory-processing-browser.mjs`: exact selection, explicit confirmation, completed evidence, basic grant and mobile layout |
 | SUM-01 | 摘要列表 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models + refinements (summaries) |
 | SUM-02 | 生成摘要 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models |
 | SUM-03 | 按项目和会话分组 | live | `server/test/memory-first-jobs.test.mjs`; `services/oauth/test/console-library-ui.test.mjs` | models + refinements (summaries) |

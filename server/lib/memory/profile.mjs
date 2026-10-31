@@ -23,8 +23,8 @@ export function projectProfile(store, auth, projectId) {
   const from = `FROM memories m LEFT JOIN memory_traits t ON t.user_id=m.user_id AND t.memory_id=m.memory_id WHERE ${where}`;
   const totals = db.prepare(`SELECT count(*) n, max(coalesce(m.updated_at,m.created_at)) last FROM memories m WHERE ${where}`).get(...params);
   const kinds = Object.fromEntries(db.prepare(`SELECT coalesce(t.kind,'none') kind, count(*) n ${from} GROUP BY 1 ORDER BY 2 DESC`).all(...params).map(r => [r.kind, r.n]));
-  const concepts = db.prepare(`SELECT min(c.value) concept, count(*) n ${from.replace('LEFT JOIN memory_traits t', 'JOIN memory_traits t')
-    .replace(' WHERE ', ', json_each(t.concepts_json) c WHERE ')} GROUP BY lower(c.value) ORDER BY n DESC, concept LIMIT ?`).all(...params, PROFILE_CONCEPTS);
+  const concepts = db.prepare(`SELECT min(c.value) concept, count(DISTINCT m.memory_id) n ${from.replace('LEFT JOIN memory_traits t', 'JOIN memory_traits t')
+    .replace(' WHERE ', ', json_each(t.concepts_json) c WHERE ')} GROUP BY memory_concept_key(c.value) ORDER BY n DESC, concept LIMIT ?`).all(...params, PROFILE_CONCEPTS);
   const key = db.prepare(`SELECT m.memory_id,m.content,m.topic,m.created_at,t.kind,t.strength ${from} AND t.kind IN (${KEY_KINDS.map(() => '?').join(',')})
     ORDER BY coalesce(t.strength,5) DESC, coalesce(m.updated_at,m.created_at) DESC LIMIT ?`).all(...params, ...KEY_KINDS, PROFILE_KEY).map(item);
   const problems = db.prepare(`SELECT m.memory_id,m.content,m.topic,m.created_at,t.kind,t.strength ${from} AND t.kind='bug'

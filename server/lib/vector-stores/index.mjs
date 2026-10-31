@@ -118,9 +118,9 @@ export class VectorIndex {
   }
   /** Checkpoint only backend-confirmed chunks. A building document is never a searchable/activatable document.
    * Model limits are outside the profile fingerprint, so the deterministic IDs also bind the exact chunk layout. */
-  async indexSource(g,e,source,{purpose='document'}={}){
+  async indexSource(g,e,source,{purpose='document',currentGuard=null}={}){
     const id=g.generation,{layout,chunks}=documentChunks(e,source.content),contentHash=digest(source.content);
-    const current=()=>{if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');};
+    const current=()=>{currentGuard?.();if(!this.owns(g))fail('LEASE_LOST');if(!this.store.derivedMemory.validateItem(source))fail('STALE_INPUT');};
     const filter={must:[condition('owner',surrogate(source.user_id)),condition('document',surrogate([source.user_id,source.memory_id]))]};
     const build=digest(['vector-build-v2',id,g.profile,source.user_id,source.memory_id,source.revision,source.state_hash,source.scope_key,layout]);
     const expected=chunks.map(chunk=>({...chunk,id:pointId('vector-point-v2',build,chunk.chunk)}));
@@ -222,6 +222,29 @@ export class VectorIndex {
         await this.indexRecord(g,e,id,raw,source,old);processed++;
       }
       return {processed,complete:processed>=pending.length,remaining:pending.length-processed,generation:id};
+    }finally{this.db.prepare('UPDATE memory_vector_generations SET lease_owner=NULL,lease_expires=NULL WHERE generation=? AND fence=? AND lease_owner=?').run(id,g.fence,g.lease_owner);}
+  }
+  /** Explicit repair of 1–50 pinned revisions in the serving generation. Never replaces the collection, changes the
+   * first-run manifest/checkpoint, or expands to unrelated pending records. A source change stops, never hides a newer
+   * source on behalf of an old grant. Confirmed chunks from a failed attempt remain reusable by indexSource. */
+  async repairSelected(id,{items,maxDocuments=1}={}){
+    integer(maxDocuments,1,50);this.assertOwner(id);if(!this.ownerId)fail('INVALID_OWNER');
+    if(!Array.isArray(items)||!items.length||items.length>50||new Set(items.map(i=>i?.memory_id)).size!==items.length)fail('INVALID_SOURCE_SET');
+    const validate=()=>{this.executionGuard?.();const active=this.snapshot();if(active.generation!==id)fail('VECTOR_GENERATION_CHANGED');
+      return items.map(item=>{const source=this.store.derivedMemory.currentSource(this.ownerId,item.memory_id);
+        if(!source||source.revision!==item.revision||source.state_hash!==item.state_hash)fail('STALE_INPUT');return source;});};
+    const pending=()=>validate().filter(source=>{const old=this.db.prepare('SELECT * FROM memory_vector_documents WHERE generation=? AND user_id=? AND memory_id=?').get(id,this.ownerId,source.memory_id);
+      return !old||old.state!=='indexed'||old.revision!==source.revision||old.state_hash!==source.state_hash||old.scope_key!==source.scope_key;});
+    const sources=pending();if(!sources.length)return {processed:0,complete:true,remaining:0,generation:id};
+    const g=this.acquire(id),e=this.embedders.get(g.profile);let processed=0;
+    try{
+      if(!e)fail('NOT_CONFIGURED');await this.backend.ensureCollection(g.collection_name,{dimensions:g.dimensions,distance:g.distance});validate();
+      for(const source of sources.slice(0,maxDocuments)){
+        await this.indexSource(g,e,source,{currentGuard:validate});
+        this.store.memoryTransaction(()=>{validate();if(!this.owns(g))fail('LEASE_LOST');
+          this.db.prepare("UPDATE memory_index_outbox SET state='indexed' WHERE user_id=? AND memory_id=? AND revision=?").run(this.ownerId,source.memory_id,source.revision);});processed++;
+      }
+      const remaining=pending().length;return {processed,complete:remaining===0,remaining,generation:id};
     }finally{this.db.prepare('UPDATE memory_vector_generations SET lease_owner=NULL,lease_expires=NULL WHERE generation=? AND fence=? AND lease_owner=?').run(id,g.fence,g.lease_owner);}
   }
   /** First-run build: only the frozen manifest, never other rows, history, secret records or other accounts.

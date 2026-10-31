@@ -10,6 +10,7 @@ import {mountAgents} from './agents.mjs';
 import {mountTaskWorkflows} from './task-workflows.mjs';
 import {mountMemoryReview,reviewButton} from './memory-review.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
+import {memoryProcessingView} from './memory-processing.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
@@ -201,9 +202,19 @@ async function openMemory(params,first=false,back=false) {
    setPaneTitle('detail',meta?.title);detailKind='memory';
    detail.innerHTML=memoryDetailView(t,data,{actions:detailActions(data.memory.memory_id),canGoBack:detailStack.length>1,meta,labels:capabilities.category_labels||{}});
    if(data.memory.status==='active')detail.insertAdjacentHTML('afterbegin',reviewButton('memory',data.memory.memory_id));
+   void loadMemoryProcessing(data.memory.memory_id,data.revision,sequence);
    if(data.memory.lifecycle?.supersedes_memory_id||data.memory.lifecycle?.superseded_by_memory_id)void loadVersionChain(data.memory.memory_id,sequence);
    markSelected();}
  catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
+}
+async function loadMemoryProcessing(memory_id,revision,sequence){
+ const target=detail.querySelector('[data-memory-processing]');if(!target)return;
+ target.innerHTML=l('loading','p');
+ try{const data=await api('memory-processing',{memory_id,revision});
+  if(!state.account||sequence!==detailSequence||target!==detail.querySelector('[data-memory-processing]'))return;
+  target.innerHTML=memoryProcessingView(t,data,{writable:canAct(capabilities,'processing.preview')});
+ }catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError'||e.message==='STALE_ACCOUNT'||target!==detail.querySelector('[data-memory-processing]'))return;
+  target.innerHTML=`<p role="status">${esc(t(e.message==='MEMORY_VERSION_CHANGED'?'changed':'processingEvidenceUnavailable'))}</p><button type="button" data-processing-refresh>${esc(t('retry'))}</button>`;}
 }
 // Version chain: the correction lineage of the open memory (each correction is a replacement record). A version's
 // change is read on demand (the two records' text) and shown inline; Compare versions keeps the side-by-side view.
@@ -273,6 +284,7 @@ function toggleContext(button){
  button.setAttribute('aria-expanded','true');void loadContext(button);
 }
 document.addEventListener('click',event=>{
+ if(event.target.closest('[data-processing-refresh]')&&detailKind==='memory'&&detailData){void loadMemoryProcessing(detailData.memory.memory_id,detailData.revision,detailSequence);return;}
  const context=event.target.closest('[data-project-context]');if(context){toggleContext(context);return;}
  const retry=event.target.closest('[data-project-context-retry]');if(retry){const button=[...root.querySelectorAll('[data-project-context]')].find(b=>b.dataset.projectContext===retry.dataset.projectContextRetry);if(button)void loadContext(button);return;}
  const projectView=event.target.closest('[data-project-view]');if(projectView){projectArchived=['true','deleted'].includes(projectView.dataset.projectView)?projectView.dataset.projectView:'false';projectOffset=0;void load();return;}

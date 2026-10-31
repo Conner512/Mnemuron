@@ -20,6 +20,10 @@ and retraction otherwise reuse `saveMemory`, `supersedeMemory` and `retractMemor
 Replacement inherits explicit Web denials from **both** compared records. Raw event
 expiry is never extended and no candidate duplicates raw text in its table.
 
+## Selected processing evidence and repair
+
+`console/memory-processing.mjs` reads an owned memory through `ConsoleService.memory`, binds its revision and uses `DerivedMemory.currentSource` for live-source validity. Summary evidence validates every dependency; vector document/chunk lookups are owner + serving generation + memory bound. Job/run histories are bounded and contain no other manifest source bodies. `OwnerControls.checkSelection` and `checkPreview` recheck explicit selections, frozen state hashes and lifecycle generation before idempotent receipt replay. `previewItems` only reads titles from validated frozen sources; unavailable rows return metadata-only stale markers. Selected repair in `vector-stores/index.mjs` only processes pinned owned revisions under the active generation lease and revalidates the generation and all sources after asynchronous boundaries. It never walks global catch-up work or changes a serving pointer. Coverage: `memory-processing-workbench.test.mjs` and the real BFF processing-evidence test.
+
 Operator note: a database whose lifecycle metadata is inconsistent, including lifecycle rows whose projects table is damaged or missing, is refused at open before any write or self-repair; recover it from a verified backup (isolated restore) rather than editing rows by hand.
 
 Status: schema v11 adds the owner-scoped entity evidence graph to the v10 lifecycle enforcement boundary. Phases 5B (reads), 5C (writes) and 5D (jobs and derived outputs) remain enforced. The v10 build first opened databases with deleted or merged projects (v8/v9 refused them); inconsistent lifecycle metadata is still refused before any write or repair (`assertLifecycleConsistent`). Older readers, including v10, refuse v11 before mutation. Lifecycle state is created only by the 5E Console actions behind the 5F BFF re-authentication gate (below); the Console UI is 5G.

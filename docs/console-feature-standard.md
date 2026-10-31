@@ -215,6 +215,8 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-08 | 记忆库 | 关键词筛选与地图 | live | memories | — |
 | MEM-09 | 记忆库 | 候选审核工作台 | live | review-candidates | review.extract, review.candidate |
 | MEM-10 | 记忆库 | 记忆对照与人工复查 | live | memory-review | review.verify, review.resolve |
+
+| MEM-11 | 记忆库 | 处理证据与选中补处理 | live | memory-processing | processing.preview, processing.start |
 | SUM-01 | 摘要 | 摘要列表 | live | summaries, summary | — |
 | SUM-02 | 摘要 | 生成摘要 | live | — | jobs.schedule |
 | SUM-03 | 摘要 | 按项目和会话分组 | live | summaries | — |

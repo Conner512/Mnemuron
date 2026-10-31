@@ -4,6 +4,7 @@ import {object,id,number} from './state.mjs';
 import {ValidationError,ConflictError,NotFoundError,AuthorizationError} from '../errors.mjs';
 import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS} from '../../../shared/console-contract.mjs';
 import {graphFold,memoryGraph} from './memory-graph.mjs';
+import {processingEvidence} from './memory-processing.mjs';
 
 export {FEATURE_VIEWS};
 // An explicit Codex plugin grant, separate from ordinary memory/capture credentials.
@@ -27,6 +28,7 @@ export const featureParams={
   'task-branches':['task_id','project_id','offset','limit'],'project-context':['project_id'],
   'task-checkpoints':['task_id','offset','limit'],'task-reconciliation':['task_id'],
   'memory-versions':['memory_id','offset','limit','revision','content_offset','content_limit','chain'],
+  'memory-processing':['memory_id','revision'],
 };
 const page=p=>{
   const offset=Number(p.offset??0),limit=Number(p.limit??25);number(offset,0,1000000);number(limit,1,100);return {offset,limit};
@@ -66,6 +68,7 @@ export class ConsoleFeatures {
   read(auth,view,p){
     object(p,featureParams[view]||[]);const {db,store,service}=this,user=auth.user_id;
     const result=value=>({read_only:true,production_ready:false,...value});
+    if(view==='memory-processing')return result(processingEvidence(service,auth,p));
     if(view==='taxonomy'){const current=this.preference(user,'taxonomy',service.taxonomy(user)),labels=this.labels(user);return result({...current,...service.taxonomy(user),labels,descriptions:this.descriptions(user),definitions:categoryDefinitions(service.taxonomy(user),labels,this.descriptions(user)),default_adoption:adoptionPreview(service.taxonomy(user),current.revision,labels)});}
     if(view==='privacy-defaults')return result({...this.privacy(user),applies_to:'new_console_memories',cloud_grant_requires_explicit_revision:true});
     if(view==='retention')return result(this.retention(user));
