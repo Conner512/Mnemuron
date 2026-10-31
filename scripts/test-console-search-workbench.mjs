@@ -41,7 +41,7 @@ try{
  const full=await explore('Synthetic Router/A');pass('Older relationships outside the newest 1000 records remain reachable',full.current_count===13&&full.evidence.items.length===10&&full.evidence.next_offset===10);
  const firstIds=full.evidence.items.map(row=>row.memory_id);const nextResponse=page.waitForResponse(r=>new URL(r.url()).searchParams.get('graph_offset')==='10');await page.locator('[data-neighbor-offset="10"]').click();const next=(await(await nextResponse).json()).graph.neighborhood;
  pass('Evidence pagination reaches every older record without duplicate page entries',next.evidence.items.length===3&&next.evidence.next_offset===null&&next.evidence.items.every(row=>!firstIds.includes(row.memory_id)));
- const openId=next.evidence.items[0].memory_id;await page.locator(`[data-neighbor-memory="${openId}"]`).click();await page.locator('#memory-dialog[open]').waitFor();
+ const openId=next.evidence.items[0].memory_id;await page.locator(`[data-neighbor-memory="${openId}"]`).click();await page.locator('#memory-dialog[open]').waitFor();await page.locator('#memory-content').getByText('Synthetic older full-library graph evidence').first().waitFor();
  pass('Graph evidence opens the actual original memory detail', (await page.locator('#memory-content').innerText()).includes('Synthetic older full-library graph evidence'));
  await page.keyboard.press('Escape');await page.locator('#memory-dialog[open]').waitFor({state:'detached'});
  let held;const ready=deferred();const hold=async route=>{if(new URL(route.request().url()).searchParams.get('graph_focus')==='Synthetic Router/A'){held={route,response:await route.fetch()};ready.resolve();}else await route.continue();};
