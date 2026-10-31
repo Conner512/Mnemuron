@@ -48,24 +48,47 @@ try{
  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});
 
  // First-fold geometry is an explicit requirement, not merely absence of horizontal overflow.
- // Narrow-screen navigation keeps every desktop destination available by touch and keyboard.
- for(const [width,locale] of [[1440,'zh-CN'],[390,'zh-CN'],[320,'zh-CN'],[1440,'en'],[390,'en']]){
+ // Narrow-screen navigation keeps every active destination available by touch and keyboard.
+ for(const [width,locale] of [[1280,'zh-CN'],[1440,'zh-CN'],[1920,'zh-CN'],[390,'zh-CN'],[320,'zh-CN'],[1440,'en'],[390,'en']]){
   const view=await newPage({width,locale});page=view.page;await page.goto(cfg.url+'/app/overview');await idle(page);
   const tag=`${width}-${locale==='en'?'en':'zh'}`;
   const dimensions=await page.evaluate(()=>{const bounds=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {top:r.top,bottom:r.bottom,left:r.left,right:r.right,height:r.height,width:r.width};};return {
-   viewport:{width:innerWidth,height:innerHeight},graph:bounds('.map-board'),activity:bounds('[data-live-stream]'),activityTitle:bounds('[data-live-stream] .section-head'),firstEvent:bounds('[data-stream-list] .stream-event'),
-   filtersHidden:document.querySelector('[data-map-filters]').hidden,systemClosed:!document.querySelector('[data-overview-system]').open,libraryClosed:!document.querySelector('[data-overview-library]').open,
+   viewport:{width:innerWidth,height:innerHeight},card:bounds('[data-memory-map]'),graph:bounds('.map-board'),activity:bounds('[data-live-stream]'),activityTitle:bounds('[data-live-stream] .section-head'),firstEvent:bounds('[data-stream-list] .stream-event'),
+   filtersHidden:document.querySelector('[data-map-filters]').hidden,sectionsVisible:[...document.querySelectorAll('[data-overview-system],[data-overview-library]')].every(n=>n.tagName==='SECTION'&&n.getBoundingClientRect().height>0&&!n.querySelector(':scope>summary')),
    overflow:document.documentElement.scrollWidth>innerWidth+1};});geometry.push({tag,...dimensions});
   await screenshot(page,'overview-'+tag+'-fold');
   if(width===1440&&locale==='zh-CN'||width===390&&locale==='zh-CN')await screenshot(page,'overview-'+tag+'-full',true);
   check(tag+': graph, activity and controls never overflow the viewport',!dimensions.overflow);
-  check(tag+': advanced filters and both secondary sections start collapsed',dimensions.filtersHidden&&dimensions.systemClosed&&dimensions.libraryClosed);
+  check(tag+': only filters start closed; lower insights are permanently visible sections',dimensions.filtersHidden&&dimensions.sectionsVisible);
   check(tag+': the actual graph is visible, with useful height, in the initial viewport',dimensions.graph.top<(width>760?330:width<=360?500:430)&&dimensions.graph.bottom<=900&&dimensions.graph.height>=(width>760?400:250));
   if(width!==320)check(tag+': live-activity heading is visible in the initial viewport',dimensions.activityTitle.bottom<=900);
-  if(width>760)check(tag+': graph and activity start side by side',Math.abs(dimensions.activity.top-(await page.locator('[data-memory-map]').boundingBox()).y)<3&&dimensions.activity.left>dimensions.graph.right);
-  check(tag+': no duplicate prominent search form above the graph',await page.locator('[data-search-input]').isHidden()&&await page.locator('[data-map-query]').isHidden());
+  if(width>1100)check(tag+': graph and activity outer cards align at both top and bottom',Math.abs(dimensions.activity.top-dimensions.card.top)<1&&Math.abs(dimensions.activity.bottom-dimensions.card.bottom)<1&&dimensions.activity.left>dimensions.graph.right);
+  check(tag+': overview contains no memory search, project controls or full-library association',await page.locator('[data-search-input],[data-map-query],[data-map-scope-form],[data-neighborhood-form],.map-neighborhood').count()===0);
+  const sameRect=(a,b)=>['x','y','width','height'].every(key=>Math.abs(a[key]-b[key])<1);
+  const before={card:await page.locator('[data-memory-map]').boundingBox(),graph:await page.locator('.map-board').boundingBox(),activity:await page.locator('[data-live-stream]').boundingBox()};
+  await page.locator('[data-map-filter-toggle]').click();
+  const opened={card:await page.locator('[data-memory-map]').boundingBox(),graph:await page.locator('.map-board').boundingBox(),activity:await page.locator('[data-live-stream]').boundingBox(),filter:await page.locator('[data-map-filters]').boundingBox()};geometry.push({tag,before,opened});
+  check(tag+': floating filters do not change either card or the graph dimensions',sameRect(before.card,opened.card)&&sameRect(before.graph,opened.graph)&&sameRect(before.activity,opened.activity));
+  check(tag+': filter is bounded inside the graph with a compact footprint',opened.filter.width<=360&&opened.filter.height<=Math.min(360,opened.graph.height)&&opened.filter.x>=opened.graph.x&&opened.filter.y>=opened.graph.y&&opened.filter.x+opened.filter.width<=opened.graph.x+opened.graph.width+1&&opened.filter.y+opened.filter.height<=opened.graph.y+opened.graph.height+1&&(width<=1100||opened.filter.width*opened.filter.height<=opened.graph.width*opened.graph.height*.5));
+  await page.locator('[data-map-filter-tab="nodes"]').click();
+  const nodes=page.locator('[data-map-nodes] [data-map-node-key]');
+  check(tag+': node browsing is inside filters and bounded to a page',await nodes.count()>0&&await nodes.count()<=8&&await page.locator('[data-map-filters] [data-map-node-page="next"]').count()===1);
+  const firstKey=await nodes.first().getAttribute('data-map-node-key');
+  await nodes.first().click();await nodes.nth(1).click();
+  check(tag+': two ordinary clicks multi-select without reflowing cards',await page.locator('[data-memory-map]').getAttribute('data-selection-count')==='2'&&sameRect(before.card,await page.locator('[data-memory-map]').boundingBox())&&sameRect(before.graph,await page.locator('.map-board').boundingBox())&&sameRect(before.activity,await page.locator('[data-live-stream]').boundingBox()));
+  if(await page.locator('[data-map-node-page="next"]').isEnabled()){
+   await page.locator('[data-map-node-page="next"]').click();
+   check(tag+': node pagination preserves selections without growing the filter',await nodes.count()<=8&&await nodes.first().getAttribute('data-map-node-key')!==firstKey&&await page.locator('[data-memory-map]').getAttribute('data-selection-count')==='2'&&sameRect(before.graph,await page.locator('.map-board').boundingBox()));
+  }
+  await screenshot(page,'overview-'+tag+'-filters');
+  await page.keyboard.press('Escape');
+  check(tag+': Escape closes floating filters and restores their trigger',await page.locator('[data-map-filters]').isHidden()&&await page.locator('[data-map-filter-toggle]').evaluate(n=>document.activeElement===n));
+  await page.locator('[data-map-clear]').click();
+  check(tag+': clearing selection leaves no highlighted node state or layout growth',await page.locator('[data-memory-map]').getAttribute('data-selection-count')==='0'&&await page.locator('[data-map-node-key][aria-pressed="true"]').count()===0&&sameRect(before.graph,await page.locator('.map-board').boundingBox()));
+  await page.locator('[data-map-filter-toggle]').click();await page.locator('#console-root h1').click();
+  check(tag+': outside click dismisses the filter without moving the cards',await page.locator('[data-map-filters]').isHidden()&&sameRect(before.card,await page.locator('[data-memory-map]').boundingBox())&&sameRect(before.activity,await page.locator('[data-live-stream]').boundingBox()));
   const nav=page.locator('.sidebar nav a'),paths=await nav.evaluateAll(links=>links.map(a=>new URL(a.href).pathname));
-  check(tag+': all ten console navigation destinations remain present',paths.length===10&&new Set(paths).size===10&&paths.includes('/app/security')&&paths.includes('/app/summaries'));
+  check(tag+': all nine active destinations remain, with projects hidden',paths.length===9&&new Set(paths).size===9&&paths.includes('/app/security')&&paths.includes('/app/summaries')&&!paths.includes('/app/projects'));
   if(width<=390){
    const navBox=await page.locator('.sidebar nav').boundingBox();
    check(tag+': mobile navigation uses one compact horizontal row',navBox.height<=60&&await nav.evaluateAll(links=>Math.max(...links.map(n=>n.getBoundingClientRect().top))-Math.min(...links.map(n=>n.getBoundingClientRect().top))<3));
@@ -78,7 +101,12 @@ try{
    check(tag+': Tab reaches and scrolls every navigation destination into view',keyboardReachable);
   }
   await page.locator('#main').focus();await page.keyboard.press('/');
-  check(tag+': slash reveals secondary search and focuses it without navigation',await page.locator('[data-overview-library]').evaluate(d=>d.open)&&await page.locator('[data-search-input]').evaluate(n=>document.activeElement===n)&&new URL(page.url()).pathname==='/app/overview');
+  check(tag+': slash on overview does not resurrect search or navigate elsewhere',await page.locator('[data-search-input]').count()===0&&new URL(page.url()).pathname==='/app/overview');
+  await page.locator('[data-overview-system]').scrollIntoViewIfNeeded();
+  check(tag+': system checks and statistics can be read by scrolling, without expansion',await page.locator('.status-strip').isVisible()&&await page.locator('.metrics').isVisible());
+  await page.locator('.overview-library-link').click();await page.waitForURL('**/app/memories');await page.locator('[data-search-input]').waitFor();
+  await page.locator('#main').focus();await page.keyboard.press('/');
+  check(tag+': searching is focused in the Memory Library',await page.locator('[data-search-input]').evaluate(n=>document.activeElement===n));
   await page.locator('[data-search-input]').fill('Synthetic / typed');
   await page.keyboard.press('/');check(tag+': the shortcut does not steal a slash typed in the search field',(await page.locator('[data-search-input]').inputValue()).endsWith('/'));
   await contextClose(view);

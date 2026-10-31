@@ -1,0 +1,66 @@
+/* Shared control geometry for the existing sticky-board console.
+   This layer targets forms and paired controls, not node chips, table links,
+   toggles, checkboxes, textareas or the compact graph toolbar. */
+.is-console{--control-height:40px;--control-height-compact:32px}
+.is-console :is(.memory-filters,#connection-filters,.audit-filters,#operation-content,.connection-content,.review-dialog) :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]):not([type=color]),button.select-trigger){
+ height:var(--control-height);min-height:var(--control-height);padding-top:0;padding-bottom:0;line-height:1.4;border-radius:var(--radius-sm)
+}
+.is-console :is(.memory-filters,#connection-filters,.audit-filters) label{min-width:0;margin:0;display:grid;gap:6px}
+.is-console :is(.memory-filters,#connection-filters,.audit-filters) .select-shell{width:100%}
+.is-console :is(.filter-actions,.connection-filter-actions){align-items:center;gap:8px}
+.is-console :is(.filter-actions,.connection-filter-actions)>button,
+.is-console .audit-filters>button[type=submit],
+.is-console :is(#operation-content,.connection-content) form>.actions>button{
+ min-height:var(--control-height);height:var(--control-height);padding-top:0;padding-bottom:0;line-height:1.4
+}
+.is-console :is(#operation-content,.connection-content) form>.actions{align-items:center}
+
+/* The current connections page uses agents-connected, not the legacy
+   connection-list selector. Give both the same field-label rhythm; the
+   record selector, name input and actions now share an actual aligned row. */
+.is-console .agents-connected #connection-filters{
+ display:grid;grid-template-columns:minmax(150px,200px) minmax(180px,1fr) auto;
+ align-items:end;gap:12px;margin:0 0 18px;padding:0
+}
+.is-console .agents-connected #connection-filters>label{font-size:12px;font-weight:500;color:var(--muted)}
+.is-console .agents-connected .connection-filter-actions{flex-wrap:wrap}
+.is-console .agents-connected .connection-filter-actions>button{flex:0 0 auto}
+/* Agent setup is wrapped for in-place refreshes, so the normal .card+.card
+   rhythm otherwise misses the next health/tunnel panel. */
+.is-console [data-agents-root]+.card{margin-top:var(--gap)}
+
+/* Date and text fields align as one unit; keep the calendar icon's inset
+   hit target inside the common border instead of making a 40px child overflow. */
+.is-console .audit-filters .audit-date-field{height:var(--control-height);min-height:var(--control-height)}
+.is-console .audit-filters .audit-date-field :is(input,button){height:100%;min-height:0}
+.is-console .audit-filters .audit-date-field input{border:0;border-radius:0}
+.is-console .audit-filters .audit-date-field button{box-shadow:none!important;transform:none!important}
+
+/* Menus remain anchored while open: colour/shadow communicate state without
+   shifting the top-bar trigger away from its neighbour or popup. */
+.is-console .topbar-tools :is(.language-control .select-trigger,.account-menu>summary){height:38px;min-height:38px}
+.is-console .topbar-tools .language-control .select-trigger,
+.is-console .topbar-tools .language-control .select-trigger:hover,
+.is-console .topbar-tools .language-control .select-trigger[aria-expanded=true],
+.is-console .topbar-tools .account-menu>summary,
+.is-console .topbar-tools .account-menu>summary:hover,
+.is-console .topbar-tools .account-menu[open]>summary{transform:none}
+
+/* An issued secret is a text field plus two actions. Plain read-only metadata
+   keeps its compact copy controls; only the input row uses form-sized controls. */
+.is-console .plugin-field dd:has(>input){flex-wrap:wrap}
+.is-console .plugin-field dd>input{height:var(--control-height);min-height:var(--control-height);flex:1 1 160px}
+.is-console .plugin-field dd:has(>input)>button{height:var(--control-height);min-height:var(--control-height);padding-top:0;padding-bottom:0}
+.is-console .pager :is(.page-jump input,.page-jump button){height:var(--control-height-compact);min-height:var(--control-height-compact);padding-top:0;padding-bottom:0}
+.is-console .paused-page-notice>p:last-child{margin-bottom:0}
+
+@media(max-width:900px){
+ .is-console .agents-connected #connection-filters{grid-template-columns:minmax(0,1fr) minmax(0,2fr)}
+ .is-console .agents-connected .connection-filter-actions{grid-column:1/-1;justify-content:flex-end}
+}
+@media(max-width:560px){
+ .is-console .agents-connected #connection-filters{grid-template-columns:minmax(0,1fr)}
+ .is-console .agents-connected .connection-filter-actions{justify-content:flex-start}
+ .is-console .agents-connected .connection-filter-actions>button{flex:1 1 auto}
+ .is-console :is(#operation-content,.connection-content) form>.actions>button{max-width:100%;height:auto;white-space:normal;padding-top:6px;padding-bottom:6px}
+}

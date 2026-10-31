@@ -1,5 +1,5 @@
 import {auditLocalValue} from './audit.mjs';
-import {pagePath} from './routes.mjs';
+import {pagePath,navigationPages} from './routes.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
 import {taskWorkflowCard} from './task-workflows.mjs';
 // Pure console views for the memory workbench. No API calls, account selection or
@@ -173,14 +173,13 @@ function distributionLegend(insights, t, labels = {}) {
     <dl class="legend-stats"><div><dt>${i18n(t, 'distributionCount')}</dt><dd>${c.count}</dd></div><div><dt>${i18n(t, 'distributionShare')}</dt><dd>${Math.round(c.count / total * 100)}%</dd></div></dl></li>`)}</ol>`;
 }
 
-/** Secondary overview tools. The graph and live activity are rendered first by overviewStatus. */
+/** Readable overview insights follow the graph and activity; searching belongs to the library. */
 export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t), labels = {}, taxonomy = [], descriptions = {}}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
   const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}">${i18n(t, title)}<strong>${count(key)}</strong></a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
-  return String(html`<details class="overview-secondary" data-overview-library><summary>${i18n(t, 'overviewLibraryDetails')}<span class="overview-secondary-note">${i18n(t, 'overviewLibraryNote')}</span></summary><div class="overview-secondary-body"><section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
-      <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
-        <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
+  return String(html`<section class="overview-secondary" data-overview-library aria-labelledby="overview-library-title"><header class="overview-secondary-heading"><h2 id="overview-library-title">${i18n(t, 'overviewLibraryDetails')}</h2><p class="overview-secondary-note">${i18n(t, 'overviewLibraryNote')}</p></header><div class="overview-secondary-body"><section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
+      <a class="button" href="/app/memories">${i18n(t, 'overviewLibraryLink')}${svg('arrow')}</a>
       </div>${distribution(data.insights, t, labels)}${distributionLegend(data.insights, t, labels)}</section>
   <div class="metrics">${metric('memories', 'memoryCount', '/app/memories')}${metric('sources', 'sourceCount', '/app/memories?focus=sources')}${metric('summaries', 'summaryCount', '/app/summaries')}${metric('jobs', 'jobCount', '/app/processing')}</div>
   <div class="home-grid">
@@ -191,7 +190,7 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
       <section class="pulse-block processing-card">${i18n(t, 'pipelineTitle', 'h3')}<div class="pipeline">
         ${stage('/app/memories', 'library', 'memoryCount', 'atomicNote', 'memories')}${stage('/app/summaries', 'summaries', 'summaryCount', 'derivedNote', 'summaries')}${stage('/app/processing', 'jobs', 'jobCount', 'jobStatusNote', 'jobs')}</div>
         <p class="privacy-note">${svg('security')}<span data-i18n="summaryBoundary">${t('summaryBoundary')}</span></p></section>
-    </aside></div></div></details>`);
+    </aside></div></div></section>`);
 }
 
 /** Category display name (older summaries only): an account-defined name, otherwise the translated built-in ID. */
@@ -510,7 +509,6 @@ export const featureMap = {
     {id: 'OVW-01', status: 'live', read: ['overview']},
     {id: 'OVW-02', status: 'live', read: ['overview']},
     {id: 'OVW-03', status: 'live', read: ['attention']},
-    {id: 'OVW-04', status: 'live', read: ['attention', 'projects']},
   ],
   memories: [
     {id: 'MEM-01', status: 'live', read: ['memories']},
@@ -751,11 +749,11 @@ function platformSwitches(t, caps) {
 }
 /** Development progress across the whole feature map, per page. */
 function featureProgress(t) {
-  const statuses = ['live', 'planned', 'policy'], count = (list, status) => list.filter(f => f.status === status).length, all = Object.values(featureMap).flat();
+  const statuses = ['live', 'planned', 'policy'], count = (list, status) => list.filter(f => f.status === status).length, entries = Object.entries(featureMap).filter(([page])=>navigationPages.includes(page)), all = entries.flatMap(([,list])=>list);
   return html`<section class="card feature-progress"><header class="section-head">${i18n(t, 'featureProgress', 'h2')}
     <div>${statuses.map(s => html`<span class="progress-total">${featureStatus(t, s)}<strong class="figure">${count(all, s)}</strong></span>`)}</div></header>${i18n(t, 'featureProgressNote', 'p')}
     <div class="table-scroll"><table><thead><tr><th>${i18n(t, 'featurePage')}</th>${statuses.map(s => html`<th>${i18n(t, `featureStatus_${s}`)}</th>`)}</tr></thead>
-    <tbody>${Object.entries(featureMap).map(([page, list]) => html`<tr><td><a href="${pagePath(page)}">${i18n(t, page)}</a></td>${statuses.map(s => html`<td class="figure">${count(list, s) || '—'}</td>`)}</tr>`)}</tbody></table></div></section>`;
+    <tbody>${entries.map(([page, list]) => html`<tr><td><a href="${pagePath(page)}">${i18n(t, page)}</a></td>${statuses.map(s => html`<td class="figure">${count(list, s) || '—'}</td>`)}</tr>`)}</tbody></table></div></section>`;
 }
 
 /** Prototype pages list live features first, then planned ones, then what is deliberately not offered. */
@@ -785,7 +783,7 @@ function featureBody(t,id,data,caps){
   const act=(action,label,values={})=>caps.allowed_actions?.includes(action)?html`<button type="button" data-console-action="${action}"${Object.entries(values).map(([k,v])=>html` data-${trusted(k)}="${v}"`)}>${i18n(t,label)}</button>`:'';
   const inspect=(v,p,label)=>html`<button type="button" data-feature-read="${v}" data-feature-params="${JSON.stringify(p)}">${i18n(t,label)}</button>`;
   const table=(rows,cols)=>rows?.length?html`<div class="table-scroll"><table><thead><tr>${cols.map(([key])=>html`<th>${i18n(t,key)}</th>`)}</tr></thead><tbody>${rows.map(r=>html`<tr>${cols.map(([,get])=>html`<td>${get(r)}</td>`)}</tr>`)}</tbody></table></div>`:emptyState(t);
-  if(id==='OVW-03')return html`<dl class="metadata-grid">${[['failed_jobs','failedJobs','jobs'],['stale_summaries','staleSummaries','summaries'],['pending_reconciliation','pendingReconciliation','tasks']].map(([k,label,p])=>html`<dt>${i18n(t,label)}</dt><dd><a href="${pagePath(p)}">${d.counts[k]}</a></dd>`)}</dl>`;
+  if(id==='OVW-03')return html`<dl class="metadata-grid">${[['failed_jobs','failedJobs','jobs'],['stale_summaries','staleSummaries','summaries']].map(([k,label,p])=>html`<dt>${i18n(t,label)}</dt><dd><a href="${pagePath(p)}">${d.counts[k]}</a></dd>`)}</dl>`;
   if(id==='MEM-06')return sectionNote(t,caps.allowed_actions?.includes('memory.batch_retract')?'batchNote':'batchUnavailable');
   if(id==='MEM-07')return sectionNote(t,'compareOpenDetail');
   // Stacked rows rather than a fixed four-column table: titles wrap at full width on phones.

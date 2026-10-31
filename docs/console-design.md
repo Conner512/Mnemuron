@@ -67,7 +67,7 @@ pipeline stages, processing capabilities (a coloured band on top of the card), c
 (reads pink, writes blue, sign-in and credentials yellow). Colour fills always sit inside an ink outline, so text on
 them stays ink.
 
-Geometry: `--radius` 12px for cards, `--radius-sm` 7px for controls, 36–38px controls, 2px ink outlines on cards,
+Geometry: `--radius` 12px for cards, `--radius-sm` 7px for controls, 40px form controls and 38px header controls, 2px ink outlines on cards,
 buttons and the current navigation item, 1.5px on tags and fields. Buttons carry a 2px hard shadow and press in
 (translate, no shadow) when clicked; the primary button is solid ink. There is no glow, blur or gradient light.
 
@@ -84,19 +84,27 @@ as web fonts.
 
 ## Components
 
-- **Overview hierarchy**: graph and activity first, with compact counts and a time range. Search, project/task,
-  type and custom-day controls open from **Filters**; applied scope and sample coverage stay visible. Processing
-  diagnostics, library statistics and full-library search are secondary disclosures below the main regions.
-  A page-search shortcut opens its disclosure before focusing the actual input; it does not navigate elsewhere.
+- **Overview hierarchy**: graph and activity first, with compact counts and a time range. At desktop widths the
+  two outer cards share one height rule and align at both edges; long content scrolls inside rather than resizing
+  one card. Narrow layouts stack them. **Filters** is a compact, bounded overlay inside the graph, not an inline
+  form: opening, closing, selecting and paging do not move the graph or activity card. Time/type controls and
+  node browsing use separate tabs, with eight nodes per page and bounded internal scrolling. The panel closes
+  on Escape or outside click, with keyboard focus restored where appropriate. It contains no memory search or
+  project/task controls; the whole-library association surface has been removed. Search belongs to the Memory
+  Library, linked from the overview. Processing diagnostics and library statistics are ordinary visible sections
+  below the hero, read by scrolling rather than expansion. Search shortcuts focus existing page inputs only;
+  on an overview with no search input they do not navigate away or recreate the removed form.
 - **Memory map**: a bounded, authorized active-memory snapshot from `attention`. Keywords, topics and type hubs
   are connection points, not proof of entity identity or causality. Large samples use aggregation while retaining
   access to every returned source. Labels avoid collisions; if a label cannot fit, its node remains visible and
   its full name remains available by hover or the accessible node directory.
   Ordinary click, Enter and Space toggle nodes without modifier keys. Multiple selections form a **union** of
-  source IDs within the displayed graph, with overlapping memories counted once. Selected-node chips, clear,
+  source IDs within the displayed graph, with overlapping memories counted once. A reserved single-line selected
+  node strip scrolls horizontally and cannot grow the card. Selected-node chips, clear,
   Escape and empty-canvas clicks provide explicit exits. Opening an original is a separate action.
   Stable keys survive layout and language changes; removed keys cannot select an unrelated replacement node.
-  Selection, hover and keyboard focus are different states. Deselection clears transient highlights and pulses
+  While filters are open, results do not obscure node browsing. An explicit selected-memory action closes the
+  filter and opens the result list. Selection, hover and keyboard focus are different states. Deselection clears transient highlights and pulses
   while preserving keyboard-only focus affordances. Drag pans and the existing zoom controls remain available.
 - **Live activity**: the latest eight audit events for the current account, independent of graph filters. It
   reads on entry, manual refresh and visible-tab resume, and every 30 seconds while visible and unpaused. This is
@@ -120,8 +128,11 @@ as web fonts.
   newest first; each version says why it was made and can show its change inline (deleted text struck in red,
   added text in green).
 - **Navigation**: icon + label under small monospace group labels. The current page is an outlined card in its
-  group's colour with a hard shadow. On narrow screens every destination stays available in one horizontally
-  scrollable keyboard/touch row, rather than occupying the first viewport with the entire desktop menu.
+  group's colour with a hard shadow. On narrow screens all nine active destinations stay available in one
+  horizontally scrollable keyboard/touch row, rather than occupying the first viewport with the desktop menu.
+  Projects & tasks is paused in navigation and discovery. Existing authenticated project/task bookmarks remain
+  compatible with a visible paused notice; no stored data, authorization boundary, backend API or connection
+  grant is deleted or implicitly downgraded. Hiding a UI destination is not access control.
 - **Buttons**: primary = ink fill; secondary = ink outline with a hard shadow; quiet = text only. Revoke, retract, disable and cancel
   actions use the danger colour.
 - **Memory selection**: inline, accessibly named checkboxes only when a batch action is granted. Opening a record is
@@ -143,7 +154,10 @@ content, screenshots, sessions or a live model to reproduce these UI checks.
 - `scripts/test-console-memory-map.mjs`: first-fold graph/activity geometry, pointer/keyboard multi-selection,
   unique source unions, cancelled highlight state, resize, language, reduced motion, failed reads and scope bounds.
 - `scripts/test-console-overview-ux.mjs`: foreground polling, manual/pause/error states, initial-history behavior,
-  readable overview hierarchy, narrow navigation and cross-tab account changes.
+  aligned outer-card edges, overlay geometry before/after interaction, bounded multi-select pagination, always
+  visible lower sections, library-only search, narrow navigation and cross-tab account changes.
+- `scripts/test-console-control-alignment.mjs`: real browser geometry of adjacent input/button/menu controls
+  across memory, connection, processing and related pages in both languages and desktop/narrow viewports.
 - `scripts/test-console-summary-reader.mjs`: Chinese/English reading at desktop and narrow widths, exact source
   text, source back-navigation, current/history distinctions, normal pagination and explicitly reduced-budget
   synthetic quotation-fragment continuation.
