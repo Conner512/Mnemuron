@@ -11,10 +11,12 @@ stays calm so that content, provenance and permission boundaries carry it.
 - `web/console/styles.css`: design tokens, fonts, layout and components.
 - `web/console/controls.css`: native-select enhancement, write dialogs, connections, owner pages, the memory map,
   pipeline, version chain and entity map.
+- `web/console/overview-ux.css`, `memory-map-ux.css`, `summary-reader.css`: scoped exploration layout,
+  graph interaction states and source-first summary reading. These are bundled, not new public asset routes.
 - `web/console/visuals.mjs`: page views, the escaping `html` template tag, the fixed local icon set and the
   category colour groups (`categoryGroup`).
-- `web/console/actions.mjs`: owner pages, the overview status, the memory map canvas (`memoryMap`) and the entity
-  map side panel.
+- `web/console/actions.mjs`: owner pages, overview diagnostics and account-bound foreground activity refresh.
+- `web/console/memory-map.mjs`: the graph canvas, stable-key multi-selection and source-memory panels.
 - `web/console/display-font.woff2`, `web/console/mono-font.woff2`: self-hosted typefaces (latin subsets, SIL OFL
   1.1, see `web/console/FONTS-LICENSE.txt`). The publication check pins both files by content hash.
 
@@ -82,26 +84,44 @@ as web fonts.
 
 ## Components
 
-- **Memory map** (overview hero, entity page): a canvas of the newest active memories and the current entities that
-  name them, read from the `attention` view. Without entities, topics shared by at least two memories become the
-  violet connection points and every memory also links loosely to its category hub (a node in the category
-  colour), so one topic's memories of different categories form one network; without such topics, memories gather
-  around their category hubs (`mapAnchors` in `actions.mjs`).
-  Hovering names a node; a click on a connection point highlights its memories and opens a panel (its categories,
-  related points, a library link); a click on a memory opens it in the detail pane. Drag pans; pinch, ctrl+wheel,
-  double-click or the zoom buttons zoom. Light
-  pulses replay only the latest real reads and writes from the audit log; nothing is animated without an event.
-  On the entity page an entity can be chosen on the map or from the side list; its links light up and the panel
-  shows its categories and the entities it shares memories with.
-- **Live stream**: the latest memory reads and writes. Every console read is audited, so it refreshes on demand
-  (open, refresh, tab shown again; at most once a minute), never on a timer.
-- **Pipeline**: written → scrubbed → classified → entities → semantic index → used, 7-day counts, each stage linking
+- **Overview hierarchy**: graph and activity first, with compact counts and a time range. Search, project/task,
+  type and custom-day controls open from **Filters**; applied scope and sample coverage stay visible. Processing
+  diagnostics, library statistics and full-library search are secondary disclosures below the main regions.
+  A page-search shortcut opens its disclosure before focusing the actual input; it does not navigate elsewhere.
+- **Memory map**: a bounded, authorized active-memory snapshot from `attention`. Keywords, topics and type hubs
+  are connection points, not proof of entity identity or causality. Large samples use aggregation while retaining
+  access to every returned source. Labels avoid collisions; if a label cannot fit, its node remains visible and
+  its full name remains available by hover or the accessible node directory.
+  Ordinary click, Enter and Space toggle nodes without modifier keys. Multiple selections form a **union** of
+  source IDs within the displayed graph, with overlapping memories counted once. Selected-node chips, clear,
+  Escape and empty-canvas clicks provide explicit exits. Opening an original is a separate action.
+  Stable keys survive layout and language changes; removed keys cannot select an unrelated replacement node.
+  Selection, hover and keyboard focus are different states. Deselection clears transient highlights and pulses
+  while preserving keyboard-only focus affordances. Drag pans and the existing zoom controls remain available.
+- **Live activity**: the latest eight audit events for the current account, independent of graph filters. It
+  reads on entry, manual refresh and visible-tab resume, and every 30 seconds while visible and unpaused. This is
+  a bounded polling snapshot, not a push subscription or a guarantee that all intervening events are shown.
+  Page reads belong to the system audit group, so polling does not create its own memory activity. The feed shows
+  refresh state, last successful update, event dates and recorded outcomes. Failed updates retain the previous
+  snapshot. Missing outcomes stay unknown; lexical-subquery references are never called final search hits.
+  Only newly observed successful events animate once; initial history and unchanged refreshes do not replay.
+  Hiding, pausing or leaving the page stops background animation and automatic refresh.
+- **Summary reader**: human scope and date precede content. List previews preserve separate, source-bound
+  excerpts; historical/outdated entries are folded and never displayed as current facts. Detail pages group
+  exact quotations by source and revision. Only identical source/revision/range quotations are deduplicated;
+  equal wording from different sources is not merged. Originals and their revisions remain explicit links.
+  Page/fragment continuation, source coverage and end-of-content are distinct signals. Internal IDs, character
+  ranges and quality actions remain available after the reading/navigation area, in a disclosure. These views
+  do not invent a narrative, rewrite original memories or claim factual validation. List counts describe the
+  current page, not an unqueried global total.
+- **Pipeline**: written → scrubbed → typed → keywords → semantic index → used, 7-day counts, each stage linking
   to where it is managed. Only stages with real daily data get a sparkline.
 - **Version chain** (detail pane): corrections are replacement records, so the chain follows supersedes links,
   newest first; each version says why it was made and can show its change inline (deleted text struck in red,
   added text in green).
 - **Navigation**: icon + label under small monospace group labels. The current page is an outlined card in its
-  group's colour with a hard shadow. No route codes.
+  group's colour with a hard shadow. On narrow screens every destination stays available in one horizontally
+  scrollable keyboard/touch row, rather than occupying the first viewport with the entire desktop menu.
 - **Buttons**: primary = ink fill; secondary = ink outline with a hard shadow; quiet = text only. Revoke, retract, disable and cancel
   actions use the danger colour.
 - **Memory selection**: inline, accessibly named checkboxes only when a batch action is granted. Opening a record is
@@ -114,3 +134,21 @@ as web fonts.
   the feature map; see [console-feature-standard.md](console-feature-standard.md) for the development rules.
 
 All motion stops under `prefers-reduced-motion`: the maps draw once and do not pulse.
+
+## Interaction and isolation acceptance
+
+All browser fixtures use synthetic accounts and disposable loopback services. Do not use production memory
+content, screenshots, sessions or a live model to reproduce these UI checks.
+
+- `scripts/test-console-memory-map.mjs`: first-fold graph/activity geometry, pointer/keyboard multi-selection,
+  unique source unions, cancelled highlight state, resize, language, reduced motion, failed reads and scope bounds.
+- `scripts/test-console-overview-ux.mjs`: foreground polling, manual/pause/error states, initial-history behavior,
+  readable overview hierarchy, narrow navigation and cross-tab account changes.
+- `scripts/test-console-summary-reader.mjs`: Chinese/English reading at desktop and narrow widths, exact source
+  text, source back-navigation, current/history distinctions, normal pagination and explicitly reduced-budget
+  synthetic quotation-fragment continuation.
+
+The authenticated BFF binds `/console-api/` replies with `x-mnemuron-account-id`. Successful reads must match the
+page's request account/epoch before JSON is rendered. A cookie changed by another tab therefore clears the old
+page and returns it to sign-in instead of painting a different account's data under the old identity. Frontend
+and BFF changes ship together; stripping this response header causes the reader to fail closed.

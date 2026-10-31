@@ -1923,3 +1923,77 @@ Object.assign(catalog.en,{
  processingChannel_traits:'Keyword fill',processingChannel_summary:'Summary',processingChannel_vector:'Vectors',processingChannel_classification:'Legacy classification',processingChannel_entities:'Legacy entities',VECTOR_GENERATION_CHANGED:'The serving index changed. Select memories again and create a new preview.',
  processingResult_preview:'Preview created; no content sent. Review the manifest and explicitly confirm to start.',processingResult_saved:'Settings saved. This save did not start processing.',processingResult_queued:'The batch is authorized and waiting for background processing.',processingResult_paused:'The batch is paused and cannot claim work or publish results.',processingResult_cancelled:'The batch is cancelled. Requests already sent cannot be recalled.',processingResult_deleted:'Selected finished run records were deleted. Memories, summaries and indices are retained.',processingResult_unknown:'The operation returned an unrecognized status. Refresh to verify the actual result.',
 });
+
+// Graph-first overview and explicit multi-node selection.
+Object.assign(catalog['zh-CN'],{
+ mapLabelDensityNote:'拥挤时自动避让或隐藏部分画布标签，不隐藏节点。悬停、放大或展开“浏览节点”可查看完整名称。',
+ mapRangeDays:'近 {0} 天',mapRangeAll:'全部时间',mapBrowseShort:'浏览节点',mapExploreShort:'全库关联',
+ mapFilters:'筛选',mapFilterHeading:'筛选当前图谱',mapFilterTypes:'记忆类型',mapAllTypes:'全部类型',mapNoTypes:'未选择类型',
+ mapSelectedNodes:'已选 {0} 个节点',mapUniqueMemories:'{0} 条不重复记忆',mapSelectionSummary:'{0} 个节点 · {1} 条记忆',mapClearSelection:'清除选择',mapRemoveSelection:'取消选择',mapRemoveNode:'取消选择：{0}',
+ mapUnionNote:'包含任一所选节点的记忆，重叠记录只计一次。',mapSelectionBound:'仅显示当前图谱样本中的来源记忆，保留当前筛选与授权范围；不代表全库结果。',
+ mapKeyboardHint:'点击、Enter 或空格可添加或取消选择，无需组合键。多个节点取并集；Esc 或点击图谱空白处清除选择。点击来源记忆才打开原文。',
+});
+Object.assign(catalog.en,{
+ mapFilters:'Filters',mapFilterHeading:'Filter this map',mapFilterTypes:'Memory types',mapAllTypes:'All types',mapNoTypes:'No types selected',
+ mapRangeDays:'{0} days',mapRangeAll:'All time',mapBrowseShort:'Browse nodes',mapExploreShort:'Full-library links',
+ mapLabelDensityNote:'Crowded labels move or hide without removing nodes. Hover, zoom, or open Browse nodes for full names.',
+ mapSelectedNodes:'{0} nodes selected',mapUniqueMemories:'{0} unique memories',mapSelectionSummary:'{0} nodes · {1} memories',mapClearSelection:'Clear selection',mapRemoveSelection:'Remove selection',mapRemoveNode:'Remove selection: {0}',
+ mapUnionNote:'Memories linked to any selected node. Overlapping records count once.',mapSelectionBound:'Source memories in the current map sample only, within the applied filters and authorization. This is not a full-library result.',
+ mapKeyboardHint:'Click, Enter or Space to add or remove a node; no modifier key is needed. Multiple nodes use a union. Esc or empty map space clears selection. Open a source memory explicitly to read its text.',
+});
+
+// overviewUx: graph-first hierarchy and honest, bounded foreground activity refresh.
+Object.assign(catalog['zh-CN'],{
+ overviewFocusNote:'从图谱探索记忆，在动态中查看最近的读写。',overviewLibraryLink:'打开记忆库',
+ overviewSystemDetails:'处理状态与系统检查',overviewSystemNote:'索引、调用额度和需要注意的事项',overviewAttentionCount:'项需要注意',
+ overviewLibraryDetails:'记忆库统计与检索',overviewLibraryNote:'完整搜索、类型分布和最近写入',
+ overviewLiveTitle:'实时动态',overviewAudit:'全部审计',overviewStreamLoading:'正在读取动态…',
+ overviewStreamPause:'暂停',overviewStreamResume:'继续',overviewStreamEmpty:'最近没有记忆读写。',
+ overviewStreamNote:'当前账号最近 8 条动态，不随图谱筛选。页面可见时每 30 秒更新，非实时推送。',
+ overviewStreamUpdated:'上次成功更新',overviewStreamNoUpdate:'尚未成功读取动态。',overviewStreamInitialError:'暂时无法读取动态；请刷新重试。',
+ overviewStream_live:'自动更新中',overviewStream_loading:'正在更新…',overviewStream_paused:'已暂停自动更新',
+ overviewStream_hidden:'页面隐藏，已暂停',overviewStream_offline:'网络离线，等待连接',overviewStream_error:'更新失败 · 保留上次内容',
+ overviewActorConsole:'控制台',overviewActorUnknown:'未知来源',overviewEventSearch:'搜索记忆',overviewEventRead:'读取记忆',overviewEventSave:'保存记忆',
+ overviewEventCorrect:'修正记忆',overviewEventRetract:'撤回记忆',overviewEventRestore:'恢复记忆',overviewEventUpdate:'更新记忆',overviewEventFailed:'操作失败',overviewEventUnknown:'结果未知',
+});
+Object.assign(catalog.en,{
+ overviewFocusNote:'Explore memories in the map and follow recent reads and writes.',overviewLibraryLink:'Open library',
+ overviewSystemDetails:'Processing and system checks',overviewSystemNote:'Index, call quotas and items needing attention',overviewAttentionCount:'items need attention',
+ overviewLibraryDetails:'Library insights and search',overviewLibraryNote:'Full search, type distribution and recent memories',
+ overviewLiveTitle:'Live activity',overviewAudit:'All activity',overviewStreamLoading:'Loading activity…',
+ overviewStreamPause:'Pause',overviewStreamResume:'Resume',overviewStreamEmpty:'No recent memory reads or writes.',
+ overviewStreamNote:'Latest 8 events for this account, independent of map filters. Refreshes every 30 seconds while visible; not a push feed.',
+ overviewStreamUpdated:'Last successful update',overviewStreamNoUpdate:'Activity has not loaded yet.',overviewStreamInitialError:'Activity is unavailable. Refresh to retry.',
+ overviewStream_live:'Auto-refresh on',overviewStream_loading:'Updating…',overviewStream_paused:'Auto-refresh paused',
+ overviewStream_hidden:'Hidden tab · paused',overviewStream_offline:'Offline · waiting for connection',overviewStream_error:'Refresh failed · showing last update',
+ overviewActorConsole:'Console',overviewActorUnknown:'Unknown source',overviewEventSearch:'Search memories',overviewEventRead:'Read memory',overviewEventSave:'Save memory',
+ overviewEventCorrect:'Correct memory',overviewEventRetract:'Retract memory',overviewEventRestore:'Restore memory',overviewEventUpdate:'Update memory',overviewEventFailed:'Failed',overviewEventUnknown:'Outcome unknown',
+});
+
+// summaryReader: source-first reading, explicit page/coverage boundaries and secondary tools.
+Object.assign(catalog['zh-CN'],{
+ summaryReaderOnPage:'份摘要 · 本页',summaryReaderPageNote:'这里只显示当前页，分组和数量不代表全库。使用下方翻页继续浏览。',
+ summaryReaderCitedSources:'引用来源',summaryReaderNotCited:'条来源未引用',summaryReaderPreview:'原文摘录预览',
+ summaryReaderPreviewTruncated:'预览已截短，打开摘要阅读原文。',
+ summaryReaderRead:'阅读摘录与来源',summaryReaderOpenFull:'展开阅读完整摘录',summaryReaderInformation:'摘要信息',summaryReaderTimezone:'时区',
+ summaryReaderHistory:'历史与已失效摘要',summaryReaderHistoryNote:'这些记录只保留生成信息，不再作为当前事实展示。请查看现行摘要或原始记忆。',
+ summaryReaderBoundary:'以下是按来源整理的原文摘录，不是重新撰写的结论。',summaryReaderOmittedNote:'部分来源未被引用；读完本页不代表已覆盖全部来源。',
+ summaryReaderBatchNote:'本摘要只覆盖这次获准处理的批次，不代表该时间段的全部记忆。',
+ summaryReaderSource:'来源',summaryReaderSourceCount:'条来源',summaryReaderQuotes:'条摘录',summaryReaderPageContent:'本页内容',summaryReaderContinued:'继续上次阅读',
+ summaryReaderContinuedQuote:'这段原文接续上一页。',summaryReaderExcerptPartial:'此段原文尚未结束，请继续下一页。',summaryReaderDuplicate:'已合并完全相同的重复摘录：',
+ summaryReaderMore:'本摘要还有后续摘录。点击“继续阅读”查看，来源和版本保持不变。',summaryReaderEnd:'本摘要的摘录已读到末尾。',summaryReaderIncomplete:'当前内容未被标记为完整；请返回列表重新读取。',
+ summaryReaderNavigation:'摘要阅读导航',summaryReaderNext:'继续阅读',summaryReaderTools:'版本、来源信息与质量检查',summaryReaderRange:'原文字符范围',summaryReaderFragment:'摘录字符进度',
+});
+Object.assign(catalog.en,{
+ summaryReaderOnPage:'summaries on this page',summaryReaderPageNote:'Groups and counts describe this page, not the whole library. Continue using the page controls below.',
+ summaryReaderCitedSources:'Sources cited',summaryReaderNotCited:'sources not cited',summaryReaderPreview:'Original excerpts · preview',
+ summaryReaderPreviewTruncated:'Preview shortened. Open the summary to read the original quotation.',
+ summaryReaderRead:'Read excerpts and sources',summaryReaderOpenFull:'Open the full excerpts',summaryReaderInformation:'Summary information',summaryReaderTimezone:'Time zone',
+ summaryReaderHistory:'Historical and outdated summaries',summaryReaderHistoryNote:'These records retain generation information only. They are not presented as current facts. Read a current summary or the original memories.',
+ summaryReaderBoundary:'Original quotations, arranged by source. These are not rewritten conclusions.',summaryReaderOmittedNote:'Some sources were not cited. Reaching the end of this page does not mean every source was covered.',
+ summaryReaderBatchNote:'This summary covers only the authorized processing batch, not every memory in the period.',
+ summaryReaderSource:'Source',summaryReaderSourceCount:'sources',summaryReaderQuotes:'excerpts',summaryReaderPageContent:'On this page',summaryReaderContinued:'Continuing your reading',
+ summaryReaderContinuedQuote:'This quotation continues from the previous page.',summaryReaderExcerptPartial:'This quotation continues on the next page.',summaryReaderDuplicate:'Exact duplicate excerpts combined:',
+ summaryReaderMore:'More excerpts remain. Continue reading with the same source and revision bindings.',summaryReaderEnd:'You have reached the end of this summary’s excerpts.',summaryReaderIncomplete:'This content is not marked complete. Return to the list and read it again.',
+ summaryReaderNavigation:'Summary reading navigation',summaryReaderNext:'Continue reading',summaryReaderTools:'Revision, source details and quality',summaryReaderRange:'Original character range',summaryReaderFragment:'Quotation character progress',
+});

@@ -108,6 +108,11 @@ try:
   # Rendered geometry, not stylesheet text: restyling may change CSS freely as long as layout holds.
   for width in [1280,1440,1920]:
    page.set_viewport_size({'width':width,'height':900});goto('overview')
+   # The graph/activity hero is primary; verify metrics only after deliberately opening the
+   # secondary library panel, so hidden zero-size boxes cannot satisfy the geometry checks.
+   library_panel=page.locator('[data-overview-library]')
+   check('Overview library stats are secondary at '+str(width),library_panel.get_attribute('open') is None)
+   library_panel.locator(':scope > summary').click();expect(page.locator('.metrics')).to_be_visible()
    tops=page.eval_on_selector_all('.metrics > .metric','els=>els.map(e=>Math.round(e.getBoundingClientRect().top))')
    check('Overview shows four metrics in one row at '+str(width),len(tops)==4 and len(set(tops))==1)
    check('Overview has no horizontal overflow at '+str(width),page.evaluate('document.documentElement.scrollWidth<=innerWidth'))

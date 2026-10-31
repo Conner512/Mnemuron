@@ -12,7 +12,7 @@ const evidence=fs.mkdtempSync(path.join(base,'search-workbench-browser-'));fs.ch
 assert.ok(path.isAbsolute(process.env.PLAYWRIGHT_MODULE||''));
 const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE));
 const log=fs.openSync(path.join(evidence,'fixture.stderr'),'wx',0o600),child=spawn(process.execPath,['scripts/helpers/memory-map-browser-fixture.mjs'],{cwd:root,stdio:['pipe','pipe',log]});
-const queued=[],waiters=[],checks=[],errors=[],actions=[];let browser,cfg;
+const queued=[],waiters=[],checks=[],errors=[],actions=[],responses=[],navigation=[];let browser,cfg,page;
 createInterface({input:child.stdout}).on('line',line=>{if(!line.startsWith('{'))return;const value=JSON.parse(line);if(waiters.length)waiters.shift()(value);else queued.push(value);});
 const bounded=async promise=>{let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('SYNTHETIC_FIXTURE_TIMEOUT')),30000);})]);}finally{clearTimeout(timer);}};
 const read=()=>bounded(queued.length?Promise.resolve(queued.shift()):new Promise(resolve=>waiters.push(resolve)));
@@ -22,8 +22,11 @@ const deferred=()=>{let resolve;return {promise:new Promise(yes=>resolve=yes),re
 try{
  cfg=await read();assert.equal(cfg.fixture,true);assert.equal(new URL(cfg.url).hostname,'127.0.0.1');const seeded=await command('seed-workbench');
  browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});
- const context=await browser.newContext({viewport:{width:1440,height:1080},reducedMotion:'reduce'}),page=await context.newPage();
+ const context=await browser.newContext({viewport:{width:1440,height:1080},reducedMotion:'reduce'});page=await context.newPage();
  page.on('pageerror',error=>errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error'&&/Content Security Policy|Refused/.test(msg.text()))errors.push(msg.text());});
+ page.on('response',response=>{const pathname=new URL(response.url()).pathname;if(pathname.startsWith('/console-api/'))responses.push({path:pathname,status:response.status(),owner:cfg.accounts.findIndex(account=>account.account_id===response.headers()['x-mnemuron-account-id'])});});
+ page.on('response',response=>{if(response.request().isNavigationRequest())navigation.push({kind:'response',path:new URL(response.url()).pathname,status:response.status(),location:response.headers().location||null});});
+ page.on('request',async request=>{if(request.isNavigationRequest()){const headers=await request.allHeaders();navigation.push({kind:'request',path:new URL(request.url()).pathname,owner:cfg.accounts.findIndex(account=>(headers.cookie||'').includes(cfg.cookie+'='+account.token))});}});
  page.on('request',request=>{if(new URL(request.url()).pathname==='/console-api/action')actions.push(new URLSearchParams(request.postData()));});
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  await context.addInitScript(accounts=>{for(const account of accounts)localStorage.setItem('mnemuron.appearance.v1.'+account.account_id,JSON.stringify({locale:'en'}));},cfg.accounts);
@@ -31,6 +34,7 @@ try{
  const explore=async value=>{await page.locator('[data-map-neighborhood]').evaluate(node=>node.open=true);await page.locator('[data-neighbor-focus]').fill(value);const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/attention'&&new URL(r.url()).searchParams.get('graph_focus')===value);await page.locator('[data-neighbor-search] button').click();const data=await(await response).json();await page.locator('[data-neighbor-result] h3').waitFor();return data.graph.neighborhood;};
  await page.goto(cfg.url+'/app/overview');await idle();await page.locator(`[data-map-project] option[value="${seeded.project_id}"]`).waitFor({state:'attached'});
  await page.locator('[data-map-days="0"]').click();await idle();
+ await page.locator('[data-map-filter-toggle]').click();
  await page.locator('[data-map-project]').selectOption(seeded.project_id);await page.locator('[data-map-task]').fill(seeded.task_id);
  const scoped=page.waitForResponse(r=>new URL(r.url()).searchParams.get('graph_task_id')===seeded.task_id);await page.locator('[data-map-scope-filter] button[type="submit"]').click();const scopedGraph=(await(await scoped).json()).graph;await idle();
  pass('Project and exact task filters reach Core before counts and the graph cap',scopedGraph.filtered_total===4&&scopedGraph.scope.task_id===seeded.task_id);
@@ -72,11 +76,22 @@ try{
  let historyHeld;const historyReady=deferred();const holdHistory=async route=>{historyHeld={route,response:await route.fetch()};historyReady.resolve();};
  await page.route('**/console-api/search-feedback?*',holdHistory);await page.locator('[data-feedback-refresh]').click();await bounded(historyReady.promise);
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
- await page.unroute('**/console-api/search-feedback?*',holdHistory);await page.reload();await page.locator('[data-search-feedback]').waitFor();await historyHeld.route.fulfill({response:historyHeld.response}).catch(()=>{});
+ // A different tab's sign-in is a real identity boundary, not an in-place account update.
+ // Trigger a B read in the old A realm while its A history response is still held; finish
+ // the mandatory clear/login transition before opening B's library. A blind reload can
+ // otherwise race the old realm's guard and legitimately end at /login.
+ const switchedResponse=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/memories'&&r.headers()['x-mnemuron-account-id']===cfg.accounts[1].account_id);
+ await page.locator('#search-form button[type="submit"]').click();const switched=await switchedResponse;
+ pass('A real cross-tab library read is bound to the newly authenticated account',switched.status()===200&&switched.headers()['x-mnemuron-account-id']===cfg.accounts[1].account_id);
+ await page.waitForURL('**/login');
+ pass('Account mismatch clears the old search and feedback before the login boundary',await page.locator('[data-feedback-for],[data-search-feedback]').count()===0&&!(await page.locator('body').innerText()).includes('Synthetic SearchFeedbackNeedle'));
+ await page.unroute('**/console-api/search-feedback?*',holdHistory);await historyHeld.route.fulfill({response:historyHeld.response}).catch(()=>{});
+ await page.goto(cfg.url+'/app/memories?query=SearchFeedbackNeedle&mode=lexical');await page.locator('[data-search-feedback]').waitFor();
+ assert.equal(await page.locator('body').getAttribute('data-account'),cfg.accounts[1].account_id);
  await page.waitForFunction(()=>document.querySelector('[data-feedback-history]')?.textContent.includes('scope: 0'));
  pass('Account switch removes old results and discards a late rich feedback history',await page.locator('[data-feedback-for]').count()===0&&!(await page.locator('[data-feedback-history]').innerText()).includes(seeded.feedback_id));
  pass('Readable evaluation entry explains synthetic results versus unrun real model quality',(await page.locator('[data-search-feedback] details').innerText()).includes('Reproducible quality checks'));
  pass('No browser JavaScript or CSP failures',errors.length===0);
  fs.writeFileSync(path.join(evidence,'results.json'),JSON.stringify({status:'passed',checks,synthetic_only:true,network_calls_to_models:0},null,2),{flag:'wx',mode:0o600});console.log(JSON.stringify({status:'passed',checks:checks.length,evidence}));
-}catch(error){fs.writeFileSync(path.join(evidence,'failure.json'),JSON.stringify({status:'failed',checks,error:String(error),errors},null,2),{mode:0o600});console.error(error);process.exitCode=1;}
+}catch(error){const pageState=await page?.evaluate(()=>({path:location.pathname,page:document.body.dataset.page,loading:!!document.querySelector('.loading-card'),emptyRoot:document.querySelector('#console-root')?.childElementCount===0,alert:document.querySelector('#console-root > [role=alert]')?.textContent})).catch(()=>null);await page?.screenshot({path:path.join(evidence,'failure.png'),fullPage:true}).catch(()=>{});fs.writeFileSync(path.join(evidence,'failure.json'),JSON.stringify({status:'failed',checks,error:String(error),errors,pageState,responses:responses.slice(-30),navigation},null,2),{mode:0o600});console.error(error);console.error(JSON.stringify({status:'failed',evidence,pageState}));process.exitCode=1;}
 finally{await browser?.close();if(child.exitCode===null)child.stdin.write(JSON.stringify({command:'stop'})+'\n');await bounded(new Promise(resolve=>child.exitCode!==null?resolve():child.once('exit',resolve))).catch(()=>child.kill('SIGTERM'));fs.closeSync(log);}

@@ -42,7 +42,7 @@ jobs:
           node scripts/test-console-agent-fixes.mjs
   browser:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -83,6 +83,8 @@ jobs:
           node scripts/test-console-workflow-continuity.mjs
           node scripts/test-console-task-workflows.mjs
           node scripts/test-console-memory-map.mjs
+          node scripts/test-console-overview-ux.mjs
+          node scripts/test-console-summary-reader.mjs
           node scripts/test-console-memory-review.mjs
           node scripts/test-memory-processing-browser.mjs
           node scripts/test-console-search-workbench.mjs
@@ -105,5 +107,7 @@ jobs:
             ${{ runner.temp }}/workflow-continuity-browser-*/*.png
             ${{ runner.temp }}/task-workflows-browser-*/*.png
             ${{ runner.temp }}/memory-map-browser-*/*.png
+            ${{ runner.temp }}/overview-ux-browser-*/*.png
+            ${{ runner.temp }}/summary-reader-browser-*/*.png
           retention-days: 3
           if-no-files-found: error

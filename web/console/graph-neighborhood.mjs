@@ -5,7 +5,7 @@ const date=value=>value?String(value).slice(0,10):'—';
 export const graphScopeParams=scope=>({graph_days:scope.days,graph_kinds:scope.kinds.join(','),...(scope.query?{graph_query:scope.query}:{}),
   ...(scope.project_id?{graph_project_id:scope.project_id}:{}),...(scope.task_id?{graph_task_id:scope.task_id}:{})});
 
-export function neighborhoodCard(){return `<details class="map-neighborhood" data-map-neighborhood><summary>${label('mapExploreLibrary')}</summary>
+export function neighborhoodCard({compact=false}={}){return `<details class="map-neighborhood" data-map-neighborhood><summary>${label(compact?'mapExploreShort':'mapExploreLibrary')}</summary>
   <p class="muted">${label('mapNeighborhoodNote')}</p><form data-neighbor-search class="map-search"><label>${label('mapExactKeyword')}<input data-neighbor-focus maxlength="400" required autocomplete="off"></label><button>${label('search')}</button></form>
   <div data-neighbor-status role="status" aria-live="polite"></div><div data-neighbor-result></div></details>`;}
 

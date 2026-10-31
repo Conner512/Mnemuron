@@ -118,6 +118,29 @@ test('SUM-PREVIEW-01: the list carries a short preview read through the validate
   const row=(await f.list()).get(id);
   assert.equal(row.preview.text,'Synthetic preview: backups run nightly to the second disk.');
   assert.equal(row.preview.claims,1);assert.equal(row.preview.more,false);
+  assert.deepEqual(row.preview.excerpts,[{memory_id,revision,start:0,end:[...content].length,quote:content,quote_complete:true,quote_offset:0,quote_length:[...content].length}]);
   f.store.retractMemory(f.a.auth,memory_id,{reason:'synthetic'});
   assert.ok(!JSON.stringify(await f.list()).includes('backups run nightly'),'a withdrawn source never shows in a preview');
+});
+
+test('SUM-CTX-06: source-bound list excerpts preserve whitespace and Unicode while disclosing truncation',async t=>{
+  const f=await setup(t),user=f.a.auth.user_id,version=f.store.consoleService.taxonomy(user).version;
+  const bodies=['Synthetic paragraph one.\n\n  Keep this indentation.','合成😀'.repeat(61),'Synthetic source three.','Synthetic source four.'];
+  const sources=bodies.map(content=>{
+    const memory=f.store.saveMemory(f.a.auth,{scope:'user',content}).memory;
+    f.store.db.prepare('INSERT INTO memory_category_overrides VALUES (?,?,?,1)').run(user,memory.memory_id,'technical');
+    return f.store.derivedMemory.currentSource(user,memory.memory_id);
+  });
+  const job={job_id:'synthetic-excerpt-job',group_key:'synthetic-excerpt-group',user_id:user,scope_key:sources[0].scope_key,profile:'synthetic',metadata:{category:'technical',window:JSON.parse(WINDOW),taxonomy:{version}}};
+  const id=f.store.memoryTransaction(()=>f.store.derivedMemory.publishSummary(job,sources.map(({memory_id,revision,state_hash,scope_key})=>({user_id:user,memory_id,revision,state_hash,scope_key})),
+    sources.map(({memory_id,revision,content})=>({memory_id,revision,start:0,end:[...content].length,quote:content})),Date.UTC(2026,9,1,2)));
+  const row=(await f.list()).get(id);assert.equal(row.preview.excerpts.length,3);assert.equal(row.preview.more,true);
+  assert.equal(row.preview.excerpts[0].quote,bodies[0]);assert.equal(row.preview.excerpts[0].quote_complete,true);
+  assert.equal(row.preview.excerpts[1].quote,[...bodies[1]].slice(0,120).join(''));assert.equal(row.preview.excerpts[1].quote_complete,false);
+  assert.equal(row.preview.excerpts[1].quote_length,[...bodies[1]].length);assert.equal(row.preview.excerpts[1].end,[...bodies[1]].length);
+  assert.deepEqual(row.preview.excerpts.map(c=>c.memory_id),sources.slice(0,3).map(c=>c.memory_id));
+  const foreign=await f.store.issueCredential({userId:f.other.auth.user_id,deviceId:'synthetic-console-foreign',agentId:'mnemuron-console',agentInstanceId:'excerpt-foreign',scopes:['memory:read','console:read']});
+  const other=await consoleRead(f.store,f.store.authenticate(foreign.api_key),'summaries',{});assert.ok(!JSON.stringify(other).includes(bodies[0]));
+  f.store.retractMemory(f.a.auth,sources[0].memory_id,{reason:'synthetic excerpt withdrawal'});
+  assert.ok(!JSON.stringify(await consoleRead(f.store,f.reader,'summaries',{limit:50})).includes('Synthetic paragraph one.'));
 });

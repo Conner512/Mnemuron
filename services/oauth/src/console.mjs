@@ -150,6 +150,9 @@ export async function consoleRequest(request,response,{config,accounts,store,url
   try{session=ids.session(token,'console');}catch(error){if(routeTitle(pathname)&&request.method==='GET'){redirect(response,'/login');return true;}throw error;}
   const account=ids.byId(session.account_id),principal=ids.principal(account.subject);
   if(config.identity.owner_account_id&&account.account_id!==config.identity.owner_account_id)throw new BoundaryError(403,'OWNER_REQUIRED');
+  // Bind the response to the session that authenticated this request. A different tab can replace the
+  // cookie without reloading an already-open Console; its polling must not display B's data under A's name.
+  if(pathname.startsWith('/console-api/'))response.setHeader('x-mnemuron-account-id',account.account_id);
   if(routeTitle(pathname)&&request.method==='GET') {
     sendPage(response,{title:routeTitle(pathname),page:routeTitle(pathname),account,csrf:ids.formCsrf(token,'console')});return true;
   }

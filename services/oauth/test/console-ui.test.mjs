@@ -21,6 +21,12 @@ test('ISO-10 INT-05: delayed A responses are discarded after account exit',()=>{
  a.clear();a.account='synthetic-account-B';assert.equal(a.accepts(ticket),false);assert.ok(ticket.controller.signal.aborted);
  const b=a.ticket();assert.ok(a.accepts(b));a.finish(b);
 });
+test('ISO-10b: response ownership must match the page even when another tab changes its cookie',()=>{
+ const state=new SessionState('synthetic-account-A'),ticket=state.ticket();
+ assert.equal(state.acceptsResponse(ticket,'synthetic-account-A'),true);
+ for(const owner of ['synthetic-account-B',null,undefined,''])assert.equal(state.acceptsResponse(ticket,owner),false);
+ state.clear();assert.equal(state.acceptsResponse(ticket,'synthetic-account-A'),false);
+});
 test('UI-01 INT-04: auth shell loads local assets and keeps transaction form intact',()=>{
  const body='<form action="/interaction/synthetic-uid/login"><input name="csrf" value="synthetic-csrf"></form>';
  const page=renderPage({title:'login',body,auth:true});

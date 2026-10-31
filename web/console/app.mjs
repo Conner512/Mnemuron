@@ -3,7 +3,7 @@ import {mountAuditDates,auditDateRange} from './audit.mjs';
 // Views are pure (visuals.mjs); operations and connections keep their own modules.
 import {actionButton,actionPage,mountActions,mountFeatureReads,canAct,overviewStatus,mountOverview,configHistoryCard} from './actions.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
-import {projectProfileView,SELECTION_LIMIT,overviewView,libraryView,summariesView,auditView,memoryDetailView,versionChainView,revisionDifference,summaryDetailView,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels,projectContextView} from './visuals.mjs';
+import {projectProfileView,SELECTION_LIMIT,overviewView,libraryView,summariesView,auditView,memoryDetailView,versionChainView,revisionDifference,summaryDetailView,summaryDetailTitle,memoryRows,pageHeading,formatDate,prototypeView,prototypePages,roadmapCard,featureStatus,pageState,completedViews,completedFeaturePanels,projectContextView} from './visuals.mjs';
 import {SessionState} from './session-state.mjs';
 import {mountConnections} from './connections.mjs';
 import {mountAgents} from './agents.mjs';
@@ -37,6 +37,19 @@ function readLocation(){const p=new URLSearchParams(location.search);if(page==='
 function saveLocation(){const p=new URLSearchParams();if(page==='audit'){p.set('group',auditGroup);if(auditCursor)p.set('cursor',auditCursor);for(const [key,value] of Object.entries(auditFilters))if(value)p.set(key,value);history.replaceState(null,'',location.pathname+'?'+p);return;}if(query)p.set('query',query);if(searchMode!==(capabilities.default_retrieval_mode||'hybrid'))p.set('mode',searchMode);if(kind)p.set('kind',kind);if(concept)p.set('concept',concept);if(status!=='active')p.set('status',status);if(topic)p.set('topic',topic);if(origin)p.set('origin',origin);if(review)p.set('review',review);if(offset)p.set('offset',offset);history.replaceState(null,'',location.pathname+(p.size?'?'+p:''));}
 readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
+// The compact navigation is a horizontal strip on phones. Native focus scrolling can leave most of
+// a wide link clipped, so reveal its full label without moving the document vertically.
+const nav=document.querySelector('.sidebar nav'),compactNav=window.matchMedia('(max-width: 760px)');
+function revealNavigation(link){
+ if(!compactNav.matches||!nav||!link||!nav.contains(link))return;
+ const frame=nav.getBoundingClientRect(),item=link.getBoundingClientRect(),left=frame.left+6,right=frame.right-6;
+ const delta=item.left<left?item.left-left:item.right>right?item.right-right:0;
+ if(delta)nav.scrollLeft+=delta;
+}
+nav?.addEventListener('focusin',event=>revealNavigation(event.target.closest?.('a')));
+const revealCurrentNavigation=()=>revealNavigation(nav?.querySelector('a[aria-current="page"]'));
+compactNav.addEventListener('change',revealCurrentNavigation);requestAnimationFrame(revealCurrentNavigation);
+
 function clear() {
  memoryReview?.clear();
  searchFeedback?.dispose();searchFeedback=null;
@@ -49,6 +62,8 @@ async function api(view,params={}) {
  const ticket=state.ticket();try {
    const response=await fetch(`/console-api/${view}?${new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined))}`,{credentials:'same-origin',cache:'no-store',signal:ticket.controller.signal});
    if(response.status===401){clear();location.replace('/login');throw new Error('SESSION_REQUIRED');}
+   if(!state.accepts(ticket))throw new Error('STALE_ACCOUNT');
+   if(response.ok&&!state.acceptsResponse(ticket,response.headers.get('x-mnemuron-account-id'))){clear();location.replace('/login');throw new Error('STALE_ACCOUNT');}
    const data=await response.json();if(!state.accepts(ticket))throw new Error('STALE_ACCOUNT');
    if(!response.ok)throw requestError(data);return data;
  } finally {state.finish(ticket);}
@@ -79,7 +94,7 @@ const pagination=data=>page==='memories'&&Number.isSafeInteger(data.total)?pageJ
 const policy=(note,items)=>`<section class="card"><div class="policy-box"><span class="tag">${l('blocked')}</span>${l(note,'p')}<div class="actions">${items.map(key=>`<button type="button" disabled title="${esc(t('blocked'))}" data-i18n="${key}">${esc(t(key))}</button>`).join('')}</div></div></section>`;
 
 function heading() {
- if(page==='overview')return pageHeading(t,{title:'overview',note:'heroNote'});
+ if(page==='overview')return pageHeading(t,{title:'overview',note:'overviewFocusNote',actions:`<a class="button overview-library-link" href="/app/memories">${l('overviewLibraryLink')}</a>`});
  // Prototype destinations (built from the feature map) say how much of the page is live; other pages carry no badge:
  // whether a button can be used shows on the button itself.
  const badge=prototypePages.includes(page)?String(featureStatus(t,pageState(page))):'';
@@ -266,8 +281,9 @@ async function openSummary(params,first=false,back=false) {
  const sequence=++detailSequence;
  if(first)beginDetail('summary','summaries');
  try{const data=await api('summary',params);if(!state.account||sequence!==detailSequence)return;detailData=data;if(!back)detailStack.push({kind:'summary',params});
-   setPaneTitle('summaries');detailKind='summary';
-   detail.innerHTML=reviewButton('summary',data.results?.[0]?.summary_id||params.summary_id)+summaryDetailView(t,data,{canGoBack:detailStack.length>1});markSelected();}
+   setPaneTitle('summaries',summaryDetailTitle(t,data));detailKind='summary';
+   detail.innerHTML=summaryDetailView(t,data,{canGoBack:detailStack.length>1,tools:reviewButton('summary',data.results?.[0]?.summary_id||params.summary_id)});markSelected();
+   pane.scrollTop=0;if(!first){const title=document.getElementById('detail-title');title.tabIndex=-1;title.focus({preventScroll:true});}}
  catch(e){if(!state.account||sequence!==detailSequence||e.name==='AbortError')return;detailData=null;detail.innerHTML=changed(e,!first&&detailStack.length>0);}
 }
 
@@ -339,13 +355,14 @@ document.addEventListener('keydown',event=>{
  if(typing||event.defaultPrevented||event.isComposing||document.querySelector('.select-popup:popover-open'))return;
  if(!(event.key==='/'||(event.key.toLowerCase?.()==='k'&&(event.metaKey||event.ctrlKey))))return;
  const field=document.querySelector('[data-search-input]');
- if(field){event.preventDefault();field.focus();field.select();}
+ if(field){event.preventDefault();for(let parent=field.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;field.focus();field.select();}
 });
 WIDE_PANE.addEventListener('change',()=>{if(pane.open){const modal=pane.matches(':modal');if(modal===WIDE_PANE.matches){pane.close();}}});
 window.addEventListener('pagehide',clear);
 window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
 document.addEventListener('appearancechange',()=>{
  memoryReview?.appearance();
+ if(detailKind==='summary'&&detailData)setPaneTitle('summaries',summaryDetailTitle(t,detailData));
  // Language changes translate chrome only; do not replace a form, drawer, user content or a pending request.
  document.title=`Mnemuron · ${t(page)}`;
 });

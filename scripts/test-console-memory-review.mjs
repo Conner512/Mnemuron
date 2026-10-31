@@ -35,7 +35,7 @@ try{
  await dialog.locator('[data-review-confirm] button:not([type])').click();await dialog.locator('[data-review-extract]').waitFor();
  check('Explicit authenticated edited acceptance persists exactly once',(await command('state')).memories===cfg.expected.memories+1);
  await page.screenshot({path:path.join(evidence,'candidate-accepted-zh.png'),fullPage:true});await dialog.locator('[data-review-close]').click();
- await page.goto(cfg.url+'/app/summaries');await page.locator(`[data-summary="${cfg.expected.summary}"]`).first().click();await page.locator('[data-review-open=summary]').click();
+ await page.goto(cfg.url+'/app/summaries');await page.locator(`[data-summary="${cfg.expected.summary}"]`).first().click();await page.locator('.summary-reader-tools > summary').click();await page.locator('[data-review-open=summary]').click();
  await dialog.locator('[data-review-feedback]').waitFor();check('Quality view exposes source coverage and original text',(await dialog.innerText()).includes('1 / 2')&&(await dialog.innerText()).includes('17.12.3'));
  await dialog.locator('[data-review-feedback] select').selectOption('missing_context',{force:true});const feedbackReply=actionReply('review.summary');await dialog.locator('[data-review-feedback] button:not([type])').click();assert.equal((await feedbackReply).status(),200);await dialog.locator('[data-review-feedback] button:not([type]):not(:disabled)').waitFor();
  check('Summary feedback is persisted against the reviewed snapshot',(await command('state')).feedback[0]?.decision==='missing_context');await page.screenshot({path:path.join(evidence,'summary-quality-zh.png'),fullPage:true});

@@ -288,12 +288,13 @@ export function overviewStatus(data){const f=data.features||{},o=f['system-healt
   const items=[...problems.map(x=>`<li data-health="${esc(x.level)}"><span class="health-dot" data-level="${esc(x.level)}" aria-hidden="true"></span><div><strong>${esc(x.title)}</strong><p>${esc(x.detail)}</p>${x.fix?`<p class="muted">${esc(x.fix)}</p>`:''}</div><a href="${esc(x.href||'/app/health')}">${x.href?'去处理':'查看'}</a></li>`),
     ...extra.map(([n,text,href])=>`<li data-health="warn"><span class="health-dot" data-level="warn" aria-hidden="true"></span><div><strong>${esc(n)} ${esc(text)}</strong></div><a href="${href}">处理</a></li>`)];
   const map=mapCard(f);
-  return `${map?`<div class="overview-hero">${map}${streamCard()}</div>`:''}<div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/processing',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/models')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/health',worst)}</div>
+  return `${map?`<div class="overview-hero">${map}${streamCard()}</div>`:''}<details class="overview-secondary" data-overview-system><summary>${l('overviewSystemDetails')}<span class="overview-secondary-note">${items.length?`${items.length} ${esc(t('overviewAttentionCount'))}`:l('overviewSystemNote')}</span></summary><div class="overview-secondary-body"><div class="status-strip">${tile('活动记忆',num(active),`共 ${num(data.counts?.memories)} 条记录（含历史版本）`,'/app/memories')}${tile('语义索引',index[0],index[1],'/app/processing',index[2])}${tile('今日嵌入调用',calls[0],calls[1],'/app/models')}${tile('系统健康',problems.length?`${problems.length} 项`:'正常',problems.length?'需要注意':'所有检查通过','/app/health',worst)}</div>
     ${pipelineCard(data,f,active)}
-    <section class="card attention-card"><header class="section-head"><h2>需要注意</h2></header>${items.length?`<ul class="health-list">${items.join('')}</ul>`:'<p class="muted">目前没有需要处理的事。</p>'}</section>`;
+    <section class="card attention-card"><header class="section-head"><h2>需要注意</h2></header>${items.length?`<ul class="health-list">${items.join('')}</ul>`:'<p class="muted">目前没有需要处理的事。</p>'}</section></div></details>`;
 }
-function streamCard(){return `<section class="card live-stream" data-live-stream><header class="section-head"><h2>实时动态</h2><div><button type="button" class="quiet" data-stream-refresh>刷新</button><a href="/app/audit">全部审计</a></div></header>
-  <ol class="stream-events" data-stream-list><li class="muted">正在读取最近的记忆读写…</li></ol><p class="muted stream-note">打开概览、点刷新或切回这个页面时更新。</p></section>`;}
+function streamCard(){return `<section class="card live-stream" data-live-stream aria-labelledby="stream-title"><header class="section-head"><h2 id="stream-title">${l('overviewLiveTitle')}</h2><a href="/app/audit?group=memory">${l('overviewAudit')}</a></header>
+  <div class="stream-toolbar"><span class="stream-state" data-stream-state role="status">${l('overviewStreamLoading')}</span><div><button type="button" class="quiet" data-stream-pause aria-pressed="false">${l('overviewStreamPause')}</button><button type="button" class="quiet" data-stream-refresh>${l('refresh')}</button></div></div>
+  <ol class="stream-events" data-stream-list aria-busy="true"><li class="muted">${l('overviewStreamLoading')}</li></ol><p class="stream-updated" data-stream-updated></p><p class="muted stream-note">${l('overviewStreamNote')}</p></section>`;}
 // Memory pipeline for the last 7 days: written → scrubbed → typed → keywords → semantic index → used.
 function pipelineCard(data,f,active){const a=f.attention?.activity_7d,o=f['system-health']?.owner,g=f.attention?.graph;if(!a)return '';
   const s=a.sources,u=a.uses,written=s.chatgpt+s.agents+s.console+s.import+s.other,on=k=>o?.flags?.[k]===true;
@@ -310,26 +311,59 @@ function pipelineCard(data,f,active){const a=f.attention?.activity_7d,o=f['syste
     ${stage('proj','语义索引',c?.error_code?'失败':on('vector_catch_up')?`${num(Math.max(0,(active||0)-(c?.pending||0)))}/${num(active)}`:'未开启',c?.pending?`待索引 ${num(c.pending)} 条`:on('vector_catch_up')?'新记忆自动加入':'新记忆不会进入语义索引','/app/processing')}
     ${stage('pref','被读取',num(reads),`搜索 ${num(u.chatgpt.search+u.agents.search+u.console.search)} · 读取 ${num(u.chatgpt.read+u.agents.read+u.console.read)}`,'/app/audit?group=memory')}
   </div></section>`;}
-// Live stream: the latest memory reads and writes from the audit log. Every console read is itself audited, so the
-// list refreshes on demand (open, refresh, tab shown again; at most once a minute), never on a timer.
-const VERB={'memory.query':'搜索了记忆','memory.read':'读取了'};
-function streamItems(d){const creds=d.credentials||{},mems=d.memories||{};
+// This is a bounded audit snapshot, not an event subscription. Page reads remain in the system audit group,
+// so polling the memory group cannot manufacture activity in its own feed. Search references describe lexical
+// subqueries, not the final hybrid result count; never present them as "N hits" (or missing refs as zero hits).
+const STREAM_ACTIONS={'memory.query':'overviewEventSearch','memory.read':'overviewEventRead','memory.create':'overviewEventSave',
+  'memory.save':'overviewEventSave','memory.supersede':'overviewEventCorrect','memory.correct':'overviewEventCorrect',
+  'memory.retract':'overviewEventRetract','memory.delete':'overviewEventRetract','memory.batch_retract':'overviewEventRetract',
+  'memory.restore':'overviewEventRestore'};
+export function streamItems(d){const creds=d.credentials||{},mems=d.memories||{};
   return (d.entries||[]).filter(e=>e.kind==='read'||e.kind==='write').slice(0,8).map(e=>{const c=e.credential_id&&creds[e.credential_id],conn=c?.connection;
-    const who=conn?.type==='personal'&&!conn.missing?conn.label:conn?.purpose==='console'?'控制台':conn?.purpose==='web'?'ChatGPT':c?.label||'未知来源';
+    const who=conn?.type==='personal'&&!conn.missing?conn.label:conn?.purpose==='console'?t('overviewActorConsole'):conn?.purpose==='web'?'ChatGPT':c?.label||t('overviewActorUnknown');
     const memory=e.target_type==='memory'&&e.target_id?mems[e.target_id]:null,title=memory?.title||'';
-    const verb=VERB[e.action]||(e.kind==='write'?'写入了':'读取了'),date=new Date(typeof e.created_at==='number'?e.created_at*1000:e.created_at);
-    return {memory_id:e.target_type==='memory'?e.target_id:null,kind:e.kind,refs:e.query?.result_refs||[],
-      html:`<li class="stream-event" data-kind="${esc(e.kind)}"><time>${Number.isFinite(date.getTime())?date.toLocaleTimeString(document.documentElement.lang,{hour:'2-digit',minute:'2-digit'}):''}</time><div><p><strong>${esc(who)}</strong> ${esc(verb)}${title?` <span class="stream-title">「${esc(title)}」</span>`:e.action==='memory.query'?`，命中 ${num(e.query?.result_refs?.length||0)} 条`:''}</p><span class="node-key" data-group="${e.kind==='write'?'proj':'pref'}">${e.kind==='write'?'写入':'读取'}</span></div></li>`};});}
+    const action=String(e.action||'').replace(/^(?:console|cloud)\./,''),label=t(STREAM_ACTIONS[action]||(e.kind==='write'?'overviewEventUpdate':'overviewEventRead'));
+    const date=new Date(typeof e.created_at==='number'?e.created_at*1000:e.created_at),valid=Number.isFinite(date.getTime()),locale=document.documentElement.lang;
+    const stamp=valid?date.toLocaleTimeString(locale,{hour:'2-digit',minute:'2-digit',hour12:false}):'—';
+    const day=valid?date.toLocaleDateString(locale,{month:'2-digit',day:'2-digit'}):'',outcome=e.outcome==='success'?'success':e.outcome==='failure'?'failure':'unknown';
+    return {id:e.audit_id,created_at:valid?date.getTime():null,memory_id:e.target_type==='memory'?e.target_id:null,kind:e.kind,refs:e.query?.result_refs||[],outcome,
+      html:`<li class="stream-event" data-kind="${esc(e.kind)}" data-outcome="${outcome}"><time${valid?` datetime="${date.toISOString()}" title="${esc(date.toLocaleString(locale))}"`:''}>${esc(stamp)}<small>${esc(day)}</small></time><div><p class="stream-event-heading"><strong>${esc(who)}</strong><span>${esc(label)}</span></p>${title?`<p class="stream-title">${esc(title)}</p>`:''}<span class="node-key" data-group="${outcome==='failure'?'bug':e.kind==='write'?'proj':'pref'}">${esc(t(outcome==='success'?`auditKind_${e.kind}`:outcome==='failure'?'overviewEventFailed':'overviewEventUnknown'))}</span></div></li>`};});}
+
+export function mountActivityStream({api,root,isActive=()=>true,onNewEvents=()=>{},doc=document,
+  clock={now:()=>Date.now(),setTimeout:(fn,ms)=>setTimeout(fn,ms),clearTimeout:id=>clearTimeout(id)}}){
+  const list=root.querySelector('[data-stream-list]');if(!list)return {dispose(){}};
+  const state=root.querySelector('[data-stream-state]'),updated=root.querySelector('[data-stream-updated]'),button=root.querySelector('[data-stream-refresh]'),pause=root.querySelector('[data-stream-pause]');
+  const win=doc.defaultView;let disposed=false,paused=false,busy=false,failed=false,lastSuccess=null,cached=null,timer=null,known=new Set(),markup='';
+  const alive=()=>!disposed&&isActive()&&list.isConnected,online=()=>win?.navigator?.onLine!==false;
+  const stop=()=>{if(timer!==null){clock.clearTimeout(timer);timer=null;}};
+  const paint=()=>{if(!alive())return;const mode=doc.hidden?'hidden':!online()?'offline':busy?'loading':failed?'error':paused?'paused':lastSuccess!==null?'live':'loading';
+    if(state){state.dataset.state=mode;state.textContent=t(`overviewStream_${mode}`);}
+    if(updated)updated.textContent=lastSuccess===null?t('overviewStreamNoUpdate'):`${t('overviewStreamUpdated')} ${new Date(lastSuccess).toLocaleTimeString(doc.documentElement.lang,{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false})}`;
+    if(button)button.disabled=busy;
+    if(pause){pause.textContent=t(paused?'overviewStreamResume':'overviewStreamPause');pause.setAttribute('aria-pressed',String(paused));}
+    list.setAttribute('aria-busy',String(busy));};
+  const schedule=()=>{stop();if(alive()&&!paused&&!doc.hidden&&online())timer=clock.setTimeout(()=>void load(),30000);};
+  const render=items=>{const next=items.length?items.map(item=>item.html).join(''):`<li class="muted">${l('overviewStreamEmpty')}</li>`;
+    if(next!==markup){const top=list.scrollTop;list.innerHTML=next;list.scrollTop=top;markup=next;}};
+  const load=async(manual=false)=>{if(!alive()||busy||doc.hidden||(!manual&&paused))return;
+    if(!online()){paint();return;}stop();busy=true;paint();
+    try{const response=await api('audit',{group:'memory',limit:20});if(!alive()||doc.hidden||!online())return;
+      const items=streamItems(response),fresh=cached===null?[]:items.filter(item=>item.id&&!known.has(item.id)&&item.outcome==='success');
+      for(const item of items)if(item.id)known.add(item.id);known=new Set([...known].slice(-256));
+      cached=response;lastSuccess=clock.now();failed=false;render(items);
+      if(!paused&&fresh.length)onNewEvents(fresh);
+    }catch{if(!alive())return;failed=true;if(cached===null){list.innerHTML=`<li class="muted">${l('overviewStreamInitialError')}</li>`;markup='';}}
+    finally{busy=false;if(alive()){paint();schedule();}}};
+  const refresh=()=>void load(true),toggle=()=>{paused=!paused;stop();paint();if(paused)onNewEvents([]);else void load(true);};
+  const visibility=()=>{stop();paint();if(doc.hidden)onNewEvents([]);else void load();},network=()=>{stop();paint();if(online())void load();else onNewEvents([]);};
+  const appearance=()=>{if(cached&&alive())render(streamItems(cached));paint();};
+  button?.addEventListener('click',refresh);pause?.addEventListener('click',toggle);doc.addEventListener('visibilitychange',visibility);doc.addEventListener('appearancechange',appearance);
+  win?.addEventListener('online',network);win?.addEventListener('offline',network);void load();
+  return {dispose(){disposed=true;stop();cached=null;known.clear();button?.removeEventListener('click',refresh);pause?.removeEventListener('click',toggle);doc.removeEventListener('visibilitychange',visibility);doc.removeEventListener('appearancechange',appearance);win?.removeEventListener('online',network);win?.removeEventListener('offline',network);}};
+}
 export function mountOverview({api,root,data,isActive,openMemory}){
-  const map=mountMemoryMap({api,root,data,isActive,openMemory}),list=root.querySelector('[data-stream-list]');let last=0,sequence=0,disposed=false;
-  const alive=()=>!disposed&&isActive()&&list?.isConnected;
-  const load=async(force=false)=>{if(!alive()||(!force&&Date.now()-last<60000))return;last=Date.now();const mine=++sequence;
-    try{const items=streamItems(await api('audit',{group:'memory',limit:20}));if(mine!==sequence||!alive())return;
-      list.innerHTML=items.length?items.map(i=>i.html).join(''):'<li class="muted">最近没有记忆读写。</li>';map?.replay(items);
-    }catch{if(mine===sequence&&alive())list.innerHTML='<li class="muted">暂时读不到审计记录，稍后点刷新。</li>';}};
-  const refresh=()=>void load(true),visible=()=>{if(!document.hidden)void load();},button=root.querySelector('[data-stream-refresh]');
-  button?.addEventListener('click',refresh);document.addEventListener('visibilitychange',visible);void load(true);
-  return {dispose(){disposed=true;sequence++;map?.dispose();button?.removeEventListener('click',refresh);document.removeEventListener('visibilitychange',visible);}};
+  const map=mountMemoryMap({api,root,data,isActive,openMemory}),stream=mountActivityStream({api,root,isActive,onNewEvents:items=>map?.replay(items)});
+  return {dispose(){stream.dispose();map?.dispose();}};
 }
 const activityLine=(a,key,writeLabel)=>a?`<p class="activity-line" data-activity="${esc(key)}">最近 7 天：搜索 <strong>${num(a.uses[key].search)}</strong> 次 · 读取 <strong>${num(a.uses[key].read)}</strong> 次 · ${esc(writeLabel)} <strong>${num(a.sources[key])}</strong> 条</p>`:'';
 // Entities: names that recur across memories (people, devices, projects, vendors) with their aliases.

@@ -42,7 +42,7 @@ try{
    const response=await page.goto(cfg.url+'/app/'+name);
    try{await page.locator('.loading-card').waitFor({state:'detached'});await page.locator('#console-root h1').waitFor();}
    catch(e){throw new Error(`${e.message}; URL ${page.url()}; HTTP ${response.status()}; rate limited ${JSON.stringify(rateLimited)}; browser errors ${JSON.stringify(errors)}`);}
-   await page.evaluate(()=>Promise.all(document.getAnimations({subtree:true}).map(a=>a.finished)));
+   await page.evaluate(()=>Promise.all(document.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))));
    const label=`${name} ${width} ${locale}`;
    check(label+' HTTP and translated page',response.status()===200&&await page.locator('#console-root h1').innerText()!==name);
    const geometry=await page.evaluate(()=>{
@@ -56,11 +56,15 @@ try{
    check(label+' readable text columns',!geometry.narrow.length,geometry.narrow);
    check(label+' no failed page panel',await page.locator('#console-root > [role=alert]').count()===0);
    if(name==='overview'){
+    // Full-library search is an explicit secondary tool; verify its expanded geometry,
+    // then restore the graph-first default for the overview screenshot.
+    await page.locator('[data-overview-library]').evaluate(panel=>panel.open=true);
     const search=await page.locator('.ask').evaluate(form=>{
      const bounds=form.getBoundingClientRect(),input=form.querySelector('input').getBoundingClientRect(),button=form.querySelector('button').getBoundingClientRect();
      return {inputWidth:input.width,buttonInside:button.left>=bounds.left&&button.right<=bounds.right&&button.top>=bounds.top&&button.bottom<=bounds.bottom};
     });
     check(label+' search input usable and submit contained',search.inputWidth>=120&&search.buttonInside,search);
+    await page.locator('[data-overview-library]').evaluate(panel=>panel.open=false);
    }
    if(name==='security'){
     const badge=await page.locator('.identity-row .tag').evaluate(tag=>{const r=tag.getBoundingClientRect(),parent=tag.parentElement.getBoundingClientRect();return {inside:r.left>=parent.left&&r.right<=parent.right,wraps:getComputedStyle(tag).whiteSpace!=='nowrap',width:r.width,parentWidth:parent.width};});
