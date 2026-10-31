@@ -1,0 +1,76 @@
+/* Graph-first overview. Controls remain available without displacing the initial map. */
+.map-card--browse [hidden]{display:none!important}
+.map-card--browse{padding:16px;min-width:0}
+.map-card--browse .map-heading{margin:0 0 10px;align-items:center;justify-content:space-between;gap:8px}
+.map-heading-title,.map-heading-actions{display:flex;align-items:center;gap:14px;min-width:0}
+.map-heading-title{flex-wrap:wrap;gap:8px 18px}
+.map-heading h2{margin:0;font-size:17px}
+.map-heading-actions{flex-shrink:0;gap:8px}
+.map-heading-actions button{min-height:30px;padding:4px 8px;font-size:12px}
+.map-heading-actions [aria-expanded="true"]{background:var(--c-ent);border-radius:var(--radius-sm)}
+.map-card--browse .map-figures{position:static;pointer-events:auto;display:flex;gap:12px;margin:0}
+.map-card--browse .map-figure{display:flex;align-items:baseline;gap:5px}
+.map-card--browse .map-figure b{display:inline;font-size:17px;line-height:1.2;letter-spacing:0}
+.map-card--browse .map-figure span{font:400 11px var(--font-body);letter-spacing:0}
+.map-card--browse .map-toolbar{margin:0 0 8px;display:block}
+.map-card--browse .map-range{gap:5px}
+.map-snapshot-line{display:flex;flex-wrap:wrap;align-items:baseline;gap:3px 14px;min-width:0;margin:0 0 9px}
+.map-card--browse .map-coverage{margin:0;font-size:11.5px;line-height:1.5}
+.map-card--browse .map-scope{flex:1 1 150px;margin:0;font-size:11.5px;line-height:1.5;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.map-card--browse .map-board{height:clamp(340px,51vh,600px);min-height:340px;background:color-mix(in srgb,var(--surface) 30%,transparent)}
+.map-card--browse .map-hint{font-family:var(--font-body);font-size:11px;line-height:1.55;letter-spacing:0;margin:9px 0;color:var(--muted)}
+.map-filter-panel{padding:14px;margin:0 0 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface)}
+.map-filter-panel h3{font-size:13px;margin:0 0 10px}
+.map-filter-panel .map-search{margin-bottom:12px}
+.map-filter-panel .map-scope-filters{margin:0}
+.map-filter-panel>p{font-size:11.5px;line-height:1.6;margin:8px 0 12px}
+.map-filter-options{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.map-filter-options>div{flex:1 1 200px}
+.map-filter-options>div>p{font-size:12px;margin:0 0 6px}
+.map-filter-options .map-custom{display:grid;gap:6px;font-size:12px}
+.map-card--browse .map-filter-options .map-legend{margin:0}
+.map-filter-options .map-custom input{width:112px!important}
+.map-browse-tools{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 10px;padding-top:7px;border-top:1px solid var(--line)}
+.map-card--browse .map-directory,.map-card--browse .map-neighborhood{min-width:0;max-width:100%;padding:0;margin:0;border:0}
+.map-browse-tools>details[open]{flex:1 1 100%}
+.map-directory summary,.map-neighborhood summary{font-size:13px}
+[data-map-node-count]{display:inline-block;font:400 11px var(--font-mono);color:var(--muted);margin-left:5px}
+.map-card--browse .map-directory>ul{grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr));gap:6px;padding:3px;max-height:220px}
+.map-card--browse .map-directory button{font-size:12px;min-height:36px;transition:background .12s ease;color:var(--text)}
+.map-card--browse .map-directory button[aria-pressed="true"]{background:var(--c-ent);border-color:var(--ink)}
+.map-card--browse .map-directory button[aria-pressed="true"] .node-key::before{background:var(--ink)}
+/* A selected fill is state. A focus ring is only a keyboard affordance, never a sticky click effect. */
+.map-card--browse [data-map-node-key]:focus:not(:focus-visible),.map-card--browse [data-map-close]:focus:not(:focus-visible),.map-card--browse [data-map-clear]:focus:not(:focus-visible){outline:none;box-shadow:none!important}
+.map-card--browse [data-map-node-key]:focus-visible,.map-card--browse [data-map-close]:focus-visible,.map-card--browse [data-map-clear]:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.map-card--browse [data-map-node-key]:active{transform:none!important;box-shadow:none!important}
+.map-selection-bar{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:9px 0 0}
+.map-selection-bar>p{margin:0;font-size:12px;font-weight:600}
+.map-selection-bar ul,.map-panel-selection{display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin:0;padding:0;list-style:none;min-width:0}
+.map-selection-bar ul{flex:1 1 160px}
+.map-selection-bar li,.map-panel-selection li{max-width:100%;min-width:0}
+.map-selection-bar [data-map-node-key],.map-panel-selection [data-map-node-key]{display:flex;align-items:center;gap:6px;max-width:100%;text-align:left;overflow-wrap:anywhere;white-space:normal;border:1px solid var(--line);border-radius:999px;padding:3px 8px;min-height:26px;background:var(--c-ent);font-size:11.5px}
+.map-selection-bar [data-map-clear]{font-size:12px;min-height:28px;padding:3px 6px}
+.map-card--browse .map-selection-bound{font-size:11px;line-height:1.6;margin:12px 0 0;padding-top:8px;border-top:1px dashed var(--line);color:var(--muted)}
+.map-card--browse .map-panel-selection{margin:10px 0}
+.map-card--browse .map-panel{background:var(--surface);width:min(300px,calc(100% - 24px));right:12px;top:12px;max-height:calc(100% - 24px)}
+.map-card--browse .map-panel h4{letter-spacing:0;font-size:12px;font-weight:600}
+.map-card--browse .map-panel [data-map-memory]{line-height:1.5}
+@media(max-width:560px){
+ .map-card--browse{padding:12px}
+ .map-heading-title{gap:5px 12px}
+ .map-heading h2{font-size:15px}
+ .map-card--browse .map-heading{align-items:flex-start}
+ .map-card--browse .map-heading-title{flex:1 1 150px}
+ .map-heading-actions{gap:2px}
+ .map-heading-actions button{padding:4px 5px;font-size:11px}
+ .map-card--browse .map-figures{gap:10px}
+ .map-card--browse .map-figure b{font-size:15px}
+ .map-card--browse .map-board{height:280px;min-height:280px}
+ .map-card--browse .map-range button{padding:0 8px!important;font-size:10.5px!important}
+ .map-card--browse .map-directory>ul{grid-template-columns:repeat(2,minmax(0,1fr));max-height:220px}
+ .map-card--browse .map-directory button{padding:5px;gap:5px;font-size:11px}
+ .map-filter-panel{padding:10px}
+ .map-filter-panel .map-search>button{font-size:12px}
+ .map-selection-bar ul{flex-basis:100%}
+}
+@media(prefers-reduced-motion:reduce){.map-card--browse [data-map-node-key]{transition:none!important}}

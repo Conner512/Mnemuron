@@ -269,6 +269,8 @@ async function summariesSection() {
     const {context,page,errors}=await newPage({width,height:900},{locale,account:0});
     await page.goto(cfg.url+'/app/summaries');await settle(page);
     const tag=`${width}-${locale==='en'?'en':'zh'}`;
+    check(S,`${tag}: historical summaries are secondary disclosures by default`,await page.locator('.summary-history[open]').count()===0);
+    await page.locator('.summary-history').evaluateAll(nodes=>nodes.forEach(node=>{node.open=true;}));
     const layout=await page.evaluate(()=>{const list=document.querySelector('.list-panel').getBoundingClientRect();
       const narrow=[...document.querySelectorAll('.summary-row .memory-link')].map(n=>n.getBoundingClientRect().width);
       return {list:list.width,hasIndex:!!document.querySelector('.index-panel'),narrowest:Math.min(...narrow),rows:narrow.length};});
@@ -305,6 +307,7 @@ async function summariesSection() {
         return {fits:p.scrollWidth<=p.clientWidth,claim:claim.getBoundingClientRect().width,facts:document.querySelector('#memory-content .summary-detail-facts')?.innerText||''};});
       check(S,`${tag}: summary detail repeats the distinguishing facts and reads at full pane width (${Math.round(pane.claim)}px)`,
         pane.fits&&pane.claim>=width-80&&pane.facts.includes('Synthetic UI Project Twin'));
+      await page.locator('#memory-content .summary-reader-tools > summary').click();
       const reviewButton=page.locator('#memory-content [data-review-open="summary"]');
       const review=await reviewButton.evaluate(b=>{const bounds=b.getBoundingClientRect(),content=b.closest('#memory-content').getBoundingClientRect(),style=getComputedStyle(b);
         return {fits:bounds.left>=content.left&&bounds.right<=content.right&&b.scrollWidth<=b.clientWidth,wraps:style.whiteSpace==='normal',text:b.textContent};});

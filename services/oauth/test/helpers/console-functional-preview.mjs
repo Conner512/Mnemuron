@@ -11,6 +11,7 @@ import {memoryFixture} from '../../../../server/test/helpers/core-memory-fixture
 import {VectorIndex} from '../../../../server/lib/vector-stores/index.mjs';
 import {MockVectorStore} from '../../../../server/test/helpers/vector-mock.mjs';
 import {calendarWindow} from '../../../../server/lib/memory-jobs/windows.mjs';
+import {seedSummaryReader} from './summary-reader-fixture.mjs';
 import {provisionIdentities} from '../../src/provisioning.mjs';
 import {prepareConnectionBinding,applyConnectionBinding,finishConnectionBinding} from '../../src/connection-provisioning.mjs';
 import {randomSecret,writePrivate,seconds,secretHash} from '../../../../shared/oauth-common.mjs';
@@ -265,6 +266,7 @@ lines.on('line',async line=>{
   if(req.command==='seed-entities')reply=(await import('./entity-browser-seed.mjs')).seedEntityBrowser(core,o);
   if(req.command==='seed-entity-pending')reply=(await import('./entity-browser-seed.mjs')).seedEntityBrowserPending(core,o);
   if(req.command==='seed-summaries')reply=seedSummaries(o,owners.indexOf(o));
+  if(req.command==='seed-summary-reader')reply=seedSummaryReader(core.store,core.issue(o.account.user_id,`synthetic-summary-reader-${owners.indexOf(o)}`).auth,owners.indexOf(o));
   if(req.command==='seed-projects')reply=seedProjects(o,owners.indexOf(o));
   if(req.command==='seed-responsive')reply=await (await import('./responsive-browser-seed.mjs')).seedResponsive(core,ids,o,modelUrl);
   // Read-only evidence of the stored synthetic rows (exactness checks); never content of another owner.

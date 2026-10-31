@@ -16,7 +16,7 @@ async function login(f,owner) {
  const result=await browser.post('/login',{csrf:page.text.match(/name="csrf" value="([^"]+)"/)[1],username:owner.name,password:'Synthetic password with spaces  ',otp:await generate({secret:owner.setup.secret})});
  assert.equal(result.status,303);return browser;
 }
-const json=async(browser,url)=>{const r=await browser.request(url);return {status:r.status,data:JSON.parse(r.text)};};
+const json=async(browser,url)=>{const r=await browser.request(url);return {status:r.status,account:r.headers.get('x-mnemuron-account-id'),data:JSON.parse(r.text)};};
 
 test('ISO-01..05 ISO-11..12 UI-07 INT-06: real console sessions isolate every read, source, summary and policy route',async t=>{
  const core=await memoryFixture(t),f=await consoleFixture(t,{core}),ids=f.app.accounts,owners=[];
@@ -40,7 +40,7 @@ test('ISO-01..05 ISO-11..12 UI-07 INT-06: real console sessions isolate every re
    assert.equal(auditA.status,200);assert.equal(auditB.status,200);assert.equal(auditA.data.entries.length,2);
    assert.equal(new Set([...auditA.data.entries,...auditB.data.entries].map(e=>e.audit_id)).size,4);
    for(const view of ['overview','memories','summaries','jobs','connections','audit','security','storage','models']) {
-     const r=await json(owner.browser,`/console-api/${view}`);assert.equal(r.status,200,view);
+     const r=await json(owner.browser,`/console-api/${view}`);assert.equal(r.status,200,view);assert.equal(r.account,account.account_id,view+' response identity');
      assert.ok(!JSON.stringify(r.data).includes(other.memory.memory_id),view);assert.ok(!JSON.stringify(r.data).includes(other.user),view);
    }
    for(const route of ['accounts','invitations','export','restore','../../v1/admin'])assert.notEqual((await json(owner.browser,`/console-api/${route}`)).status,200,route);

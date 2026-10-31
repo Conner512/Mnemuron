@@ -1,0 +1,73 @@
+/* Overview is an exploration surface first. Diagnostics and full-library tools are disclosures;
+   the graph and the account's activity remain the two primary regions. */
+body[data-page="overview"] .page-heading{align-items:center;margin-bottom:18px;gap:12px}
+body[data-page="overview"] .page-heading h1{font-size:28px;margin-bottom:4px}
+body[data-page="overview"] .page-heading p{font-size:13px;line-height:1.6}
+.overview-library-link{font-size:12px;white-space:normal;text-align:center}
+.overview-hero{grid-template-columns:minmax(0,1fr) minmax(280px,30%);align-items:start;gap:16px}
+.overview-hero>.live-stream{height:clamp(540px,calc(100vh - 190px),760px);max-height:none;min-width:0;padding:18px}
+.live-stream .section-head{gap:8px;margin-bottom:10px;align-items:center}
+.live-stream .section-head h2{font-size:16px}
+.live-stream .section-head>a{font-size:12px;white-space:nowrap}
+.stream-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px;margin-bottom:8px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.stream-toolbar>div{display:flex;flex-wrap:wrap;gap:4px}
+.stream-toolbar button{min-height:28px;padding:2px 5px;font-size:11px}
+.stream-state{display:inline-flex;align-items:center;gap:6px;font-size:11px;line-height:1.5;color:var(--muted)}
+.stream-state::before{content:"";display:block;width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.stream-state[data-state="live"]::before{background:var(--good)}
+.stream-state[data-state="error"]::before,.stream-state[data-state="offline"]::before{background:var(--bad)}
+.stream-events{min-height:80px;max-height:none;overscroll-behavior:contain;scrollbar-gutter:stable}
+.stream-event{grid-template-columns:44px minmax(0,1fr);gap:10px;padding:12px 0}
+.stream-event time{line-height:1.5}
+.stream-event time small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.stream-event-heading{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px}
+.stream-event-heading>span{font-size:11px;color:var(--muted)}
+.stream-event p.stream-title{color:var(--text);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.65;margin:4px 0 6px}
+.stream-event[data-outcome="failure"] .node-key{font-weight:700}
+.stream-updated{font-size:11px;color:var(--muted);margin:10px 0 0;padding-top:10px;border-top:1px solid var(--border)}
+.stream-note{font-size:11px;line-height:1.6;margin-top:5px}
+.overview-secondary{margin:16px 0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0}
+.overview-secondary>summary{padding:13px 16px;font-size:13px;font-weight:650;cursor:pointer;overflow-wrap:anywhere}
+.overview-secondary-note{margin-left:12px;color:var(--muted);font-size:12px;font-weight:400}
+.overview-secondary[open]>summary{border-bottom:1px solid var(--border)}
+.overview-secondary-body{padding:16px;min-width:0}
+.overview-secondary-body>:last-child{margin-bottom:0}
+/* Narrow screens retain every destination in one keyboard/touch-scrollable row, rather than
+   spending half the first viewport on the entire desktop navigation. No routes are hidden. */
+@media(max-width:760px){
+ .is-console .sidebar{padding:10px 12px 8px;border-right:0}
+ .is-console .sidebar>.brand{margin:0 4px;font-size:18px;align-self:flex-start}
+ .is-console .sidebar>.brand .brand-mark{width:28px;height:28px}
+ .is-console .sidebar>.brand .logo{width:28px;height:28px}
+ .is-console .sidebar nav{margin-top:8px;flex-wrap:nowrap;overflow-x:auto;gap:5px;padding:2px 3px 6px;scrollbar-width:thin}
+ .is-console .sidebar nav a{flex:0 0 auto;height:34px;margin:0;gap:7px;padding:0 9px;font-size:12px;white-space:nowrap}
+ .is-console .sidebar nav .nav-icon{width:22px;height:22px;min-width:22px;padding:3px}
+ .is-console .topbar{min-height:52px;padding:7px 14px;gap:6px}
+ .is-console .topbar .breadcrumb{font-size:12px}
+ .is-console .topbar-tools{gap:6px}
+ .is-console .topbar-tools .language-control{width:100px}
+ .is-console .topbar-tools .account-menu{width:120px}
+ .is-console #main{padding:16px 14px 28px}
+ .is-console .page-heading{margin-bottom:16px;gap:8px}
+ .is-console .page-heading h1{font-size:24px;margin-bottom:4px}
+ .is-console .page-heading p{font-size:12px;line-height:1.6}
+ body[data-page="overview"] .page-heading{flex-direction:row;align-items:flex-start}
+ body[data-page="overview"] .page-heading p{max-width:35ch}
+ body[data-page="overview"] .page-heading-actions{flex-shrink:1;max-width:100px}
+ .overview-library-link{font-size:11px;padding:5px 8px;min-height:32px}
+ .overview-hero{grid-template-columns:minmax(0,1fr);gap:14px}
+ .overview-hero>.live-stream{height:380px;padding:14px}
+ .overview-secondary-note{display:block;margin:5px 0 0 18px;font-size:11px}
+ .overview-secondary-body{padding:12px}
+}
+@media(min-width:761px) and (max-width:1100px){
+ .overview-hero{grid-template-columns:minmax(0,1fr)}
+ .overview-hero>.live-stream{height:360px}
+}
+@media(max-width:360px){
+ .is-console .topbar{flex-wrap:nowrap}
+ .is-console .topbar .breadcrumb{display:none}
+ .is-console .topbar-tools{width:100%}
+ .is-console .topbar-tools .language-control,.is-console .topbar-tools .account-menu{width:auto;flex:1}
+ body[data-page="overview"] .page-heading p{max-width:24ch}
+}

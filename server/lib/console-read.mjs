@@ -82,10 +82,19 @@ function summaryPreview(store,auth,user,row){
     const offset=store.db.prepare("SELECT COUNT(*) n FROM memory_summaries WHERE user_id=? AND scope_key=? AND category=? AND status='current' AND rowid>?").get(user,row.scope_key,row.category,row.row).n;
     const s=store.derivedMemory.summaries(user,row.scope_key,{auth,category:row.category,limit:1,offset,budget:8192}).results[0];
     if(s?.summary_id!==row.summary_id)return null;
-    const quotes=(s.claims||[]).map(c=>String(c.quote||'').replace(/\s+/g,' ').trim()).filter(Boolean);
-    if(!quotes.length)return null;
-    const text=quotes.slice(0,3).join(' · ');
-    return {text:text.length>240?text.slice(0,239)+'…':text,claims:quotes.length,more:quotes.length>3||text.length>240||s.content_complete===false};
+    const claims=(s.claims||[]).filter(c=>typeof c.quote==='string'&&c.quote.trim());
+    if(!claims.length)return null;
+    // Keep source boundaries and exact Unicode text in the reader preview. Whitespace folding and
+    // joining unrelated claims are only retained in the legacy `text` field for older clients.
+    const excerpts=claims.slice(0,3).map(c=>{
+      const chars=[...c.quote],quote=chars.slice(0,120).join('');
+      return {memory_id:c.memory_id,revision:c.revision,start:c.start,end:c.end,quote,
+        quote_complete:c.quote_complete!==false&&chars.length<=120,
+        quote_offset:c.quote_offset??0,quote_length:c.quote_length??chars.length};
+    });
+    const text=claims.slice(0,3).map(c=>c.quote.replace(/\s+/g,' ').trim()).join(' · '),chars=[...text];
+    return {text:chars.length>240?chars.slice(0,239).join('')+'…':text,excerpts,claims:claims.length,
+      more:claims.length>3||chars.length>240||excerpts.some(c=>!c.quote_complete)||s.content_complete===false};
   }catch{return null;}
 }
 export async function consoleRead(store,auth,view,params={}) {

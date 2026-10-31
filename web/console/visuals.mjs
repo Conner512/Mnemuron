@@ -173,12 +173,12 @@ function distributionLegend(insights, t, labels = {}) {
     <dl class="legend-stats"><div><dt>${i18n(t, 'distributionCount')}</dt><dd>${c.count}</dd></div><div><dt>${i18n(t, 'distributionShare')}</dt><dd>${Math.round(c.count / total * 100)}%</dd></div></dl></li>`)}</ol>`;
 }
 
-/** Overview: distribution and search first, then counts, recent stream and pipeline. Never invents trends. */
+/** Secondary overview tools. The graph and live activity are rendered first by overviewStatus. */
 export function overviewView(data, {t, memoryRows: rows = list => memoryRows(list, t), labels = {}, taxonomy = [], descriptions = {}}) {
   const count = key => safeCount(data.counts?.[key]) === null ? '—' : data.counts[key].toLocaleString();
   const metric = (key, title, href) => html`<a class="metric" href="${href}" data-metric="${key}">${i18n(t, title)}<strong>${count(key)}</strong></a>`;
   const stage = (href, glyphName, title, note, key) => html`<a class="processing-stage" href="${href}"><span class="stage-icon">${svg(glyphName)}</span><span class="stage-text">${i18n(t, title)}<small data-i18n="${note}">${t(note)}</small></span><strong>${count(key)}</strong></a>`;
-  return String(html`<section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
+  return String(html`<details class="overview-secondary" data-overview-library><summary>${i18n(t, 'overviewLibraryDetails')}<span class="overview-secondary-note">${i18n(t, 'overviewLibraryNote')}</span></summary><div class="overview-secondary-body"><section class="card radar-panel"><div class="radar-copy"><p class="eyebrow">${i18n(t, 'radarLabel')}</p>${i18n(t, 'radarTitle', 'h2')}${i18n(t, 'radarNote', 'p')}
       <form class="ask" action="/app/memories" method="get" role="search"><label class="sr-only" for="home-query" data-i18n="query">${t('query')}</label>${svg('search')}
         <input id="home-query" name="query" maxlength="2000" autocomplete="off" data-search-input data-i18n-placeholder="askPlaceholder" placeholder="${t('askPlaceholder')}"><kbd aria-hidden="true">/</kbd><button class="primary" type="submit" data-i18n="search">${t('search')}</button></form>
       </div>${distribution(data.insights, t, labels)}${distributionLegend(data.insights, t, labels)}</section>
@@ -191,7 +191,7 @@ export function overviewView(data, {t, memoryRows: rows = list => memoryRows(lis
       <section class="pulse-block processing-card">${i18n(t, 'pipelineTitle', 'h3')}<div class="pipeline">
         ${stage('/app/memories', 'library', 'memoryCount', 'atomicNote', 'memories')}${stage('/app/summaries', 'summaries', 'summaryCount', 'derivedNote', 'summaries')}${stage('/app/processing', 'jobs', 'jobCount', 'jobStatusNote', 'jobs')}</div>
         <p class="privacy-note">${svg('security')}<span data-i18n="summaryBoundary">${t('summaryBoundary')}</span></p></section>
-    </aside></div>`);
+    </aside></div></div></details>`);
 }
 
 /** Category display name (older summaries only): an account-defined name, otherwise the translated built-in ID. */
@@ -279,27 +279,59 @@ export function summaryFacts(t, s) {
   return html`<span class="summary-facts">${summaryWindow(t, s.window)}${summaryScope(t, s.scope)}<span>${i18n(t, 'sourceCount')} ${s.coverage}</span>${omitted ? html`<span>${i18n(t, 'summaryOmitted')} ${omitted}</span>` : ''}<span>${i18n(t, 'revisions')} ${s.revision}</span></span>`;
 }
 
+// Plain text only: the controller assigns this to textContent, never innerHTML. Keep a readable
+// scope and date in the pane title so opening an original and returning does not lose orientation.
+export function summaryDetailTitle(t, data) {
+  const {scope, window} = data.context || {};
+  const names = SCOPE_LEVELS.filter(([, , id]) => scope?.[id]).map(([level, name, id]) =>
+    name && scope[name] ? String(scope[name]) : `${t(`summaryScope_${level}`)} ${String(scope[id]).slice(0, 8)}…`);
+  const label = names.length ? names.join(' › ') : t(`summaryScope_${scope?.kind === 'user' ? 'user' : 'unknown'}`);
+  return [label, window?.local_start, t(window ? `summaryPeriod_${window.period}` : 'summaryWindowUnknown')].filter(Boolean).join(' · ');
+}
+
+const summarySourceCounts = s => {
+  const total = safeCount(s.dependency_count ?? s.coverage), omitted = safeCount(s.omitted_source_count ?? s.omitted);
+  return {total, omitted, selected: safeCount(s.selected_source_count) ?? (total !== null && omitted !== null ? Math.max(0, total - omitted) : null)};
+};
+function summaryCoverage(t, s) {
+  const {total, selected, omitted} = summarySourceCounts(s);
+  return html`<span>${i18n(t, 'summaryReaderCitedSources')} <b>${selected ?? '—'}</b>${total !== null ? html` / ${total}` : ''}</span>${omitted ? html`<span class="summary-coverage-warning">${omitted} ${i18n(t, 'summaryReaderNotCited')}</span>` : ''}`;
+}
+
+// A preview is never a generated narrative: keep source boundaries returned by the validated
+// read path. Older servers' single preview is still readable, but is labelled as a preview only.
+function summaryListPreview(t, s) {
+  if (s.status !== 'current') return '';
+  const excerpts = Array.isArray(s.preview?.excerpts) ? s.preview.excerpts.filter(c => typeof c?.quote === 'string' && c.quote).slice(0, 3) : [];
+  if (excerpts.length) return html`<span class="summary-preview-label">${i18n(t, 'summaryReaderPreview')}</span><span class="summary-preview-lines">${excerpts.map(c => html`<span class="summary-preview-quote">${c.quote}${c.quote_complete === false ? html`<span class="summary-preview-ellipsis" aria-label="${t('summaryReaderPreviewTruncated')}">…</span>` : ''}</span>`)}</span>`;
+  return s.preview?.text ? html`<span class="summary-preview-label">${i18n(t, 'summaryReaderPreview')}</span><span class="summary-preview">${s.preview.text}</span>`
+    : html`<span class="summary-preview is-empty">${i18n(t, 'summaryPreviewOpen')}</span>`;
+}
+
 /** Summaries (agentmemory "crystals"-style): grouped by what they cover — a project, task, session or all memories —
  * and within a group one row per period (daily / weekly), newest first. Summaries written before types keep a small
  * note of the category they were split by. Internal IDs fold into the row's technical details. */
 const scopeGroup = scope => scope?.kind === 'session' ? 'flow' : ['project', 'task', 'workstream'].includes(scope?.kind) ? 'proj' : 'none';
 export function summariesView(t, {data, pagination = '', labels = {}}) {
   const summaries = data.summaries || [];
-  const row = s => {
+  const row = (s, showTimezone = false) => {
     const ids = scopeIds(s.scope), omitted = safeCount(s.omitted), legacy = s.category && s.category !== 'all';
-    const facts = html`<span class="summary-facts"><span>${i18n(t, 'sourceCount')} ${s.coverage}</span>${omitted ? html`<span>${i18n(t, 'summaryOmitted')} ${omitted}</span>` : ''}<span>${i18n(t, 'revisions')} ${s.revision}</span>${legacy ? html`<span class="summary-legacy">${i18n(t, 'summaryLegacyCategory')} ${categoryName(t, labels, s.category)}</span>` : ''}</span>`;
-    const body = html`<span class="summary-title"><span class="period-pill" data-period="${s.window?.period || 'unknown'}">${s.window ? i18n(t, `summaryPeriod_${s.window.period}`) : i18n(t, 'summaryWindowUnknown')}</span>${s.window ? html`<span class="summary-window">${s.window.period === 'weekly' ? html`${i18n(t, 'summaryWeekFrom')} ` : ''}<time>${s.window.local_start || '—'}</time> <span class="summary-tz">(${s.window.timezone || '—'})</span></span>` : ''}</span>${s.preview?.text ? html`<span class="summary-preview">${s.preview.text}</span>` : s.status === 'current' ? html`<span class="summary-preview is-empty">${i18n(t, 'summaryPreviewOpen')}</span>` : ''}${facts}`;
-    const technical = html`<details class="summary-technical"><summary>${i18n(t, 'auditTechnical')}</summary><small class="summary-id">${ids.length ? html`${i18n(t, 'summaryScopeIds')} <code>${ids.join(' / ')}</code><br>` : ''}${i18n(t, 'summaryId')} <code>${s.summary_id}</code></small></details>`;
-    return html`<li class="summary-row" data-group="${scopeGroup(s.scope)}">${s.status === 'current'
+    const facts = html`<span class="summary-facts">${summaryCoverage(t, s)}${legacy ? html`<span class="summary-legacy">${i18n(t, 'summaryLegacyCategory')} ${categoryName(t, labels, s.category)}</span>` : ''}</span>`;
+    const body = html`<span class="summary-title"><span class="period-pill" data-period="${s.window?.period || 'unknown'}">${s.window ? i18n(t, `summaryPeriod_${s.window.period}`) : i18n(t, 'summaryWindowUnknown')}</span>${s.window ? html`<span class="summary-window">${s.window.period === 'weekly' ? html`${i18n(t, 'summaryWeekFrom')} ` : ''}<time>${s.window.local_start || '—'}</time>${showTimezone ? html` <span class="summary-tz">(${s.window.timezone || '—'})</span>` : ''}</span>` : ''}</span>${summaryListPreview(t, s)}${facts}${s.status === 'current' ? html`<span class="summary-read-link">${i18n(t, s.preview?.more ? 'summaryReaderOpenFull' : 'summaryReaderRead')}${svg('arrow')}</span>` : ''}`;
+    const technical = html`<details class="summary-technical"><summary>${i18n(t, 'summaryReaderInformation')}</summary><div class="summary-technical-body"><span>${i18n(t, 'revisions')} ${s.revision}</span>${s.window?.timezone ? html`<span class="summary-tz">${i18n(t, 'summaryReaderTimezone')} ${s.window.timezone}</span>` : ''}${omitted ? html`<span>${i18n(t, 'summaryOmitted')} ${omitted}</span>` : ''}<small class="summary-id">${ids.length ? html`${i18n(t, 'summaryScopeIds')} <code>${ids.join(' / ')}</code><br>` : ''}${i18n(t, 'summaryId')} <code>${s.summary_id}</code></small></div></details>`;
+    return html`<li class="summary-row" data-group="${scopeGroup(s.scope)}" data-summary-state="${s.status}">${s.status === 'current'
       ? html`<div class="summary-main"><button type="button" class="memory-link" data-summary="${s.summary_id}" data-revision="${s.revision}">${body}</button>${technical}</div>`
       : html`<div class="summary-main"><div class="memory-link">${body}<small>${i18n(t, 'summaryNotCurrent')} · <a href="/app/memories">${i18n(t, 'browseMemories')}</a></small></div>${technical}</div>`}<span class="tag lifecycle-tag" data-status="${s.status === 'current' ? 'active' : 'superseded'}">${t(s.status)}</span></li>`;
   };
   // Groups keep the order in which their newest summary appears on this page.
   const groups = new Map();
   for (const s of summaries) { const key = JSON.stringify([s.scope?.kind || 'unknown', ...scopeIds(s.scope)]); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(s); }
-  const section = list => html`<section class="summary-group" data-group="${scopeGroup(list[0].scope)}"><header class="summary-group-head">${summaryScope(t, list[0].scope)}<small>${list.length} ${i18n(t, 'summaryGroupCount')}</small></header><ol class="summary-list">${list.map(row)}</ol></section>`;
-  return String(html`<p class="library-intro">${i18n(t, 'summariesIntro')}</p>
-  <section class="list-panel">${summaries.length ? html`<div class="summary-groups">${[...groups.values()].map(section)}</div>` : emptyState(t)}${trusted(pagination)}</section>`);
+  const section = list => {
+    const current = list.filter(s => s.status === 'current'), history = list.filter(s => s.status !== 'current');
+    const mixedTimezones = new Set(list.map(s => s.window?.timezone || '')).size > 1;
+    return html`<section class="summary-group" data-group="${scopeGroup(list[0].scope)}"><header class="summary-group-head"><h2 class="summary-group-title">${summaryScope(t, list[0].scope)}</h2><small>${list.length} ${i18n(t, 'summaryGroupCount')}</small></header>${current.length ? html`<ol class="summary-list">${current.map(s => row(s, mixedTimezones))}</ol>` : ''}${history.length ? html`<details class="summary-history"><summary>${i18n(t, 'summaryReaderHistory')} <span>${history.length}</span></summary><p>${i18n(t, 'summaryReaderHistoryNote')}</p><ol class="summary-list">${history.map(s => row(s, mixedTimezones))}</ol></details>` : ''}</section>`;
+  };
+  return String(html`<div class="summary-library"><section class="list-panel">${summaries.length ? html`<div class="summary-page-heading"><span>${summaries.length} ${i18n(t, 'summaryReaderOnPage')}</span>${data.next_offset != null || Number(data.offset) > 0 ? i18n(t, 'summaryReaderPageNote', 'small') : ''}</div><div class="summary-groups">${[...groups.values()].map(section)}</div>` : emptyState(t)}${trusted(pagination)}</section></div>`);
 }
 
 // Audit (AUD-01/02, Console item 7). One stream at a time with its own paging. Event details show one labelled row
@@ -423,14 +455,45 @@ export function versionChainView(t, chain = [], {truncated = false, current = ''
     ${i < total - 1 ? html`<div class="version-diff" data-version-diff="${i}" hidden></div>` : ''}</div></li>`)}</ol>${truncated ? i18n(t, 'latestTenVersions', 'p') : ''}`);
 }
 
-export function summaryDetailView(t, data, {canGoBack = false}) {
-  const summary = data.results?.[0] || {claims: []};
-  return String(html`<div class="detail-meta">${summary.category && summary.category !== 'all' ? html`<span class="tag">${i18n(t, 'summaryLegacyCategory')} ${t(summary.category)}</span>` : ''}<span class="tag">${i18n(t, 'revisions')} ${summary.revision}</span></div>
-  ${data.context ? html`<p class="summary-detail-facts">${summaryFacts(t, {...data.context, revision: summary.revision})}${scopeIds(data.context.scope).length ? html`<small class="summary-id">${i18n(t, 'summaryScopeIds')} <code>${scopeIds(data.context.scope).join(' / ')}</code></small>` : ''}</p>` : ''}
-  ${summary.claims?.length ? html`<ol class="claim-list">${summary.claims.map(c => html`<li class="detail-source"><p class="body-content">${c.quote}</p>
-    <button type="button" class="quiet" data-memory="${c.memory_id}" data-revision="${c.revision}" title="${c.memory_id}">${svg('source')}${i18n(t, 'summaryOpenSource')}</button></li>`)}</ol>` : emptyState(t)}
-  ${i18n(t, data.complete ? 'endOfContent' : 'next', 'p')}
-  <div class="pagination">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : html`<button type="button" data-close>${svg('back')}${i18n(t, 'backToList')}</button>`}${data.next_request ? html`<button type="button" data-detail-next>${i18n(t, 'next')}${svg('arrow')}</button>` : ''}</div>`);
+// Groups are local to the returned page, not a claim of whole-summary coverage. Never merge
+// quotations from different sources or revisions. Only byte-exact duplicates with the same
+// validated source range and pagination coordinates may share a displayed paragraph.
+function summarySourceGroups(claims) {
+  const groups = new Map();
+  for (const [index, claim] of claims.entries()) {
+    const key = JSON.stringify([claim.memory_id, claim.revision]);
+    if (!groups.has(key)) groups.set(key, {memory_id: claim.memory_id, revision: claim.revision, entries: [], seen: new Map(), duplicates: 0});
+    const group = groups.get(key), validRange = typeof claim.memory_id === 'string' && Number.isSafeInteger(claim.revision) && claim.revision > 0
+      && Number.isSafeInteger(claim.start) && claim.start >= 0 && Number.isSafeInteger(claim.end) && claim.end >= claim.start;
+    const signature = validRange ? JSON.stringify([claim.start, claim.end, claim.quote, claim.quote_offset ?? 0, claim.quote_length ?? null, claim.quote_complete ?? true]) : null;
+    if (signature !== null && group.seen.has(signature)) {
+      group.seen.get(signature).duplicates++;group.duplicates++;continue;
+    }
+    const entry = {claim, index, duplicates: 0};group.entries.push(entry);
+    if (signature !== null) group.seen.set(signature, entry);
+  }
+  return [...groups.values()];
+}
+
+export function summaryDetailView(t, data, {canGoBack = false, tools = ''} = {}) {
+  const summary = data.results?.[0] || {claims: []}, current = !summary.status || summary.status === 'current';
+  const claims = current && Array.isArray(summary.claims) ? summary.claims : [], groups = summarySourceGroups(claims);
+  const counts = {...data.context, ...summary}, omitted = summarySourceCounts(counts).omitted;
+  const continued = safeCount(summary.claim_offset) > 0 || claims.some(c => safeCount(c.quote_offset) > 0);
+  const sourceGroup = (group, index) => html`<li class="detail-source summary-source-group">
+    <header class="summary-source-head"><h3>${i18n(t, 'summaryReaderSource')} ${index + 1}</h3><small>${group.entries.length} ${i18n(t, 'summaryReaderQuotes')}</small></header>
+    <ol class="summary-excerpts">${group.entries.map(({claim, duplicates}) => html`<li>${safeCount(claim.quote_offset) > 0 ? i18n(t, 'summaryReaderContinuedQuote', 'p') : ''}<blockquote class="summary-excerpt"><p class="body-content">${claim.quote}</p></blockquote>${claim.quote_complete === false ? html`<p class="summary-quote-boundary">${i18n(t, 'summaryReaderExcerptPartial')}</p>` : ''}${duplicates ? html`<small class="summary-duplicate-note">${i18n(t, 'summaryReaderDuplicate')} ${duplicates}</small>` : ''}</li>`)}</ol>
+    <button type="button" class="quiet summary-source-open" data-memory="${group.memory_id}" data-revision="${group.revision}" aria-label="${t('summaryOpenSource')} · ${t('summaryReaderSource')} ${index + 1}">${svg('source')}${i18n(t, 'summaryOpenSource')}</button>
+  </li>`;
+  return String(html`<article class="summary-reader">
+    <header class="summary-detail-facts"><div class="summary-reader-scope">${summaryScope(t, data.context?.scope)}</div>${summaryWindow(t, data.context?.window)}<div class="summary-reader-coverage">${summaryCoverage(t, counts)}</div></header>
+    ${current ? html`<p class="summary-reader-boundary">${i18n(t, 'summaryReaderBoundary')}</p>${omitted ? html`<p class="summary-reader-warning">${i18n(t, 'summaryReaderOmittedNote')}</p>` : ''}${summary.coverage_basis === 'authorized_batch' ? html`<p class="summary-reader-warning">${i18n(t, 'summaryReaderBatchNote')}</p>` : ''}` : html`<p class="summary-reader-warning" role="status">${i18n(t, 'summaryNotCurrent')}</p>`}
+    ${claims.length ? html`<div class="summary-reading-progress">${continued ? i18n(t, 'summaryReaderContinued') : i18n(t, 'summaryReaderPageContent')}<span>${groups.reduce((n, group) => n + group.entries.length, 0)} ${i18n(t, 'summaryReaderQuotes')} · ${groups.length} ${i18n(t, 'summaryReaderSourceCount')}</span></div><ol class="claim-list summary-source-groups">${groups.map(sourceGroup)}</ol>` : emptyState(t)}
+    <p class="summary-reader-completion" role="status">${i18n(t, data.next_request && current ? 'summaryReaderMore' : data.complete && current ? 'summaryReaderEnd' : 'summaryReaderIncomplete')}</p>
+    <nav class="pagination summary-reader-navigation" aria-label="${t('summaryReaderNavigation')}">${canGoBack ? html`<button type="button" data-detail-back>${svg('back')}${i18n(t, 'previous')}</button>` : html`<button type="button" data-close>${svg('back')}${i18n(t, 'backToList')}</button>`}${data.next_request && current ? html`<button type="button" data-detail-next>${i18n(t, 'summaryReaderNext')}${svg('arrow')}</button>` : ''}</nav>
+    <details class="summary-reader-tools"><summary>${i18n(t, 'summaryReaderTools')}</summary><div class="summary-reader-tools-body"><div class="summary-facts"><span>${i18n(t, 'revisions')} ${summary.revision ?? '—'}</span>${summary.category && summary.category !== 'all' ? html`<span>${i18n(t, 'summaryLegacyCategory')} ${t(summary.category)}</span>` : ''}</div><small class="summary-id">${i18n(t, 'summaryId')} <code>${summary.summary_id || '—'}</code>${scopeIds(data.context?.scope).length ? html`<br>${i18n(t, 'summaryScopeIds')} <code>${scopeIds(data.context.scope).join(' / ')}</code>` : ''}</small>
+      ${groups.length ? html`<ol class="summary-provenance">${groups.map((group, index) => html`<li><strong>${i18n(t, 'summaryReaderSource')} ${index + 1}</strong><code>${group.memory_id}</code><span>${i18n(t, 'revisions')} ${group.revision}</span><ul>${group.entries.map(({claim, duplicates}) => html`<li>${i18n(t, 'summaryReaderRange')} <code>${claim.start ?? '—'}–${claim.end ?? '—'}</code>${safeCount(claim.quote_offset) > 0 || claim.quote_complete === false ? html` · ${i18n(t, 'summaryReaderFragment')} <code>${claim.quote_offset ?? 0} / ${claim.quote_length ?? '—'}</code>` : ''}${duplicates ? html` · ${i18n(t, 'summaryReaderDuplicate')} ${duplicates}` : ''}</li>`)}</ul></li>`)}</ol>` : ''}${tools ? html`<div class="summary-quality-tools">${trusted(tools)}</div>` : ''}</div></details>
+  </article>`);
 }
 
 /* Feature map: every menu page lists what it offers today and what is still planned, so the

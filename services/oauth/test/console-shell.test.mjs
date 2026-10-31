@@ -214,5 +214,5 @@ test('Shell header contains language/account only; page search has no cross-page
  assert.doesNotMatch(shell,/top-search|data-search-shortcut/);
  const script=fs.readFileSync(new URL('../../../web/console/app.mjs',import.meta.url),'utf8');
  assert.doesNotMatch(script,/else location\.assign\('\/app\/memories'\)/);
- assert.match(script,/if\(field\)\{event.preventDefault\(\);field.focus\(\);field.select\(\);\}/);
+ assert.match(script,/if\(field\)\{event.preventDefault\(\);for\(let parent=field.parentElement;parent;parent=parent.parentElement\)if\(parent.tagName==='DETAILS'\)parent.open=true;field.focus\(\);field.select\(\);\}/,'search disclosures open before focus without cross-page navigation');
 });
