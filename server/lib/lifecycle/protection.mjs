@@ -122,6 +122,8 @@ export const LIFECYCLE_ENFORCEMENT_TABLES = `
 //   console_models, console_model_tests, console_model_quotas, console_hosts(_apply), console_vector_budget, console_vector_profiles,
 //   console_vector_requests, console_settings, console_preferences, console_imports, console_import_records
 //   (configuration and import receipts; their effects on memories, categories and summaries are counted there),
+//   console_search_feedback, console_search_feedback_keys (non-authoritative owner telemetry and private query salt;
+//     no memory, lifecycle, model authorization or ranking effect; target reads still enforce live projects),
 //   memory_vector_points (derived from memory_vector_documents, which are tracked).
 const viaVectorOwner = {parent: 'memory_vector_owners', key: 'generation'};
 export const MATERIAL_TABLES = [

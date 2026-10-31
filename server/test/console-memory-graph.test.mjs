@@ -103,3 +103,84 @@ test('graph filter validation rejects malformed or unbounded inputs without broa
   const graph=store.consoleService.features.read(a.auth,'attention',{graph_query:'图'.repeat(200)}).graph;
   assert.equal(graph.scope.query.length,200);assert.equal(graph.filtered_total,0);
 });
+
+test('full-library one-hop exploration pages old pair evidence beyond the overview cap with exact keywords',async t=>{
+  const {store,a}=await memoryFixture(t),old='2020-01-01T00:00:00.000Z',ids=[];
+  for(let i=0;i<13;i++){
+    const m=store.saveMemory(a.auth,{scope:'user',content:`Synthetic older edge evidence ${i}.`,kind:'architecture',concepts:['Gateway／A','Route B']}).memory;
+    ids.push(m.memory_id);store.db.prepare('UPDATE memories SET created_at=?,updated_at=? WHERE memory_id=?').run(old,old,m.memory_id);
+    store.db.prepare('UPDATE memory_traits SET updated_at=? WHERE user_id=? AND memory_id=?').run(old,a.auth.user_id,m.memory_id);
+  }
+  store.memoryTransaction(()=>{for(let i=0;i<1002;i++)store.saveMemory(a.auth,{scope:'user',content:`Synthetic recent unrelated ${i}.`,concepts:['Other']});});
+  const get=p=>store.consoleService.features.read(a.auth,'attention',{graph_days:'0',...p}).graph;
+  assert.ok(get({}).memories.every(m=>!ids.includes(m.id)),'overview sample omits the old edge');
+  const g=get({graph_focus:'gateway/a',graph_peer:'route b',graph_limit:'5'}),n=g.neighborhood;
+  assert.equal(n.current_count,13);assert.equal(n.neighbors[0].current_count,13);assert.equal(n.history_count,0);
+  assert.equal(n.first_seen,old);assert.equal(n.evidence.total,13);assert.equal(n.evidence.items.length,5);
+  assert.equal(n.evidence.next_offset,5);assert.ok(n.evidence.items.every(m=>ids.includes(m.memory_id)));
+  const next=get({graph_focus:'Gateway/A',graph_peer:'Route B',graph_limit:'5',graph_offset:'5'}).neighborhood.evidence;
+  assert.ok(next.items.every(m=>!n.evidence.items.some(old=>old.memory_id===m.memory_id)));
+  assert.equal(get({graph_focus:'gateway'}).neighborhood.total,0,'partial identifiers never match focus');
+  assert.equal(get({graph_focus:'gateway/a',graph_peer:'Other'}).neighborhood.evidence.total,0,'one-hop evidence requires the actual pair');
+  assert.ok(Buffer.byteLength(JSON.stringify(g))<GRAPH_RESPONSE_BYTES);
+  assert.doesNotMatch(JSON.stringify(g),/Synthetic older|Synthetic recent/);
+});
+
+test('neighborhood project/task scope, lifecycle and history counts use the same authorized membership',async t=>{
+  const f=await memoryFixture(t),{store,a,other}=f;
+  const first=store.saveMemory(a.auth,{scope:'project',project_id:f.alpha.project_id,content:'Synthetic old topology.',concepts:['Alpha','Link']}).memory;
+  const replacement=store.supersedeMemory(a.auth,first.memory_id,{content:'Synthetic corrected topology.',concepts:['Alpha','Link']}).replacement_memory;
+  store.saveMemory(a.auth,{scope:'project',project_id:f.beta.project_id,content:'Synthetic separate project.',concepts:['Alpha','Link']});
+  store.saveMemory(a.auth,{scope:'user',content:'Synthetic shared user record.',concepts:['Alpha','Link']});
+  store.saveMemory(other.auth,{scope:'user',content:'Synthetic foreign record.',concepts:['Alpha','Foreign']});
+  const get=p=>store.consoleService.features.read(a.auth,'attention',{graph_days:'0',graph_focus:'Alpha',graph_project_id:f.alpha.project_id,...p}).graph;
+  const n=get({}).neighborhood;assert.equal(n.current_count,1);assert.equal(n.history_count,1);assert.equal(n.evidence.total,1);
+  assert.equal(n.evidence.items[0].supersedes_memory_id,first.memory_id);assert.equal(n.evidence.items[0].memory_id,replacement.memory_id);
+  const history=get({graph_history:'1'}).neighborhood.evidence;assert.equal(history.total,2);assert.equal(history.items.length,2);
+  assert.ok(history.items.some(m=>m.status==='superseded'));assert.doesNotMatch(JSON.stringify(n),/Foreign/);
+  store.retractMemory(a.auth,replacement.memory_id,{reason:'Synthetic withdrawal.'});
+  assert.equal(get({graph_history:'1'}).neighborhood.current_count,0,'withdrawn memories never remain current evidence');
+  assert.equal(get({graph_history:'1'}).neighborhood.evidence.total,1,'withdrawn records are not graph history');
+  store.db.prepare("INSERT OR REPLACE INTO project_lifecycle VALUES (?,?,'merged',?,1,?)").run(a.auth.user_id,f.alpha.project_id,f.beta.project_id,new Date().toISOString());
+  assert.equal(get({}).neighborhood.current_count,1,'merged origin resolves canonical member set');
+  store.db.prepare("INSERT OR REPLACE INTO project_lifecycle VALUES (?,?,'deleted',NULL,2,?)").run(a.auth.user_id,f.beta.project_id,new Date().toISOString());
+  assert.throws(()=>get({}),e=>e.errorCode==='PROJECT_DELETED');
+  assert.throws(()=>get({graph_project_id:'not-owned-project'}),e=>e.errorCode==='PROJECT_NOT_FOUND');
+});
+
+test('neighborhood rejects invalid peers/pages and bounds neighbor output without inventing edges',async t=>{
+  const {store,a}=await memoryFixture(t);
+  for(let i=0;i<60;i++)store.saveMemory(a.auth,{scope:'user',content:`Synthetic different edge ${i}.`,concepts:['Seed',`Leaf ${i}`]});
+  const get=p=>store.consoleService.features.read(a.auth,'attention',p).graph;
+  const n=get({graph_focus:'Seed'}).neighborhood;
+  assert.equal(n.neighbors.length,50);assert.equal(n.neighbors_truncated,true);assert.ok(n.neighbors.every(v=>v.current_count===1));
+  for(const p of [{graph_peer:'Seed'},{graph_focus:''},{graph_focus:'Seed',graph_peer:'ＳＥＥＤ'},{graph_focus:'Seed',graph_limit:'0'},{graph_focus:'Seed',graph_offset:'-1'},{graph_focus:'Seed',graph_limit:'51'},{graph_focus:'Seed',graph_history:'yes'},{graph_offset:'2'}]){
+    assert.throws(()=>get(p),e=>e.errorCode==='INVALID_CONSOLE_INPUT',JSON.stringify(p));
+  }
+});
+
+test('neighborhood preserves exact task scope, project membership and owner boundaries',async t=>{
+  const f=await memoryFixture(t),{store,a}=f;
+  const task=store.saveMemory(a.auth,{scope:'task',task_id:f.alpha.task_id,content:'Synthetic exact task evidence.',concepts:['Seed','Peer']}).memory;
+  store.saveMemory(a.auth,{scope:'project',project_id:f.alpha.project_id,content:'Synthetic project-only evidence.',concepts:['Seed','Peer']});
+  store.saveMemory(a.auth,{scope:'task',task_id:f.beta.task_id,content:'Synthetic different task evidence.',concepts:['Seed','Peer']});
+  const get=p=>store.consoleService.features.read(a.auth,'attention',{graph_days:'0',graph_focus:'Seed',...p}).graph;
+  const graph=get({graph_task_id:f.alpha.task_id});
+  assert.equal(graph.scope.project_id,f.alpha.project_id);assert.equal(graph.neighborhood.current_count,1);
+  assert.deepEqual(graph.neighborhood.evidence.items.map(row=>row.memory_id),[task.memory_id]);
+  assert.throws(()=>get({graph_project_id:f.beta.project_id,graph_task_id:f.alpha.task_id}),e=>e.errorCode==='SCOPE_MISMATCH');
+  assert.throws(()=>get({graph_task_id:f.foreign.task_id}),e=>e.errorCode==='TASK_NOT_FOUND');
+});
+
+test('oversized legacy neighborhood labels never exceed the response budget or turn into invented clipped keywords',async t=>{
+  const {store,a}=await memoryFixture(t),oversized='长'.repeat(20000);
+  const m=store.saveMemory(a.auth,{scope:'user',content:'Synthetic malformed legacy neighborhood.',concepts:['Seed','Peer'],topic:'before'}).memory;
+  store.db.prepare('UPDATE memory_traits SET concepts_json=? WHERE user_id=? AND memory_id=?').run(JSON.stringify(['Seed','Peer',oversized]),a.auth.user_id,m.memory_id);
+  store.db.prepare('UPDATE memories SET topic=? WHERE user_id=? AND memory_id=?').run(oversized,a.auth.user_id,m.memory_id);
+  const g=store.consoleService.features.read(a.auth,'attention',{graph_days:'0',graph_focus:'Seed'}).graph;
+  assert.equal(g.neighborhood.current_count,1);assert.equal(g.neighborhood.neighbor_labels_omitted_records,1);
+  assert.deepEqual(g.neighborhood.neighbors.map(row=>row.keyword),['peer']);
+  assert.equal(g.neighborhood.evidence.items[0].topic,null);assert.equal(g.neighborhood.evidence.items[0].topic_omitted,1);
+  assert.equal(g.neighborhood.evidence.items[0].memory_id,m.memory_id);
+  assert.ok(Buffer.byteLength(JSON.stringify(g))<=GRAPH_RESPONSE_BYTES);
+});

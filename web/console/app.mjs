@@ -11,12 +11,13 @@ import {mountTaskWorkflows} from './task-workflows.mjs';
 import {mountMemoryReview,reviewButton} from './memory-review.mjs';
 import {retrievalReasonKey} from './catalog.mjs';
 import {memoryProcessingView} from './memory-processing.mjs';
+import {searchFeedbackCard,mountSearchFeedback} from './search-feedback.mjs';
 
 const root=document.getElementById('console-root'),pane=document.getElementById('memory-dialog'),detail=document.getElementById('memory-content');
 const state=new SessionState(document.body.dataset.account);
 const page=document.body.dataset.page;
 const WIDE_PANE=window.matchMedia('(min-width: 1180px)');
-let capabilities={enabled:false,writable:false},actions,connections,featureReads,taskWorkflows,memoryReview,overview,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
+let capabilities={enabled:false,writable:false},actions,connections,featureReads,taskWorkflows,memoryReview,overview,searchFeedback,auditFilters={},auditSource='core',auditGroup='memory',auditPages={},auditCursor='';
 let requestSequence=0,detailSequence=0,currentData=null,detailData=null,lastFocus=null,detailKind='memory',detailStack=[];
 let detailMeta=null,query='',searchMode='hybrid',kind='',concept='',status='active',topic='',origin='',review='',offset=0;
 // Library selection: explicit IDs (kept across pages, up to SELECTION_LIMIT) or everything matching the filter.
@@ -38,6 +39,7 @@ readLocation();const auditDates=page==='audit'?mountAuditDates(t):null;
 
 function clear() {
  memoryReview?.clear();
+ searchFeedback?.dispose();searchFeedback=null;
  actions?.clear();connections?.clear();featureReads?.clear();taskWorkflows?.clear();overview?.dispose();overview=null;state.clear();requestSequence++;detailSequence++;contextGeneration++;contextRequests.clear();projectOffset=0;projectArchived='false';taskOffset=0;
  currentData=null;detailData=null;detailMeta=null;detailStack=[];query='';kind='';concept='';status='active';topic='';origin='';review='';searchMode='hybrid';offset=0;selected=new Map();selectAll=false;facets=null;auditFilters={};auditSource='core';auditGroup='memory';auditCursor='';auditPages={};auditDates?.close();
  detail.replaceChildren();closePane();root.replaceChildren();document.body.removeAttribute('data-csrf');
@@ -86,6 +88,7 @@ function heading() {
 }
 
 function render(data) {
+ searchFeedback?.dispose();searchFeedback=null;
  overview?.dispose();overview=null;
  // Replaced rows can never receive a context reply that was requested before this render.
  contextGeneration++;contextRequests.clear();
@@ -99,12 +102,14 @@ function render(data) {
  else if(page==='models')html=policy('modelsNote',['configure']);
  const implementation=actionPage(page,data,capabilities,connections?.query());if(implementation!==null)html=implementation;
  if(!prototypePages.includes(page))html+=completedFeaturePanels(t,page,data,capabilities);
+ if(page==='memories')html+=searchFeedbackCard(data,{writable:canAct(capabilities,'search.feedback')});
  root.innerHTML=heading()+(capabilities.unavailable?`<p class="policy-box" role="status">${l('capabilitiesUnavailable')}</p>`:'')+html;
  syncAppearance();
  taskWorkflows?.afterRender();
  // The overview map and live stream draw after the markup exists; both stop once the page is replaced.
  const openFromMap=memory_id=>void openMemory({memory_id,content_limit:1024,include_history:'true'},true);
  if(page==='overview'){const account=state.account;overview=mountOverview({api,root,data,isActive:()=>!!account&&state.account===account,openMemory:openFromMap});}
+ if(page==='memories'){const account=state.account;searchFeedback=mountSearchFeedback({root,data,api,mutate,writable:canAct(capabilities,'search.feedback'),isActive:()=>!!account&&state.account===account});syncAppearance();}
 }
 function updateMemorySelection() {
  const toolbar=root.querySelector('[data-memory-selection]');if(!toolbar||selectAll)return;

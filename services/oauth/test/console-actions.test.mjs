@@ -76,6 +76,32 @@ test('Processing evidence crosses the authenticated BFF with revision and accoun
  assert.equal((await x.a.browser.request('/assets/memory-processing.mjs')).status,200);
 });
 
+test('HTTP-SEARCH-FEEDBACK: full BFF search context, explicit votes, privacy, replay and current-owner filtering',async t=>{
+ const x=await setup(t),created=await x.act('memory.create',{scope:'user',content:'Synthetic BFF feedbackword record.'});assert.equal(created.status,200);
+ const search=await x.get('memories?query=feedbackword&mode=lexical');assert.equal(search.status,200);assert.equal(search.body.results.length,1);
+ const row=search.body.results[0],context=search.body.feedback_context,payload={search_token:context.token,memory_id:row.memory_id,revision:row.revision,feedback:'relevant'},operation=randomUUID();
+ assert.ok((await x.get('capabilities')).body.allowed_actions.includes('search.feedback'));
+ assert.equal((await x.act('search.feedback',{...payload,query:'must never reach Core'})).status,400);
+ assert.equal((await x.act('search.feedback',{...payload,current_password:'not forwarded'})).status,400);
+ const saved=await x.act('search.feedback',payload,x.a,operation);assert.equal(saved.status,200,JSON.stringify(saved.body));assert.equal(saved.body.ranking_changed,false);
+ assert.equal((await x.act('search.feedback',payload,x.a,operation)).body.replayed,true);
+ assert.equal((await x.act('search.feedback',payload,x.b)).status,400);
+ const history=await x.get('search-feedback?query_fingerprint='+context.query_fingerprint);assert.equal(history.status,200);assert.equal(history.body.total,1);
+ assert.equal((await x.get('search-feedback',x.b)).body.total,0);
+ const graph=await x.get('attention?graph_days=0&graph_focus=unknown&graph_limit=5');assert.equal(graph.status,200);assert.equal(graph.body.graph.neighborhood.evidence.total,0);
+ const correction=await x.act('memory.correct',{memory_id:row.memory_id,revision:row.revision,content:'Synthetic corrected BFF feedbackword record.'});assert.equal(correction.status,200);
+ const stale=await x.act('search.feedback',{...payload,feedback:'outdated'});assert.equal(stale.status,409);assert.equal(stale.body.error_code,'MEMORY_VERSION_CHANGED');
+ assert.doesNotMatch(JSON.stringify(x.core.store.db.prepare('SELECT * FROM console_search_feedback').all()),/feedbackword|BFF/);
+ for(const asset of ['graph-neighborhood.mjs','search-feedback.mjs'])assert.equal((await x.a.browser.request('/assets/'+asset)).status,200);
+});
+
+test('HTTP-SEARCH-FEEDBACK: basic/read-only Console policy cannot be upgraded by a signed context',async t=>{
+ const x=await setup(t,{basic:{memory:true,security:true,oauth:true}});
+ const search=await x.get('memories?query=syntheticmissing&mode=lexical');assert.equal(search.status,200);
+ const result=await x.act('search.feedback',{search_token:search.body.feedback_context.token,feedback:'missing'});assert.equal(result.status,403);
+ assert.ok(!(await x.get('capabilities')).body.allowed_actions.includes('search.feedback'));
+});
+
 function taskWorkflowSeed(x,owner=x.a){
  const store=x.core.store,user=owner.record.user_id,suffix=randomUUID(),project_id=`workflow-project-${suffix}`,task_id=`workflow-task-${suffix}`,workstream_id=`workflow-stream-${suffix}`;
  const issue=(agentId,scopes)=>{const key=store.issueCredential({userId:user,deviceId:`workflow-device-${agentId}`,agentId,agentInstanceId:`workflow-instance-${agentId}`,scopes});return {...key,auth:store.authenticate(key.api_key)};};

@@ -36,7 +36,7 @@ core.store.db.prepare('UPDATE memories SET created_at=?,updated_at=? WHERE user_
 core.store.db.prepare('UPDATE memory_traits SET updated_at=? WHERE user_id=? AND memory_id=?').run(old,a.account.user_id,outside.memory_id);
 const retracted=save(a,'Synthetic retracted graph memory',{kind:'bug',concepts:['Synthetic Retracted','PVE']});core.store.retractMemory(a.writer.auth,retracted.memory_id,{reason:'Synthetic browser lifecycle exclusion'});
 save(owners[1],'Synthetic private other-account graph body',{kind:'fact',concepts:['Synthetic Other Owner','PVE']});
-let largeSeeded=false,stopped=false;
+let largeSeeded=false,workbenchSeeded=false,stopped=false;
 async function stop(){if(stopped)return;stopped=true;for(const fn of cleanup.reverse())await fn();const removed=!fs.existsSync(core.root)&&!fs.existsSync(f.directory);process.stderr.write(JSON.stringify({synthetic_cleanup_complete:removed,core_storage_removed:!fs.existsSync(core.root),identity_storage_removed:!fs.existsSync(f.directory)})+'\n');process.exit(removed?0:1);}
 console.log(JSON.stringify({fixture:true,url:f.config.issuer,cookie:'mnm_fixture_console',accounts:owners.map(owner=>({account_id:owner.account.account_id,token:owner.console.token})),expected:{default_count:202,all_count:203,shared,renewed:renewed.memory_id,outside:outside.memory_id,untagged_first:untagged[0]}}));
 readline.createInterface({input:process.stdin}).on('line',async line=>{try{
@@ -45,6 +45,20 @@ readline.createInterface({input:process.stdin}).on('line',async line=>{try{
   assert.equal(largeSeeded,false);largeSeeded=true;
   for(let i=0;i<260;i++)save(a,`Synthetic bounded map memory ${i}`,{kind:'fact',concepts:Array.from({length:8},(_,j)=>String.fromCharCode(0x4e00+j).repeat(38)+String(i%8).padStart(2,'0'))});
   reply={created:260};
+ }else if(request.command==='seed-workbench'){
+  assert.equal(workbenchSeeded,false);workbenchSeeded=true;
+  const project_id='synthetic-graph-project',task_id='synthetic-graph-task';
+  core.store.upsertTask(a.writer.auth,{project_id,project_name:'Synthetic Graph Project',task_id,title:'Synthetic Graph Task',goal:'Synthetic scope test',status:'active'});
+  const scoped=[];for(let i=0;i<4;i++)scoped.push(core.store.saveMemory(a.writer.auth,{scope:'task',project_id,task_id,content:`Synthetic scoped graph record ${i}.`,concepts:['Synthetic Scoped','Synthetic ScopePeer']}).memory);
+  core.store.supersedeMemory(a.writer.auth,scoped[0].memory_id,{content:'Synthetic corrected scoped graph record.',concepts:['Synthetic Scoped','Synthetic ScopePeer']});
+  const older=[];core.store.memoryTransaction(()=>{
+   for(let i=0;i<13;i++){const m=save(a,`Synthetic older full-library graph evidence ${i}.`,{concepts:['Synthetic Router／A','Synthetic Link B']});older.push(m.memory_id);
+    core.store.db.prepare('UPDATE memories SET created_at=?,updated_at=? WHERE user_id=? AND memory_id=?').run(old,old,a.account.user_id,m.memory_id);
+    core.store.db.prepare('UPDATE memory_traits SET updated_at=? WHERE user_id=? AND memory_id=?').run(old,a.account.user_id,m.memory_id);}
+   for(let i=0;i<1002;i++)save(a,`Synthetic newest graph noise ${i}.`,{concepts:['Synthetic Noise']});
+  });
+  const feedback=save(a,'Synthetic SearchFeedbackNeedle memory for explicit feedback.');
+  reply={project_id,task_id,older,feedback_id:feedback.memory_id,scoped_count:4};
  }else if(request.command==='revoke-console'){ids.db.prepare("DELETE FROM identity_sessions WHERE account_id=? AND purpose='console'").run(a.account.account_id);reply={revoked:true};}
  else throw new Error('UNKNOWN_SYNTHETIC_COMMAND');
  console.log(JSON.stringify({command:request.command,...reply}));

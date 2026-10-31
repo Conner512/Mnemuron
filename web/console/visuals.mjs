@@ -447,6 +447,7 @@ export const featureMap = {
     {id: 'OVW-01', status: 'live', read: ['overview']},
     {id: 'OVW-02', status: 'live', read: ['overview']},
     {id: 'OVW-03', status: 'live', read: ['attention']},
+    {id: 'OVW-04', status: 'live', read: ['attention', 'projects']},
   ],
   memories: [
     {id: 'MEM-01', status: 'live', read: ['memories']},
@@ -460,6 +461,7 @@ export const featureMap = {
     {id: 'MEM-09', status: 'live', read: ['review-candidates'], write: ['review.extract', 'review.candidate'], reauth: true},
     {id: 'MEM-10', status: 'live', read: ['memory-review'], write: ['review.verify', 'review.resolve'], reauth: true},
     {id: 'MEM-11', status: 'live', read: ['memory-processing'], write: ['processing.preview', 'processing.start']},
+    {id: 'MEM-12', status: 'live', read: ['search-feedback'], write: ['search.feedback']},
   ],
   summaries: [
     {id: 'SUM-01', status: 'live', read: ['summaries', 'summary']},

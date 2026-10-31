@@ -27,7 +27,8 @@
   "console_task_workflow_previews",
   "memory_review_candidates",
   "memory_summary_reviews",
-  "memory_manual_reviews"
+  "memory_manual_reviews",
+  "console_search_feedback"
  ],
  "sites": {
   "server/lib/console/memory-review.mjs": {
@@ -250,6 +251,10 @@
   },
   "server/lib/console/memory-graph.mjs": {
    "memories": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_revisions": {
     "read": 1,
     "write": 0
    }
@@ -325,6 +330,20 @@
    },
    "resumes": {
     "read": 5,
+    "write": 1
+   }
+  },
+  "server/lib/console/search-feedback.mjs": {
+   "memories": {
+    "read": 2,
+    "write": 0
+   },
+   "memory_revisions": {
+    "read": 2,
+    "write": 0
+   },
+   "console_search_feedback": {
+    "read": 1,
     "write": 1
    }
   },
@@ -517,6 +536,16 @@
   "server/lib/memory-evaluation/quality.mjs": {
    "memories": {
     "read": 2,
+    "write": 0
+   }
+  },
+  "server/lib/memory-evaluation/search-workbench.mjs": {
+   "memories": {
+    "read": 0,
+    "write": 1
+   },
+   "console_search_feedback": {
+    "read": 1,
     "write": 0
    }
   },
