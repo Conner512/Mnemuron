@@ -10,6 +10,7 @@ import {protectTables} from '../lifecycle/protection.mjs';
 import {outputSchema,validateSummary} from '../memory-jobs/worker.mjs';
 import {ConsoleQuotas} from './quotas.mjs';
 import {ConsoleHosts} from './hosts.mjs';
+import {ModelUsageLedger,validateUsagePricing} from '../model-providers/usage.mjs';
 
 // Model-list discovery bounds: one deadline for DNS and HTTP, response bytes, listed IDs, ID length (the save limit).
 export const DISCOVERY=Object.freeze({deadline_ms:10000,max_bytes:262144,max_models:200,max_id:160});
@@ -39,7 +40,7 @@ export class ConsoleModels {
       CREATE TABLE IF NOT EXISTS memory_vector_manifest (generation TEXT NOT NULL,memory_id TEXT NOT NULL,revision INTEGER NOT NULL,state_hash TEXT NOT NULL,
         state TEXT NOT NULL DEFAULT 'pending',PRIMARY KEY(generation,memory_id));`);
     protectTables(this.db,['memory_vector_manifest']);
-    this.quotas=new ConsoleQuotas(store,this);this.hosts=new ConsoleHosts(store);
+    this.quotas=new ConsoleQuotas(store,this);this.hosts=new ConsoleHosts(store);this.usage=new ModelUsageLedger(this.db);
     // Replaceable in synthetic tests only (fake DNS, controlled clock); discovery never uses another resolver path.
     this.lookup=lookup;this.clock=()=>Date.now();this.discoveryDeadlineMs=DISCOVERY.deadline_ms;this.discovering=new Set();}
   /** Counts one embedder call: the owner's limits (if set) and an open first-run budget. Returns true for a manifest
@@ -83,13 +84,16 @@ export class ConsoleModels {
       if(new URL(c.base_url).origin!==new URL(now.base_url).origin)continue;
       const profile=this.profile(user,'embedder',c),{fingerprint:unused,...input}=profile;
       const guard=()=>{const owner=this.store.consoleService?.owner;if(owner?.user){owner.require(user);if(!owner.allowed('vector_search')||!owner.allowed('memory'))fail('FEATURE_DISABLED');if(this.raw(user,'embedder')?.revision!==current.revision)fail('STALE_INPUT');}};
-      const provider=new Embedder(input,{transport:async(p,route,body)=>{guard();
+      // A retained model must not inherit the new/current model's price. Without a matching live price profile,
+      // its requests remain unpriced; the build-time price is not asserted to still be current.
+      const pricing=this.profile(user,'embedder',now).fingerprint===profile.fingerprint?now.pricing:null;
+      const provider=new Embedder(input,{attemptObserver:this.usage.observer({user_id:user,kind:'embedder',profile_fingerprint:profile.fingerprint,model:profile.model,pricing}),transport:async(p,route,body,{onResponse}={})=>{guard();
         const live=this.raw(user,'embedder');if(!live||!JSON.parse(live.config_json).enabled)fail('NOT_CONFIGURED');
         const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
         const addresses=await this.hosts.resolve(user,host,lookup).catch(()=>fail('DNS_UNAVAILABLE'));
         const cipher=live.secret_cipher;
         const headers=cipher?{authorization:'Bearer '+this.state.unseal(user,'model:embedder',cipher)}:{};
-        guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address),allow_private:p.egress.allow_private||this.hosts.privateRecord(user,host)}},route,body,{resolve:async()=>addresses,headers});guard();return response;
+        guard();const response=await requestJSON({...p,egress:{...p.egress,addresses:addresses.map(a=>a.address),allow_private:p.egress.allow_private||this.hosts.privateRecord(user,host)}},route,body,{resolve:async()=>addresses,headers});onResponse?.(response);guard();return response;
       }});
       provider.profile=Object.freeze({...profile,egress:Object.freeze({...profile.egress,approved:profile.egress.approved&&now.egress_approved===true,
         query_approved:profile.egress.query_approved&&now.query_approved===true})});
@@ -104,10 +108,11 @@ export class ConsoleModels {
     return {kind,revision:row?.revision||0,config:row?JSON.parse(row.config_json):{enabled:false},has_key:!!row?.secret_cipher,
       verification:test?{state:interrupted?'interrupted':test.state,error_code:interrupted?'MODEL_TEST_INTERRUPTED':test.error_code,updated_at:test.updated_at,...(test.result_json?JSON.parse(test.result_json):{})}:null};});}
   save(auth,p) {
-    object(p,['kind','expected_revision','config','api_key','remove_key']);object(p.config,['enabled','protocol','base_url','model','profile_revision','dimensions','daily_requests','output_tokens','batch_size','sensitivities','egress_approved','query_approved','native_schema']);
+    object(p,['kind','expected_revision','config','api_key','remove_key']);object(p.config,['enabled','protocol','base_url','model','profile_revision','dimensions','daily_requests','output_tokens','batch_size','sensitivities','egress_approved','query_approved','native_schema','pricing']);
     const row=this.raw(auth.user_id,p.kind),revision=row?.revision||0;
     if(number(p.expected_revision,0,2147483647)!==revision)throw new ConflictError('Model configuration changed.','MODEL_VERSION_CHANGED');
     const config=structuredClone(p.config);
+    if(config.pricing!==undefined)config.pricing=validateUsagePricing(config.pricing,p.kind);
     delete config.sensitivities; // removed setting; older clients may still send it
     if(config.native_schema===undefined)config.native_schema=true;
     if(typeof config.native_schema!=='boolean')throw new ValidationError('Invalid schema capability.');
@@ -163,7 +168,7 @@ export class ConsoleModels {
     const {fingerprint:unused,...input}=profile;
     const guard=()=>{const owner=this.store.consoleService?.owner;if(owner?.user){owner.require(user);if(runId)owner.guard(runId);else if(catchUp){if(kind!=='embedder'||!['vector_catch_up','processing','memory'].every(flag=>owner.allowed(flag)))fail('EXECUTION_GRANT_REQUIRED');}
       else if(!synthetic&&(kind!=='embedder'||!owner.allowed('vector_search')||!owner.allowed('memory')))fail('EXECUTION_GRANT_REQUIRED');}};
-    const provider=new ctor(input,{transport:async(p,route,body)=>{guard();
+    const provider=new ctor(input,{attemptObserver:this.usage.observer({user_id:user,kind,profile_fingerprint:profile.fingerprint,model:profile.model,pricing:c.pricing,synthetic}),transport:async(p,route,body,{onResponse}={})=>{guard();
       const current=this.raw(user,kind);
       if(!current||current.revision!==row.revision)fail('STALE_INPUT');
       const host=new URL(p.base_url).hostname.replace(/^\[|\]$/g,'');
@@ -174,7 +179,7 @@ export class ConsoleModels {
       // redirects, and pins the validated lookup result to the actual socket.
       const target={...p,egress:{...p.egress,addresses:addresses.map(a=>a.address),allow_private:p.egress.allow_private||this.hosts.privateRecord(user,host)}};
       const headers=row.secret_cipher?{authorization:'Bearer '+this.state.unseal(user,`model:${kind}`,row.secret_cipher)}:{};
-      const response=await requestJSON(target,route,body,{resolve:async()=>addresses,headers});guard();if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');return response;
+      const response=await requestJSON(target,route,body,{resolve:async()=>addresses,headers});onResponse?.(response);guard();if(this.raw(user,kind)?.revision!==row.revision)fail('STALE_INPUT');return response;
     }});
     provider.profile=Object.freeze(profile);
     if(kind==='embedder'){const embed=provider.embed.bind(provider);provider.embed=(texts,type,options)=>{if(this.store.consoleService?.owner.user&&!runId&&!synthetic&&!catchUp&&type!=='query')fail('EXECUTION_GRANT_REQUIRED');return embed(texts,type,options);};}

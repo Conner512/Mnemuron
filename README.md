@@ -80,6 +80,7 @@ These are source integrations, not a universal installer. Host plugin loading, h
 - [Account console preview](docs/integrated-console-v0.3.md) — invitation-based registration, local TOTP, account-bound reads, migration and deliberately blocked operations.
 - [Memory pipeline reliability](docs/memory-pipeline-reliability.md) — extraction fidelity, source-grounded compression, resumable vectorization and honest graph coverage (Chinese).
 - [Memory graph and search workbench](docs/memory-search-workbench.md) — project-scoped full-library keyword evidence, privacy-preserving result feedback and reproducible offline quality reports (Chinese).
+- [Memory operations evidence](docs/memory-operations-observability.md) — provider-reported usage, request-time cost estimates and operator-only backup / isolated-restore verification status.
 - [Core specification](docs/core-spec-v0.1.md) — the data model and continuity boundaries.
 - [Deployment guide](docs/pve-lxc-deployment-v0.1.md) — an optional Linux/LXC deployment example; Proxmox is not required by the core API.
 - [Core optimization notes](docs/core-optimization-v0.2/release-notes.md) and [retrieval/sync review](docs/core-review-v0.3/README.md) — implementation changes and compatibility notes.

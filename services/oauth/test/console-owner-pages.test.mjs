@@ -123,7 +123,8 @@ test('Usage on the models page: a 14-day chart drawn to scale; no usage page; th
   assert.equal(actionPage('usage',{},caps),null,'the usage page moved to the models page');
   const usage=actionPage('models',{models:[],processing:{},features:{'model-usage':{models:[{kind:'embedder',configured:true,used:8,limit:250,limit_mode:'manual',total:{used:123,limit:1500}}],history:days,searches_7d:128}}},caps);
   assert.equal((usage.match(/class="bar-(organizer|embedder)"/g)||[]).length,28);
-  assert.match(usage,/近 14 天模型调用<\/span><strong class="status-value">13</);assert.match(usage,/近 7 天记忆搜索<\/span><strong class="status-value">128</);
+  assert.match(usage,/近 14 天调用额度预留<\/span><strong class="status-value">13</);assert.match(usage,/近 7 天记忆搜索<\/span><strong class="status-value">128</);
+  assert.match(usage,/不等于已成功发送或被供应商计费的次数/);
   assert.doesNotMatch(usage,/你设置的调用上限/,'per-model calls are on the model cards, not repeated');
   assert.match(usage,/<div class="usage-overview"><div class="status-strip" data-count="2">/);assert.doesNotMatch(usage,/费用|未计量/,'no cost tile');
   const heights=[...usage.matchAll(/class="bar-embedder"><title>[^ ]+ 嵌入 (\d+)<\/title>/g)].map(m=>Number(m[1]));assert.deepEqual(heights.filter(Boolean),[3,8]);

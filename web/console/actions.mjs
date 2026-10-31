@@ -2,7 +2,7 @@ import {collectAuditExport} from './audit.mjs';
 import {translate as t,syncAppearance} from './appearance.mjs';
 import {connectionsView} from './connections.mjs';
 import {agentsView} from './agents.mjs';
-import {icon,revisionDifference} from './visuals.mjs';
+import {icon,revisionDifference,backupStatusView} from './visuals.mjs';
 import {mapCard,mountMemoryMap} from './memory-map.mjs';
 export {mapAnchors,anchorPanel,mapWindow} from './memory-map.mjs';
 
@@ -342,8 +342,19 @@ function usageOverview(d){if(!d)return '';const history=d.history||[];
   const grid=[0,ceil/2,ceil].map(v=>`<line x1="${left}" x2="${W-8}" y1="${y(v)}" y2="${y(v)}" class="chart-grid"/><text x="${left-6}" y="${y(v)+4}" text-anchor="end">${num(v)}</text>`).join('');
   const bars=history.map((r,i)=>{const x=left+i*slot+slot/2;return `<rect x="${x-bar-1}" y="${y(r.organizer||0)}" width="${bar}" height="${H-bottom-y(r.organizer||0)}" class="bar-organizer"><title>${r.day} 整理 ${r.organizer||0}</title></rect><rect x="${x+1}" y="${y(r.embedder||0)}" width="${bar}" height="${H-bottom-y(r.embedder||0)}" class="bar-embedder"><title>${r.day} 嵌入 ${r.embedder||0}</title></rect>${(history.length-1-i)%2===0?`<text x="${x}" y="${H-8}" text-anchor="middle">${r.day.slice(5)}</text>`:''}`;}).join('');
   const total=history.reduce((n,r)=>n+(r.organizer||0)+(r.embedder||0),0);
-  return `<div class="usage-overview"><div class="status-strip" data-count="2">${[['近 14 天模型调用',num(total),'整理 + 嵌入'],['近 7 天记忆搜索',num(d.searches_7d),'来自所有连接']].map(([a,b,c])=>`<div class="status-tile"><span class="status-label">${a}</span><strong class="status-value">${b}</strong><span class="status-sub">${c}</span></div>`).join('')}</div>
-    <section class="card"><header class="section-head"><h2>近 14 天调用</h2><span class="chart-legend"><span class="legend-organizer">整理</span><span class="legend-embedder">嵌入</span></span></header><div class="chart-scroll"><svg class="usage-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 14 天每天的整理和嵌入调用次数">${grid}${bars}</svg></div><p class="muted">按 UTC 日期统计；计入你的调用额度的请求都算在内。</p></section></div>`;
+  return `<div class="usage-overview"><div class="status-strip" data-count="2">${[['近 14 天调用额度预留',num(total),'整理 + 嵌入'],['近 7 天记忆搜索',num(d.searches_7d),'来自所有连接']].map(([a,b,c])=>`<div class="status-tile"><span class="status-label">${a}</span><strong class="status-value">${b}</strong><span class="status-sub">${c}</span></div>`).join('')}</div>
+    <section class="card"><header class="section-head"><h2>近 14 天调用额度预留</h2><span class="chart-legend"><span class="legend-organizer">整理</span><span class="legend-embedder">嵌入</span></span></header><div class="chart-scroll"><svg class="usage-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="近 14 天每天的整理和嵌入调用额度预留次数">${grid}${bars}</svg></div><p class="muted">按 UTC 日期统计；计入你的调用额度的预留都算在内，不等于已成功发送或被供应商计费的次数。</p></section></div>`+usageEvidence(d.observed_usage);
+}
+// Reported usage and quota reservations are intentionally different panels. Unknown observations stay visible.
+function usageEvidence(d){if(!d)return '';const n=v=>v===null||v===undefined?l('usageUnknown'):esc(num(v));
+  const tokens=(value,unknown)=>n(value)+(unknown?` <small>${esc(unknown)} ${l('usageUnknownAttempts')}</small>`:'');
+  const money=(amount,currency)=>amount===null?l('usageUnknown'):`${esc(currency)} ${esc(Number(amount).toLocaleString(document.documentElement.lang,{maximumFractionDigits:10}))}`;
+  const totals=d.totals||{},daily=table(d.groups,['usageDay','modelName','usagePurpose','usageAttempts','usageFailures','usageInput','usageOutput','usageLatency'],r=>`<tr><td>${esc(r.day)}</td><td>${esc(r.model)}<small>${l(r.kind)}</small></td><td>${l('usagePurpose_'+r.purpose)}</td><td>${n(r.attempts)}</td><td>${n(r.failed)}<small>${n(r.pending)} ${l('usagePending')}</small></td><td>${tokens(r.input_tokens,r.input_unknown)}</td><td>${r.kind==='embedder'?'—':tokens(r.output_tokens,r.output_unknown)}</td><td>${r.latency_mean_ms===null?l('usageUnknown'):`${esc(Math.round(r.latency_mean_ms))} ms`}<small>${n(r.latency_unknown)} ${l('usageUnknownAttempts')}</small></td></tr>`);
+  const recent=table(d.recent,['created','modelName','usagePurpose','state','usageInput','usageOutput','usageAttemptLatency','usageEstimate'],r=>`<tr><td>${esc(time(r.started_at))}</td><td>${esc(r.model)}</td><td>${l('usagePurpose_'+r.purpose)}</td><td>${l('usageOutcome_'+r.outcome)}${r.error_code?`<small><code>${esc(r.error_code)}</code></small>`:''}</td><td>${n(r.input_tokens)}<small>${l('usageCached')}: ${n(r.cached_input_tokens)}</small></td><td>${r.kind==='embedder'?'—':n(r.output_tokens)}</td><td>${r.duration_ms===null?l('usageUnknown'):`${esc(r.duration_ms)} ms`}</td><td>${r.estimate_status==='estimated'?money(r.estimated_amount,r.pricing?.currency):l('usageEstimate_'+r.estimate_status)}${r.pricing?`<small>${l('usagePriceVersion')}: ${esc(r.pricing.version)}</small>`:''}</td></tr>`);
+  return section('usageEvidence',note('usageEvidenceNote')+kv([['usageWindow',`${esc(d.days)} ${l('usageDaysUTC')}`],['usageAttempts',n(totals.attempts)],['usageFailures',n(totals.failed)],['usagePending',n(totals.pending)],
+    ['usageInput',tokens(totals.input_tokens,totals.input_unknown)],['usageOutput',tokens(totals.output_tokens,totals.output_unknown)],['usageInvalid',n(totals.invalid_usage)],
+    ['usageEstimate',(d.estimates||[]).map(r=>money(r.amount,r.currency)+` <small>(${esc(r.attempts)} ${l('usageAttempts')})</small>`).join(' · ')||l('usageUnknown')],['usageUnestimated',n(totals.unestimated_attempts)]])+daily+
+    (d.groups_truncated?note('usageGroupsTruncated'):'')+`<details><summary>${l('usageRecentAttempts')} (${esc(d.recent_limit)})</summary>${recent}</details>`+note('usageEstimateNote'),{className:'usage-evidence'});
 }
 export function actionPage(page,data,caps,connectionQuery={}) {
   const owner=caps.owner_mode?data.features?.['system-health']?.owner:null;
@@ -404,7 +415,8 @@ export function actionPage(page,data,caps,connectionQuery={}) {
   // Health: the checks, then the data counts beside personal export and import.
   if(page==='storage'){const COUNTS={memories:'记忆',sources:'来源',events:'原始事件',revisions:'修订版本'};
     return healthView(data)+`<div class="card-grid health-extras">${section('dataCounts',`<dl class="metadata-grid">${Object.entries(data.counts||{}).map(([k,n])=>`<dt>${esc(COUNTS[k]||k)}</dt><dd><strong class="figure">${esc(n)}</strong></dd>`).join('')}</dl>`)}
-    ${section('personalExport',`<p>${l('portableNote')}</p>${writable?buttons([actionButton('storage.export','export'),actionButton('storage.import','importMemories')]):onlyRead()}${note('databaseRestoreNote')}`)}</div>`;}
+    ${section('personalExport',`<p>${l('portableNote')}</p>${writable?buttons([actionButton('storage.export','export'),actionButton('storage.import','importMemories')]):onlyRead()}${note('databaseRestoreNote')}`)}</div>`+
+      (caps.operator||caps.owner_mode?section('backupEvidenceTitle',backupStatusView(t,data.features?.backups),{aside:refresh()}):'');}
 
   return null;
 }
@@ -796,7 +808,11 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
           ((data.processing??getData().processing)?.quotas?.[intent.kind]?.mode==='manual'?`<input type="hidden" name="daily_requests" value="${esc(c.daily_requests||100)}"><p class="muted">${l('dailyLimitInCallLimits')}</p>`
             :field('daily_requests','dailyRequests',{type:'number',value:c.daily_requests||100,min:1,upper:10000,step:1}))+field('batch_size','batchSize',{type:'number',value:c.batch_size||5,min:1,upper:20,step:1})+
           (intent.kind==='organizer'?field('output_tokens','outputTokens',{type:'number',value:c.output_tokens||4096,min:128,upper:32768,step:1}):`<input type="hidden" name="output_tokens" value="${esc(c.output_tokens||4096)}">`)+field('profile_revision','modelRevision',{value:c.profile_revision||'1',max:160})+
-          (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
+          (intent.kind==='organizer'?check('native_schema','nativeSchema',c.native_schema!==false):'')+`</fieldset><fieldset><legend>${l('usagePricing')}</legend>`+check('pricing_enabled','usagePricingEnabled',!!c.pricing)+
+          field('price_currency','usageCurrency',{value:c.pricing?.currency||'USD',required:false,max:3})+field('price_version','usagePriceVersion',{value:c.pricing?.version||'',required:false,max:80})+
+          field('price_input','usagePriceInput',{value:c.pricing?.input_per_million??'',type:'number',required:false,min:0,upper:1e9,step:'any'})+
+          (intent.kind==='organizer'?field('price_output','usagePriceOutput',{value:c.pricing?.output_per_million??'',type:'number',required:false,min:0,upper:1e9,step:'any'}):'')+
+          field('price_cached','usagePriceCached',{value:c.pricing?.cached_input_per_million??'',type:'number',required:false,min:0,upper:1e9,step:'any'})+`<p class="muted">${l('usagePricingNote')}</p></fieldset><fieldset><legend>${l('modelPrivacy')}</legend>`+check('egress_approved','approveEgress',c.egress_approved)+(intent.kind==='embedder'?check('query_approved','approveQuery',c.query_approved):'')+`<p>${l('modelSecretExcluded')}</p></fieldset>`;
       } else if(action==='models.quota'){
         const q=(data.processing??getData().processing)?.quotas?.[intent.kind];if(!q)throw new Error('unavailable');intent.revision=q.mode==='manual'?q.revision:0;
         // Each limit is an explicit choice; the number only applies with "Limit to". A legacy limit is offered as the starting value.
@@ -871,6 +887,9 @@ const pre=document.createElement('pre');pre.className='operation-result';const {
     else if(a==='hosts.remove')p.hostname=intent.id;
     else if(a==='models.save'){
       p.kind=intent.kind;p.expected_revision=intent.revision;p.config={enabled:fd.has('enabled'),protocol:fd.get('protocol'),base_url:fd.get('base_url'),model:fd.get('model'),profile_revision:fd.get('profile_revision'),daily_requests:Number(fd.get('daily_requests')),output_tokens:Number(fd.get('output_tokens')),batch_size:Number(fd.get('batch_size')),egress_approved:fd.has('egress_approved'),query_approved:fd.has('query_approved'),native_schema:intent.kind==='organizer'?fd.has('native_schema'):true};if(intent.kind==='embedder')p.config.dimensions=Number(fd.get('dimensions'));if(fd.get('api_key'))p.api_key=fd.get('api_key');if(fd.has('remove_key'))p.remove_key=true;
+      p.config.pricing=null;if(fd.has('pricing_enabled')){const price=name=>String(fd.get(name)||'').trim()===''?null:Number(fd.get(name));
+        p.config.pricing={currency:String(fd.get('price_currency')||'').trim(),version:String(fd.get('price_version')||'').trim(),input_per_million:price('price_input'),...(intent.kind==='organizer'?{output_per_million:price('price_output')}:{})};
+        if(String(fd.get('price_cached')||'').trim())p.config.pricing.cached_input_per_million=price('price_cached');}
     } else if(a==='models.quota'){p.kind=intent.kind;p.expected_revision=intent.revision;
       // "No limit" is sent as null. Anything but plain digits is sent as typed, so the server refuses it rather than reading 0 or null.
       for(const name of ['daily_limit','total_limit']){const raw=String(fd.get(name)??'').trim();p[name]=fd.get(`${name}_mode`)==='limit_unlimited'?null:/^\d{1,16}$/.test(raw)?Number(raw):raw;}
