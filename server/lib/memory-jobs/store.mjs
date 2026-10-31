@@ -95,6 +95,19 @@ export class MemoryJobs {
     this.db.prepare("UPDATE memory_jobs SET processed=(SELECT COUNT(*) FROM memory_job_items WHERE job_id=? AND state='done'),updated_at=? WHERE job_id=?")
       .run(job.job_id,this.clock(),job.job_id);
   });}
+  /** Partial summary results are private checkpoints, not completed source items or published claims. */
+  saveSummaryProgress(job,item,progress){return this.store.memoryTransaction(()=>{
+    this.store.consoleService?.owner.guardJob(job);
+    if(!this.owns(job))fail('LEASE_LOST');
+    const saved=this.db.prepare('SELECT * FROM memory_job_items WHERE job_id=? AND ordinal=?').get(job.job_id,item.ordinal);
+    if(job.job_type!=='summary'||!saved||saved.state==='done'||item.job_id!==job.job_id||item.user_id!==job.user_id||item.scope_key!==job.scope_key
+      ||['user_id','memory_id','revision','state_hash','scope_key'].some(key=>saved[key]!==item[key]))fail('INVALID_JOB_ITEM');
+    if(!this.store.derivedMemory.validateItem(item))fail('STALE_INPUT');
+    const serialized=JSON.stringify(progress);
+    if(progress?.schema!=='summary-segments-v1'||!Array.isArray(progress.completed)||progress.completed.length>64||Buffer.byteLength(serialized)>131072)fail('INVALID_SOURCE_SET');
+    this.db.prepare("UPDATE memory_job_items SET state='partial',result_json=? WHERE job_id=? AND ordinal=?").run(serialized,job.job_id,item.ordinal);
+    this.db.prepare('UPDATE memory_jobs SET updated_at=? WHERE job_id=?').run(this.clock(),job.job_id);
+  });}
   publish(job,callback){return this.store.memoryTransaction(()=>{
     this.store.consoleService?.owner.guardJob(job);
     if(!this.owns(job))fail('LEASE_LOST');const items=this.items(job);

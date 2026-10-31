@@ -10,7 +10,7 @@ export function memoryProcessingView(t,data,{writable=false}={}){
   const rows=[['processingSource',state(data.source.status)],['processingTraits',state(data.traits.status)],
     ['processingSummary',state(data.summary.status)],['processingVector',`${state(data.vector.status)} · ${label('processingConfirmedChunks')} ${data.vector.confirmed_chunks}`]];
   const runRows=data.runs.items.map(run=>`<li><span>${label('processingChannel_'+run.kind)}</span> · ${esc(t(run.state))} · ${label('revisions')} ${run.revision} · ${run.used}/${run.budget}${run.error_code?` <strong>${esc(t(run.error_code))}</strong>`:''}</li>`).join('');
-  const jobs=data.jobs.items.map(job=>`<li>${label('processingChannel_'+job.job_type)} · ${esc(t(job.state))} · ${label('revisions')} ${job.revision}${job.last_error_code?` <strong>${esc(t(job.last_error_code))}</strong>`:''}</li>`).join('');
+  const jobs=data.jobs.items.map(job=>`<li>${label('processingChannel_'+job.job_type)} · ${esc(t(job.state))} · ${label('revisions')} ${job.revision}${Number.isInteger(job.segment_total)?` · ${label('processingSegments')} ${esc(job.segment_processed)}/${esc(job.segment_total)} · ${label('processingSegmentsUnpublished')}`:''}${job.last_error_code?` <strong>${esc(t(job.last_error_code))}</strong>`:''}</li>`).join('');
   return `<h3>${label('processingEvidenceTitle')}</h3><p class="muted">${label('processingEvidenceNote')} · ${label('revisions')} ${data.revision}</p>
     <dl class="detail-facts">${rows.map(([key,value])=>`<dt>${label(key)}</dt><dd>${value}</dd>`).join('')}</dl>
     ${data.vector.repair_blockers.length?`<p class="muted">${data.vector.repair_blockers.map(code=>esc(t(code))).join(' · ')}</p>`:''}

@@ -21,7 +21,7 @@ const command=async(command,extra={})=>{child.stdin.write(JSON.stringify({comman
 const check=(name,value=true)=>{assert.ok(value,name);checks.push(name);console.log('PASS '+name);};
 try{
  cfg=await read();assert.equal(new URL(cfg.url).hostname,'127.0.0.1');await command('owner-mode');
- browser=await chromium.launch({executablePath:process.env.CHROME_EXECUTABLE,headless:true,args:['--no-sandbox']});
+ browser=await chromium.launch({executablePath:process.env.CHROMIUM_EXECUTABLE||process.env.CHROME_EXECUTABLE,headless:true,args:['--no-sandbox']});
  const context=await browser.newContext({viewport:{width:1440,height:1000}});
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  await context.addInitScript(({account,origin})=>{if(location.origin===origin)localStorage.setItem('mnemuron.appearance.v1.'+account,JSON.stringify({locale:'en'}));},{account:cfg.accounts[0].account_id,origin:cfg.url});

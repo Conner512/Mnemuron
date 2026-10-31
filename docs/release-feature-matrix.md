@@ -2,7 +2,7 @@
 
 This matrix describes the current candidate source and its validation boundaries.
 The inventory matches `web/console/visuals.mjs` and the feature table in
-[Console feature standard](console-feature-standard.md): **58 entries: 57 live,
+[Console feature standard](console-feature-standard.md): **64 entries: 63 live,
 0 planned, 1 policy exclusion**. A `live` entry has an implemented interface;
 deployment, enabled runtime capabilities, actual provider behavior and real-host
 acceptance remain separate. `production_ready` remains `false`.
@@ -31,6 +31,10 @@ listed suite.
 | responsive | `scripts/test-console-responsive.mjs` |
 | continuity | `scripts/test-console-workflow-continuity.mjs` |
 | task-workflows | `scripts/test-console-task-workflows.mjs` |
+| memory-review | `scripts/test-console-memory-review.mjs` |
+| selected-processing | `scripts/test-memory-processing-browser.mjs` |
+| search-workbench | `scripts/test-console-search-workbench.mjs` |
+| operations | `scripts/test-console-operations.mjs` |
 
 These suites use disposable synthetic Core/OAuth accounts and loopback HTTP.
 Model and vector fixtures do not certify an external provider or real Qdrant.
@@ -45,6 +49,7 @@ layout separately from the action coverage shown here.
 | OVW-01 | 记忆分布与计数 | live | `server/test/console-completion.test.mjs` | completion |
 | OVW-02 | 最近写入与 30 天活动 | live | `server/test/console-completion.test.mjs` | completion |
 | OVW-03 | 待处理事项 | live | `server/test/console-completion.test.mjs` | completion |
+| OVW-04 | 全库局部图谱与证据 | live | `server/test/console-memory-graph.test.mjs`; `services/oauth/test/console-search-workbench-ui.test.mjs` | search-workbench |
 | MEM-01 | 检索与筛选 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion + continuity |
 | MEM-02 | 详情、来源与修订历史 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-03 | 新建记忆 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
@@ -53,10 +58,14 @@ layout separately from the action coverage shown here.
 | MEM-06 | 批量撤回 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-07 | 版本对比 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-08 | 关键词筛选与地图 | live | `server/test/memory-traits.test.mjs`; `server/test/console-memory-graph.test.mjs`; `services/oauth/test/console-library-ui.test.mjs` | functional |
+| MEM-09 | 候选审核工作台 | live | `server/test/console-memory-review.test.mjs`; `services/oauth/test/console-actions.test.mjs` | memory-review |
+| MEM-10 | 记忆对照与人工复查 | live | `server/test/console-memory-review.test.mjs`; `services/oauth/test/console-actions.test.mjs` | memory-review |
 | MEM-11 | 处理证据与选中补处理 | live | `server/test/memory-processing-workbench.test.mjs`; `services/oauth/test/console-actions.test.mjs`; `services/oauth/test/console-memory-processing.test.mjs` | `scripts/test-memory-processing-browser.mjs`: exact selection, explicit confirmation, completed evidence, basic grant and mobile layout |
+| MEM-12 | 搜索反馈与验收 | live | `server/test/console-search-feedback.test.mjs`; `server/test/search-workbench-quality.test.mjs`; `services/oauth/test/console-actions.test.mjs` | search-workbench |
 | SUM-01 | 摘要列表 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models + refinements (summaries) |
 | SUM-02 | 生成摘要 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/console-completion.test.mjs` | functional + models |
 | SUM-03 | 按项目和会话分组 | live | `server/test/memory-first-jobs.test.mjs`; `services/oauth/test/console-library-ui.test.mjs` | models + refinements (summaries) |
+| SUM-04 | 摘要质量与原文对照 | live | `server/test/console-memory-review.test.mjs`; `services/oauth/test/console-actions.test.mjs` | memory-review |
 | TSK-01 | 项目列表 | live | `server/test/console-projects.test.mjs`; `server/test/project-lifecycle-mutations.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion + refinements (projects, lifecycle) |
 | TSK-02 | 任务与来源分支 | live | `server/test/console-projects.test.mjs`; `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion + refinements (projects) + task-workflows (exact selected task) |
 | TSK-03 | 项目上下文预览 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion (reads only) |
@@ -83,7 +92,7 @@ layout separately from the action coverage shown here.
 | MOD-01 | 整理模型与向量模型 | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
 | MOD-02 | 连通性测试 | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
 | MOD-03 | 个人向量索引（含首次建立：冻结清单、总预算、手动启用与回滚） | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
-| MOD-04 | 用量与预算（含手动调用次数限制） | live | `server/test/console-model-pipeline.test.mjs`; `services/oauth/test/console-models-ui.test.mjs` | models |
+| MOD-04 | 用量、预算与可选费用估算 | live | `server/test/console-model-pipeline.test.mjs`; `server/test/model-usage-observation.test.mjs`; `services/oauth/test/console-operations-evidence-ui.test.mjs` | models + operations; provider usage and versioned price snapshots are not a billing invoice |
 | SEC-01 | 修改密码 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
 | SEC-02 | 更换验证器 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
 | SEC-03 | 轮换恢复码 | live | `services/oauth/test/recovery.test.mjs`; `services/oauth/test/identity-repository.test.mjs`; `services/oauth/test/console-actions.test.mjs` | functional + completion |
@@ -100,7 +109,7 @@ layout separately from the action coverage shown here.
 | STO-05 | 平台开关 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
 | STO-06 | 服务健康 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
 | STO-07 | 版本与迁移 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
-| STO-08 | 备份状态 | live | `server/test/console-completion.test.mjs`; `services/oauth/test/console-feature-map.test.mjs` | completion |
+| STO-08 | 备份状态 | live | `server/test/backup-status-evidence.test.mjs`; `services/oauth/test/console-operations-evidence-ui.test.mjs` | operations; trusted creation, verify and isolated-restore evidence, including later failure |
 
 ## Task-workflow acceptance recorded on 2026-10-29
 
@@ -161,9 +170,27 @@ belongs with the immutable candidate's release run.
   as current feature cards.
 - **AGT-02** reports actual server observations; unreported local hook failures
   and queues remain `not_observable`. **STO-08** has a backup-status read interface,
-  but absent trusted backup evidence remains `not_configured/verified:false` and
-  does not establish backup or restore acceptance. Usage cards count requests
-  and budgets without inventing external billing amounts.
+  but absent trusted backup evidence remains `not_configured`, `missing` or `unknown`
+  and never establishes backup or restore acceptance. Owner Console providers now
+  record reported tokens and per-attempt latency; optional request-time price
+  estimates remain distinct from actual external billing. Unsupported standalone
+  providers and missing usage remain unobserved/unknown, never free.
+
+## Memory workbench and checkpoint coverage
+
+Issue #6 adds source-bound candidate approval, two-memory manual review, summary
+comparison and feedback, exact-selection processing, project/task graph evidence,
+explicit search feedback, observed provider usage and trusted backup evidence.
+The four additional browser scripts above run in the existing isolated browser CI;
+their private fixture databases, credentials and evidence are not uploaded as artifacts.
+
+Oversized source summaries are covered by `memory-first-jobs-segments.test.mjs`,
+`memory-first-jobs-budgets.test.mjs` and `memory-processing-segments.test.mjs`.
+They test complete wire budgets, original offsets, frozen classification context,
+durable private checkpoints and cancellation/source/lease fences. Completing a
+segment is not publishing a summary. No model-based reranker or query cache is
+introduced; the new feedback and frozen offline comparison are evidence for a
+separate, explicitly authorized real-provider quality evaluation.
 
 ## Host acceptance is separate
 
