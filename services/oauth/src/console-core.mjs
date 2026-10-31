@@ -1,6 +1,6 @@
 import {BoundaryError,readPrivate,fetchJson} from '../../../shared/oauth-common.mjs';
 import {CONSOLE_READ_SCOPES,CONSOLE_BASIC_SCOPES,CONSOLE_WRITE_SCOPES,consoleActionWritable,exactScopes} from '../../../shared/console-contract.mjs';
-import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS} from '../../../shared/console-contract.mjs';
+import {CONSOLE_FEATURE_VIEWS as FEATURE_VIEWS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_WORKFLOW_ERRORS,CONSOLE_REVIEW_VIEWS} from '../../../shared/console-contract.mjs';
 import {isRetrievalDegradation} from '../../../shared/retrieval-diagnostics.mjs';
 export class ConsoleCore {
   constructor(config,principal,binding) {
@@ -48,7 +48,7 @@ export class ConsoleCore {
       if(!/^[A-Za-z0-9_.:-]{1,160}$/.test(memory_id||'')||Object.keys(options).some(k=>!['content_offset','content_limit','source_offset','revision','source_version','include_history'].includes(k)))throw new BoundaryError(400,'INVALID_DETAIL_REQUEST');
       return this.request(`/v1/memories/${encodeURIComponent(memory_id)}?${new URLSearchParams(options)}`);
     }
-    if(!['entities','overview','memories','summaries','summary','jobs','job','storage','connections','audit','capabilities','models','memory-meta','export','projects','metadata-values','task-detail','project-profile','tunnel','config','operation','lifecycle-preview-check',...FEATURE_VIEWS,...CONSOLE_WORKFLOW_VIEWS].includes(view))throw new BoundaryError(404,'NOT_FOUND');
+    if(!['entities','overview','memories','summaries','summary','jobs','job','storage','connections','audit','capabilities','models','memory-meta','export','projects','metadata-values','task-detail','project-profile','tunnel','config','operation','lifecycle-preview-check',...FEATURE_VIEWS,...CONSOLE_WORKFLOW_VIEWS,...CONSOLE_REVIEW_VIEWS].includes(view))throw new BoundaryError(404,'NOT_FOUND');
     return this.request(`/v1/console/${view}?${new URLSearchParams(params)}`);
   }
   async action(input) {

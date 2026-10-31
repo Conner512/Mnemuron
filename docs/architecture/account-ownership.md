@@ -1,5 +1,17 @@
 # Account ownership and boundaries
 
+### Review metadata (additive Console workbench)
+
+`memory_review_candidates`, `memory_summary_reviews` and `memory_manual_reviews`
+are classified under `core.review_user_id` in the machine-readable inventory. Their
+primary keys include `user_id`; no platform-admin cross-owner read path is added.
+Candidate rows store event references, exact offsets, rule/version metadata and review
+state, not copied source text. Summary feedback stores a bounded decision code bound to
+the summary revision and source digest. Manual memory review stores revision-bound
+decisions and explicit verification/due dates. Every rich read revalidates its live
+owner-scoped source. MCP and basic Console credentials gain no review mutation scopes.
+Review metadata is retained on rollback; there is no destructive down migration.
+
 > **Opt-in functional update:** [console actions v0.4](../console-functional-actions-v0.4.md) adds separately authorized human-console writes, owner-isolated models and explicit operator roles. The original read-only mode remains the default; old `blocked_policy` statements below describe that mode, not the new enabled mode. ChatGPT MCP scopes are unchanged.
 
 

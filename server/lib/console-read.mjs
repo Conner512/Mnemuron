@@ -91,6 +91,7 @@ function summaryPreview(store,auth,user,row){
 export async function consoleRead(store,auth,view,params={}) {
   store.requireScope(auth,'console:read');if(store.consoleService.owner.user)store.consoleService.owner.require(auth.user_id);
   if(!isConsoleReader(auth))throw new NotFoundError('Console route not available.');
+  if(['review-candidates','summary-quality','memory-review'].includes(view))return store.consoleService.review.read(auth,view,params);
   const allowed={entities:['entity_id','memory_id','query','status','offset','limit'],memories:['offset','limit','query','mode','status','kind','concept','topic','origin','review','part'],summaries:['offset','limit'],jobs:['offset','limit','job_id','group','batch_id'],summary:['summary_id','revision','cursor'],job:['job_id'],'memory-meta':['memory_id'],export:['after','highwater','limit'],operation:['operation_id','action','request_hash'],audit:['offset','limit'],
     projects:['offset','limit','archived','query'],'metadata-values':['kind','id','field','offset','limit'],'task-detail':['task_id'],'project-profile':['project_id'],tunnel:[],config:['after','limit'],'lifecycle-preview-check':['preview_id','action','confirm_name','operation_id'],
     'task-workflow-preview':['preview_id'],'resume-targets':['offset','limit'],'resume-status':['resume_id'],'resume-history':['task_id','offset','limit']}[view]||[];
@@ -110,7 +111,7 @@ export async function consoleRead(store,auth,view,params={}) {
       if(params.action===undefined&&params.request_hash===undefined)return store.consoleService.state.inspect(user,params.operation_id);
       // The BFF checks a retry's exact business intent before consuming fresh factors. Neither the saved hash nor
       // the operation result/content leaves this view; no ordinary read credential gains confirmation authority.
-      if(!Object.hasOwn(CONSOLE_WORKFLOW_CONFIRMS,params.action)||!/^[a-f0-9]{64}$/.test(params.request_hash||''))throw new ValidationError('Invalid operation check.','INVALID_CONSOLE_INPUT');
+      if(!Object.hasOwn(CONSOLE_WORKFLOW_CONFIRMS,params.action)&&!['review.candidate','review.resolve'].includes(params.action)||!/^[a-f0-9]{64}$/.test(params.request_hash||''))throw new ValidationError('Invalid operation check.','INVALID_CONSOLE_INPUT');
       store.consoleService.require(auth,params.action);
       return store.memoryTransaction(()=>{
         const result=store.consoleService.state.inspect(user,params.operation_id,{action:params.action,requestHash:params.request_hash});
@@ -118,6 +119,7 @@ export async function consoleRead(store,auth,view,params={}) {
           // Task workflow receipts remain bound to their original Console credential and current live references,
           // even after expiry. Do not return the stored receipt or revive its frozen content for this precheck.
           const receipt=JSON.parse(db.prepare('SELECT result_json FROM console_operations WHERE user_id=? AND operation_id=?').get(user,params.operation_id).result_json);
+          if(params.action.startsWith('review.')){store.consoleService.review.validateReceipt(auth,receipt);return result;}
           const workflow=store.consoleService.taskWorkflows;workflow.require(auth);workflow.references(auth,workflow.row(auth,receipt.preview_id));
         }
         return result;

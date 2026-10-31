@@ -213,9 +213,12 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 | MEM-06 | 记忆库 | 批量撤回 | live | memories | memory.batch_retract |
 | MEM-07 | 记忆库 | 版本对比 | live | memory-versions | — |
 | MEM-08 | 记忆库 | 关键词筛选与地图 | live | memories | — |
+| MEM-09 | 记忆库 | 候选审核工作台 | live | review-candidates | review.extract, review.candidate |
+| MEM-10 | 记忆库 | 记忆对照与人工复查 | live | memory-review | review.verify, review.resolve |
 | SUM-01 | 摘要 | 摘要列表 | live | summaries, summary | — |
 | SUM-02 | 摘要 | 生成摘要 | live | — | jobs.schedule |
 | SUM-03 | 摘要 | 按项目和会话分组 | live | summaries | — |
+| SUM-04 | 摘要 | 摘要质量与原文对照 | live | summary-quality | review.summary |
 | TSK-01 | 项目与任务 | 项目列表 | live | projects | — |
 | TSK-02 | 项目与任务 | 任务与来源分支 | live | task-branches | — |
 | TSK-03 | 项目与任务 | 项目上下文预览 | live | project-context | — |

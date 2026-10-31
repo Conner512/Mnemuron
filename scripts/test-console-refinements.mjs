@@ -300,11 +300,16 @@ async function summariesSection() {
     if(width<=390){
       await row(page,'Synthetic UI Project Twin').locator('button[data-summary]').click();
       await page.locator('#memory-content .claim-list').waitFor();
+      await settledPane(page,tag);
       const pane=await page.evaluate(()=>{const p=document.querySelector('#memory-dialog'),claim=document.querySelector('#memory-content .claim-list .body-content');
         return {fits:p.scrollWidth<=p.clientWidth,claim:claim.getBoundingClientRect().width,facts:document.querySelector('#memory-content .summary-detail-facts')?.innerText||''};});
       check(S,`${tag}: summary detail repeats the distinguishing facts and reads at full pane width (${Math.round(pane.claim)}px)`,
         pane.fits&&pane.claim>=width-80&&pane.facts.includes('Synthetic UI Project Twin'));
-      await settledPane(page,tag);await shot(page,`summaries-02-detail-${tag}`,false);
+      const reviewButton=page.locator('#memory-content [data-review-open="summary"]');
+      const review=await reviewButton.evaluate(b=>{const bounds=b.getBoundingClientRect(),content=b.closest('#memory-content').getBoundingClientRect(),style=getComputedStyle(b);
+        return {fits:bounds.left>=content.left&&bounds.right<=content.right&&b.scrollWidth<=b.clientWidth,wraps:style.whiteSpace==='normal',text:b.textContent};});
+      check(S,`${tag}: complete summary review label wraps inside the detail pane`,review.fits&&review.wraps&&review.text===(locale==='en'?'Summary quality and source comparison':'摘要质量与原文对照'));
+      await shot(page,`summaries-02-detail-${tag}`,false);
       await page.locator('#memory-content [data-close]').click();
       check(S,`${tag}: in-pane Back to list closes the detail and returns focus to the row`,
         !(await page.locator('#memory-dialog').evaluate(d=>d.open))&&await page.evaluate(()=>document.activeElement?.hasAttribute('data-summary')));
@@ -774,12 +779,15 @@ async function lifecycleSection() {
   const {context,page,errors}=await newPage({width:1440,height:1000},{account:0});
   const posts=[];page.on('request',r=>{if(r.method()==='POST'&&r.url().endsWith('/console-api/action'))posts.push(new URLSearchParams(r.postData()||'').get('action'));});
   const confirms=()=>posts.filter(a=>a!=='projects.lifecycle_preview').length;
+  // Tasks retain their old rows during a reload. Even an already-selected view reloads page zero,
+  // so its old aria-pressed state (or an absent loading card) is not a completion signal.
+  const reloadList=async(p,button)=>{const previous=await p.locator('.view-switch').elementHandle();assert.ok(previous);
+    try{await button.click();await p.waitForFunction(node=>!node.isConnected,previous);await settle(p);}finally{await previous.dispose();}};
   // The project list holds 26+ projects; find a row by switching pages until it appears.
-  // A view switch is done when that view's button is the pressed one (the previous list can still be on screen before).
-  const switchView=async(p,view)=>{await p.locator(`[data-project-view="${view}"]`).click();await p.locator(`[data-project-view="${view}"][aria-pressed="true"]`).waitFor();await settle(p);};
+  const switchView=async(p,view)=>{await reloadList(p,p.locator(`[data-project-view="${view}"]`));await p.locator(`[data-project-view="${view}"][aria-pressed="true"]`).waitFor();};
   const showRow=async(p,id,view='false')=>{await switchView(p,view);
     // Page forward with the project pager's Next button (its data offset is past the current one) until the row shows.
-    for(let i=0;i<4&&!(await row(p,id).count());i++){const next=p.locator('[data-project-offset]').filter({hasText:/下一页|Next/});if(!(await next.count()))break;await next.first().click();await settle(p);}
+    for(let i=0;i<4&&!(await row(p,id).count());i++){const next=p.locator('[data-project-offset]').filter({hasText:/下一页|Next/});if(!(await next.count()))break;await reloadList(p,next.first());}
     await row(p,id).waitFor();};
   await page.goto(cfg.url+'/app/tasks');await settle(page);
   check(S,'Three project views (active, archived, deleted) with server counts',await page.locator('[data-project-view]').count()===3&&(await page.locator('[data-project-view="deleted"] .figure').innerText()).trim()==='0');
@@ -862,30 +870,39 @@ async function lifecycleSection() {
   check(S,'The target lists its merged project',(await row(page,'synthetic-life-tgt').innerText()).includes('synthetic-life-src')&&await row(page,'synthetic-life-src').count()===0);
 
   if(process.env.LC_DEBUG)console.log('STEP late-responses');
-  // Late and reordered responses: a slow first preview never replaces a newer one; a reply after Cancel never reopens.
-  // The server handles each request at once; only the delivery of the chosen reply is delayed (a slow network), so the
-  // request itself is valid and the late reply carries a real preview.
-  let delay=true;await page.route('**/console-api/action',async route=>{const action=new URLSearchParams(route.request().postData()||'').get('action');
-    const slow=action==='projects.lifecycle_preview'&&delay;if(slow)delay=false;const response=await route.fetch();
-    if(slow)await new Promise(r=>setTimeout(r,1200));await route.fulfill({response});});
-  await showRow(page,'synthetic-life-keep');
-  await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();
-  await page.waitForTimeout(150);await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});
-  await page.waitForTimeout(1500);
-  check(S,'A preview that arrives after Cancel never reopens the dialog',!(await op(page).isVisible()));
-  // Reordered replies across Cancel and reopen: the slow reply of the first dialog arrives after the second dialog's reply.
-  const previewIds=[];page.on('response',async r=>{if(r.url().endsWith('/console-api/action')&&new URLSearchParams(r.request().postData()||'').get('action')==='projects.lifecycle_preview'){try{previewIds.push((await r.json()).preview_id);}catch{}}});
-  delay=true;await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();await page.waitForTimeout(100);
-  await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});
-  await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();await confirmForm(page).waitFor({timeout:5000});
-  const shownFirst=await confirmForm(page).getAttribute('data-preview-id');await page.waitForTimeout(1500);
-  check(S,'A slow reply from a cancelled dialog never replaces the newer preview',previewIds.length>=2&&previewIds.every(Boolean)&&await confirmForm(page).getAttribute('data-preview-id')===shownFirst&&shownFirst===previewIds[0]&&previewIds.at(-1)!==shownFirst);
-  const first=await confirmForm(page).getAttribute('data-preview-id');delay=true;
-  await op(page).locator('[data-lifecycle-refresh]').click();await page.waitForTimeout(100);
-  check(S,'The confirm stays disabled while a refresh is pending',await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').isDisabled());
-  await op(page).locator('[data-lifecycle-message]').waitFor({timeout:5000});
-  check(S,'The refreshed preview replaces the old one',await confirmForm(page).getAttribute('data-preview-id')!==first);
-  await page.unroute('**/console-api/action');
+  // Fetch actual BFF previews immediately, but deliver each reply only when its gate is released.
+  // Fixed delays and asynchronous response.json() observer order do not establish network order.
+  const pendingPreviews=[],previewGates=[];
+  const holdPreview=()=>{let release,ready,fail;const wait=new Promise(r=>release=r),received=new Promise((resolve,reject)=>{ready=resolve;fail=reject;});
+    const gate={wait,ready,fail,release,received,operation:null,async deliver(){
+      const delivery=page.waitForResponse(r=>r.url().endsWith('/console-api/action')&&new URLSearchParams(r.request().postData()||'').get('operation_id')===gate.operation);
+      release();const response=await delivery;assert.equal(response.status(),200);await response.finished();await frame(page);
+    }};pendingPreviews.push(gate);previewGates.push(gate);return gate;
+  };
+  await page.route('**/console-api/action',async route=>{const body=new URLSearchParams(route.request().postData()||'');
+    const gate=body.get('action')==='projects.lifecycle_preview'?pendingPreviews.shift():null;if(!gate)return route.continue();
+    gate.operation=body.get('operation_id');
+    try{const response=await route.fetch(),data=await response.json();assert.equal(response.status(),200);assert.ok(data.preview_id);gate.ready(data);
+      await gate.wait;await route.fulfill({response});
+    }catch(error){gate.fail(error);await route.abort();}
+  });
+  try{
+    await showRow(page,'synthetic-life-keep');
+    const cancelled=holdPreview();await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();await cancelled.received;
+    await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});await cancelled.deliver();
+    check(S,'A preview that arrives after Cancel never reopens the dialog',!(await op(page).isVisible()));
+    // The older request is completed by the server before Cancel, then delivered after the new preview is visible.
+    const older=holdPreview();await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();const oldPreview=await older.received;
+    await op(page).locator('[data-operation-close]').first().click();await op(page).waitFor({state:'hidden'});
+    const newer=holdPreview();await row(page,'synthetic-life-keep').locator('[data-console-action="projects.lifecycle_delete"]').click();const newPreview=await newer.received;
+    await newer.deliver();await confirmForm(page).waitFor();const shownFirst=await confirmForm(page).getAttribute('data-preview-id');await older.deliver();
+    check(S,'A slow reply from a cancelled dialog never replaces the newer preview',oldPreview.preview_id!==newPreview.preview_id&&shownFirst===newPreview.preview_id&&await confirmForm(page).getAttribute('data-preview-id')===newPreview.preview_id);
+    const first=await confirmForm(page).getAttribute('data-preview-id'),refresh=holdPreview();
+    await op(page).locator('[data-lifecycle-refresh]').click();const refreshed=await refresh.received;
+    check(S,'The confirm stays disabled while a refresh is pending',await op(page).locator('form[data-lifecycle-step="confirm"] button[type=submit]').isDisabled());
+    await refresh.deliver();await op(page).locator('[data-lifecycle-message]').waitFor();
+    check(S,'The refreshed preview replaces the old one',refreshed.preview_id!==first&&await confirmForm(page).getAttribute('data-preview-id')===refreshed.preview_id);
+  }finally{for(const gate of previewGates)gate.release();await page.unroute('**/console-api/action');}
   if(process.env.LC_DEBUG)console.log('STEP revoked');
   // A revoked session cannot confirm.
   await op(page).locator('[name=confirm_name]').fill(names['synthetic-life-keep']);await factors(page);

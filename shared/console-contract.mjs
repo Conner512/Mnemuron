@@ -24,6 +24,13 @@ export const RESUME_WORKFLOW_ACTIONS=Object.freeze(['resume.preview','resume.con
 export const TASK_WORKFLOW_VIEWS=Object.freeze(['task-workflow-preview']);
 export const RESUME_WORKFLOW_VIEWS=Object.freeze(['resume-targets','resume-status','resume-history']);
 export const CONSOLE_WORKFLOW_VIEWS=Object.freeze([...TASK_WORKFLOW_VIEWS,...RESUME_WORKFLOW_VIEWS]);
+export const CONSOLE_REVIEW_VIEWS=Object.freeze(['review-candidates','summary-quality','memory-review']);
+export const CONSOLE_REVIEW_ACTIONS=Object.freeze(['review.extract','review.candidate','review.summary','review.verify','review.resolve']);
+// Candidate promotion and destructive pair decisions are explicit, freshly authenticated Console operations.
+export const CONSOLE_REVIEW_FIELDS=Object.freeze({
+  'review.candidate':['candidate_id','revision','decision','content','memory_type','topic','confirmed'],
+  'review.resolve':['memory_id','revision','source_version','counterpart_id','counterpart_revision','counterpart_source_version','decision','confirmed'],
+});
 export const CONSOLE_WORKFLOW_ERRORS=Object.freeze(['LIFECYCLE_AUTHORITY_STALE','TASK_WORKFLOW_PREVIEW_TOO_LARGE','RECONCILIATION_CONFLICT',
   'RESUME_ALREADY_DELIVERED','RESUME_CONTEXT_CHANGED','RESUME_NOT_FOUND','RESUME_PREVIEW_EXPIRED','RESUME_TARGET_MISMATCH',
   'RESUME_TARGET_REQUIRED','RESUME_TARGET_UNAVAILABLE','RESUME_TASK_UNRESOLVED','RESUME_VERSION_CHANGED','RESUME_CONFIRMATION_REQUIRED']);
@@ -34,7 +41,7 @@ export const CONSOLE_WORKFLOW_CONFIRMS=Object.freeze({
   'tasks.reconciliation_resolve':['preview_id','preview_version','decision'],
   'resume.confirm':['resume_id','preview_version','confirmed'],
 });
-export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,...TASK_WORKFLOW_ACTIONS,...RESUME_WORKFLOW_ACTIONS,'memory.create','memory.correct','memory.retract',...CONSOLE_ORGANIZE_ACTIONS,
+export const CONSOLE_ACTIONS = Object.freeze([...OWNER_ACTIONS,...TASK_WORKFLOW_ACTIONS,...RESUME_WORKFLOW_ACTIONS,...CONSOLE_REVIEW_ACTIONS,'memory.create','memory.correct','memory.retract',...CONSOLE_ORGANIZE_ACTIONS,
   'jobs.schedule','jobs.cancel','jobs.cancel_batch','jobs.retry','models.save','models.test','models.discover','models.disable','models.quota','hosts.set','hosts.remove','vector.schedule','vector.prepare','vector.activate','vector.deactivate',
   'connections.create','connections.rotate','connections.revoke','storage.import','devices.revoke',
   'memory.batch_retract','privacy.defaults','retention.save','retention.prune','devices.register','devices.rotate',

@@ -125,6 +125,7 @@ export const LIFECYCLE_ENFORCEMENT_TABLES = `
 //   memory_vector_points (derived from memory_vector_documents, which are tracked).
 const viaVectorOwner = {parent: 'memory_vector_owners', key: 'generation'};
 export const MATERIAL_TABLES = [
+  ...['memory_review_candidates','memory_summary_reviews','memory_manual_reviews'].map(table=>({table,group:'memory_review'})),
   ...['owner_feature_policy','owner_processing_runs'].map(table=>({table,group:'owner_controls'})),
   ...['owner_processing_items','owner_processing_jobs'].map(table=>({table,group:'owner_controls',owner:{parent:'owner_processing_runs',key:'run_id'}})),
   // core: created by the Core migrations.

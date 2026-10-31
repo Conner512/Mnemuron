@@ -33,6 +33,39 @@ async function setup(t,{maintenance=false,recovery=false,writable=true,managemen
  return {core,f,ids,a,b,get,act,proof};
 }
 
+test('HTTP-REVIEW-01: source previews are owner-only; promotion requires fresh factors and never forwards them',async t=>{
+ const x=await setup(t),store=x.core.store,writer=x.core.issue(x.a.record.user_id,'synthetic-review-http');
+ store.appendEvents(writer.auth,{event:{event_id:'synthetic-review-http-event',event_type:'user_message',session_id:'synthetic-review-http-session',content:'事实：合成系统已完成验收。'}});
+ const events=await x.get('review-candidates');assert.equal(events.status,200,JSON.stringify(events.body));const event=events.body.events.find(e=>e.event_id==='synthetic-review-http-event');assert.ok(event);
+ const preview=await x.act('review.extract',{event_id:event.event_id,source_hash:event.source_hash});assert.equal(preview.status,200,JSON.stringify(preview.body));
+ const c=(await x.get('review-candidates?event_id='+event.event_id)).body.candidates[0];assert.ok(c);
+ assert.equal((await new Browser(x.f.config.issuer).request('/console-api/review-candidates')).status,401);
+ assert.equal((await x.get('review-candidates?candidate_id='+c.candidate_id,x.b)).status,404);
+ const p={candidate_id:c.candidate_id,revision:c.revision,decision:'accept',confirmed:true};
+ assert.equal((await x.act('review.candidate',p)).status,403);
+ const seen=[],original=store.consoleService.execute.bind(store.consoleService);store.consoleService.execute=(auth,input)=>{seen.push(input);return original(auth,input);};
+ const op=randomUUID(),saved=await x.act('review.candidate',{...p,...await x.proof()},x.a,op);assert.equal(saved.status,200,JSON.stringify(saved.body));assert.ok(saved.body.memory_id);
+ assert.ok(seen.every(call=>!Object.hasOwn(call.payload,'current_password')&&!Object.hasOwn(call.payload,'otp')));
+ assert.equal((await x.act('review.candidate',{...p,...await x.proof(x.a,30)},x.a,op)).body.replayed,true);
+ assert.equal((await x.get('memory-review?memory_id='+saved.body.memory_id,x.b)).status,404);
+});
+
+test('HTTP-REVIEW-02: expired or stale review sources are rejected before spending another authenticator attempt',async t=>{
+ const x=await setup(t),writer=x.core.issue(x.a.record.user_id,'synthetic-review-stale');
+ x.core.store.appendEvents(writer.auth,{event:{event_id:'synthetic-review-stale-event',event_type:'user_message',session_id:'synthetic-review-stale-session',content:'事实：合成对象仍需复查。'}});
+ const event=(await x.get('review-candidates')).body.events[0];await x.act('review.extract',{event_id:event.event_id,source_hash:event.source_hash});
+ const candidate=(await x.get('review-candidates')).body.candidates[0];let calls=0;const original=x.ids.console.reauthenticate;x.ids.console.reauthenticate=function(...args){calls++;return original.apply(this,args);};
+ const malformed=await x.act('review.candidate',{candidate_id:candidate.candidate_id,revision:candidate.revision,decision:'guess',...await x.proof()});
+ assert.equal(malformed.status,400);assert.equal(calls,0);
+ x.core.store.db.prepare('UPDATE events SET expires_at=? WHERE event_id=?').run('2000-01-01T00:00:00Z',event.event_id);
+ const response=await x.act('review.candidate',{candidate_id:candidate.candidate_id,revision:candidate.revision,decision:'accept',confirmed:true,...await x.proof()});
+ assert.equal(response.status,409);assert.equal(response.body.error_code,'STALE_INPUT');assert.equal(calls,0);
+ const a=(await x.act('memory.create',{scope:'user',content:'Synthetic review left'})).body.memory_id,b=(await x.act('memory.create',{scope:'user',content:'Synthetic review right'})).body.memory_id;
+ const pair=(await x.get('memory-review?memory_id='+a+'&counterpart_id='+b)).body;
+ const stale=await x.act('review.resolve',{memory_id:a,revision:999,source_version:pair.left.source_version,counterpart_id:b,counterpart_revision:pair.right.revision,counterpart_source_version:pair.right.source_version,decision:'replace',confirmed:true,...await x.proof()});
+ assert.equal(stale.status,409);assert.equal(calls,0);
+});
+
 function taskWorkflowSeed(x,owner=x.a){
  const store=x.core.store,user=owner.record.user_id,suffix=randomUUID(),project_id=`workflow-project-${suffix}`,task_id=`workflow-task-${suffix}`,workstream_id=`workflow-stream-${suffix}`;
  const issue=(agentId,scopes)=>{const key=store.issueCredential({userId:user,deviceId:`workflow-device-${agentId}`,agentId,agentInstanceId:`workflow-instance-${agentId}`,scopes});return {...key,auth:store.authenticate(key.api_key)};};
