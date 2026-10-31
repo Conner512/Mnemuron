@@ -42,7 +42,7 @@ try{
    const response=await page.goto(cfg.url+'/app/'+name);
    try{await page.locator('.loading-card').waitFor({state:'detached'});await page.locator('#console-root h1').waitFor();}
    catch(e){throw new Error(`${e.message}; URL ${page.url()}; HTTP ${response.status()}; rate limited ${JSON.stringify(rateLimited)}; browser errors ${JSON.stringify(errors)}`);}
-   await page.evaluate(()=>Promise.all(document.getAnimations({subtree:true}).map(a=>a.finished)));
+   await page.evaluate(()=>Promise.all(document.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{}))));
    const label=`${name} ${width} ${locale}`;
    check(label+' HTTP and translated page',response.status()===200&&await page.locator('#console-root h1').innerText()!==name);
    const geometry=await page.evaluate(()=>{

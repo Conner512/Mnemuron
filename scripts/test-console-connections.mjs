@@ -51,6 +51,9 @@ try{
  const context=await newContext({viewport:{width:1440,height:1080},permissions:['clipboard-read','clipboard-write']});
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  const page=await context.newPage(),errors=[];let mutations=0;
+ // page.waitForFunction treats an async predicate's Promise as truthy and returns at once, so the
+ // asynchronous clipboard has to be polled from here.
+ const clipboard=async accept=>{const deadline=Date.now()+15000;for(;;){const text=await page.evaluate(()=>navigator.clipboard.readText());if(accept(text))return text;assert.ok(Date.now()<deadline,'clipboard did not receive the expected value: '+text);await page.waitForTimeout(50);}};
  page.on('request',request=>{if(request.url().includes('/console-api/action'))mutations++;});
  page.on('pageerror',error=>errors.push(error.message));page.on('console',msg=>{if(msg.type()==='error'&&/Content Security Policy|Refused/.test(msg.text()))errors.push(msg.text());});
  const goto=async name=>{await navigate(page,cfg.url+'/app/'+name);await page.locator('#console-root h1').waitFor();await page.locator('.loading-card').waitFor({state:'detached'});};
@@ -122,10 +125,10 @@ try{
  const issuedSecret=chatgpt.secret;check('Guide failure retains the issued credential without inventing scopes or discovery',!!issuedSecret&&!(await page.locator('.agent-steps .agent-step').nth(2).locator('code').innerText()).includes('openid')&&!(await page.locator('.agent-steps .agent-step').nth(3).locator('code').innerText()).includes('/.well-known/'));
  let beforeGuide=mutations;await page.locator('.agent-steps [data-connection-detail]').click();await dialog.locator('[data-connection-copy=url]').waitFor();
  check('Guide retry does not create another connection or rotate the credential',mutations===beforeGuide&&(await page.locator('.agent-steps').innerText()).includes(issuedSecret));
- await dialog.locator('[data-connection-copy=scopes]').click();await page.waitForFunction(async()=>await navigator.clipboard.readText()==='openid offline_access memory:read');check('Copied OAuth scopes include refresh support without adding write permission');
- await dialog.locator('[data-connection-copy=client_id]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText()).startsWith('mnmc_'));check('Client ID copy matches actual registry value');
+ await dialog.locator('[data-connection-copy=scopes]').click();await clipboard(text=>text==='openid offline_access memory:read');check('Copied OAuth scopes include refresh support without adding write permission');
+ await dialog.locator('[data-connection-copy=client_id]').click();await clipboard(text=>text.startsWith('mnmc_'));check('Client ID copy matches actual registry value');
  check('Connection-specific OIDC URL is visible without expanding technical details',await dialog.locator('[data-connection-copy=discovery_url]').isVisible());
- await dialog.locator('[data-connection-copy=discovery_url]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText()).includes('/.well-known/openid-configuration?client_id='));const scopedUrl=await page.evaluate(()=>navigator.clipboard.readText());check('Copied discovery URL keeps the public client selector',new URL(scopedUrl).searchParams.get('client_id')?.startsWith('mnmc_'));
+ await dialog.locator('[data-connection-copy=discovery_url]').click();const scopedUrl=await clipboard(text=>text.includes('/.well-known/openid-configuration?client_id='));check('Copied discovery URL keeps the public client selector',new URL(scopedUrl).searchParams.get('client_id')?.startsWith('mnmc_'));
  await command('provision-connections');const discovered=await page.evaluate(async url=>(await fetch(url)).json(),scopedUrl);check('Readonly connection discovers only allowed scopes',JSON.stringify(discovered.scopes_supported)===JSON.stringify(['openid','offline_access','memory:read']));
  await dialog.locator('.plugin-advanced summary').click();check('Advanced setup exposes discovered endpoints and exact resource',await dialog.locator('[data-connection-copy=authorization_url]').isVisible()&&await dialog.locator('[data-connection-copy=resource]').isVisible());
  const iconEvent=page.waitForEvent('download');await dialog.locator('[data-connection-icon]').click();const icon=await iconEvent,iconFile=path.join(evidence,'synthetic-plugin-icon.png');await icon.saveAs(iconFile);const png=fs.readFileSync(iconFile);
@@ -149,7 +152,7 @@ try{
  await openDetail('Synthetic browser ChatGPT');await dialog.locator('[data-connection-action=update]').click();await dialog.locator('[name=profile]').selectOption('memory_readwrite');await proof();await dialog.locator('button[type=submit]').click();await dialog.locator('[data-connection-refresh]').waitFor();await command('provision-connections');await dialog.locator('[data-connection-refresh]').click();await dialog.locator('[data-i18n=connWriteConsentCheck]').waitFor();
  const setupData=await page.evaluate(async()=>{const list=await fetch('/console-api/connections').then(r=>r.json()),c=list.connections.find(c=>c.label==='Synthetic browser ChatGPT');return fetch('/console-api/connections?connection_id='+c.connection_id).then(r=>r.json());});
  const writable=await page.evaluate(async url=>(await fetch(url)).json(),setupData.guide.discovery_url);check('Read/write guide discovers memory:write without project scope',JSON.stringify(writable.scopes_supported)===JSON.stringify(['openid','offline_access','memory:read','memory:write']));
- await dialog.locator('[data-connection-copy=scopes]').click();await page.waitForFunction(async()=>(await navigator.clipboard.readText())==='openid offline_access memory:read memory:write');check('Read/write Base scopes copy includes actual requested write permission');
+ await dialog.locator('[data-connection-copy=scopes]').click();await clipboard(text=>text==='openid offline_access memory:read memory:write');check('Read/write Base scopes copy includes actual requested write permission');
  await page.screenshot({path:path.join(evidence,'chatgpt-readwrite-guide.png'),fullPage:true});await close();
  for(const writing of [true,false]){
   const authPage=await page.context().newPage(),verifier=randomBytes(32).toString('base64url');
