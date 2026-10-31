@@ -1929,12 +1929,14 @@ Object.assign(catalog['zh-CN'],{
  mapLabelDensityNote:'拥挤时自动避让或隐藏部分画布标签，不隐藏节点。悬停、放大或展开“浏览节点”可查看完整名称。',
  mapRangeDays:'近 {0} 天',mapRangeAll:'全部时间',mapBrowseShort:'浏览节点',mapExploreShort:'全库关联',
  mapFilters:'筛选',mapFilterHeading:'筛选当前图谱',mapFilterTypes:'记忆类型',mapAllTypes:'全部类型',mapNoTypes:'未选择类型',
+ mapFilterSettings:'时间与类型',mapFilterNodes:'浏览节点',mapFilterClose:'关闭筛选',mapNodePage:'第 {0} / {1} 页',mapShowSelection:'查看所选记忆',mapNoNodes:'当前图谱没有可选节点。',mapNodeSelectionHint:'可多选；结果包含任一所选节点关联的记忆。',
  mapSelectedNodes:'已选 {0} 个节点',mapUniqueMemories:'{0} 条不重复记忆',mapSelectionSummary:'{0} 个节点 · {1} 条记忆',mapClearSelection:'清除选择',mapRemoveSelection:'取消选择',mapRemoveNode:'取消选择：{0}',
  mapUnionNote:'包含任一所选节点的记忆，重叠记录只计一次。',mapSelectionBound:'仅显示当前图谱样本中的来源记忆，保留当前筛选与授权范围；不代表全库结果。',
  mapKeyboardHint:'点击、Enter 或空格可添加或取消选择，无需组合键。多个节点取并集；Esc 或点击图谱空白处清除选择。点击来源记忆才打开原文。',
 });
 Object.assign(catalog.en,{
  mapFilters:'Filters',mapFilterHeading:'Filter this map',mapFilterTypes:'Memory types',mapAllTypes:'All types',mapNoTypes:'No types selected',
+ mapFilterSettings:'Time & types',mapFilterNodes:'Browse nodes',mapFilterClose:'Close filters',mapNodePage:'Page {0} of {1}',mapShowSelection:'View selected memories',mapNoNodes:'No nodes in this graph.',mapNodeSelectionHint:'Select multiple nodes; results include memories linked to any selected node.',
  mapRangeDays:'{0} days',mapRangeAll:'All time',mapBrowseShort:'Browse nodes',mapExploreShort:'Full-library links',
  mapLabelDensityNote:'Crowded labels move or hide without removing nodes. Hover, zoom, or open Browse nodes for full names.',
  mapSelectedNodes:'{0} nodes selected',mapUniqueMemories:'{0} unique memories',mapSelectionSummary:'{0} nodes · {1} memories',mapClearSelection:'Clear selection',mapRemoveSelection:'Remove selection',mapRemoveNode:'Remove selection: {0}',
@@ -1946,7 +1948,8 @@ Object.assign(catalog.en,{
 Object.assign(catalog['zh-CN'],{
  overviewFocusNote:'从图谱探索记忆，在动态中查看最近的读写。',overviewLibraryLink:'打开记忆库',
  overviewSystemDetails:'处理状态与系统检查',overviewSystemNote:'索引、调用额度和需要注意的事项',overviewAttentionCount:'项需要注意',
- overviewLibraryDetails:'记忆库统计与检索',overviewLibraryNote:'完整搜索、类型分布和最近写入',
+ overviewLibraryDetails:'记忆库统计',overviewLibraryNote:'类型分布、来源与最近写入；搜索请前往记忆库',
+ projectsPausedTitle:'项目与任务已暂停展示',projectsPausedNote:'当前优先完善记忆与连接。此兼容入口仅为已有书签保留，原有数据未删除。',
  overviewLiveTitle:'实时动态',overviewAudit:'全部审计',overviewStreamLoading:'正在读取动态…',
  overviewStreamPause:'暂停',overviewStreamResume:'继续',overviewStreamEmpty:'最近没有记忆读写。',
  overviewStreamNote:'当前账号最近 8 条动态，不随图谱筛选。页面可见时每 30 秒更新，非实时推送。',
@@ -1959,7 +1962,8 @@ Object.assign(catalog['zh-CN'],{
 Object.assign(catalog.en,{
  overviewFocusNote:'Explore memories in the map and follow recent reads and writes.',overviewLibraryLink:'Open library',
  overviewSystemDetails:'Processing and system checks',overviewSystemNote:'Index, call quotas and items needing attention',overviewAttentionCount:'items need attention',
- overviewLibraryDetails:'Library insights and search',overviewLibraryNote:'Full search, type distribution and recent memories',
+ overviewLibraryDetails:'Library insights',overviewLibraryNote:'Types, sources and recent memories. Search in the Memory Library.',
+ projectsPausedTitle:'Projects & tasks are paused',projectsPausedNote:'Memory and connections are the current focus. This compatibility page is retained for existing bookmarks; stored data has not been deleted.',
  overviewLiveTitle:'Live activity',overviewAudit:'All activity',overviewStreamLoading:'Loading activity…',
  overviewStreamPause:'Pause',overviewStreamResume:'Resume',overviewStreamEmpty:'No recent memory reads or writes.',
  overviewStreamNote:'Latest 8 events for this account, independent of map filters. Refreshes every 30 seconds while visible; not a push feed.',

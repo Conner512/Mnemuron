@@ -31,28 +31,25 @@ try{
  await context.addCookies([{name:cfg.cookie,value:cfg.accounts[0].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);
  await context.addInitScript(accounts=>{for(const account of accounts)localStorage.setItem('mnemuron.appearance.v1.'+account.account_id,JSON.stringify({locale:'en'}));},cfg.accounts);
  const idle=()=>page.locator('[data-memory-map][aria-busy="false"]').waitFor();
- const explore=async value=>{await page.locator('[data-map-neighborhood]').evaluate(node=>node.open=true);await page.locator('[data-neighbor-focus]').fill(value);const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/attention'&&new URL(r.url()).searchParams.get('graph_focus')===value);await page.locator('[data-neighbor-search] button').click();const data=await(await response).json();await page.locator('[data-neighbor-result] h3').waitFor();return data.graph.neighborhood;};
- await page.goto(cfg.url+'/app/overview');await idle();await page.locator(`[data-map-project] option[value="${seeded.project_id}"]`).waitFor({state:'attached'});
- await page.locator('[data-map-days="0"]').click();await idle();
- await page.locator('[data-map-filter-toggle]').click();
- await page.locator('[data-map-project]').selectOption(seeded.project_id);await page.locator('[data-map-task]').fill(seeded.task_id);
- const scoped=page.waitForResponse(r=>new URL(r.url()).searchParams.get('graph_task_id')===seeded.task_id);await page.locator('[data-map-scope-filter] button[type="submit"]').click();const scopedGraph=(await(await scoped).json()).graph;await idle();
- pass('Project and exact task filters reach Core before counts and the graph cap',scopedGraph.filtered_total===4&&scopedGraph.scope.task_id===seeded.task_id);
- const scopedNeighbor=await explore('Synthetic Scoped');pass('Focused graph reports current and superseded counts from full scoped data',scopedNeighbor.current_count===4&&scopedNeighbor.history_count===1);
- const historyResponse=page.waitForResponse(r=>new URL(r.url()).searchParams.get('graph_history')==='1');await page.locator('[data-neighbor-history]').check();const historic=(await(await historyResponse).json()).graph.neighborhood;
- pass('History is explicitly opted in and replacement relationships are distinguished',historic.evidence.total===5&&historic.evidence.items.some(row=>row.supersedes_memory_id));
- await page.locator('[data-map-reset]').click();await idle();await page.locator('[data-map-days="0"]').click();await idle();
- const full=await explore('Synthetic Router/A');pass('Older relationships outside the newest 1000 records remain reachable',full.current_count===13&&full.evidence.items.length===10&&full.evidence.next_offset===10);
- const firstIds=full.evidence.items.map(row=>row.memory_id);const nextResponse=page.waitForResponse(r=>new URL(r.url()).searchParams.get('graph_offset')==='10');await page.locator('[data-neighbor-offset="10"]').click();const next=(await(await nextResponse).json()).graph.neighborhood;
- pass('Evidence pagination reaches every older record without duplicate page entries',next.evidence.items.length===3&&next.evidence.next_offset===null&&next.evidence.items.every(row=>!firstIds.includes(row.memory_id)));
- const openId=next.evidence.items[0].memory_id;await page.locator(`[data-neighbor-memory="${openId}"]`).click();await page.locator('#memory-dialog[open]').waitFor();await page.locator('#memory-content').getByText('Synthetic older full-library graph evidence').first().waitFor();
- pass('Graph evidence opens the actual original memory detail', (await page.locator('#memory-content').innerText()).includes('Synthetic older full-library graph evidence'));
- await page.keyboard.press('Escape');await page.locator('#memory-dialog[open]').waitFor({state:'detached'});
- let held;const ready=deferred();const hold=async route=>{if(new URL(route.request().url()).searchParams.get('graph_focus')==='Synthetic Router/A'){held={route,response:await route.fetch()};ready.resolve();}else await route.continue();};
- await page.route('**/console-api/attention?*',hold);await page.locator('[data-neighbor-focus]').fill('Synthetic Router/A');await page.locator('[data-neighbor-search] button').click();await bounded(ready.promise);
- await explore('Synthetic Scoped');await held.route.fulfill({response:held.response});await page.waitForTimeout(120);
- pass('A late neighborhood reply cannot overwrite a newer focus',(await page.locator('[data-neighbor-result] h3').innerText()).includes('synthetic scoped'));
- await page.unroute('**/console-api/attention?*',hold);await page.screenshot({path:path.join(evidence,'graph-neighborhood-desktop.png'),fullPage:true});
+ // The whole-library association and project-scope controls are intentionally removed from
+ // Overview. Keep their read API compatibility and authorization coverage without pretending
+ // that a removed control is still a supported user journey.
+ const graphApi=async params=>{const response=await page.evaluate(async params=>{const response=await fetch('/console-api/attention?'+new URLSearchParams({graph_days:0,...(params.graph_focus?{graph_limit:10}:{}),...params}));return {status:response.status,owner:response.headers.get('x-mnemuron-account-id'),body:await response.json()};},params);assert.equal(response.status,200,response.body.error_code);assert.equal(response.owner,cfg.accounts[0].account_id);return response.body.graph;};
+ await page.goto(cfg.url+'/app/overview');await idle();await page.locator('[data-map-filter-toggle]').click();
+ pass('Overview removes full-library association, project scopes and memory search controls',await page.locator('[data-map-neighborhood],[data-neighbor-search],[data-map-project],[data-map-task],[data-map-search]').count()===0);
+ const scope={graph_project_id:seeded.project_id,graph_task_id:seeded.task_id},scopedGraph=await graphApi(scope);
+ pass('Preserved API filters project and exact task before counts and the graph cap',scopedGraph.filtered_total===4&&scopedGraph.scope.task_id===seeded.task_id);
+ const scopedNeighbor=(await graphApi({...scope,graph_focus:'Synthetic Scoped'})).neighborhood;pass('Preserved focused API reports current and superseded scoped counts',scopedNeighbor.current_count===4&&scopedNeighbor.history_count===1);
+ const historic=(await graphApi({...scope,graph_focus:'Synthetic Scoped',graph_history:1})).neighborhood;
+ pass('History remains an explicit API opt-in with replacement relationships',historic.evidence.total===5&&historic.evidence.items.some(row=>row.supersedes_memory_id));
+ const full=(await graphApi({graph_focus:'Synthetic Router/A'})).neighborhood;pass('Older relationships outside the newest 1000 records remain API-readable',full.current_count===13&&full.evidence.items.length===10&&full.evidence.next_offset===10);
+ const firstIds=full.evidence.items.map(row=>row.memory_id),next=(await graphApi({graph_focus:'Synthetic Router/A',graph_offset:10})).neighborhood;
+ pass('Preserved evidence pagination reaches every older record without duplicates',next.evidence.items.length===3&&next.evidence.next_offset===null&&next.evidence.items.every(row=>!firstIds.includes(row.memory_id)));
+ const openId=next.evidence.items[0].memory_id,detail=await page.evaluate(async id=>{const response=await fetch('/console-api/memory?memory_id='+encodeURIComponent(id));return {status:response.status,body:await response.json()};},openId);
+ pass('Source IDs returned by the API resolve to the actual authenticated memory',detail.status===200&&detail.body.memory.content.includes('Synthetic older full-library graph evidence'));
+ const foreign=await browser.newContext();await foreign.addCookies([{name:cfg.cookie,value:cfg.accounts[1].token,url:cfg.url,httpOnly:true,sameSite:'Lax'}]);const foreignPage=await foreign.newPage();await foreignPage.goto(cfg.url+'/app/overview');
+ const denied=await foreignPage.evaluate(async({id,project,task})=>{const response=await fetch('/console-api/attention?'+new URLSearchParams({graph_days:0,graph_focus:'Synthetic Scoped',graph_project_id:project,graph_task_id:task}));const memory=await fetch('/console-api/memory?memory_id='+encodeURIComponent(id));return {status:response.status,body:await response.json(),memoryStatus:memory.status,memoryError:(await memory.json()).error_code};},{id:openId,project:seeded.project_id,task:seeded.task_id});
+ pass('Removed controls preserve explicit not-found denials, not incidental server errors',denied.status===404&&denied.body.error_code==='PROJECT_NOT_FOUND'&&denied.memoryStatus===404&&denied.memoryError==='MEMORY_NOT_FOUND');await foreign.close();
  await page.goto(cfg.url+'/app/memories?query=SearchFeedbackNeedle&mode=lexical');await page.locator('[data-feedback-vote="relevant"]').waitFor();
  const vote=async kind=>{const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/console-api/action');await page.locator(`[data-feedback-vote="${kind}"]`).click();const body=await(await response).json();await page.waitForFunction(()=>document.querySelector('[data-feedback-status]')?.textContent.includes('Saved'));return body;};
  const saved=await vote('relevant');pass('A real BFF action saves a revision-bound relevant vote without rewriting source/ranking',saved.status==='saved'&&saved.ranking_changed===false);

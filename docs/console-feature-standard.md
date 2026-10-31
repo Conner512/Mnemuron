@@ -1,6 +1,6 @@
 # 控制台功能开发标准
 
-适用于 `web/console` 控制台的全部菜单页面。功能清单（`web/console/visuals.mjs` 中的 `featureMap`）和本文件一起构成开发标准：界面上的占位、系统状态页的「功能进度」、本文件末尾的功能表都来自这份清单。`services/oauth/test/console-feature-map.test.mjs` 会检查清单、界面、接口白名单、中英文文案和本文件是否一致，不一致时测试失败。
+适用于 `web/console` 控制台的活跃页面和保留的兼容页面。功能清单（`web/console/visuals.mjs` 中的 `featureMap`）和本文件一起构成开发标准：本文件末尾的功能表记录代码接口能力；菜单与功能发现仅展示 `routes.mjs` 中的 `navigationPages`，不把已暂停的兼容页面继续宣传为当前入口。`services/oauth/test/console-feature-map.test.mjs` 会检查清单、界面、接口白名单、中英文文案和本文件是否一致，不一致时测试失败。
 
 新增或调整功能时，先改清单，再写代码。
 
@@ -29,7 +29,7 @@
 | 记忆 | 摘要 | `/app/summaries` | `SUM` |
 | 自动整理 | 整理能力 | `/app/processing` | `JOB` |
 | 连接 | 连接 | `/app/connections` | `CON` |
-| 工作 | 项目与任务 | `/app/projects` | `TSK` |
+| 暂停入口 | 项目与任务（兼容页，已隐藏） | `/app/projects` | `TSK` |
 | 系统 | 模型与额度 | `/app/models` | `MOD` |
 | 系统 | 健康 | `/app/health` | `STO` |
 | 系统 | 审计 | `/app/audit` | `AUD` |
@@ -37,7 +37,11 @@
 
 导航按“记忆从哪来、怎么整理、被谁使用”分组。每个页面的地址与它的中英文标题一致（整理能力 Processing → `/app/processing`，项目与任务 Projects & tasks → `/app/projects`，健康 Health → `/app/health`）；代码里的页面键（`jobs`、`tasks`、`storage`）只在内部使用。公网入口（Cloudflare Tunnel）只放行这些路径，新增或改名的路径要先在入口规则里加。旧地址都会跳转：`/app/jobs`、`/app/system` → `/app/processing`，`/app/tasks`、`/app/resume` → `/app/projects`，`/app/storage` → `/app/health`，`/app/agents` → `/app/connections`，`/app/usage` → `/app/models`，`/app/entities` → `/app/memories`。单一所有者部署中：每项整理能力在「整理能力」页有自己的开关、依赖清单、状态和补处理入口，默认检索模式在语义检索卡片里；所有连接（ChatGPT、编程助手和其他应用）都在「连接」页；用量（调用次数与 14 天调用图）在「模型与额度」页。功能编号随内容移动：原 `CON-03`～`CON-05` 现为 `AGT-01`～`AGT-03`，原 `RES-01`～`RES-04` 现为 `TSK-07`～`TSK-10`，原 `SYS-01`～`SYS-04` 现为 `STO-05`～`STO-08`，`USE-01`～`USE-02` 在「模型与额度」页。
 
-「项目与任务」是原型页面：整页由清单生成，每个功能一张卡片，已上线的排在前面。已上线的卡片显示真实数据，也可以带真实操作；规划中的卡片显示线框和开发说明，不带任何操作。其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
+当前导航只有概览、记忆库、摘要、整理能力、连接、模型与额度、健康、审计、账户安全共 **9 个入口**。「工作」分组以及「项目与任务」入口暂停展示；概览中的项目／任务筛选和任务对账提醒入口同时隐藏。`pages` 仍记录全部受支持路由，`pausedPages=['tasks']` 独立控制导航可见性，不能通过删改页面索引重排既有编号。
+
+「项目与任务」的 `/app/projects` 及旧书签重定向继续通过原身份、权限和 CSRF 校验，页面明确显示暂停说明；兼容页仍由清单生成，保留原来的预览、确认、任务对账和接续能力。**本次只暂停入口展示，不删除数据、停止后台任务、收回凭据权限或改变服务端门禁**；隐藏入口不是新的权限隔离边界。连接页的已授权任务接续能力不会因导航变化被静默降级。功能表中的 `TSK-* = live` 仅指保留的代码／接口能力，不代表该页面仍在主导航开放。
+
+其他页面保留原有的真实功能，并在底部用「功能规划」列出本页规划中和不开放的功能。
 
 「隐私与保留」（`PRV`）、「注册码管理」（`INV`）、「账户管理」（`ACC`）三个页面已从 Console 移除：不在导航中出现，也不再渲染。旧地址 `/app/privacy`、`/app/invitations`、`/app/accounts` 由 BFF 以 303 重定向到 `/app`（概览），ingress 示例保留这三条路径只为让旧书签能到达重定向。这三个前缀的编号停用，不再复用。本次只移除网页入口，对应的服务端读取视图和写操作没有删除；是否下线由运维单独决定。注册码由 `services/oauth/bin/identity.mjs invite-*` 签发和撤销；平台管理员角色用 `console-operator.mjs grant-operator|revoke-operator`；多账户的停用与启用用 `console-operator.mjs disable-account|enable-account`（与原网页操作走同一条本地维护路径，最后一名平台管理员受保护）。新记忆默认隐私和数据保留没有网页或命令行入口，只能通过 Console 操作接口（`privacy.defaults`、`retention.save`、`retention.prune`）修改；新建记忆表单仍按账户已保存的默认值预填。
 
@@ -48,7 +52,12 @@
 - **policy 不开放**：有意不在网页端提供。说明文案写清楚原因和替代途径（例如运维在服务器上处理）。不得声明 `read` 或 `write`。
 - **从规划中到已上线**必须在同一个提交内完成：实现接口、前端、测试，把清单状态改为 `live`，并同步本文件的功能表。
 - 从 `policy` 改为其他状态，涉及安全或隐私边界，先在 issue 中讨论。
-- 功能取消时保留编号，状态改为 `policy`，并在说明中写明原因。
+- 暂停页面展示时，在 `pausedPages` 登记，并保留其代码能力与路由合同；不要把单纯隐藏入口伪报为服务端关闭。
+- 不再提供但仍需向用户说明的功能保留编号、状态改为 `policy`；已从界面完全移除的功能在下方「停用编号」单独登记，从活跃清单移出。两者的编号都不得复用。
+
+### 停用编号
+
+- `OVW-04`：全库局部图谱与证据网页入口已移除，不再在概览提供「全库关联」或对应搜索。原有图谱读取 API、权限过滤和服务端回归用例保留，此编号不再用于其他功能。
 
 ## 4. 分层与数据流
 
@@ -87,7 +96,7 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ## 7. 新增页面
 
-1. `web/console/routes.mjs` 加路由；`render.mjs` 的 `navGroups` 加菜单项；`visuals.mjs` 加图标（24 像素网格、1.5 线宽、方角）。
+1. `web/console/routes.mjs` 加路由；`render.mjs` 的 `navGroups` 加菜单项；`visuals.mjs` 加图标（24 像素网格、1.5 线宽、方角）。兼容或暂停页面需在 `pausedPages` 显式登记，不加入活跃导航或功能发现。
 2. catalog 加页面名 `<page>` 和页面说明 `pageNote_<page>`，中英文都要有。页面 ID 不能与已有文案键重名（例如 `projects` 已是分类名，所以项目页用 `tasks`）。
 3. 在清单中加入该页的功能；需要新前缀时，在第 2 节登记。
 4. ingress：`app/(...)` 加入页面名，同步 Cloudflare 隧道的路径规则。
@@ -108,16 +117,17 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 - 参照 agentmemory 的 concepts：关键词写在每条记忆上（`memory_traits.concepts_json`，最多 8 个、每个不超过 40 字），不再单独设实体页面。旧的 `/app/entities` 跳转到记忆库。
 - 记忆库：行内关键词是按钮，点一下列出所有带这个关键词的记忆（`memories?concept=`，大小写不敏感），筛选栏显示当前关键词并可清除；记忆详情里的关键词是同样的链接。搜索时，关键词包含查询词的记忆排在正文与语义命中之后一起返回（最多 200 条，仅限本人、仅限未删除项目）。`part=facets` 返回最常用的 30 个关键词。
-- 概览记忆地图：被至少两条记忆共用的关键词成为连接点（最多 14 个），每条记忆连到它的每个关键词，并轻连到所属类型；没有共用关键词时退回主题，再退回类型。点开关键词看到图上的记忆数、常一起出现的关键词和“在记忆库里查看”。
+- 概览记忆地图：被至少两条记忆共用的关键词成为连接点（关键词上限随画布大小在 8～30 个之间调整），每条记忆连到它的每个关键词，并轻连到所属类型；没有共用关键词时退回主题，再退回类型。浏览节点整合到悬浮筛选内，列表限高并在内部滚动或分页；选择多个节点查看关联记忆并集，去重显示，不把共现解释为同一实体或因果关系。完整记忆搜索只在记忆库提供。
 - 补全关键词（`traits` 任务）：整理模型给还缺类型或重要度的有效记忆补上类型、关键词和重要度，每次调用 10 条，结果直接写入，不逐条审核；写入方或修订里已经填的字段不覆盖。单人模式下打开“补全关键词”开关后按自动处理节奏处理新记忆；“补全历史记忆”一次预览即可包含全部缺失记忆（上限 2000 条），确认一次后在后台跑完。模型输出在本地按完整约束校验，越界或换了修订的结果整批不写入。
 - 实体相关的控制台操作（`entity.create/alias/alias_correct/alias_remove/link/unlink/resolve`）和实体提取任务的调度已移除；实体库与别名检索仍保留在服务端（现有数据保留，`entities` 读取视图仍按 owner 授权），审计里的历史实体操作仍归在记忆组。
 - 回归入口：`server/test/memory-traits.test.mjs`、`server/test/console-memory-graph.test.mjs`、`services/oauth/test/console-library-ui.test.mjs`、`services/oauth/test/console-version-entity-ui.test.mjs`。
 
-### 8.2 全库局部图谱与搜索反馈（OVW-04、MEM-12）
+### 8.2 搜索反馈与图谱读取兼容边界（MEM-12，OVW-04 已停用）
 
-- 图谱按项目／任务、时间、类型与关键词条件先过滤再统计；局部一跳和共现证据分页读取完整授权范围，不以概览 1000 条样本代替全库。当前、被替代记录数量与首次／最近记录时间分别显示；共现、版本替代及来源关系不得混淆。
+- 概览不再挂载「全库关联」界面，也不提供关键词搜索、项目／任务筛选。图谱展示、时间／类型筛选和当前样本节点多选仍保留；记忆库承接完整检索。悬浮筛选必须在图谱内部限宽、限高，不推挤图谱或旁边的活动卡片。
+- 原局部图谱只读 API 继续按项目／任务、时间、类型与关键词条件先过滤再统计，分页读取完整授权范围，不以概览 1000 条样本代替全库。保留服务端账户隔离、当前／历史证据和分页测试；移除网页入口不表示删除服务端能力或放宽原授权。
 - 搜索反馈绑定签名展示上下文和当前记忆 revision，提供相关、无关、过时及遗漏四种显式评价。仅保存 owner 加盐的问题指纹，不保存问题正文，不自动调整排序或开启新模型外发。人工计数不得标为准确率或召回率。
-- 新模块 `graph-neighborhood.mjs`、`search-feedback.mjs` 及 `search-feedback` 视图须同时出现在静态模块、Core/BFF 和 ingress 白名单中；写 action `search.feedback` 仅允许完整 Console 账户绑定授权。
+- `graph-neighborhood.mjs` 静态兼容路径保留，但概览不再导入和挂载它。记忆库继续使用 `search-feedback.mjs`；`search-feedback` 视图及其静态模块仍在 Core/BFF 和 ingress 白名单中，写 action `search.feedback` 仅允许完整 Console 账户绑定授权。
 - 合同、隐私和可复现验收入口见 [memory-search-workbench.md](memory-search-workbench.md)。
 
 ## 9. 安全与隐私红线
@@ -145,6 +155,12 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 ## 11. 本轮补齐的合同与边界
 
 基础独立功能阶段已实现记忆、连接、用量、隐私及系统查看，未启用 handoff。后续任务工作流与 Hook 的接通范围见下方“任务创建、对账与接续联动”；代码实现仍不自动启用 handoff，`production_ready` 继续为 `false`。
+
+### 当前记忆优先界面范围
+
+- 概览首屏以等高对齐的图谱与账户活动为主；时间／类型与节点浏览位于图谱的紧凑悬浮筛选，展开或选择不改变两张外框的相对高度。
+- 「处理状态与系统检查」「记忆库统计」是可向下滚动查看的固定区块，不用展开；概览不再包含记忆搜索表单。
+- 项目与任务暂停导航展示，既有数据、鉴权、API 与兼容书签保留；后续重点是记忆、连接、抽取、压缩和向量处理，不自动调整生产开关或凭据。
 
 ### 接口与数据
 
@@ -205,14 +221,13 @@ Core    server/lib/console-read.mjs（读取视图）· server/lib/console/servi
 
 ## 12. 功能表
 
-「读取」列是 console-api 视图名，「写操作」列是操作名。测试会逐行核对编号和状态。
+「读取」列是 console-api 视图名，「写操作」列是操作名。测试会逐行核对编号和状态。`TSK-*` 行保留兼容页与服务端合同，入口暂停展示，不属于当前的 9 项主导航。
 
 | 编号 | 页面 | 功能 | 状态 | 读取 | 写操作 |
 | --- | --- | --- | --- | --- | --- |
 | OVW-01 | 概览 | 记忆分布与计数 | live | overview | — |
 | OVW-02 | 概览 | 最近写入与 30 天活动 | live | overview | — |
 | OVW-03 | 概览 | 待处理事项 | live | attention | — |
-| OVW-04 | 概览 | 全库局部图谱与证据 | live | attention, projects | — |
 | MEM-01 | 记忆库 | 检索与筛选 | live | memories | — |
 | MEM-02 | 记忆库 | 详情、来源与修订历史 | live | memory, memory-meta | — |
 | MEM-03 | 记忆库 | 新建记忆 | live | — | memory.create |

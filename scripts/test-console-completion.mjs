@@ -32,10 +32,9 @@ try{
   const submit=async()=>{await op.locator('button[type=submit]').click();await op.locator('.operation-result').first().waitFor({state:'attached'});return JSON.parse(await op.locator('.operation-result').first().textContent());};
   const close=async()=>{await op.locator('[data-operation-close]').first().click();await op.waitFor({state:'hidden'});};
   await goto('overview');const overview=await page.evaluate(()=>fetch('/console-api/overview').then(r=>r.json()));
-  check('Overview keeps library and system details folded behind the graph and activity',await page.locator('[data-overview-library][open],[data-overview-system][open]').count()===0);
+  check('Overview keeps library and system information visible below graph and activity',await page.locator('[data-overview-library]').evaluate(n=>n.tagName==='SECTION'&&n.getBoundingClientRect().height>0)&&await page.locator('[data-overview-system]').evaluate(n=>n.tagName==='SECTION'&&n.getBoundingClientRect().height>0));
   await shot('overview');
-  await page.locator('[data-overview-library]>summary').click();await page.locator('[data-overview-system]>summary').click();
-  check('Overview shows real account counts after expanding secondary information',await page.locator('[data-metric=memories] strong').innerText()===overview.counts.memories.toLocaleString()&&await page.locator('.attention-card').count()===1);
+  check('Overview shows real account counts without expanding secondary information',await page.locator('[data-metric=memories] strong').innerText()===overview.counts.memories.toLocaleString()&&await page.locator('.attention-card').count()===1);
   await goto('summaries');check('Summaries page offers no category editing',await page.locator('[data-console-action="taxonomy.save"],[data-console-action="category.manage"]').count()===0);
   check('Summaries are grouped by what they cover',await page.locator('.summary-group,.empty').count()>0);
   await goto('memories');

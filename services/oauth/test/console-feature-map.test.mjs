@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {pages,removedPages,movedPages,renderPage,slugOf,routeTitle} from '../../../web/console/render.mjs';
+import {pages,navigationPages,removedPages,movedPages,renderPage,slugOf,routeTitle} from '../../../web/console/render.mjs';
 import {featureMap,featureKey,prototypePages,prototypeView,prototypeOrder,roadmapCard,pageState,revisionDifference} from '../../../web/console/visuals.mjs';
 import {catalog,text} from '../../../web/console/catalog.mjs';
 import {CONSOLE_ACTIONS,CONSOLE_WORKFLOW_VIEWS,CONSOLE_REVIEW_VIEWS} from '../../../shared/console-contract.mjs';
@@ -28,11 +28,11 @@ test('Revision comparison preserves exact Unicode and highlights the changed reg
   assert.deepEqual(revisionDifference('A😀旧文末','A😃新文末'),[{prefix:'A',changed:'😀旧',suffix:'文末'},{prefix:'A',changed:'😃新',suffix:'文末'}]);
 });
 
-test('Feature map: one entry per menu page, in navigation order',()=>{
+test('Feature map: all supported routes keep their contracts while only active pages appear in navigation',()=>{
  assert.deepEqual(Object.keys(featureMap),pages);
  for(const page of prototypePages)assert.ok(pages.includes(page),page);
  const nav=renderPage({title:'overview',page:'overview',account:{account_id:'synthetic',username:'Synthetic'}});
- assert.deepEqual([...nav.matchAll(/<a href="\/app\/([a-z]+)"/g)].map(m=>m[1]),pages.map(slugOf),'each link is the page\'s slug');
+ assert.deepEqual([...nav.matchAll(/<a href="\/app\/([a-z]+)"/g)].map(m=>m[1]),navigationPages.map(slugOf),'each active link is the page\'s slug; paused routes keep their contracts without a menu entry');
 });
 
 // A page may hold more than one prefix after pages merge (connections keeps CON and AGT); a prefix stays on one page

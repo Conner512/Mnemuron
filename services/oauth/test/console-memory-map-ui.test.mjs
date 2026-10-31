@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 globalThis.document??={body:{dataset:{}},documentElement:{dataset:{},lang:'zh-CN'},querySelectorAll:()=>[],addEventListener(){},removeEventListener(){}};
 const {mapAnchors,overviewStatus}=await import('../../../web/console/actions.mjs');
-const {memoryMap,anchorPanel,selectedMemories,selectionPanel}=await import('../../../web/console/memory-map.mjs');
+const {memoryMap,anchorPanel,selectedMemories,selectionPanel,nodePage,mapCard}=await import('../../../web/console/memory-map.mjs');
 const memories=(count,traits)=>Array.from({length:count},(_,i)=>({id:`synthetic-map-${i}`,kind:'fact',day:'2026-10-30',...traits(i)}));
 
 test('MAP-01: aggregation keeps every returned memory reachable, including untagged and rare keywords',()=>{
@@ -24,7 +24,8 @@ test('MAP-02: filtered graph counts and bounded-result notice are present in the
  assert.match(html,/data-map-coverage/,'coverage is outside the optional canvas hint');
  assert.match(html,/1,001/);
  assert.match(html,/data-map-node-key/,'native node buttons provide keyboard access without pointer hit-testing');
- assert.match(html,/data-map-query/);
+ assert.doesNotMatch(html,/data-map-query|data-map-search|data-map-neighborhood|data-map-project|data-map-task/,'overview does not expose library search or paused project controls');
+ assert.match(html,/data-map-filters role="dialog" aria-modal="false"/);
 });
 
 test('MAP-03: pipeline keyword coverage uses account totals, not the filtered graph sample',()=>{
@@ -112,4 +113,23 @@ test('MAP-10: dense mobile labels never overlap, and omitted labels do not remov
  assert.ok(hidden>0);assert.ok(labels.length>0);assert.equal(hidden+labels.length,map.plan.anchors.length);
  for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++){const a=labels[i],b=labels[j];assert.ok(!(a.labelX<b.labelX+140&&a.labelX+140>b.labelX&&a.labelY-10<b.labelY+4&&a.labelY+4>b.labelY-10),'displayed label rectangles must not overlap');}
  const key=map.plan.anchors.at(-1).key;map.toggleKey(key);assert.deepEqual(map.selectedKeys,[key]);
+});
+
+test('MAP-11: bounded node pages preserve stable keys, clamp stale offsets and expose every node once',()=>{
+ const plan={anchors:Array.from({length:29},(_,i)=>({key:`concept:synthetic-${i}`,count:2,label:`Synthetic ${i}`}))};
+ const seen=new Set();let offset=0,pages=0;
+ do{const page=nodePage(plan,offset);assert.ok(page.items.length<=8);assert.equal(page.page,++pages);for(const item of page.items){assert.ok(!seen.has(item.key));seen.add(item.key);}offset=page.next;}while(offset!==null);
+ assert.equal(seen.size,29);assert.equal(pages,4);assert.equal(nodePage(plan,999).offset,24);assert.equal(nodePage(plan,-8).offset,0);assert.equal(nodePage(plan,NaN).offset,0);
+ assert.deepEqual(nodePage({anchors:[]}),{items:[],offset:0,total:0,page:1,pages:1,previous:null,next:null});
+});
+
+test('MAP-12: filter dialog contains tabs and bounded nodes inside the board, with no whole-library explorer',()=>{
+ const graph={memories:memories(192,i=>({concepts:[`word-${i%24}`,`word-${(i+1)%24}`]})),scope:{days:30,kinds:['fact']}};
+ const html=mapCard({attention:{graph}}),board=html.indexOf('<div class="map-board">'),filter=html.indexOf('data-map-filters');
+ assert.ok(board<filter,'the filter is an overlay within the map board');
+ assert.match(html,/data-map-filter-tab="settings"/);assert.match(html,/data-map-filter-tab="nodes"/);
+ assert.ok([...html.matchAll(/data-map-node-key=/g)].length<=8);
+ assert.doesNotMatch(html,/data-map-search|data-map-query|data-map-neighborhood|data-map-explore|data-map-project|<details/);
+ const plan=mapAnchors(graph),index=plan.anchors.findIndex(anchor=>anchor.kind==='concept');
+ assert.doesNotMatch(anchorPanel(graph,plan,index),/data-map-explore/,'memory details cannot bring back the removed explorer');
 });

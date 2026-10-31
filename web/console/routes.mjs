@@ -1,9 +1,13 @@
 // Console routes shared by the server shell and the browser controller.
 // Keep in step with the sidebar (render.mjs), the feature map (visuals.mjs) and the ingress routes.
-// Navigation order (render.mjs): overview; memory; processing; connections; work; system. Page keys are internal (views,
+// Navigation order (render.mjs): overview; memory; processing; connections; system. Page keys are internal (views,
 // feature map, catalog); the URL of each page names what its title says (slugs), so /app/<slug> matches the page in both
 // languages. The public ingress allows exactly the slugs, removed pages and moved pages.
 export const pages=['overview','memories','summaries','jobs','connections','tasks','models','storage','audit','security'];
+// Paused UI destinations are absent from navigation/discovery, not removed from authorization or storage.
+// Authenticated legacy URLs remain compatible with existing bookmarks; no project/task records are changed.
+export const pausedPages=Object.freeze(['tasks']);
+export const navigationPages=Object.freeze(pages.filter(page=>!pausedPages.includes(page)));
 // Removed web pages (their backend, CLI and API stay): old links redirect to the overview.
 export const removedPages=['privacy','invitations','accounts'];
 // Pages whose content moved: old links redirect to the new home instead of the overview.

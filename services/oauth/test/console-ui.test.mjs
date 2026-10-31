@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {renderPage,routeTitle,pages,slugOf} from '../../../web/console/render.mjs';
+import {renderPage,routeTitle,pages,navigationPages,slugOf} from '../../../web/console/render.mjs';
 import {catalog} from '../../../web/console/catalog.mjs';
 import {SessionState} from '../../../web/console/session-state.mjs';
 import {declarations,rules,hasMedia} from './helpers/css.mjs';
@@ -55,7 +55,8 @@ test('console chrome omits retired status notices without removing navigation or
   assert.equal(html.match(/<footer>(.*?)<\/footer>/s)?.[1],'<span class="footer-mark">Mnemuron</span>');
   assert.match(html,/action="\/console-api\/logout" method="post"/);
   assert.match(html,/name="csrf" value="synthetic-csrf"/);
-  for(const target of pages)assert.ok(html.includes(`href="/app/${slugOf(target)}"`));
+  for(const target of navigationPages)assert.ok(html.includes(`href="/app/${slugOf(target)}"`));
+  assert.doesNotMatch(html,/href="\/app\/(?:projects|tasks|resume)"/,'paused work destinations are not discoverable from shell links');
  }
  for(const locale of ['zh-CN','en'])for(const key of ['handoff','capabilityBoundary','notProduction'])assert.equal(Object.hasOwn(catalog[locale],key),false);
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');

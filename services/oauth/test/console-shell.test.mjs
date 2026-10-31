@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
-import {renderPage,sendPage,serveAsset,pages,routeTitle,slugOf} from '../../../web/console/render.mjs';
+import {renderPage,sendPage,serveAsset,pages,navigationPages,pausedPages,routeTitle,slugOf,movedPages} from '../../../web/console/render.mjs';
 import {overviewView,icon,libraryView,memoryDetailView,memoryRows,summaryDetailView} from '../../../web/console/visuals.mjs';
 import {text,catalog} from '../../../web/console/catalog.mjs';
 import {declarations,rules} from './helpers/css.mjs';
@@ -17,7 +17,10 @@ test('Shell: home counts are source-backed and never invent trends or connection
  assert.equal((html.match(/class="metric"/g)||[]).length,4);
  assert.equal((html.match(/class="processing-stage"/g)||[]).length,3);
  assert.match(html,/class="synthetic-row"/);
- assert.match(html,/<form class="ask" action="\/app\/memories" method="get"/);
+ assert.doesNotMatch(html,/<form\b|data-search-input|data-map-query/,'overview statistics do not duplicate library search');
+ assert.match(html,/<section class="overview-secondary" data-overview-library aria-labelledby="overview-library-title">/);
+ assert.doesNotMatch(html,/<details[^>]*data-overview-library|<summary\b/,'statistics remain directly visible without an expand action');
+ assert.match(html,/<a class="button" href="\/app\/memories"><span data-i18n="overviewLibraryLink">/,'the library remains the explicit search destination');
  assert.doesNotMatch(html,/1,248|24\s*\/\s*24|已连接|已完成|<canvas|<progress/);
 });
 test('Shell: unavailable and invalid metric data never becomes a zero or HTML',()=>{
@@ -56,14 +59,14 @@ test('Shell: auth has one H1 and retains the exact trusted form and OAuth purpos
  assert.match(html,/class="auth-story"/);
  assert.doesNotMatch(html,/class="rail"|\/console-api\/logout/);
 });
-test('Shell: every route keeps identity escaping, logout CSRF and a single current location',()=>{
+test('Shell: every route keeps identity escaping and logout CSRF; only visible routes have a current navigation item',()=>{
  for(const page of pages){
   const html=renderPage({title:page,page,csrf:'" onfocus="synthetic',account:{account_id:'synthetic-account',username:'<script>synthetic</script>'}});
   assert.match(html,/action="\/console-api\/logout" method="post"/);
   assert.match(html,/name="csrf" value="&quot; onfocus=&quot;synthetic"/);
   assert.ok(html.includes('&lt;script&gt;synthetic&lt;/script&gt;'));
   assert.doesNotMatch(html,/<script>synthetic/);
-  assert.equal((html.match(/aria-current="page"/g)||[]).length,1);
+  assert.equal((html.match(/aria-current="page"/g)||[]).length,navigationPages.includes(page)?1:0);
  }
 });
 test('Shell: assets remain on a fixed same-origin allowlist',()=>{
@@ -128,24 +131,40 @@ test('Shell: pages preserve CSP, no-store and anti-framing headers',()=>{
  const hash=createHash('sha256').update(bootstrap[1]).digest('base64');
  assert.equal(res.headers['content-security-policy'],`default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self' 'sha256-${hash}'; connect-src 'self'; img-src 'self'; form-action 'self' https://callback.example.test/exact; frame-ancestors 'none'; base-uri 'none'`);
 });
-test('Shell: the sidebar has the overview plus five journey groups and all ten destinations as icon links (usage lives on the models page)',()=>{
+test('Shell: the sidebar has the overview plus four memory-first groups and nine active destinations',()=>{
  const account={account_id:'synthetic',username:'Synthetic'};
  for(const page of pages){
   const html=renderPage({title:page,page,account,csrf:'c'});
   const nav=html.slice(html.indexOf('<aside class="sidebar">'),html.indexOf('</aside>'));
-  assert.equal((nav.match(/class="nav-group"/g)||[]).length,6);
-  assert.equal((nav.match(/<h2 data-i18n="nav(Memory|Processing|Connections|Work|System)">/g)||[]).length,5);
-  assert.equal((nav.match(/data-nav-badge="[a-z]+"/g)||[]).length,10);
-  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,10);assert.doesNotMatch(nav,/href="\/app\/usage"/);
-  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon nav-glyph"/g)||[]).length,10,"every destination has its own bold navigation glyph");
+  assert.equal((nav.match(/class="nav-group"/g)||[]).length,5);
+  assert.equal((nav.match(/<h2 data-i18n="nav(Memory|Processing|Connections|System)">/g)||[]).length,4);
+  assert.equal((nav.match(/data-nav-badge="[a-z]+"/g)||[]).length,9);
+  assert.equal((nav.match(/<a href="\/app\//g)||[]).length,9);assert.doesNotMatch(nav,/href="\/app\/usage"/);
+  assert.equal((nav.match(/<span class="nav-icon"><svg class="icon nav-glyph"/g)||[]).length,9,"every active destination has its own bold navigation glyph");
+  assert.doesNotMatch(nav,/navWork|href="\/app\/(?:projects|tasks|resume)"|data-nav-badge="tasks"/);
   assert.doesNotMatch(nav,/nav-code|MN-\d/);
-  assert.match(nav,new RegExp(`href="/app/${slugOf(page)}" aria-current="page"`));
+  if(navigationPages.includes(page))assert.match(nav,new RegExp(`href="/app/${slugOf(page)}" aria-current="page"`));
+  else assert.doesNotMatch(nav,/aria-current="page"/,'hidden compatibility pages must not highlight the wrong destination');
   assert.match(html,/<dialog id="memory-dialog" class="pane"/);
   assert.doesNotMatch(html,/data-skin|data-mode|status-readout|<filter id=|page-code/);
  }
  const css=fs.readFileSync(new URL('../../../web/console/styles.css',import.meta.url),'utf8');
  assert.equal(declarations(css,'.pane').position,'fixed');
  assert.ok(rules(css).some(r=>r.selectors.includes('body.pane-open .workspace')),'docked pane reserves space instead of covering the list');
+});
+test('Shell: paused project URLs keep authenticated compatibility without advertising them as active navigation',()=>{
+ assert.deepEqual(pausedPages,['tasks']);
+ assert.deepEqual(navigationPages,['overview','memories','summaries','jobs','connections','models','storage','audit','security']);
+ assert.equal(routeTitle('/app/projects'),'tasks');assert.equal(movedPages.tasks,'projects');assert.equal(movedPages.resume,'projects');
+ for(const page of pages){
+  const html=renderPage({title:page,page,account:{account_id:'synthetic',username:'Synthetic'}});
+  assert.equal(html.includes('class="policy-box paused-page-notice"'),page==='tasks');
+  if(page==='tasks'){
+   assert.match(html,/aria-labelledby="projects-paused-title"/);
+   assert.match(html,/data-i18n="projectsPausedTitle"/);assert.match(html,/data-i18n="projectsPausedNote"/);
+   assert.match(html,/<body[^>]+data-page="tasks"/,'the legacy route remains routed to its original page instead of a misleading overview');
+  }
+ }
 });
 test('Shell: the type mix draws only real type shares',()=>{
  const html=view({counts:{memories:3},insights:{kinds:[{value:'fact',count:3},{value:'none',count:1},{value:'bug',count:0}],activity:[{day:'2026-09-01',count:2},{day:'2026-09-02',count:0}]}});

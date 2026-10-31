@@ -9,18 +9,20 @@ const saved=JSON.parse(localStorage.getItem('mnemuron.appearance.v1.'+account)||
 if(['zh-CN','en'].includes(saved?.locale))root.lang=saved.locale;}catch{}})();`;
 const appearanceBootstrapHash=createHash('sha256').update(appearanceBootstrap).digest('base64');
 export const escapeHtml=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-import {pages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug} from './routes.mjs';
-export {pages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug};
+import {pages,pausedPages,navigationPages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug} from './routes.mjs';
+export {pages,pausedPages,navigationPages,pageCode,removedPages,movedPages,slugOf,pagePath,pageOfSlug};
 export const routeTitle=route=>route==='/app' || route==='/app/'?'overview':pageOfSlug(route.replace(/^\/app\//,''))??null;
 export const label=(key,tag='span')=>`<${tag} data-i18n="${key}">${escapeHtml(text(key))}</${tag}>`;
 
 // Navigation follows the memory's journey: the overview; memory; automatic processing; connections (where memories come
-// from and who reads them); work; system. Each destination is an icon + label, no route codes. Slugs are kept
+// from and who reads them); system. Paused work destinations keep their compatible URLs but have no navigation group.
+// Each destination is an icon + label, no route codes. Slugs are kept
 // where a page moved (the public ingress allows exactly these): jobs = processing, connections = ChatGPT, storage = health.
 // What each destination offers or will offer is listed in the feature map (visuals.mjs).
 const navGroups=[['',[['overview','home']]],['navMemory',[['memories','library'],['summaries','summaries']]],
   ['navProcessing',[['jobs','jobs']]],['navConnections',[['connections','connections']]],['navWork',[['tasks','tasks']]],
-  ['navSystem',[['models','models'],['storage','storage'],['audit','audit'],['security','security']]]];
+  ['navSystem',[['models','models'],['storage','storage'],['audit','audit'],['security','security']]]]
+  .map(([group,items])=>[group,items.filter(([page])=>navigationPages.includes(page))]).filter(([,items])=>items.length);
 const groupOf=page=>navGroups.find(([,items])=>items.some(([p])=>p===page))?.[0]||'';
 // Logo: a memory neuron. A violet entity node with a hard ink shadow links three memories in the category colours
 // (preference pink, project blue, workflow yellow), as on the overview memory map. Geometry: docs/console-design.md.
@@ -38,6 +40,7 @@ function consoleShell({title,body,account,csrf,page}) {
   // Each link has an empty badge slot the browser fills with a live count or health state (app.mjs).
   const nav=navGroups.map(([group,items])=>`<div class="nav-group">${group?label(group,'h2'):''}${items.map(([p,glyph])=>`<a href="${pagePath(p)}"${p===page?' aria-current="page"':''}><span class="nav-icon">${navIcon(glyph)}</span>${label(p)}<span class="nav-badge" data-nav-badge="${p}"></span></a>`).join('')}</div>`).join('');
   const loading=`<div class="page-heading"><div>${label(title,'h1')}${label('loading','p')}</div></div><div class="loading-card" role="status">${label('loading')}</div>`;
+  const pausedNotice=pausedPages.includes(page)?`<aside class="policy-box paused-page-notice" aria-labelledby="projects-paused-title"><strong id="projects-paused-title">${label('projectsPausedTitle')}</strong>${label('projectsPausedNote','p')}</aside>`:'';
   return `<div class="shell">
   <aside class="sidebar"><a class="brand" href="/app">${brandMark}</a><p class="eyebrow" data-i18n="systemLabel">${text('systemLabel')}</p>
     <nav aria-label="Mnemuron">${nav}</nav></aside>
@@ -46,7 +49,7 @@ function consoleShell({title,body,account,csrf,page}) {
       <div class="topbar-tools">${languageControl()}
         <details class="account-menu"><summary data-i18n-title="accountMenu" title="${text('accountMenu')}"><span class="account-avatar" aria-hidden="true">${escapeHtml([...(account?.username||'?')][0].toUpperCase())}</span><span class="account-name">${username}</span><span class="account-chevron" aria-hidden="true"></span></summary>
           <div class="account-menu-panel">${label('identity','small')}<strong>${username}</strong><a class="account-security" href="/app/security">${icon('security')}${label('security')}</a><form action="/console-api/logout" method="post"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button type="submit" class="quiet">${icon('logout')}${label('signOut')}</button></form></div></details></div></header>
-    <main id="main" tabindex="-1"><div id="console-root">${body||loading}</div></main>
+    <main id="main" tabindex="-1">${pausedNotice}<div id="console-root">${body||loading}</div></main>
     <footer><span class="footer-mark">Mnemuron</span></footer>
   </div></div>
   <dialog id="memory-dialog" class="pane" aria-labelledby="detail-title"><div class="dialog-header"><h2 id="detail-title" data-i18n="detail">${text('detail')}</h2><button type="button" class="close-button" data-close data-i18n-aria-label="closePane" aria-label="${text('closePane')}">${icon('close')}</button></div><div id="memory-content"></div></dialog>`;
@@ -75,7 +78,7 @@ export function renderPage({title,body='',auth=false,authPurpose='console',accou
 // Browser modules. The public ingress allows exactly these paths (docs/console-ingress.example.yml);
 // add a module only together with its ingress route, or fold it into an existing one.
 const MODULES=['appearance.mjs','catalog.mjs','app.mjs','session-state.mjs','audit.mjs','routes.mjs','visuals.mjs','actions.mjs','connections.mjs','agents.mjs','task-workflows.mjs','memory-map.mjs','memory-review.mjs','memory-processing.mjs','graph-neighborhood.mjs','search-feedback.mjs'];
-const STYLESHEETS=['styles.css','controls.css','overview-ux.css','memory-map-ux.css','summary-reader.css'];
+const STYLESHEETS=['styles.css','controls.css','overview-ux.css','memory-map-ux.css','summary-reader.css','console-alignment.css'];
 const stylesheetContent=()=>Buffer.concat(STYLESHEETS.flatMap(name=>[fs.readFileSync(new URL(name,import.meta.url)),Buffer.from('\n')]));
 // New markup must not reuse a prior release's cached palette; keep the allowlisted path unchanged.
 const stylesheetVersion=createHash('sha256').update(stylesheetContent()).digest('hex').slice(0,16);

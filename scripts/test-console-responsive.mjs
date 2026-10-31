@@ -23,9 +23,11 @@ async function command(command,params={}){fixture.stdin.write(JSON.stringify({co
 const checks=[],failures=[],screenshots=[];
 function check(name,ok,detail){checks.push({name,passed:!!ok,...(detail?{detail}: {})});if(!ok)failures.push(name);console.log(`${ok?'PASS':'FAIL'} ${name}${!ok&&detail?' '+JSON.stringify(detail):''}`);}
 const controlsOnly=process.argv.includes('--controls-only');
-const pages=controlsOnly?['overview','security']:['overview','memories','summaries','entities','jobs','connections','agents','tasks','models','storage','usage','audit','security'];
+const connectionsOnly=process.argv.includes('--connections-only');
+const pages=controlsOnly?['overview','security']:connectionsOnly?['connections']:['overview','memories','summaries','entities','jobs','connections','agents','tasks','models','storage','usage','audit','security'];
 let browser,cfg,exitCode=0,windowStart=Date.now(),requestsInWindow=0;
 try{
+ assert.ok(!(controlsOnly&&connectionsOnly),'Choose one focused responsive surface');
  cfg=await read();assert.equal(cfg.fixture,true);assert.match(cfg.url,/^http:\/\/127\.0\.0\.1:/);
  await command('seed-projects');await command('seed-summaries');await command('seed-responsive');await command('seed-audit');
  const {chromium}=await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE));
@@ -56,31 +58,43 @@ try{
    check(label+' readable text columns',!geometry.narrow.length,geometry.narrow);
    check(label+' no failed page panel',await page.locator('#console-root > [role=alert]').count()===0);
    if(name==='overview'){
-    // Full-library search is an explicit secondary tool; verify its expanded geometry,
-    // then restore the graph-first default for the overview screenshot.
-    await page.locator('[data-overview-library]').evaluate(panel=>panel.open=true);
-    const search=await page.locator('.ask').evaluate(form=>{
-     const bounds=form.getBoundingClientRect(),input=form.querySelector('input').getBoundingClientRect(),button=form.querySelector('button').getBoundingClientRect();
-     return {inputWidth:input.width,buttonInside:button.left>=bounds.left&&button.right<=bounds.right&&button.top>=bounds.top&&button.bottom<=bounds.bottom};
-    });
-    check(label+' search input usable and submit contained',search.inputWidth>=120&&search.buttonInside,search);
-    await page.locator('[data-overview-library]').evaluate(panel=>panel.open=false);
+    const destinations=await page.locator('.sidebar nav a').evaluateAll(links=>links.map(link=>new URL(link.href).pathname));
+    const expected=['/app/overview','/app/memories','/app/summaries','/app/processing','/app/connections','/app/models','/app/health','/app/audit','/app/security'];
+    check(label+' memory-first navigation retains all nine active destinations',JSON.stringify(destinations)===JSON.stringify(expected),destinations);
+    check(label+' paused work navigation is absent, not merely visually clipped',await page.locator('.sidebar [data-i18n="navWork"],.sidebar a[href="/app/projects"],.sidebar a[href="/app/tasks"],.sidebar a[href="/app/resume"]').count()===0);
+   }
+   if(name==='tasks')check(label+' legacy project route is retained with a visible pause notice',await page.locator('.paused-page-notice').isVisible()&&await page.locator('.sidebar a[aria-current="page"]').count()===0&&new URL(page.url()).pathname==='/app/projects');
+   if(name==='overview'){
+    check(label+' overview has no duplicate memory search',await page.locator('[data-search-input],[data-map-query],[data-neighborhood-form]').count()===0);
+    check(label+' lower insight sections stay visible without disclosure controls',await page.locator('[data-overview-system],[data-overview-library]').evaluateAll(nodes=>nodes.length===2&&nodes.every(n=>n.tagName==='SECTION'&&n.getBoundingClientRect().height>0&&!n.querySelector(':scope>summary'))));
    }
    if(name==='security'){
     const badge=await page.locator('.identity-row .tag').evaluate(tag=>{const r=tag.getBoundingClientRect(),parent=tag.parentElement.getBoundingClientRect();return {inside:r.left>=parent.left&&r.right<=parent.right,wraps:getComputedStyle(tag).whiteSpace!=='nowrap',width:r.width,parentWidth:parent.width};});
     check(label+' authentication badge fits profile',badge.inside,badge);
    }
-   const filename=`${name}-${width}-${locale}.png`;await page.screenshot({path:path.join(evidence,filename),fullPage:true});screenshots.push(filename);
+   if(name==='connections'){
+    const gap=await page.locator('[data-agents-root] + .card').first().evaluate(card=>{
+     const r=card.getBoundingClientRect(),before=card.previousElementSibling.getBoundingClientRect();
+     return {actual:r.top-before.bottom,expected:parseFloat(getComputedStyle(card).getPropertyValue('--gap'))};
+    });
+    check(label+' health card keeps the standard gap after agent setup',gap.actual>0&&Math.abs(gap.actual-gap.expected)<=1,gap);
+   }
+   const filename=`${name}-${width}-${locale}.png`;await page.screenshot({path:path.join(evidence,filename),fullPage:true,animations:'disabled'});screenshots.push(filename);
    // Do not weaken the production per-peer limit. Natural browser paint and screenshot pacing prevents bursts.
    await page.waitForTimeout(200);
   }
   if(controlsOnly){await context.close();continue;}
+  if(connectionsOnly){
+   check(`${width} ${locale} no browser exceptions`,errors.length===0,errors);
+   check(`${width} ${locale} no rate-limit masking`,rateLimited.length===0,rateLimited);
+   await context.close();continue;
+  }
   // Exercise generic form, Cancel/Escape and result focus at each viewport and language.
   await page.goto(cfg.url+'/app/memories');await page.locator('[data-console-action="memory.create"]').waitFor();
   const create=page.locator('[data-console-action="memory.create"]').first();await create.focus();await page.keyboard.press('Enter');
   const dialog=page.locator('#operation-dialog');await dialog.locator('form').waitFor();
   check(`${width} ${locale} modal fits`,await dialog.evaluate(d=>{const r=d.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth+.5&&d.scrollWidth<=d.clientWidth+1;}));
-  await page.screenshot({path:path.join(evidence,`memory-create-${width}-${locale}.png`),fullPage:false});
+  await page.screenshot({path:path.join(evidence,`memory-create-${width}-${locale}.png`),fullPage:false,animations:'disabled'});
   await page.keyboard.press('Escape');await dialog.waitFor({state:'hidden'});
   check(`${width} ${locale} Escape restores trigger focus`,await create.evaluate(e=>e===document.activeElement));
   await create.click();await dialog.locator('[name=content]').fill('Synthetic responsive acceptance '+width+' '+locale+' '+Date.now());
@@ -96,7 +110,9 @@ try{
 }catch(e){exitCode=1;failures.push(e.message);console.error(e.stack);}
 finally{
  await browser?.close();if(!fixtureEnded){fixture.stdin.write(JSON.stringify({command:'stop'})+'\n');await new Promise(r=>fixture.once('exit',r));}
- fs.closeSync(log);if(!exitCode)fs.rmSync(privateDir,{recursive:true,force:true});
+ fs.closeSync(log);const cleaned=fs.readFileSync(path.join(privateDir,'fixture.stderr'),'utf8').includes('"synthetic_cleanup_complete":true');
+ check('Synthetic fixture cleanup is verified',cleaned);if(!cleaned)exitCode=1;
+ if(!exitCode)fs.rmSync(privateDir,{recursive:true,force:true});
  fs.writeFileSync(path.join(evidence,'checks.json'),JSON.stringify({status:exitCode?'failed':'passed',passed:checks.filter(x=>x.passed).length,failed:failures.length,checks,failures,screenshots},null,2),{mode:0o600});
  console.log(`${exitCode?'FAILED':'PASSED'} ${checks.filter(x=>x.passed).length} checks; evidence ${evidence}`);
  if(exitCode)console.error('Private fixture diagnostics: '+privateDir);

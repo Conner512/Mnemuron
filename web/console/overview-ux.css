@@ -1,11 +1,14 @@
-/* Overview is an exploration surface first. Diagnostics and full-library tools are disclosures;
-   the graph and the account's activity remain the two primary regions. */
+/* Overview is an exploration surface first. Both hero cards use the same outer height;
+   independent scrolling happens inside them. Diagnostics and insights stay visible below. */
 body[data-page="overview"] .page-heading{align-items:center;margin-bottom:18px;gap:12px}
 body[data-page="overview"] .page-heading h1{font-size:28px;margin-bottom:4px}
 body[data-page="overview"] .page-heading p{font-size:13px;line-height:1.6}
 .overview-library-link{font-size:12px;white-space:normal;text-align:center}
-.overview-hero{grid-template-columns:minmax(0,1fr) minmax(280px,30%);align-items:start;gap:16px}
-.overview-hero>.live-stream{height:clamp(540px,calc(100vh - 190px),760px);max-height:none;min-width:0;padding:18px}
+.overview-hero{--overview-hero-height:clamp(560px,calc(100dvh - 190px),760px);grid-template-columns:minmax(0,1fr) minmax(280px,30%);align-items:stretch;gap:16px}
+.overview-hero>.map-card,.overview-hero>.live-stream{height:var(--overview-hero-height);min-height:0;max-height:none;min-width:0;margin:0;display:flex;flex-direction:column;box-sizing:border-box}
+.overview-hero>.map-card>.map-board{flex:1 1 auto;min-height:0}
+.overview-hero>.live-stream{padding:18px}
+.overview-hero>.map-card>:not(.map-board),.overview-hero>.live-stream>:not(.stream-events){flex-shrink:0}
 .live-stream .section-head{gap:8px;margin-bottom:10px;align-items:center}
 .live-stream .section-head h2{font-size:16px}
 .live-stream .section-head>a{font-size:12px;white-space:nowrap}
@@ -16,7 +19,7 @@ body[data-page="overview"] .page-heading p{font-size:13px;line-height:1.6}
 .stream-state::before{content:"";display:block;width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}
 .stream-state[data-state="live"]::before{background:var(--good)}
 .stream-state[data-state="error"]::before,.stream-state[data-state="offline"]::before{background:var(--bad)}
-.stream-events{min-height:80px;max-height:none;overscroll-behavior:contain;scrollbar-gutter:stable}
+.stream-events{flex:1 1 auto;min-height:0;max-height:none;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 .stream-event{grid-template-columns:44px minmax(0,1fr);gap:10px;padding:12px 0}
 .stream-event time{line-height:1.5}
 .stream-event time small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
@@ -27,13 +30,13 @@ body[data-page="overview"] .page-heading p{font-size:13px;line-height:1.6}
 .stream-updated{font-size:11px;color:var(--muted);margin:10px 0 0;padding-top:10px;border-top:1px solid var(--border)}
 .stream-note{font-size:11px;line-height:1.6;margin-top:5px}
 .overview-secondary{margin:16px 0;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:0}
-.overview-secondary>summary{padding:13px 16px;font-size:13px;font-weight:650;cursor:pointer;overflow-wrap:anywhere}
-.overview-secondary-note{margin-left:12px;color:var(--muted);font-size:12px;font-weight:400}
-.overview-secondary[open]>summary{border-bottom:1px solid var(--border)}
+.overview-secondary-heading{display:flex;align-items:baseline;flex-wrap:wrap;gap:6px 14px;padding:15px 16px;border-bottom:1px solid var(--border)}
+.overview-secondary-heading h2{font-size:15px;font-weight:650;margin:0;overflow-wrap:anywhere}
+.overview-secondary-note{margin:0;color:var(--muted);font-size:12px;font-weight:400;line-height:1.6}
 .overview-secondary-body{padding:16px;min-width:0}
 .overview-secondary-body>:last-child{margin-bottom:0}
-/* Narrow screens retain every destination in one keyboard/touch-scrollable row, rather than
-   spending half the first viewport on the entire desktop navigation. No routes are hidden. */
+/* Narrow screens retain every active destination in one keyboard/touch-scrollable row,
+   rather than spending the first viewport on the full desktop navigation. */
 @media(max-width:760px){
  .is-console .sidebar{padding:10px 12px 8px;border-right:0}
  .is-console .sidebar>.brand{margin:0 4px;font-size:18px;align-self:flex-start}
@@ -57,11 +60,16 @@ body[data-page="overview"] .page-heading p{font-size:13px;line-height:1.6}
  .overview-library-link{font-size:11px;padding:5px 8px;min-height:32px}
  .overview-hero{grid-template-columns:minmax(0,1fr);gap:14px}
  .overview-hero>.live-stream{height:380px;padding:14px}
- .overview-secondary-note{display:block;margin:5px 0 0 18px;font-size:11px}
+ .overview-hero>.map-card{height:auto}
+ .overview-hero>.map-card>.map-board{flex:none;min-height:280px}
+ .overview-secondary-heading{padding:12px;gap:4px}
+ .overview-secondary-note{flex-basis:100%;font-size:11px}
  .overview-secondary-body{padding:12px}
 }
 @media(min-width:761px) and (max-width:1100px){
  .overview-hero{grid-template-columns:minmax(0,1fr)}
+ .overview-hero>.map-card{height:auto}
+ .overview-hero>.map-card>.map-board{flex:none;min-height:340px}
  .overview-hero>.live-stream{height:360px}
 }
 @media(max-width:360px){

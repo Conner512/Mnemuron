@@ -95,10 +95,11 @@ test('ACTIVITY-06b: a reply arriving after the page hides or goes offline cannot
  }
 });
 
-test('ACTIVITY-07: secondary overview tools default closed and styles share the existing public asset',()=>{
+test('ACTIVITY-07: secondary overview insights are visible sections without duplicate search or paused tasks',()=>{
   const html=overviewStatus({features:{}})+overviewView({},{t:text,memoryRows:()=>''});
-  assert.match(html,/<details class="overview-secondary" data-overview-system>/);assert.match(html,/<details class="overview-secondary" data-overview-library>/);
-  assert.doesNotMatch(html,/<details class="overview-secondary"[^>]*\bopen\b/);
+  assert.match(html,/<section class="overview-secondary" data-overview-system aria-labelledby="overview-system-title">/);assert.match(html,/<section class="overview-secondary" data-overview-library aria-labelledby="overview-library-title">/);
+  assert.doesNotMatch(html,/<details class="overview-secondary"|role="search"|data-search-input|href="\/app\/projects"/);
+  assert.match(html,/href="\/app\/memories"/);
   const render=fs.readFileSync(new URL('../../../web/console/render.mjs',import.meta.url),'utf8');
   assert.match(render,/'overview-ux.css','memory-map-ux.css','summary-reader.css'/);
   assert.doesNotMatch(render,/href="\/assets\/(overview-ux|memory-map-ux|summary-reader)\.css/);

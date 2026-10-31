@@ -2,7 +2,7 @@
 
 This matrix describes the current candidate source and its validation boundaries.
 The inventory matches `web/console/visuals.mjs` and the feature table in
-[Console feature standard](console-feature-standard.md): **64 entries: 63 live,
+[Console feature standard](console-feature-standard.md): **63 entries: 62 live,
 0 planned, 1 policy exclusion**. A `live` entry has an implemented interface;
 deployment, enabled runtime capabilities, actual provider behavior and real-host
 acceptance remain separate. `production_ready` remains `false`.
@@ -11,6 +11,11 @@ Earlier review counts and IDs are historical. The former `RES-01..04` entries no
 appear as `TSK-07..10`; former Agent entries `CON-03..05` moved to `AGT-01..03`,
 and `SYS-01..04` moved to `STO-05..08`. The current `CON-03` is the ChatGPT access
 policy card. Retired `PRV`, `INV` and `ACC` pages are outside this inventory.
+`OVW-04` (full-library association UI) is retired; its owner-scoped backend graph reads and
+regressions remain for compatibility, but there is no overview search or association entry.
+Projects/tasks (`TSK-*`) describe retained authenticated compatibility pages and APIs, not
+active navigation. Their entry is hidden while memory and connections take priority; stored
+data, existing grants and background jobs are unchanged. See the feature standard for scope.
 
 ## Regression and browser entrypoints
 
@@ -35,6 +40,9 @@ listed suite.
 | selected-processing | `scripts/test-memory-processing-browser.mjs` |
 | search-workbench | `scripts/test-console-search-workbench.mjs` |
 | operations | `scripts/test-console-operations.mjs` |
+| overview-ux | `scripts/test-console-overview-ux.mjs` |
+| control-alignment | `scripts/test-console-control-alignment.mjs` |
+| summary-reader | `scripts/test-console-summary-reader.mjs` |
 
 These suites use disposable synthetic Core/OAuth accounts and loopback HTTP.
 Model and vector fixtures do not certify an external provider or real Qdrant.
@@ -49,7 +57,6 @@ layout separately from the action coverage shown here.
 | OVW-01 | 记忆分布与计数 | live | `server/test/console-completion.test.mjs` | completion |
 | OVW-02 | 最近写入与 30 天活动 | live | `server/test/console-completion.test.mjs` | completion |
 | OVW-03 | 待处理事项 | live | `server/test/console-completion.test.mjs` | completion |
-| OVW-04 | 全库局部图谱与证据 | live | `server/test/console-memory-graph.test.mjs`; `services/oauth/test/console-search-workbench-ui.test.mjs` | search-workbench |
 | MEM-01 | 检索与筛选 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion + continuity |
 | MEM-02 | 详情、来源与修订历史 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
 | MEM-03 | 新建记忆 | live | `server/test/console-completion.test.mjs`; `server/test/cloud-memory-privacy.test.mjs`; `services/oauth/test/console-memory-selection.test.mjs` | functional + completion |
